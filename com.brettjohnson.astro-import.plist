@@ -1,0 +1,38 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd">
+<plist version="1.0">
+<dict>
+    <key>Label</key>
+    <string>com.brettjohnson.astro-import</string>
+
+    <!-- One agent watches for BOTH cameras (ASIAir + Seestar); the watcher
+         figures out which volume(s) appeared. Replaces the two old agents
+         com.brettjohnson.asiair-import and com.brettjohnson.seestar-import. -->
+    <key>WatchPaths</key>
+    <array>
+        <string>/Volumes</string>
+    </array>
+
+    <key>ProgramArguments</key>
+    <array>
+        <string>/bin/bash</string>
+        <string>__HOME__/bin/astro-watch.sh</string>
+    </array>
+
+    <!-- Run at load too, so a camera already plugged in at login is noticed -->
+    <key>RunAtLoad</key>
+    <true/>
+
+    <!-- The watcher starts the panel and exits. Without this flag launchd
+         kills the watcher's whole process group on exit — taking the panel
+         with it (seen live 2026-07-25: "panel opened" then dead minutes later). -->
+    <key>AbandonProcessGroup</key>
+    <true/>
+
+    <key>StandardOutPath</key>
+    <string>/tmp/astro-watch.log</string>
+
+    <key>StandardErrorPath</key>
+    <string>/tmp/astro-watch.log</string>
+</dict>
+</plist>

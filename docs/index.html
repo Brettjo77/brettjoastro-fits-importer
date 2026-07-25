@@ -1,0 +1,242 @@
+<!DOCTYPE html>
+<html lang="en"><head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>BrettjoAstro FITS Importer — backup-first imports for ASIAir &amp; Seestar</title>
+<meta name="description" content="A backup-first FITS import system for ZWO ASIAir and Seestar smart telescopes. Every frame SHA-256 verified, a lifetime ledger of everything you've shot, and cleanup offers only when it's provably safe.">
+<style>
+:root{
+  color-scheme:dark;
+  --page:#080b12; --surface:#10151f; --surface2:#0c1019; --line:#1d2534;
+  --ink:#e8edf6; --muted:#8b96a8; --accent:#3987e5; --accent2:#d95926;
+  --teal:#199e70; --warn:#e0a83c; --good:#43c26d;
+}
+*{box-sizing:border-box;margin:0;padding:0}
+html{scroll-behavior:smooth}
+body{background:var(--page);color:var(--ink);
+  font:16px/1.65 -apple-system,BlinkMacSystemFont,"Segoe UI",Inter,Roboto,sans-serif;
+  -webkit-font-smoothing:antialiased;overflow-x:hidden}
+a{color:var(--accent);text-decoration:none}
+a:hover{text-decoration:underline}
+.wrap{max-width:1060px;margin:0 auto;padding:0 24px;position:relative;z-index:1}
+/* starfield */
+#sky{position:fixed;inset:0;pointer-events:none;z-index:0}
+#sky i{position:absolute;background:#fff;border-radius:50%;opacity:.7;
+  animation:tw 4s ease-in-out infinite}
+@keyframes tw{0%,100%{opacity:.15}50%{opacity:.8}}
+/* hero */
+header{padding:96px 0 64px;text-align:center;position:relative}
+.mark{width:72px;height:72px;border-radius:18px;margin:0 auto 22px;display:flex;
+  align-items:center;justify-content:center;
+  background:radial-gradient(120% 120% at 30% 20%,#16233c 0%,#0a0f1a 70%);
+  border:1px solid #223052;box-shadow:0 8px 40px rgba(57,135,229,.25)}
+.mark svg{width:42px;height:42px}
+h1{font-size:44px;line-height:1.15;letter-spacing:-.5px;font-weight:800}
+h1 .brand{color:var(--accent)}
+.tag{font-size:20px;color:var(--muted);max-width:640px;margin:16px auto 0}
+.ctas{margin-top:32px;display:flex;gap:14px;justify-content:center;flex-wrap:wrap}
+.btn{display:inline-block;padding:12px 22px;border-radius:12px;font-weight:600;
+  border:1px solid var(--line);background:var(--surface);color:var(--ink)}
+.btn:hover{text-decoration:none;border-color:#2c3850}
+.btn.primary{background:var(--accent);border-color:var(--accent);color:#fff;
+  box-shadow:0 6px 24px rgba(57,135,229,.35)}
+.firstlight{margin:26px auto 0;display:inline-flex;gap:8px;align-items:center;
+  font-size:13.5px;color:var(--muted);border:1px solid var(--line);
+  border-radius:999px;padding:7px 16px;background:var(--surface2)}
+.firstlight b{color:var(--good);font-weight:600}
+/* sections */
+section{padding:54px 0}
+.eyebrow{font-size:12.5px;font-weight:700;letter-spacing:.14em;text-transform:uppercase;
+  color:var(--accent);margin-bottom:10px}
+h2{font-size:29px;letter-spacing:-.3px;margin-bottom:14px}
+.lead{color:var(--muted);max-width:720px}
+.grid{display:grid;gap:18px;margin-top:30px}
+.g2{grid-template-columns:repeat(auto-fit,minmax(320px,1fr))}
+.g4{grid-template-columns:repeat(auto-fit,minmax(230px,1fr))}
+.card{background:var(--surface);border:1px solid var(--line);border-radius:16px;padding:22px}
+.card h3{font-size:17px;margin-bottom:8px}
+.card p{font-size:14.5px;color:var(--muted)}
+.card .n{display:inline-flex;width:28px;height:28px;border-radius:8px;background:#16233c;
+  color:var(--accent);font-weight:700;font-size:14px;align-items:center;justify-content:center;
+  margin-bottom:12px}
+.chip{display:inline-block;font-size:11.5px;font-weight:600;padding:3px 10px;
+  border-radius:999px;color:#fff;margin-right:6px}
+.chip.b{background:var(--accent)}.chip.o{background:var(--accent2)}.chip.t{background:var(--teal)}
+/* screenshots */
+.shot{border:1px solid var(--line);border-radius:16px;overflow:hidden;
+  background:var(--surface2);box-shadow:0 20px 60px rgba(0,0,0,.45)}
+.shot img{display:block;width:100%;height:auto}
+.cap{font-size:13px;color:var(--muted);padding:12px 16px;border-top:1px solid var(--line)}
+/* code */
+pre{background:#0a0e16;border:1px solid var(--line);border-radius:12px;
+  padding:18px 20px;overflow-x:auto;font:13px/1.7 ui-monospace,SFMono-Regular,Menlo,monospace;
+  color:#c7d3e8;margin-top:16px}
+pre b{color:var(--good);font-weight:600}
+code{font:.92em ui-monospace,SFMono-Regular,Menlo,monospace;background:#141a28;
+  padding:2px 7px;border-radius:6px}
+/* safety list */
+.safe{list-style:none;margin-top:22px;display:grid;gap:12px}
+.safe li{display:flex;gap:12px;font-size:15px;color:var(--muted)}
+.safe li::before{content:"✓";color:var(--good);font-weight:700;flex:0 0 auto}
+.safe li b{color:var(--ink);font-weight:600}
+footer{padding:60px 0 80px;text-align:center;color:var(--muted);font-size:13.5px;
+  border-top:1px solid var(--line);margin-top:60px}
+@media (max-width:640px){h1{font-size:32px}.tag{font-size:17px}header{padding:64px 0 44px}}
+</style></head>
+<body>
+<div id="sky"></div>
+
+<header class="wrap">
+  <div class="mark">
+    <svg viewBox="0 0 48 48" fill="none">
+      <path d="M24 8l2.6 10.2L37 21l-10.4 2.8L24 34l-2.6-10.2L11 21l10.4-2.8L24 8z" fill="#3987e5"/>
+      <circle cx="36" cy="12" r="1.6" fill="#e8edf6"/><circle cx="12" cy="34" r="1.2" fill="#e8edf6"/>
+      <circle cx="38" cy="34" r="1" fill="#8b96a8"/><circle cx="10" cy="12" r="1" fill="#8b96a8"/>
+    </svg>
+  </div>
+  <h1><span class="brand">BrettjoAstro</span> FITS Importer</h1>
+  <p class="tag">Backup-first imports for ZWO ASIAir and Seestar smart telescopes.
+  Every frame verified to the byte, every session remembered forever.</p>
+  <div class="ctas">
+    <a class="btn primary" href="https://github.com/Brettjo77/brettjoastro-fits-importer">View on GitHub</a>
+    <a class="btn" href="#install">Install guide</a>
+  </div>
+  <div class="firstlight">First light: <b>686 frames</b>&nbsp;imported, SHA-verified and safely
+  cleared from the camera in a single run</div>
+</header>
+
+<section class="wrap">
+  <div class="eyebrow">The problem</div>
+  <h2>“Hang on — did I back that up?”</h2>
+  <p class="lead">Smart telescopes fill up fast, and hand-copying folders around leaves you
+  guessing. Delete too early and a night's data is gone; delete too late and the camera is full
+  at 2am under a clear sky. Most import scripts just copy — they can't <em>prove</em> anything
+  arrived intact, and they forget everything the moment you archive a finished target.</p>
+</section>
+
+<section class="wrap">
+  <div class="eyebrow">The answer</div>
+  <h2>Backup-first, with receipts</h2>
+  <div class="grid g4">
+    <div class="card"><span class="n">1</span>
+      <h3>Plug in, panel opens</h3>
+      <p>A launchd watcher spots either camera mounting, scans read-only, sends a notification,
+      and opens the local control panel. Tick targets, hit import. No terminal needed.</p>
+    </div>
+    <div class="card"><span class="n">2</span>
+      <h3>Copies you can trust</h3>
+      <p>Each frame is stream-hashed from the camera, written to a <code>.partial</code>, fsynced,
+      re-read from disk and re-hashed before it counts. Nothing is ever marked imported unless
+      the bytes on your Mac provably match the camera.</p>
+    </div>
+    <div class="card"><span class="n">3</span>
+      <h3>A lifetime ledger</h3>
+      <p>Every frame from every camera joins one register — SHA-256, exposure, night, scope,
+      day number. Archive finished targets wherever you like: the ledger still knows, so
+      nothing re-imports and history survives.</p>
+    </div>
+    <div class="card"><span class="n">4</span>
+      <h3>Cleanup only when provable</h3>
+      <p>The Seestar's end-of-run delete offer lists only folders in which <em>every single
+      file</em> is ledger-verified. The ASIAir is treated as a backup of record — it never
+      offers deletion at all.</p>
+    </div>
+  </div>
+</section>
+
+<section class="wrap">
+  <div class="eyebrow">Two cameras, one system</div>
+  <h2>It knows what you plugged in</h2>
+  <div class="grid g2">
+    <div class="card">
+      <p style="margin-bottom:10px"><span class="chip b">Askar FRA400</span>
+        <span class="chip o">Askar 107PHQ</span></p>
+      <h3>ZWO ASIAir</h3>
+      <p>Filename-parsed metadata with FITS fallback, per-scope recognition from focal length,
+      mosaic panel awareness, and a calibration library that ingests every dark, flat and bias —
+      then hard-links the <em>right</em> set (gain, filter, focal length, rotator angle) into each
+      session's folder, asking first when flats look like they belong to another project.</p>
+    </div>
+    <div class="card">
+      <p style="margin-bottom:10px"><span class="chip t">Seestar S30 Pro</span>
+        <span class="chip t">Seestar S50</span></p>
+      <h3>Seestar</h3>
+      <p>Model detected from FITS headers, MyWorks project folders parsed with all their quirks:
+      sub-frames into Day folders, only the highest stack kept, mosaic panels filed under
+      <code>panels/</code>, and simultaneous Milky Way captures automatically paired to the DSO
+      session shot at the same moment. S50 Lunar / Solar / Planetary modes import too.</p>
+    </div>
+  </div>
+</section>
+
+<section class="wrap">
+  <div class="eyebrow">See it</div>
+  <h2>One panel for everything</h2>
+  <div class="grid" style="gap:26px;margin-top:26px">
+    <figure class="shot"><img src="img/panel-dark.png" alt="The FITS Importer control panel with both cameras connected">
+      <figcaption class="cap">Both cameras connected — targets from the ASIAir and the Seestar in one list, with live storage for each volume.</figcaption></figure>
+    <div class="grid g2">
+      <figure class="shot"><img src="img/panel-question.png" alt="SAFE cleanup question card">
+        <figcaption class="cap">The SAFE cleanup offer — only ever shown when every frame is verified. No is always the highlighted default.</figcaption></figure>
+      <figure class="shot"><img src="img/dashboard-dark.png" alt="Status dashboard">
+        <figcaption class="cap">The status dashboard — monthly activity, per-rig totals, and every target's backup state.</figcaption></figure>
+    </div>
+  </div>
+</section>
+
+<section class="wrap">
+  <div class="eyebrow">Safety model</div>
+  <h2>Designed around one rule: never lose a frame</h2>
+  <ul class="safe">
+    <li><b>Crash-safe copies</b> — interrupted transfers leave a <code>.partial</code>, never a
+      half-file posing as a backup; re-running resumes with zero double-copies.</li>
+    <li><b>The camera is read-only</b> — the ASIAir is never modified beyond optional purple
+      done-tags; nothing on any camera is touched without a verified copy and your explicit Yes.</li>
+    <li><b>Empty scans never clear anything</b> — a half-mounted drive can't convince the ledger
+      that files vanished.</li>
+    <li><b>Honest categories</b> — the backup report separates “verified” from “backed up,
+      unverified” from “still on camera only”, and tells you exactly what's safe to clear.</li>
+    <li><b>Everything is inspectable</b> — the ledger is plain JSON, history is an append-only
+      log, and a published mirror keeps a browsable copy of it all.</li>
+  </ul>
+</section>
+
+<section class="wrap" id="install">
+  <div class="eyebrow">Get it</div>
+  <h2>Install in two minutes</h2>
+  <p class="lead">Requires macOS with Xcode Command Line Tools Python 3 and
+  <code>astropy</code>. Built and tested on a ZWO ASI585MC Air and a Seestar S30 Pro.</p>
+<pre><b>git</b> clone https://github.com/Brettjo77/brettjoastro-fits-importer.git
+<b>cd</b> brettjoastro-fits-importer
+<b>bash</b> install-scripts.sh
+<i style="color:#8b96a8"># then plug a camera in — the panel opens by itself</i></pre>
+  <p class="lead" style="margin-top:16px">Custom folder locations? Copy
+  <code>config.example.json</code> to <code>~/Library/Application Support/Astro
+  Import/config.json</code> and edit — the installer never overwrites it. First run on an
+  existing archive? Use <code>--baseline</code> so your history joins the ledger without
+  copying a thing, then <code>--reconcile</code> to verify what's already on disk.</p>
+</section>
+
+<footer>
+  <div class="wrap">
+    BrettjoAstro FITS Importer · MIT licensed · built by Brett Johnson with
+    <a href="https://claude.com/claude-code">Claude</a><br>
+    <span style="opacity:.75">FITS = Flexible Image Transport System — the astronomy standard
+    since 1981. This tool treats every one of yours as irreplaceable.</span>
+  </div>
+</footer>
+
+<script>
+const sky=document.getElementById('sky');
+for(let i=0;i<90;i++){
+  const s=document.createElement('i');
+  const z=Math.random();
+  s.style.width=s.style.height=(z*2+0.5)+'px';
+  s.style.left=Math.random()*100+'vw';
+  s.style.top=Math.random()*100+'vh';
+  s.style.animationDelay=(Math.random()*4)+'s';
+  s.style.animationDuration=(3+Math.random()*4)+'s';
+  sky.appendChild(s);
+}
+</script>
+</body></html>

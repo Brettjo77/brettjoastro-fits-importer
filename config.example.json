@@ -1,0 +1,11 @@
+{
+  "//": "BrettjoAstro FITS Importer — optional path overrides. Copy this file to ~/Library/Application Support/Astro Import/config.json and edit. Precedence: environment variable > this file > built-in default. All paths may use ~.",
+
+  "ASIAIR_DEST": "~/Documents/Astro/ZWO ASI AIR",
+  "ASIAIR_CAL_LIBRARY": "~/Documents/Astro/ASIAir Calibration Library",
+  "ASIAIR_MIRROR": "~/Documents/Astro/Import Status",
+  "ASIAIR_EQUIPMENT": "~/Documents/Astro/equipment.json",
+  "ASIAIR_RECEIPTS": "~/Documents/Astro/astrolog-receipts",
+  "SEESTAR_DEST_S30": "~/Documents/Astro/Seestar S30 Pro",
+  "SEESTAR_DEST_S50": "~/Documents/Astro/Seestar S50"
+}
