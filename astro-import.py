@@ -1076,7 +1076,8 @@ def _rot_delta(a, b):
     d = abs(a - b) % 360.0
     return min(d, 360.0 - d)
 
-def match_calibration_group(group_info, calibration, loose=False, explain=None):
+def match_calibration_group(group_info, calibration, loose=False, explain=None,
+                            quiet=False):
     """Match calibration for one (filter, exposure) session group.
     group_info: gain(str), gain_value, exposure_seconds, sensor_temp, filter,
                 rotation, focal_length, earliest_dt, latest_dt
@@ -1099,6 +1100,8 @@ def match_calibration_group(group_info, calibration, loose=False, explain=None):
 
     biases, darks, flats = [], [], []
     prob_sets = {}
+    for cal in calibration:          # clear stale probation marks from any
+        cal.pop("_prob", None)       # earlier match run (preview or prior target)
 
     def prob_hit(cal, detail):
         cal["_prob"] = True   # marks this frame's set as questionable if chosen
@@ -1186,9 +1189,10 @@ def match_calibration_group(group_info, calibration, loose=False, explain=None):
             age = min(ages)
             flats_age = age
             rot = flats[0].get("rotation")
-            info(f"Flats: {len(flats)} frames — shot {age} day(s) from this session"
-                 + (f", rotation {rot}°" if rot is not None else "")
-                 + (f", {flats[0]['filter']}" if flats[0].get("filter") else ""))
+            if not quiet:
+                info(f"Flats: {len(flats)} frames — shot {age} day(s) from this session"
+                     + (f", rotation {rot}°" if rot is not None else "")
+                     + (f", {flats[0]['filter']}" if flats[0].get("filter") else ""))
             if age > FLAT_STALENESS_WARN_DAYS:
                 warnings.append(f"flats are {age} days old — consider shooting fresh flats "
                                 f"for this configuration")
@@ -1204,6 +1208,183 @@ def match_calibration_group(group_info, calibration, loose=False, explain=None):
 
     return {"biases": biases, "darks": darks, "flats": flats, "warnings": warnings,
             "flatsQuestionable": flats_questionable, "flatsAge": flats_age}
+
+# ── Panel pre-consent (Brett, 2026-08-09) ───────────────────────────────────
+# The panel's scan card shows which calibration SET pairs with which target and
+# lets Brett confirm each pairing with a checkbox before the import runs.
+# CAL_DECISIONS carries those ticks: {target_name: {cal_set_key: bool}}.
+# CLI runs leave it empty, so every prompt behaves exactly as before.
+CAL_DECISIONS = {}
+
+def cal_set_key(c):
+    """Canonical identity of a calibration SET (type, exposure, filter,
+    rotation, calendar day) — the same grouping the panel's cal card shows."""
+    night = (c["capture_datetime"].strftime("%Y-%m-%d")
+             if c.get("capture_datetime") else "unknown date")
+    exp = c.get("exposure_seconds")
+    rot = c.get("rotation")
+    return "|".join([c["frame_type"],
+                     ("%g" % exp) if exp is not None else "",
+                     (c.get("filter") or ""),
+                     ("%g" % rot) if rot is not None else "",
+                     night])
+
+def _attach_light_meta(new_files):
+    """Same per-frame metadata prep the import performs (shared for preview)."""
+    for f in new_files:
+        if f.get("meta"):
+            continue
+        p = parse_light_filename(f["filename"])
+        if not p:
+            hdr = read_fits_header_summary(f["path"])
+            p = {"exposure_seconds": hdr.get("exposure_seconds", 0.0),
+                 "gain": hdr.get("gain", ""), "gain_value": hdr.get("gain_value"),
+                 "sensor_temp": hdr.get("sensor_temp"), "rotation": None,
+                 "filter": hdr.get("filter", ""),
+                 "capture_datetime": hdr.get("capture_datetime")}
+        f["meta"] = p
+
+def preview_cal_pairings(state, scan):
+    """Read-only preview for the panel: run the REAL matching gates for every
+    target with new frames and report which calibration sets would pair with
+    it. Returns {target_name: [set dict, ...]} where each set dict carries
+    setKey/type/count/exposureSeconds/filter/rotation/night/inLibrary/
+    questionable — questionable sets keep their mid-import question."""
+    out = {}
+    scope_lookup = load_equipment_scope_lookup()
+    for target in scan["targets"]:
+        if target["skipped"] or not target["new"]:
+            continue
+        new_files = list(target["new"])
+        _attach_light_meta(new_files)
+        focal_length = read_fits_focallen(new_files[0]["path"])
+        if focal_length is None:
+            focal_length = read_fits_header_summary(new_files[0]["path"]).get("focal_length")
+        scope = scope_from_focallen(focal_length, scope_lookup)
+        groups = defaultdict(list)
+        for f in new_files:
+            m = f["meta"]
+            groups[((m.get("filter") or "").lower(),
+                    round(m.get("exposure_seconds") or 0, 1))].append(f)
+        sets = {}
+        for (g_filter, g_exp), members in groups.items():
+            metas = [x["meta"] for x in members]
+            dts = [m["capture_datetime"] for m in metas if m.get("capture_datetime")]
+            rotations = [m["rotation"] for m in metas if m.get("rotation") is not None]
+            ginfo = {
+                "gain": metas[0].get("gain") or "",
+                "exposure_seconds": g_exp,
+                "sensor_temp": metas[0].get("sensor_temp"),
+                "filter": g_filter,
+                "rotation": dominant_rotation(rotations),
+                "focal_length": focal_length,
+                "scope": scope,
+                "earliest_dt": min(dts) if dts else None,
+                "latest_dt": max(dts) if dts else None,
+            }
+            matched = match_calibration_group(ginfo, scan["calibration"],
+                                              quiet=True)
+            for kind in ("biases", "darks", "flats"):
+                for c in matched[kind]:
+                    k = cal_set_key(c)
+                    e = sets.setdefault(k, {
+                        "setKey": k, "type": c["frame_type"], "count": 0,
+                        "exposureSeconds": c.get("exposure_seconds"),
+                        "filter": c.get("filter") or "",
+                        "rotation": c.get("rotation"),
+                        "night": k.rsplit("|", 1)[-1],
+                        "inLibrary": 0, "questionable": False})
+                    e["count"] += 1
+                    if state.has_ledger() and state.cal_entry(c["relpath"]) is not None:
+                        e["inLibrary"] += 1
+                    if kind == "flats" and matched.get("flatsQuestionable"):
+                        e["questionable"] = True
+        out[target["name"]] = sorted(sets.values(),
+                                     key=lambda s: (s["type"], s["night"]))
+    return out
+
+def preview_dest_plan(state, scan=None, sscan=None):
+    """Read-only prediction of where the NEXT import will land every target's
+    new frames — the same Day-folder names the import itself would compute
+    (next_day_number + continuation_day / _seestar_day_number). Powers the
+    panel's destination-tree preview (Brett, 2026-08-09)."""
+    plan = []
+    scope_lookup = load_equipment_scope_lookup()
+    if scan:
+        for target in scan["targets"]:
+            if target["skipped"] or not target["new"]:
+                continue
+            name = target["name"]
+            new_files = list(target["new"])
+            _attach_light_meta(new_files)
+            m = re.match(r"^(.+)_(\d+-\d+)$", name)
+            if m:  # mosaic panel: lights under parent/panel, cal shared at parent
+                base = m.group(1)
+                display = display_name_for(state, base)
+                day_label = name
+                dest_target_dir = os.path.join(DEST_DIR, display, name, "lights")
+                tree_root = [display, name]
+                ask_name = display == base
+                shared_cal = True
+            else:
+                display = display_name_for(state, name)
+                day_label = display
+                dest_target_dir = os.path.join(DEST_DIR, display, "lights")
+                tree_root = [display]
+                ask_name = display == name
+                shared_cal = False
+            nights = {observing_night(f["meta"].get("capture_datetime"))
+                      for f in new_files if f["meta"].get("capture_datetime")}
+            nights.discard(None)
+            day = next_day_number(state, dest_target_dir, day_label, name)
+            day = continuation_day(dest_target_dir, day_label, day, nights)
+            day_folder = f"{day_label} Day {day}"
+            focal_length = read_fits_focallen(new_files[0]["path"])
+            if focal_length is None:
+                focal_length = read_fits_header_summary(new_files[0]["path"]).get("focal_length")
+            plan.append({
+                "device": "asiair", "target": name, "display": display,
+                "askName": ask_name,
+                # scope of the INCOMING frames (badges must not show a
+                # target's ancestral scope when tonight's rig differs)
+                "scope": scope_from_focallen(focal_length, scope_lookup),
+                "deviceRoot": os.path.basename(DEST_DIR.rstrip("/")),
+                "treeRoot": tree_root, "dayFolder": day_folder,
+                "continuing": os.path.isdir(os.path.join(dest_target_dir, day_folder)),
+                "files": len(new_files),
+                "bytes": sum(f["size"] for f in new_files),
+                "nights": sorted(nights),
+                "sharedCal": shared_cal,
+            })
+    if sscan:
+        dest_root = sscan["dest"]
+        for t in sscan["targets"]:
+            if t["skipped"] or t.get("is_mw"):
+                continue
+            if not t["new"] and not t.get("new_stacks"):
+                continue
+            display = seestar_display(state, t["project_name"])
+            day = _seestar_day_number(state, os.path.join(dest_root, display),
+                                      t["sub_name"], t["name"])
+            stack = None
+            best, best_name = -1, None
+            for s_ in t.get("stacks", []):
+                ms = re.match(r"^Stacked_(\d+)_", s_["filename"])
+                if ms and int(ms.group(1)) > best:
+                    best, best_name = int(ms.group(1)), s_["filename"]
+            if t.get("new_stacks") and best_name:
+                stack = {"filename": best_name, "subs": best}
+            plan.append({
+                "device": "seestar", "target": t["name"], "display": display,
+                "askName": display in (t["project_name"], t["name"]),
+                "deviceRoot": os.path.basename(dest_root.rstrip("/")),
+                "treeRoot": [display], "dayFolder": f"{t['sub_name']} Day {day}",
+                "continuing": False,
+                "files": len(t["new"]),
+                "bytes": sum(f["size"] for f in t["new"]),
+                "nights": [], "sharedCal": False, "stack": stack,
+            })
+    return plan
 
 def link_calibration_into(state, matched, dest_dir, dry_run=False, checksum=True):
     """Hardlink matched Library frames into dest_dir/calibration/{...}. Idempotent."""
@@ -1546,17 +1727,69 @@ def run_import(state, args, only_targets=None):
                     if w.startswith("probation:"):
                         probation_notes.append(f"{label}: {w}")
                         state.history_event("probation-gate", target=name, detail=w)
+                # Panel pre-consent (Brett, 2026-08-09): checkbox decisions from
+                # the scan card. Unticked sets are dropped here (frames still
+                # get backed up to the Library — only the target link is skipped).
+                dec = CAL_DECISIONS.get(name) or {}
+                if dec:
+                    for kind in ("biases", "darks", "flats"):
+                        if not matched[kind]:
+                            continue
+                        keep = [c for c in matched[kind]
+                                if dec.get(cal_set_key(c)) is not False]
+                        dropped = len(matched[kind]) - len(keep)
+                        if dropped:
+                            matched[kind] = keep
+                            info(f"{dropped} {kind[:-1]} frame(s) unticked on the "
+                                 f"panel — not linked to {display_name}.")
+                            state.history_event("cal-unticked", target=name,
+                                                kind=kind, frames=dropped)
                 # Ask-before-linking gate (Brett, 2026-07-25): when the chosen
                 # flats look borrowed (probation flags) or stale, confirm first.
-                if (matched["flats"] and matched.get("flatsQuestionable")
-                        and not dry_run and not loose):
+                if matched["flats"] and not dry_run and not loose:
                     age_txt = (f", {matched['flatsAge']} day(s) old"
                                if matched.get("flatsAge") is not None else "")
-                    warn(f"These flats may belong to ANOTHER project "
-                         f"(gate flags{age_txt}) — no flats may exist yet for this "
-                         f"configuration.")
-                    resp = safe_input("Link these flats anyway? [y/N] ", default="n")
-                    if resp.lower() != "y":
+                    flat_keys = {cal_set_key(c) for c in matched["flats"]}
+                    pre_yes = (bool(dec) and not matched.get("flatsQuestionable")
+                               and all(dec.get(k) is True for k in flat_keys))
+                    if matched.get("flatsQuestionable"):
+                        warn(f"These flats may belong to ANOTHER project "
+                             f"(gate flags{age_txt}) — no flats may exist yet for this "
+                             f"configuration.")
+                        # Self-describing question (Brett, 2026-08-12): name the
+                        # set and the mismatch so the card needs no log-reading.
+                        f0 = matched["flats"][0]
+                        f_night = (f0["capture_datetime"].strftime("%Y-%m-%d")
+                                   if f0.get("capture_datetime") else "unknown date")
+                        f_desc = f"{len(matched['flats'])} flat(s) from {f_night}"
+                        if f0.get("rotation") is not None:
+                            f_desc += f" at {f0['rotation']:g}°"
+                        f_desc += age_txt
+                        l_desc = display_name
+                        if ginfo.get("rotation") is not None:
+                            l_desc += f" (lights at {ginfo['rotation']:g}°)"
+                        resp = safe_input(
+                            f"These look like another project's flats — {f_desc}. "
+                            f"Link to {l_desc} anyway? [y/N] ", default="n")
+                        declined = resp.lower() != "y"
+                    elif pre_yes:
+                        # Confirmed up front on the scan card — no interruption.
+                        info(f"Flats confirmed on the panel — linking "
+                             f"{len(matched['flats'])}.")
+                        declined = False
+                    elif PROMPT_FN is not None:
+                        # Panel mode: every flat link is confirmed, not just
+                        # questionable ones (Brett, 2026-08-08). Default Yes.
+                        dest_label = (f"{parent_display}/ (shared)"
+                                      if is_mosaic else day_folder_name)
+                        resp = safe_input(
+                            f"Link {len(matched['flats'])} matched flat(s) "
+                            f"({g_filter or 'no filter'}{age_txt}) into "
+                            f"{dest_label}? [Y/n] ", default="y")
+                        declined = resp.lower() in ("n", "no")
+                    else:
+                        declined = False
+                    if declined:
                         matched["flats"] = []
                         info("Flats skipped — shoot flats for this target and re-run; "
                              "they'll link into this same Day folder.")
@@ -1763,6 +1996,49 @@ def run_baseline(state, assume_yes=False):
         success("Every baselined target has a destination folder — baseline looks sound.")
     state.publish_mirror()
     return True
+
+def run_set_filter(state, target_name, filter_tag, night=None):
+    """Correct the recorded filter for already-imported frames. The ASIAir
+    only writes a filter token into filenames when the app's filter setting
+    is configured — a blank setting records 'no filter' even with glass in
+    the drawer (seen live: Fish on the Platter, 2026-06-23). This fixes the
+    LEDGER's history; calibration matching at import time always reads the
+    camera's own filenames, so future sessions need the app set correctly."""
+    if not state.has_ledger():
+        error("No ledger.")
+        return
+    tag = "" if filter_tag.lower() in ("none", "-") else filter_tag
+    touched = 0
+    nights = set()
+    for e in state.ledger["files"].values():
+        if e.get("device", "asiair") != "asiair":
+            continue
+        if e.get("target") != target_name:
+            continue
+        if night and e.get("night") != night:
+            continue
+        if e.get("filter", "") == tag:
+            continue
+        e["filter"] = tag
+        touched += 1
+        if e.get("night"):
+            nights.add(e["night"])
+        state._dirty = True
+    if not touched:
+        info(f"No entries needed changing for '{target_name}'"
+             + (f" on {night}" if night else "") + ".")
+        return
+    state.save_ledger()
+    state.history_event("filter-corrected", target=target_name,
+                        filter=tag or "none", frames=touched, night=night)
+    success(f"Recorded filter '{tag or 'no filter'}' on {touched} frame(s) of "
+            f"'{target_name}'"
+            + (f" ({night})" if night else
+               (f" across {len(nights)} night(s)" if nights else "")))
+    warn("Reminder: set the filter in the ASIAir app when you swap glass — "
+         "filenames only carry what the app is told.")
+    state.publish_mirror()
+
 
 def run_unbaseline(state, target_name):
     if not state.has_ledger():
@@ -3407,6 +3683,11 @@ def main():
                    help="regenerate and open the status page (no camera needed)")
     p.add_argument("--refresh-metadata", action="store_true",
                    help="back-fill ledger metadata from filenames/FITS (safe, repeatable)")
+    p.add_argument("--set-filter", nargs=2, metavar=("TARGET", "FILTER"),
+                   help="correct the recorded filter on a target's ledger entries "
+                        "('none' clears); add --night YYYY-MM-DD to limit to one night")
+    p.add_argument("--night", metavar="YYYY-MM-DD",
+                   help="restrict --set-filter to a single observing night")
     p.add_argument("--skip-target", metavar="NAME")
     p.add_argument("--unskip-target", metavar="NAME")
     p.add_argument("--explain-cal", action="store_true")
@@ -3434,6 +3715,9 @@ def main():
         return
     if args.refresh_metadata:
         run_refresh_metadata(state)
+        return
+    if args.set_filter:
+        run_set_filter(state, args.set_filter[0], args.set_filter[1], night=args.night)
         return
     if args.unbaseline:
         run_unbaseline(state, args.unbaseline)

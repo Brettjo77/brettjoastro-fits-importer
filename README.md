@@ -25,10 +25,20 @@ Smart telescopes fill up fast, and hand-copying folders leaves you guessing. Mos
 - A backup report that separates *verified* / *backed up but unverified* / *still on camera only*, and a self-contained HTML status dashboard
 - AstroLog-compatible JSON receipts per telescope after each import
 
+**The control panel**
+
+- One-page app layout: the page never scrolls; the target list, activity log, and report panes scroll inside their own cards, with camera storage as a live meter in the header
+- **Calibration pairings up front**: the scan runs the real matching gates and shows which bias/dark/flat *sets* pair with which target — each pairing pre-ticked, untickable, so the import runs without interrupting you; only genuinely questionable pairings still ask (and the question names the set, its date and rotation versus your lights')
+- **"Where files will land"**: a live destination tree showing the exact Day folders and calibration links the import will create — computed by the same code the import uses, updating as you tick and untick
+- Targets and the backed-up inventory in date order, newest first, with last-shot dates
+- Scope badges read the *incoming* frames' focal length, so a target shot on two rigs is labelled by tonight's, not its history
+- An unmissable finish: green completion banner (frames, targets, duration), tab title flip, and a macOS notification with a chime for imports that end while you're elsewhere
+
 **ZWO ASIAir**
 
 - Per-scope recognition from FITS focal length; filename-parsed metadata with FITS fallback (including no-filter and mosaic-panel filename forms)
 - A calibration library that ingests **all** darks/flats/biases from `Autorun/`, then hard-links the *matching* set (gain, filter, focal length, rotator angle, exposure) into each session's folder — and asks first when flats look like they belong to a different optical configuration
+- `--set-filter "<target>" "<filter>" [--night YYYY-MM-DD]` records the true glass for sessions where the ASIAir app's filter field was left blank (filenames carry no token)
 - The ASIAir is treated as a **backup of record**: this tool never deletes from it, ever
 
 **Seestar (S30 Pro / S50)**
@@ -41,8 +51,10 @@ Smart telescopes fill up fast, and hand-copying folders leaves you guessing. Mos
 
 ## Install
 
-Requires macOS with the Xcode Command Line Tools Python 3 and `astropy`
-(`/usr/bin/python3 -m pip install --user astropy`).
+Requires macOS, Python 3, and `astropy`. **Install Python from
+[python.org](https://www.python.org/downloads/)** (then
+`/usr/local/bin/python3 -m pip install astropy`) — see the permissions
+section for why Apple's bundled Python is not enough.
 
 ```bash
 git clone https://github.com/Brettjo77/brettjoastro-fits-importer.git
@@ -50,7 +62,31 @@ cd brettjoastro-fits-importer
 bash install-scripts.sh
 ```
 
-The installer copies the engine, panel, and watcher to `~/bin`, installs a single LaunchAgent (with your `$HOME` substituted), and prints the first-run steps. Then just plug a camera in.
+The installer copies the engine, panel, and watcher to `~/bin`, installs and ad-hoc-signs the app wrapper into `~/Applications`, puts a one-double-click **Restart FITS Importer** button on your Desktop, installs a single LaunchAgent (with your `$HOME` substituted), and prints the first-run steps. Then just plug a camera in.
+
+## macOS permissions — read this once, save a week
+
+USB camera drives are "removable volumes", and macOS gates background access
+to them per-process. Three hard-won facts:
+
+1. **Apple's `/usr/bin/python3` is a "platform binary"** — from a background
+   (launchd) launch it is *silently denied* removable-volume access and is
+   never allowed to show the permission prompt. No Settings toggle reliably
+   fixes this. That's why this project prefers python.org Python: it is
+   ordinary signed software, so macOS simply **asks** — click Allow once and
+   the hands-free flow (plug in → notification → panel → green scan) is
+   permanent, reboots included.
+2. **Terminal-launched processes inherit Terminal's grant**, which is why
+   `Restart FITS Importer.command` on your Desktop always works, whatever
+   else is going on. It is the guaranteed fallback.
+3. The **app wrapper** (`BrettjoAstro FITS Importer.app`, ad-hoc signed by
+   the installer) gives the panel a stable identity you can also grant Full
+   Disk Access to by dragging it into System Settings → Privacy & Security —
+   useful belt-and-braces, but unsigned apps' grants can go stale, which is
+   why signing matters and the installer does it for you.
+
+If a background-started panel ever logs `Operation not permitted`, the log
+line itself names the exact thing to grant — or just use the Desktop button.
 
 ### First run on an existing archive
 
@@ -94,6 +130,7 @@ The panel covers day-to-day use; everything is also scriptable:
 | `--pick` | Native picker dialog for choosing targets (Terminal fallback flow) |
 | `--dashboard` | Regenerate and open the HTML status dashboard |
 | `--refresh-metadata` | Back-fill ledger metadata after parser improvements (safe, repeatable) |
+| `--set-filter "<target>" "<filter>"` | Record the true filter for a target's ASIAir frames (`--night` to limit; `none` clears) |
 | `--skip-target` / `--unskip-target` | Never-import list management |
 | `--unbaseline <target>` | Remove *unverified* baseline entries so files count as new again |
 | `--dry-run` | Everything printed, nothing written |
@@ -101,11 +138,11 @@ The panel covers day-to-day use; everything is also scriptable:
 
 ## Testing
 
-136 end-to-end checks run the real engine and the real panel against simulated cameras (hand-built minimal FITS files, both device layouts, crash/rename/mosaic/Milky-Way/cleanup scenarios):
+166 end-to-end checks run the real engine and the real panel against simulated cameras (hand-built minimal FITS files, both device layouts, crash/rename/mosaic/Milky-Way/cleanup/consent scenarios — including that the destination preview must equal the folders the import then actually creates):
 
 ```bash
-python3 test_v2.py     # 114 engine checks
-python3 test_app.py    # 22 panel checks (boots the real HTTP server)
+python3 test_v2.py     # 120 engine checks
+python3 test_app.py    # 46 panel checks (boots the real HTTP server)
 ```
 
 ## Project layout
@@ -114,6 +151,8 @@ python3 test_app.py    # 22 panel checks (boots the real HTTP server)
 astro-import.py                      the engine (both cameras, ledger, report, dashboard)
 astro-app.py                         the control panel (localhost:8765)
 astro-watch.sh                       drive watcher (one for both cameras)
+BrettjoAstro FITS Importer.app/      app wrapper — the panel's grantable macOS identity
+Restart FITS Importer.command        Desktop one-click restart (Terminal context)
 com.brettjohnson.astro-import.plist  LaunchAgent template ($HOME substituted on install)
 install-scripts.sh                   installer / updater
 config.example.json                  optional path overrides

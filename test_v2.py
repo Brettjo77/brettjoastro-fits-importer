@@ -683,6 +683,38 @@ check("S7 unbaseline removes only the unverified straggler",
       len(mw_left) == 1 and mw_left[0]["filename"] == "20260618-225010.fit",
       str([e["filename"] for e in mw_left]))
 
+print("\n── Chain F2: --set-filter ledger correction ─────────────────")
+F2 = teh.Env("F2")
+F2.add_light("Plan", "NGC 7822", "0001", dt="20260623-235000", filt=None)
+F2.add_light("Plan", "NGC 7822", "0002", dt="20260624-231500", filt=None)
+F2.add_light("Plan", "M 81", "0001", dt="20260623-221000")
+r = F2.run("--baseline")
+led = F2.ledger()
+check("F2 no-token lights recorded as no filter",
+      all(e["filter"] == "" for e in led["files"].values() if e["target"] == "NGC 7822"))
+r = F2.run("--set-filter", "NGC 7822", "LeNhance", "--night", "2026-06-23")
+led = F2.ledger()
+by_night = {e["night"]: e["filter"] for e in led["files"].values()
+            if e["target"] == "NGC 7822"}
+check("F2 night-limited correction",
+      by_night.get("2026-06-23") == "LeNhance" and by_night.get("2026-06-24") == "",
+      str(by_night) + r.stdout[-200:])
+r = F2.run("--set-filter", "NGC 7822", "LeNhance")
+led = F2.ledger()
+check("F2 full-target correction",
+      all(e["filter"] == "LeNhance" for e in led["files"].values()
+          if e["target"] == "NGC 7822"))
+check("F2 other targets untouched",
+      all(e["filter"] == "LUltimate" for e in led["files"].values()
+          if e["target"] == "M 81"))
+r = F2.run("--set-filter", "NGC 7822", "none")
+led = F2.ledger()
+check("F2 'none' clears the filter",
+      all(e["filter"] == "" for e in led["files"].values()
+          if e["target"] == "NGC 7822"))
+hist = open(os.path.join(F2.state, "history.jsonl")).read()
+check("F2 history logs corrections", hist.count("filter-corrected") >= 3)
+
 # ═══════════════ Summary ═════════════════════════════════════════════════════
 print("\n═══════════════════════════════════════════════════")
 print(f"  {PASS} passed, {FAIL} failed")

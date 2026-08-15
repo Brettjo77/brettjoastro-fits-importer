@@ -20,6 +20,7 @@ import contextlib
 import importlib.util
 import json
 import os
+import re
 import subprocess
 import sys  # noqa: F401  (kept for parity)
 import threading
@@ -55,6 +56,7 @@ class App:
         self._answer_evt = threading.Event()
         self._qid = 0
         self.last_result = None               # human summary of last op
+        self.last_done = None                 # completion banner payload
         self.report_text = None
 
     # ── log capture ──────────────────────────────────────────────────────
@@ -116,6 +118,8 @@ class App:
             return False
         def work():
             self.status = label
+            if label != "scanning":
+                self.last_done = None   # banner survives rescans, not new ops
             eng.PROMPT_FN = self.on_prompt
             eng.EVENT_FN = self.on_event
             got_lock = False
@@ -130,6 +134,20 @@ class App:
             except Exception as e:
                 self.logline(f"✗ {label} failed: {e}")
                 self.last_result = f"{label} failed: {e}"
+                if "Operation not permitted" in str(e):
+                    real = os.path.realpath(sys.executable)
+                    app = (real.split("/Contents/MacOS/")[0]
+                           if "/Contents/MacOS/" in real else real)
+                    fm = re.match(r"(.*?\.framework/Versions/[^/]+)/", real)
+                    if fm:  # framework python → its draggable Python.app sibling
+                        cand = os.path.join(fm.group(1), "Resources", "Python.app")
+                        if os.path.isdir(cand):
+                            app = cand
+                    self.logline("▸ macOS is blocking disk access for this panel "
+                                 "process. Permanent fix: System Settings → Privacy "
+                                 f"& Security → Full Disk Access → add: {app} "
+                                 "(drag it in from Finder), then restart the panel. "
+                                 "Quick fix: relaunch the panel from Terminal.")
             finally:
                 if got_lock:
                     eng.release_lock()
@@ -140,9 +158,21 @@ class App:
         return True
 
     def do_scan(self):
+        STAMP = re.compile(r"20\d{6}-\d{6}")
+
+        def last_stamp(files):
+            # newest capture stamp in a file list — lexicographic == chronological
+            best = ""
+            for f in files:
+                m = STAMP.search(f.get("filename", ""))
+                if m and m.group(0) > best:
+                    best = m.group(0)
+            return best
+
         def fn():
             state = eng.State()
             targets, disks = [], []
+            scan_a = None
             scope_by_target = {}
             if state.has_ledger():
                 for e in state.ledger["files"].values():
@@ -150,9 +180,33 @@ class App:
                     if e.get("scope") and t and t not in scope_by_target:
                         scope_by_target[t] = e["scope"]
             cal_frames = 0
+            cal_summary = None
             if os.path.isdir(eng.ASIAIR_VOLUME):
-                scan = eng.scan_camera(state)
+                scan = scan_a = eng.scan_camera(state)
                 cal_frames = len(scan["calibration"])
+                new_sets, in_lib = {}, 0
+                for c in scan["calibration"]:
+                    if state.has_ledger() and state.cal_entry(c["relpath"]) is not None:
+                        in_lib += 1
+                        continue
+                    key = eng.cal_set_key(c)
+                    g = new_sets.setdefault(key, {
+                        "setKey": key,
+                        "type": c["frame_type"], "count": 0,
+                        "exposureSeconds": c.get("exposure_seconds"),
+                        "filter": c.get("filter") or "",
+                        "rotation": c.get("rotation"),
+                        "night": key.rsplit("|", 1)[-1]})
+                    g["count"] += 1
+                cal_summary = {"total": len(scan["calibration"]), "inLibrary": in_lib,
+                               "newSets": sorted(new_sets.values(),
+                                                 key=lambda g: (g["night"], g["type"]))}
+                try:
+                    # which sets pair with which target, via the real gates
+                    cal_summary["pairings"] = eng.preview_cal_pairings(state, scan)
+                except Exception as e:
+                    cal_summary["pairings"] = {}
+                    self.logline(f"⚠ pairing preview failed: {e}")
                 for t in scan["targets"]:
                     targets.append({
                         "name": t["name"], "device": "asiair",
@@ -162,6 +216,7 @@ class App:
                         "files": len(t["files"]), "new": len(t["new"]),
                         "newBytes": t["new_bytes"], "totalBytes": t["total_bytes"],
                         "hours": round(t["integration_s"] / 3600.0, 1),
+                        "lastStamp": last_stamp(t["files"]),
                     })
                 if scan["disk"]:
                     disks.append({"label": "ASIAir", **scan["disk"]})
@@ -178,6 +233,7 @@ class App:
                         "newBytes": nb,
                         "totalBytes": sum(f["size"] for f in t["files"]),
                         "hours": None,
+                        "lastStamp": last_stamp(t["files"] + t.get("stacks", [])),
                     })
                 for p in s["panel_sets"]:
                     if p["new"]:
@@ -191,15 +247,30 @@ class App:
                             "newBytes": sum(f["size"] for f in p["new"]),
                             "totalBytes": sum(f["size"] for f in p["files"]),
                             "hours": None,
+                            "lastStamp": last_stamp(p["files"]),
                         })
                 if s["disk"]:
                     disks.append({"label": f"Seestar {s['model']}", **s["disk"]})
+            try:
+                dest_plan = eng.preview_dest_plan(state, scan_a, s or None)
+            except Exception as e:
+                dest_plan = []
+                self.logline(f"⚠ destination preview failed: {e}")
+            # badge truth: targets with new frames wear the INCOMING scope,
+            # not the oldest ledger entry's (multi-rig targets, 2026-08-12)
+            plan_scope = {e["target"]: e["scope"]
+                          for e in dest_plan if e.get("scope")}
+            for t in targets:
+                if t["name"] in plan_scope:
+                    t["scope"] = plan_scope[t["name"]]
             self.scan = {
                 "targets": targets,
                 "newTargets": len([t for t in targets if t["new"] and not t["skipped"]]),
                 "newFiles": sum(t["new"] for t in targets if not t["skipped"]),
                 "newBytes": sum(t["newBytes"] for t in targets if not t["skipped"]),
                 "calFrames": cal_frames,
+                "calSummary": cal_summary,
+                "destPlan": dest_plan,
                 "disks": disks,
                 "disk": disks[0] if disks else None,
                 "hasLedger": state.has_ledger(),
@@ -209,7 +280,9 @@ class App:
                          f"{self.scan['newFiles']} files")
         return self._run("scanning", fn)
 
-    def do_import(self, names):
+    def do_import(self, names, cal_decisions=None):
+        t0 = time.time()
+
         def fn():
             state = eng.State()
             if not state.has_ledger():
@@ -217,6 +290,11 @@ class App:
                              "(python3 ~/bin/astro-import.py --baseline)")
                 self.last_result = "No ledger yet — baseline needed."
                 return
+            # scan-card checkbox decisions → engine pre-consent map
+            eng.CAL_DECISIONS = {
+                t: {str(k): bool(v) for k, v in (m or {}).items()}
+                for t, m in (cal_decisions or {}).items()
+            }
             args = argparse.Namespace(
                 dry_run=False, no_checksum=False, loose_cal=False, explain_cal=False,
                 all=False, clean_source_previews=False, targets=None, verbose=False)
@@ -244,6 +322,23 @@ class App:
                     total_t += totals["targets"]; total_f += totals["files"]
             self.last_result = (f"Imported {total_f} frame(s) across "
                                 f"{total_t} target(s).")
+            dur = int(time.time() - t0)
+            self.last_done = {
+                "op": "import", "targets": total_t, "frames": total_f,
+                "seconds": dur,
+                "finishedAt": time.strftime("%H:%M:%S"),
+            }
+            if total_f and sys.platform == "darwin":
+                try:  # a chime for imports finished while you're elsewhere
+                    subprocess.run(
+                        ["osascript", "-e",
+                         'display notification "%d frame(s) imported and '
+                         'verified across %d target(s)." with title '
+                         '"FITS Importer — import complete" sound name "Glass"'
+                         % (total_f, total_t)],
+                        timeout=5, capture_output=True)
+                except Exception:
+                    pass
             self.scan = None  # force rescan for fresh counts
         return self._run("importing", fn)
 
@@ -301,6 +396,7 @@ class App:
             "question": self.question,
             "log": tail,
             "lastResult": self.last_result,
+            "lastDone": self.last_done,
             "hasReport": self.report_text is not None,
         }
 
@@ -370,7 +466,8 @@ class Handler(BaseHTTPRequestHandler):
             if not names:
                 self._json({"started": False, "error": "no targets selected"}, 400)
             else:
-                self._json({"started": APP.do_import(names)})
+                decisions = body.get("calDecisions") or {}
+                self._json({"started": APP.do_import(names, decisions)})
         elif self.path == "/api/report":
             self._json({"started": APP.do_report()})
         elif self.path == "/api/eject":
@@ -441,7 +538,7 @@ body{font:14px/1.5 -apple-system,BlinkMacSystemFont,"SF Pro Text",system-ui,"Seg
     radial-gradient(2px 2px at 12% 55%, #ffffff 50%, transparent 51%);
   animation:tw 7s ease-in-out infinite}
 @keyframes tw{0%,100%{opacity:calc(var(--star-op)*.25)}50%{opacity:var(--star-op)}}
-.wrap{position:relative;z-index:1;max-width:1180px;margin:0 auto;padding:26px 30px 40px}
+.wrap{position:relative;z-index:1;max-width:min(1780px,96vw);margin:0 auto;padding:26px 30px 40px}
 /* ── header ── */
 header{display:flex;align-items:center;gap:16px;flex-wrap:wrap;margin-bottom:20px}
 .brand{display:flex;align-items:center;gap:12px}
@@ -454,6 +551,12 @@ header{display:flex;align-items:center;gap:16px;flex-wrap:wrap;margin-bottom:20p
 .dot.on{background:var(--good);box-shadow:0 0 0 3px color-mix(in srgb, var(--good) 22%, transparent)}
 .dot.busy{background:var(--accent);animation:pulse 1.1s ease-in-out infinite}
 @keyframes pulse{0%,100%{opacity:1}50%{opacity:.35}}
+.minimeter{width:84px;height:6px;border-radius:3px;overflow:hidden;display:inline-block;
+  background:color-mix(in srgb, var(--ink) 12%, transparent);vertical-align:middle}
+.minimeter>span{display:block;height:100%;background:var(--accent);border-radius:3px}
+#scanEyebrow{display:flex;justify-content:space-between;align-items:baseline}
+#scanEyebrow #scannedAt{font-weight:500;letter-spacing:.02em;text-transform:none;
+  color:var(--muted);font-size:11px}
 .spacer{flex:1}
 button{font:inherit;font-weight:500;border:1px solid var(--line2);background:var(--surface);
   color:var(--ink);border-radius:9px;padding:8px 15px;cursor:pointer;transition:all .15s}
@@ -471,8 +574,26 @@ button.primary:hover:not(:disabled){color:var(--accent-ink);filter:brightness(1.
 .tabs button.on{background:var(--surface);color:var(--ink);font-weight:600;
   box-shadow:0 2px 8px rgba(0,0,0,.14);border:1px solid var(--line)}
 /* ── layout ── */
-.cols{display:grid;grid-template-columns:minmax(470px,7fr) minmax(380px,6fr);gap:18px}
+.cols{display:grid;grid-template-columns:minmax(440px,5fr) minmax(430px,7fr);gap:18px}
 @media(max-width:1000px){.cols{grid-template-columns:1fr}}
+/* ── one-page app layout: page never scrolls, panes scroll inside ── */
+@media(min-width:1001px){
+  html,body{height:100%;overflow:hidden}
+  .wrap{height:100vh;display:flex;flex-direction:column;overflow:hidden;
+    padding-top:18px;padding-bottom:10px}
+  header{margin-bottom:14px}
+  .tabs{margin-bottom:12px}
+  #tab-panel{flex:1;min-height:0;display:flex;flex-direction:column}
+  .cols{flex:1;min-height:0}
+  .cols>div:first-child{display:flex;flex-direction:column;min-height:0}
+  .cols>div:first-child>.card:first-child{flex:1;min-height:0;overflow-y:auto}
+  #logcard{min-height:0}
+  #log{height:auto;flex:1;min-height:0}
+  #tab-report{flex:1;min-height:0;overflow:auto}
+  #tab-dash{flex:1;min-height:0}
+  #tab-dash iframe{height:100%}
+  .foot{margin-top:10px}
+}
 .card{background:var(--surface);border:1px solid var(--line);border-radius:16px;
   padding:18px 20px;box-shadow:var(--shadow)}
 .eyebrow{font-size:11px;font-weight:650;letter-spacing:.09em;text-transform:uppercase;
@@ -517,15 +638,26 @@ button.primary:hover:not(:disabled){color:var(--accent-ink);filter:brightness(1.
 #livebar{height:8px;border-radius:4px;background:color-mix(in srgb, var(--ink) 9%, transparent);overflow:hidden}
 #livebar>div{height:100%;background:var(--accent);border-radius:4px;transition:width .3s}
 #log{background:var(--logbg);color:var(--logink);border:1px solid var(--line);border-radius:12px;
-  padding:12px 14px;height:460px;overflow-y:auto;font:11.5px/1.65 ui-monospace,"SF Mono",Menlo,monospace;
-  white-space:pre-wrap;word-break:break-word}
-#log .ok{color:#63c76a}#log .wa{color:#e8b34b}#log .er{color:#e8756b}#log .hd{color:#8fb6f2}
+  padding:11px 13px;height:clamp(420px,calc(100vh - 430px),860px);overflow-y:auto;
+  font:12px/1.5 ui-monospace,"SF Mono",Menlo,monospace}
+#log .ll{white-space:pre-wrap;overflow-wrap:anywhere;padding-left:2ch;text-indent:-2ch;margin:1.5px 0}
+#log .ok{color:#63c76a}#log .wa{color:#e8b34b}#log .er{color:#e8756b;font-weight:600}#log .hd{color:#8fb6f2}
+#log .lr{border-top:1px solid color-mix(in srgb, var(--logink) 22%, transparent);margin:9px 2px}
+#log .lsp{height:7px}
 .result{font-size:12.5px;color:var(--ink2);margin-top:10px;min-height:18px}
 /* ── question ── */
 .q{border:1px solid color-mix(in srgb, var(--warning) 55%, transparent);
   background:color-mix(in srgb, var(--warning) 7%, var(--surface));
   border-radius:16px;padding:16px 18px;margin-bottom:16px;box-shadow:var(--shadow)}
 .q .qh{display:flex;gap:10px;align-items:center;font-weight:650;margin-bottom:8px}
+/* ── completion banner ── */
+.done{border:1px solid color-mix(in srgb, var(--good) 55%, transparent);
+  background:color-mix(in srgb, var(--good) 8%, var(--surface));
+  border-radius:16px;padding:16px 18px;margin-bottom:16px;box-shadow:var(--shadow)}
+.done .dh{display:flex;gap:10px;align-items:center;font-weight:650;margin-bottom:6px;
+  font-size:15.5px}
+.done .dh svg{width:21px;height:21px;flex:none}
+.done p{color:var(--ink2);margin-bottom:12px}
 .q .qh svg{width:20px;height:20px;flex:none}
 .q p{color:var(--ink2);margin-bottom:12px}
 .q input[type=text]{font:inherit;width:100%;padding:9px 11px;border:1px solid var(--line2);
@@ -536,6 +668,75 @@ iframe{width:100%;height:calc(100vh - 180px);border:1px solid var(--line);border
 #reportPre{font:12px/1.55 ui-monospace,"SF Mono",Menlo,monospace;white-space:pre-wrap;background:var(--surface);
   border:1px solid var(--line);border-radius:16px;padding:18px 20px;overflow-x:auto;box-shadow:var(--shadow)}
 .foot{color:var(--muted);font-size:11.5px;margin-top:20px;text-align:center}
+
+.calcard{margin-top:12px;font-size:13px;color:var(--muted);line-height:1.55}
+.calcard b{color:var(--ink)}
+.calset{display:flex;gap:8px;align-items:center;padding-top:3px}
+.calset .dot2{width:6px;height:6px;border-radius:50%;background:var(--warning);flex:0 0 auto}
+.pairhead{margin-top:11px;font-weight:650;color:var(--ink);font-size:13px}
+.pairtarget{margin-top:8px;font-weight:600;color:var(--ink2);font-size:12.5px;
+  letter-spacing:.02em}
+.pairrow{display:flex;gap:8px;align-items:center;padding:3px 0 0 8px;cursor:pointer;
+  color:var(--muted)}
+.pairrow input.caldec{appearance:none;width:16px;height:16px;border:1.5px solid var(--line2);
+  border-radius:5px;background:var(--surface);cursor:pointer;flex:0 0 auto;position:relative;
+  transition:all .12s;margin:0}
+.pairrow input.caldec:checked{background:var(--accent);border-color:var(--accent)}
+.pairrow input.caldec:checked::after{content:"";position:absolute;left:4.5px;top:1.5px;
+  width:4px;height:8px;border:solid #fff;border-width:0 2px 2px 0;transform:rotate(42deg)}
+.pairrow input.caldec:checked+span{color:var(--ink)}
+.pairrow.qrow{cursor:default}
+.qdot{width:8px;height:8px;border-radius:50%;background:var(--warning);flex:0 0 auto}
+.qnote{font-size:11px;font-weight:600;color:var(--warning);margin-left:4px;
+  background:color-mix(in srgb, var(--warning) 12%, transparent);
+  padding:1px 8px;border-radius:999px}
+.libtag{font-size:10.5px;font-weight:700;letter-spacing:.03em;color:var(--accent);
+  background:color-mix(in srgb, var(--accent) 13%, transparent);
+  padding:1px 7px;border-radius:999px}
+.pairnote{padding:2px 0 0 8px;font-size:12px;color:var(--muted);font-style:italic}
+/* ── destination preview tree ── */
+.dest{margin-top:16px;border:1px solid var(--line2);border-radius:12px;
+  padding:12px 14px;background:var(--surface2)}
+.dest .eyebrow{margin-bottom:8px}
+.droot{font:600 12.5px/1.75 ui-monospace,"SF Mono",Menlo,monospace;color:var(--ink);
+  margin-top:4px}
+.droot:first-of-type{margin-top:0}
+.drow{font:12px/1.75 ui-monospace,"SF Mono",Menlo,monospace;color:var(--muted);
+  white-space:pre-wrap;overflow-wrap:anywhere}
+.dfold{color:var(--ink);font-weight:600}
+.dmeta{color:var(--muted)}
+.dnote{font-size:10.5px;font-weight:700;color:var(--accent);
+  background:color-mix(in srgb, var(--accent) 13%, transparent);
+  padding:1px 7px;border-radius:999px}
+.dask{font-size:10.5px;font-weight:700;color:var(--warning);
+  background:color-mix(in srgb, var(--warning) 12%, transparent);
+  padding:1px 7px;border-radius:999px}
+details.inv{margin-top:16px}
+details.inv summary{cursor:pointer;font-size:13.5px;font-weight:600;color:var(--ink);
+  list-style:none;display:flex;align-items:center;gap:10px;padding:11px 14px;
+  border:1px solid var(--line2);border-radius:12px;background:var(--surface2)}
+details.inv summary:hover{border-color:color-mix(in srgb, var(--accent) 40%, var(--line2))}
+details.inv summary::-webkit-details-marker{display:none}
+details.inv summary::before{content:"▸";transition:transform .15s;display:inline-block;
+  color:var(--muted)}
+details.inv[open] summary{border-bottom-left-radius:0;border-bottom-right-radius:0}
+details.inv[open] summary::before{transform:rotate(90deg)}
+details.inv summary .cnt{margin-left:auto;font-size:11.5px;font-weight:700;
+  color:var(--accent);background:color-mix(in srgb, var(--accent) 13%, transparent);
+  padding:3px 10px;border-radius:999px;font-variant-numeric:tabular-nums}
+.invlist{border:1px solid var(--line2);border-top:none;border-radius:0 0 12px 12px;
+  max-height:320px;overflow-y:auto;padding:4px 8px;background:var(--surface2)}
+.irow{display:flex;align-items:center;gap:12px;padding:10px 8px;
+  border-bottom:1px solid var(--line2)}
+.irow:last-child{border-bottom:none}
+.irow .nm{flex:1;font-size:14.5px;font-weight:600;color:var(--ink);
+  overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
+.irow .sz{color:var(--muted);font-size:12px;flex:0 0 auto;font-variant-numeric:tabular-nums}
+.irow .dt{color:var(--ink2);font-size:12px;font-weight:600;flex:0 0 78px;text-align:right;
+  font-variant-numeric:tabular-nums}
+.bak{font-size:10.5px;font-weight:700;letter-spacing:.04em;padding:2px 9px;border-radius:999px;
+  flex:0 0 auto;color:var(--accent);background:color-mix(in srgb, var(--accent) 14%, transparent)}
+.bak.skip{color:var(--muted);background:color-mix(in srgb, var(--muted) 16%, transparent)}
 </style></head>
 <body><div id="sky"></div><div id="twinkle"></div><div class="wrap">
 <header>
@@ -548,6 +749,8 @@ iframe{width:100%;height:calc(100vh - 180px);border:1px solid var(--line);border
   </div>
   <span class="pill"><span class="dot" id="camDot"></span><span id="camText">checking…</span></span>
   <span class="pill"><span class="dot" id="busyDot"></span><span id="statusText">idle</span></span>
+  <span class="pill" id="storPill" style="display:none" title="camera storage"><span id="storageText"></span>
+    <span class="minimeter"><span id="storageBar" style="width:0%"></span></span></span>
   <span class="spacer"></span>
   <button id="btnScan">Rescan</button>
   <button id="btnReport">Refresh report</button>
@@ -560,25 +763,20 @@ iframe{width:100%;height:calc(100vh - 180px);border:1px solid var(--line);border
 </div>
 
 <div id="qbox"></div>
+<div id="doneBox"></div>
 
 <div id="tab-panel">
   <div class="cols">
     <div>
       <div class="card">
-        <div class="eyebrow" id="scanEyebrow">Targets with new frames</div>
+        <div class="eyebrow" id="scanEyebrow"><span>Targets with new frames</span><span id="scannedAt"></span></div>
         <div id="targetList"></div>
         <div class="row" style="margin-top:14px">
           <button class="primary" id="btnImport" disabled style="flex:1">Import selected</button>
         </div>
         <div class="result" id="calNote"></div>
-      </div>
-      <div class="card" style="margin-top:16px" id="storageCard">
-        <div class="eyebrow">Camera storage</div>
-        <div class="result" id="storageText" style="margin:0">No scan yet.</div>
-        <div class="meter"><div id="storageBar" style="width:0%"></div></div>
-        <div class="legend"><span><i style="background:var(--accent)"></i>Used</span>
-          <span><i style="background:color-mix(in srgb, var(--ink) 18%, transparent)"></i>Free</span>
-          <span class="spacer"></span><span id="scannedAt"></span></div>
+        <div id="destBox"></div>
+        <div id="invBox"></div>
       </div>
     </div>
     <div class="card" id="logcard">
@@ -606,8 +804,14 @@ tip: Safari → File → Add to Dock turns this into a Dock app</div>
 <script>
 const $=s=>document.querySelector(s);
 const fmtGB=b=>b>=1073741824?(b/1073741824).toFixed(1)+" GB":Math.round(b/1048576)+" MB";
+const MONTHS=["Jan","Feb","Mar","Apr","May","Jun","Jul","Aug","Sep","Oct","Nov","Dec"];
+const fmtStamp=st=>{ // "20260808-231544" → "8 Aug 26"
+  if(!st||st.length<8) return "";
+  return `${+st.slice(6,8)} ${MONTHS[+st.slice(4,6)-1]} ${st.slice(2,4)}`;
+};
+const byNewest=(a,b)=>(b.lastStamp||"").localeCompare(a.lastStamp||"");
 const esc=s=>String(s).replace(/[&<>"]/g,c=>({"&":"&amp;","<":"&lt;",">":"&gt;",'"':"&quot;"}[c]));
-let busy=false, lastLogSig="", lastScanStamp="";
+let busy=false, lastLogSig="", lastScanStamp="", curScan=null;
 
 document.querySelectorAll(".tabs button").forEach(b=>b.addEventListener("click",()=>{
   document.querySelectorAll(".tabs button").forEach(x=>x.classList.remove("on"));
@@ -631,16 +835,34 @@ function scopeChip(t){
          + (t.source ? `<span class="chip plain">${esc(t.source)}</span>` : "");
 }
 
+function invSection(scan){
+  const backed=scan.targets.filter(t=>!(t.new>0 && !t.skipped))
+      .sort(byNewest);   // date order, most recent shooting at the top
+  if(!backed.length) return "";
+  const tot=backed.reduce((a,t)=>a+(t.totalBytes||0),0);
+  const wasOpen=!!document.querySelector("#invBox details.inv[open]");
+  return `<details class="inv"${wasOpen?" open":""}><summary>Also on camera — all backed up
+      <span class="cnt">${backed.length} target${backed.length>1?"s":""} · ${fmtGB(tot)}</span></summary>
+    <div class="invlist">
+    ${backed.map(t=>`<div class="irow"><div class="nm">${esc(t.display)}</div>
+      <div class="dt">${fmtStamp(t.lastStamp)}</div>
+      <div class="sz">${(t.files||0).toLocaleString()} file${t.files===1?"":"s"} · ${fmtGB(t.totalBytes||0)}</div>
+      <span class="bak${t.skipped?" skip":""}">${t.skipped?"never import":"backed up"}</span></div>`).join("")}
+    </div>
+  </details>`;
+}
 function renderTargets(scan){
   const box=$("#targetList");
-  const withNew=scan.targets.filter(t=>t.new>0 && !t.skipped).sort((a,b)=>b.new-a.new);
+  const withNew=scan.targets.filter(t=>t.new>0 && !t.skipped)
+      .sort((a,b)=>byNewest(a,b)||b.new-a.new);   // most recent night first
   if(!withNew.length){
     const n=scan.targets.filter(t=>!t.skipped).length;
     box.innerHTML = scan.hasLedger
       ? `<div class="clear"><div class="ring">
            <svg viewBox="0 0 24 24" fill="none"><path d="M4.5 12.5l5 5 10-11" stroke="var(--good)" stroke-width="2.6" stroke-linecap="round" stroke-linejoin="round"/></svg>
          </div><b>All backed up</b><span>Every frame across ${n} targets is safe in the ledger.</span></div>`
-      : `<div class="clear"><b>No ledger yet</b><span>Run the baseline once from Terminal:<br>python3 ~/bin/asiair-import.py --baseline</span></div>`;
+      : `<div class="clear"><b>No ledger yet</b><span>Run the baseline once from Terminal:<br>python3 ~/bin/astro-import.py --baseline</span></div>`;
+    $("#invBox").innerHTML = invSection(scan);
     $("#btnImport").disabled=true;
     $("#btnImport").textContent="Import selected";
     $("#scanEyebrow").textContent="Targets";
@@ -659,6 +881,7 @@ function renderTargets(scan){
         <div class="small">frames · ${fmtGB(t.newBytes)}</div>
       </div>
     </label>`).join("");
+  $("#invBox").innerHTML = invSection(scan);
   box.querySelectorAll(".sel").forEach(c=>c.addEventListener("change",updateImportBtn));
   updateImportBtn();
 }
@@ -693,16 +916,95 @@ function renderQuestion(q){
   if(isText) $("#qval").focus();
 }
 
+function calCountsFor(target){
+  // Sum the currently TICKED pairing rows per frame type for one target.
+  const out={Bias:0,Dark:0,Flat:0,ask:false};
+  const rows=(((curScan||{}).calSummary||{}).pairings||{})[target]||[];
+  for(const x of rows){
+    if(x.questionable){ if(x.type==="Flat") out.ask=true; continue; }
+    const cb=document.querySelector(
+      `.caldec[data-t="${encodeURIComponent(target)}"][data-k="${encodeURIComponent(x.setKey)}"]`);
+    if(!cb||cb.checked) out[x.type]=(out[x.type]||0)+x.count;
+  }
+  return out;
+}
+
+function renderDestPlan(){
+  const box=$("#destBox");
+  const plan=(curScan||{}).destPlan||[];
+  if(!plan.length){box.innerHTML="";return;}
+  const groups={};
+  plan.forEach(e=>{(groups[e.deviceRoot]=groups[e.deviceRoot]||[]).push(e)});
+  let h=`<div class="dest"><div class="eyebrow">Where files will land</div>`;
+  for(const root of Object.keys(groups)){
+    h+=`<div class="droot">${esc(root)}/</div>`;
+    const es=groups[root];
+    es.forEach((e,i)=>{
+      const last=i===es.length-1, l1=last?"└─":"├─", pipe=last?"&nbsp;&nbsp;&nbsp;":"│&nbsp;&nbsp;";
+      const nameNote=e.askName?` <span class="dnote">will ask for a friendly name</span>`:"";
+      h+=`<div class="drow">${l1} <span class="dfold">${esc(e.treeRoot.join("/"))}/</span>${nameNote}</div>`;
+      if(e.device==="asiair"){
+        const nights=e.nights.length>1?` · ${e.nights.length} nights`:"";
+        const cont=e.continuing?` <span class="dnote">continues the existing folder</span>`:"";
+        h+=`<div class="drow">${pipe}└─ <span class="dfold">lights/${esc(e.dayFolder)}/</span> `+
+           `<span class="dmeta">${e.files.toLocaleString()} lights · ${fmtGB(e.bytes)}${nights}</span>${cont}</div>`;
+        const c=calCountsFor(e.target);
+        const parts=[];
+        if(c.Bias) parts.push(`${c.Bias.toLocaleString()} biases`);
+        if(c.Dark) parts.push(`${c.Dark.toLocaleString()} darks`);
+        if(c.Flat) parts.push(`${c.Flat.toLocaleString()} flats`);
+        let cal=parts.length
+          ?`<span class="dfold">calibration/</span> <span class="dmeta">${parts.join(" · ")} linked${e.sharedCal?" (shared, target level)":""}</span>`
+          :`<span class="dmeta">no calibration linked</span>`;
+        if(c.ask) cal+=` <span class="dask">flats ask at import</span>`;
+        h+=`<div class="drow">${pipe}&nbsp;&nbsp;&nbsp;└─ ${cal}</div>`;
+      } else {
+        if(e.files)
+          h+=`<div class="drow">${pipe}${e.stack?"├─":"└─"} <span class="dfold">${esc(e.dayFolder)}/</span> `+
+             `<span class="dmeta">${e.files.toLocaleString()} lights · ${fmtGB(e.bytes)}</span></div>`;
+        if(e.stack)
+          h+=`<div class="drow">${pipe}└─ <span class="dfold">${esc(e.stack.filename)}</span> `+
+             `<span class="dmeta">${e.stack.subs.toLocaleString()} subs · replaces any older stack</span></div>`;
+      }
+    });
+  }
+  box.innerHTML=h+"</div>";
+}
+document.addEventListener("change",e=>{
+  if(e.target && e.target.classList && e.target.classList.contains("caldec")) renderDestPlan();
+});
+
+let dismissedDone="";
+function renderDone(d){
+  const box=$("#doneBox");
+  if(!d || !d.frames || busy || d.finishedAt===dismissedDone){
+    box.innerHTML=""; document.title="BrettjoAstro FITS Importer"; return;
+  }
+  const mins=Math.floor(d.seconds/60), secs=d.seconds%60;
+  const dur=d.seconds>=60?`${mins}m ${secs}s`:`${d.seconds}s`;
+  document.title="✓ Import complete — BrettjoAstro FITS Importer";
+  box.innerHTML=`<div class="done"><div class="dh">
+    <svg viewBox="0 0 24 24" fill="none"><circle cx="12" cy="12" r="10" stroke="var(--good)" stroke-width="1.8"/><path d="M7.5 12.5l3 3 6-7" stroke="var(--good)" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"/></svg>
+    Import complete</div>
+    <p><b>${d.frames.toLocaleString()}</b> frame${d.frames===1?"":"s"} imported and verified across <b>${d.targets.toLocaleString()}</b> target${d.targets===1?"":"s"} · took ${dur} · finished ${esc(d.finishedAt)}</p>
+    <button id="doneOk">Nice — dismiss</button></div>`;
+  $("#doneOk").onclick=()=>{dismissedDone=d.finishedAt; renderDone(null);};
+}
+
 function renderLog(lines){
   const el=$("#log");
   el.innerHTML = lines.map(l=>{
-    const t=esc(l);
-    if(l.startsWith("✓")) return `<span class="ok">${t}</span>`;
-    if(l.startsWith("⚠")) return `<span class="wa">${t}</span>`;
-    if(l.startsWith("✗")) return `<span class="er">${t}</span>`;
-    if(l.startsWith("▸")) return `<span class="hd">${t}</span>`;
-    return t;
-  }).join("\n");
+    // display only: shorten /Users/<name>/ to ~/ so paths fit on one line
+    const raw=l.replace(/\/(?:Users|home)\/[^\/\s]+\//g,"~/");
+    if(/^\s*[─—=_-]{6,}\s*$/.test(raw)) return '<div class="lr"></div>';
+    if(!raw.trim()) return '<div class="lsp"></div>';
+    let cls="";
+    if(raw.startsWith("✓")) cls=" ok";
+    else if(raw.startsWith("⚠")||raw.startsWith("△")) cls=" wa";
+    else if(raw.startsWith("✗")) cls=" er";
+    else if(raw.startsWith("▸")) cls=" hd";
+    return `<div class="ll${cls}">${esc(raw)}</div>`;
+  }).join("");
   el.scrollTop=el.scrollHeight;
 }
 
@@ -737,25 +1039,66 @@ async function tick(){
     ["btnScan","btnReport","btnEject"].forEach(id=>$("#"+id).disabled=busy);
     if(s.scan && (s.scannedAt!==lastScanStamp)){
       lastScanStamp=s.scannedAt;
+      curScan=s.scan;
       renderTargets(s.scan);
-      $("#calNote").textContent = s.scan.calFrames
-        ? s.scan.calFrames.toLocaleString()+" calibration frames on camera — backed up automatically on import"
-        : "";
+      const cs=s.scan.calSummary;
+      if(cs && cs.total){
+        const exp=x=>x.exposureSeconds==null?"":(x.exposureSeconds>=1?` ${x.exposureSeconds}s`:` ${Math.round(x.exposureSeconds*1000)}ms`);
+        const setLabel=x=>`${x.count} × ${esc(x.type)}${exp(x)}${x.filter?" · "+esc(x.filter):""}${x.type==="Flat"&&x.rotation!=null?" · "+x.rotation+"°":""} · ${esc(x.night)}`;
+        let h=`<b>${cs.total.toLocaleString()}</b> calibration frames on camera · <b>${cs.inLibrary.toLocaleString()}</b> already in the Library`;
+        const nNew=cs.newSets.reduce((a,x)=>a+x.count,0);
+        if(nNew){
+          h+=` · <b>${nNew.toLocaleString()} new</b> — backed up to the Library on next import:`;
+          h+=cs.newSets.map(x=>`<div class="calset"><span class="dot2"></span>${setLabel(x)}</div>`).join("");
+        }
+        const pr=cs.pairings||{};
+        const tn=Object.keys(pr);
+        if(tn.length){
+          h+=`<div class="pairhead">Pairings for this import — untick anything that isn't for that target:</div>`;
+          for(const t of tn){
+            const disp=((s.scan.targets||[]).find(x=>x.name===t)||{}).display||t;
+            h+=`<div class="pairtarget">${esc(disp)}</div>`;
+            const rows=pr[t]||[];
+            if(!rows.length){h+=`<div class="pairnote">no matching calibration — imports without cal links</div>`;continue;}
+            h+=rows.map(x=>{
+              const lib=x.inLibrary>=x.count?` <span class="libtag">from Library</span>`:"";
+              if(x.questionable)
+                return `<div class="pairrow qrow"><span class="qdot"></span>${setLabel(x)}${lib}<span class="qnote">asks during import</span></div>`;
+              return `<label class="pairrow"><input type="checkbox" class="caldec" `+
+                     `data-t="${encodeURIComponent(t)}" data-k="${encodeURIComponent(x.setKey)}" checked>`+
+                     `<span>${setLabel(x)}${lib}</span></label>`;
+            }).join("");
+            if(!rows.some(x=>x.type==="Flat"))
+              h+=`<div class="pairnote">no matching flats — imports without flats</div>`;
+          }
+          h+=`<div style="margin-top:6px">Ticked pairings link without asking · untick = don't link (frames still back up) · amber ones ask during the import.</div>`;
+        } else if(nNew){
+          h+=`<div style="margin-top:5px">Flats always ask before linking to a target's Day folder.</div>`;
+        }
+        $("#calNote").innerHTML=h;
+        $("#calNote").className="result calcard";
+      } else {
+        $("#calNote").textContent="";
+      }
+      renderDestPlan();
       if(s.scan.disks && s.scan.disks.length){
-        const parts=s.scan.disks.map(d=>d.label+": "+fmtGB(d.used)+" / "+fmtGB(d.total)+" ("+fmtGB(d.free)+" free)");
-        $("#storageText").textContent=parts.join("   ·   ");
+        const parts=s.scan.disks.map(d=>d.label+" "+fmtGB(d.used)+" / "+fmtGB(d.total)+" · "+fmtGB(d.free)+" free");
+        $("#storageText").textContent=parts.join("  ·  ");
         const d=s.scan.disks[0], pct=Math.round(100*d.used/d.total);
         $("#storageBar").style.width=pct+"%";
+        $("#storPill").style.display="";
       } else if(s.scan.disk){
         const d=s.scan.disk, pct=Math.round(100*d.used/d.total);
-        $("#storageText").textContent=fmtGB(d.used)+" used of "+fmtGB(d.total)+" — "+fmtGB(d.free)+" free";
+        $("#storageText").textContent=fmtGB(d.used)+" / "+fmtGB(d.total)+" · "+fmtGB(d.free)+" free";
         $("#storageBar").style.width=pct+"%";
+        $("#storPill").style.display="";
       }
       $("#scannedAt").textContent = s.scannedAt ? "scanned "+s.scannedAt : "";
     }
-    if(!s.scan && !busy && s.cameraPresent){ /* fresh state after import → rescan */ api("/api/scan",{}); }
+    if(!s.scan && !busy && s.cameraPresent && !(s.lastResult||"").startsWith("scanning failed")){ /* fresh state after import → rescan */ api("/api/scan",{}); }
     updateImportBtn();
     renderQuestion(s.question);
+    renderDone(s.lastDone);
     // progress lines REPLACE the last entry, so compare content, not length
     const logSig=s.log.length+"|"+(s.log[s.log.length-1]||"");
     if(logSig!==lastLogSig){ lastLogSig=logSig; renderLog(s.log); }
@@ -772,7 +1115,13 @@ $("#btnReport").onclick=async()=>{await api("/api/report",{}); setTimeout(loadRe
 $("#btnEject").onclick=()=>api("/api/eject",{});
 $("#btnImport").onclick=()=>{
   const names=[...document.querySelectorAll(".sel:checked")].map(x=>decodeURIComponent(x.dataset.name));
-  if(names.length) api("/api/import",{names});
+  if(!names.length) return;
+  const dec={};
+  document.querySelectorAll(".caldec").forEach(cb=>{
+    const t=decodeURIComponent(cb.dataset.t);
+    (dec[t]=dec[t]||{})[decodeURIComponent(cb.dataset.k)]=cb.checked;
+  });
+  api("/api/import",{names,calDecisions:dec});
 };
 
 tick(); setInterval(tick, 1000);

@@ -53,6 +53,9 @@ env.add_cal("Bias", "1.0ms", "20260719-090000")
 env.add_cal("Dark", "300.0s", "20260719-091000")
 # in-window but rotation-mismatched flat → questionable → confirm card expected
 env.add_cal("Flat", "20.0ms", "20260710-090000", filt="LUltimate", rot="10.0deg")
+# CLEAN flat matching MYSTERY 42 (402mm, same rot) → Yes-default consent card
+env.add_cal("Flat", "20.0ms", "20260721-100000", filt="LUltimate", rot="120.0deg",
+            focallen=402, seq="0050")
 # Seestar S30 Pro: one DSO project
 env.add_seestar_sub("M 42", "20260119-210000")
 env.add_seestar_sub("M 42", "20260119-210500")
@@ -61,6 +64,8 @@ env.add_seestar_stack("M 42", 30, "20260119-213000")
 r = subprocess.run([sys.executable, teh.SCRIPT, "--baseline"],
                    env=env.env, capture_output=True, text=True)
 assert "Baseline complete" in r.stdout, r.stdout[-400:]
+# a NEW calibration set taken after the baseline → must show in calSummary
+env.add_cal("Bias", "1.0ms", "20260801-090000", seq="0099")
 # make the targets NEW again (baseline marked them imported)
 for t in ["M 81", "MYSTERY 42", "M 42"]:
     subprocess.run([sys.executable, teh.SCRIPT, "--unbaseline", t],
@@ -99,24 +104,100 @@ try:
     check("T2 storage covers both volumes",
           len(s["scan"]["disks"]) == 2 and s["scan"]["disk"] is not None,
           json.dumps(s["scan"].get("disks", [])))
+    cs = s["scan"]["calSummary"]
+    check("T2 calSummary present with counts",
+          cs and cs["total"] == 5 and cs["inLibrary"] == 4, json.dumps(cs))
+    check("T2 new calibration set surfaced (post-baseline bias)",
+          len(cs["newSets"]) == 1 and cs["newSets"][0]["type"] == "Bias"
+          and cs["newSets"][0]["count"] == 1 and cs["newSets"][0]["night"] == "2026-08-01"
+          and cs["newSets"][0].get("setKey"),
+          json.dumps(cs["newSets"]))
+    # ── Pairing preview: real gates, per target ─────────────────────────
+    pr = cs.get("pairings") or {}
+    mys_rows = {x["type"]: x for x in pr.get("MYSTERY 42", [])}
+    m81_rows = {x["type"]: x for x in pr.get("M 81", [])}
+    check("T2 pairings cover both ASIAir targets",
+          "MYSTERY 42" in pr and "M 81" in pr, json.dumps(list(pr.keys())))
+    check("T2 clean flat pairs with MYSTERY 42 only, not questionable",
+          mys_rows.get("Flat") and mys_rows["Flat"]["count"] == 1
+          and mys_rows["Flat"]["questionable"] is False
+          and mys_rows["Flat"]["rotation"] == 120.0,
+          json.dumps(pr.get("MYSTERY 42", [])))
+    check("T2 M 81 flat pairing flagged questionable (rotation probation)",
+          m81_rows.get("Flat") and m81_rows["Flat"]["questionable"] is True,
+          json.dumps(pr.get("M 81", [])))
+    check("T2 darks and biases pair with M 81",
+          m81_rows.get("Dark", {}).get("count") == 1
+          and m81_rows.get("Bias", {}).get("count", 0) >= 1,
+          json.dumps(pr.get("M 81", [])))
+    check("T2 inventory data covers backed-up targets",
+          all(k in s["scan"]["targets"][0] for k in ("files", "totalBytes", "display")),
+          json.dumps(s["scan"]["targets"][0]))
+    check("T2 lastStamp present for date ordering (newest file wins)",
+          names["M 81"].get("lastStamp") == "20260720-222000"
+          and names["M 42"].get("lastStamp") == "20260119-213000",
+          json.dumps({t: names.get(t, {}).get("lastStamp") for t in ("M 81", "M 42")}))
+    check("T2 scope badge follows the INCOMING frames' focal length",
+          names["M 81"].get("scope") == "Askar 107PHQ"
+          and names["MYSTERY 42"].get("scope") == "Askar FRA400",
+          json.dumps({t: names.get(t, {}).get("scope") for t in ("M 81", "MYSTERY 42")}))
+    # ── Destination preview: predicted Day folders, both devices ────────
+    dp = {e["target"]: e for e in s["scan"].get("destPlan", [])}
+    check("T2 destPlan covers all three targets",
+          {"M 81", "MYSTERY 42", "M 42"} <= set(dp), json.dumps(list(dp)))
+    check("T2 M 81 lands in its catalog-named Day 1",
+          dp["M 81"]["dayFolder"] == "M 81 - Bode's Galaxy Day 1"
+          and dp["M 81"]["askName"] is False and dp["M 81"]["files"] == 2,
+          json.dumps(dp.get("M 81")))
+    check("T2 unknown target flagged as will-ask-name",
+          dp["MYSTERY 42"]["askName"] is True
+          and dp["MYSTERY 42"]["dayFolder"] == "MYSTERY 42 Day 1",
+          json.dumps(dp.get("MYSTERY 42")))
+    check("T2 Seestar day folder predicted",
+          dp["M 42"]["device"] == "seestar"
+          and dp["M 42"]["dayFolder"] == "M 42_sub Day 1"
+          and dp["M 42"]["display"] == "M 42 - Orion Nebula"
+          and dp["M 42"]["stack"] and dp["M 42"]["stack"]["subs"] == 30,
+          json.dumps(dp.get("M 42")))
 
-    # ── Import ASIAir targets; answer the two inline questions ──────────
-    api("/api/import", {"names": ["M 81", "MYSTERY 42"]})
+    # ── Import ASIAir targets with scan-card decisions:
+    #    MYSTERY 42's clean flat TICKED  → links with NO question card
+    #    M 81's dark set UNTICKED        → backed up but not linked
+    #    M 81's questionable flat        → still asks (No default)
+    decisions = {"MYSTERY 42": {mys_rows["Flat"]["setKey"]: True},
+                 "M 81": {m81_rows["Dark"]["setKey"]: False}}
+    api("/api/import", {"names": ["M 81", "MYSTERY 42"], "calDecisions": decisions})
     s = wait_for(lambda s: s["question"] is not None or s["status"] == "idle", timeout=90)
-    seen_kinds = []
+    seen_kinds, seen_defaults, no_prompts = [], [], []
     while s["question"] is not None:
         q = s["question"]
         seen_kinds.append(q["kind"])
+        if q["kind"] == "confirm":
+            seen_defaults.append(q.get("default"))
+            if q.get("default") == "n":
+                no_prompts.append(q["prompt"])
         if q["kind"] == "text":
             api("/api/answer", {"value": "Test Nebula"})
+        elif q.get("default") == "y":
+            api("/api/answer", {"value": "y"})
         else:
-            api("/api/answer", {"value": "n"})       # decline questionable flats
+            api("/api/answer", {"value": "n"})       # decline questionable ones
         time.sleep(0.4)
         s = wait_for(lambda s: s["question"] is not None or s["status"] == "idle", timeout=90)
     check("T3 questions were asked inline", "text" in seen_kinds and "confirm" in seen_kinds,
           str(seen_kinds))
+    check("T3 pre-ticked flats skipped their card; questionable still asked No-default",
+          "n" in seen_defaults and "y" not in seen_defaults, str(seen_defaults))
+    check("T3 questionable card is self-describing (set, rotation, vs lights)",
+          any("°" in p and "another project" in p.lower() and "lights at" in p
+              for p in no_prompts), str(no_prompts))
     s = wait_for(lambda s: s["status"] == "idle", timeout=120)
     check("T3 import finished", "Imported" in (s["lastResult"] or ""), str(s["lastResult"]))
+    check("T3 completion payload for the banner",
+          bool(s.get("lastDone")) and s["lastDone"]["op"] == "import"
+          and s["lastDone"]["frames"] == 3 and s["lastDone"]["targets"] == 2
+          and "finishedAt" in s["lastDone"] and "seconds" in s["lastDone"],
+          json.dumps(s.get("lastDone")))
 
     led = env.ledger()
     m81 = [e for e in led["files"].values() if e["target"] == "M 81" and e["origin"] == "import"]
@@ -124,13 +205,26 @@ try:
     check("T4 M 81 frames imported + verified", len(m81) == 2 and all(e["verifiedAtImport"] for e in m81))
     check("T4 naming answer applied", mys and mys[0]["displayName"] == "MYSTERY 42 - Test Nebula",
           str(mys[:1]))
-    flats_dir = os.path.join(env.dest, "M 81 - Bode's Galaxy", "lights",
-                             "M 81 - Bode's Galaxy Day 1", "calibration", "flats")
-    n_flats = len([f for f in os.listdir(flats_dir)]) if os.path.isdir(flats_dir) else 0
-    check("T4 questionable flats declined via panel", n_flats == 0, str(n_flats))
-    darks_dir = os.path.join(env.dest, "M 81 - Bode's Galaxy", "lights",
-                             "M 81 - Bode's Galaxy Day 1", "calibration", "darks")
-    check("T4 darks still linked", os.path.isdir(darks_dir) and len(os.listdir(darks_dir)) == 1)
+    m81_day = os.path.join(env.dest, "M 81 - Bode's Galaxy", "lights",
+                           "M 81 - Bode's Galaxy Day 1", "calibration")
+    def n_in(base, sub):
+        d = os.path.join(base, sub)
+        return len(os.listdir(d)) if os.path.isdir(d) else 0
+    check("T4 questionable flats declined via panel", n_in(m81_day, "flats") == 0,
+          str(n_in(m81_day, "flats")))
+    check("T4 UNTICKED dark set not linked to M 81", n_in(m81_day, "darks") == 0,
+          str(n_in(m81_day, "darks")))
+    check("T4 biases (no decision) still link silently", n_in(m81_day, "biases") == 1,
+          str(n_in(m81_day, "biases")))
+    mys_day = os.path.join(env.dest, "MYSTERY 42 - Test Nebula", "lights",
+                           "MYSTERY 42 - Test Nebula Day 1", "calibration")
+    check("T4 TICKED clean flats linked with no question card",
+          n_in(mys_day, "flats") == 1, str(n_in(mys_day, "flats")))
+    check("T4 darks link to MYSTERY 42 (untick was target-scoped)",
+          n_in(mys_day, "darks") == 1, str(n_in(mys_day, "darks")))
+    check("T4 preview matched reality (M 81 Day folder)",
+          os.path.isdir(os.path.join(env.dest, "M 81 - Bode's Galaxy", "lights",
+                                     dp["M 81"]["dayFolder"])))
     check("T4 Seestar untouched by ASIAir-only selection",
           not [e for e in led["files"].values()
                if e.get("device") == "seestar" and e["origin"] == "import"])
@@ -157,10 +251,24 @@ try:
           len(s42) == 3 and all(e["verifiedAtImport"] for e in s42), str(len(s42)))
     day1 = os.path.join(env.sdest30, "M 42 - Orion Nebula", "M 42_sub Day 1")
     check("T5 Seestar files on disk", os.path.isdir(day1) and len(os.listdir(day1)) == 2)
+    check("T5 preview matched reality (Seestar Day folder)",
+          os.path.isdir(os.path.join(env.sdest30, dp["M 42"]["display"],
+                                     dp["M 42"]["dayFolder"])))
+    check("T5 completion payload after Seestar import",
+          bool(s.get("lastDone")) and s["lastDone"]["frames"] == 2
+          and s["lastDone"]["targets"] == 1, json.dumps(s.get("lastDone")))
+    # (2 = the sub lights; the stacked file is reported separately in the log)
+    # banner must SURVIVE a rescan (only a new import/report clears it) ──
+    api("/api/scan", {})
+    s = wait_for(lambda s: s["status"] == "idle" and s["scan"])
+    check("T5 banner survives a rescan", bool(s.get("lastDone")),
+          json.dumps(s.get("lastDone")))
 
     # ── Report + dashboard through the panel ────────────────────────────
     api("/api/report", {})
     s = wait_for(lambda s: s["status"] == "idle" and s["hasReport"], timeout=60)
+    check("T6 a new operation clears the banner", s.get("lastDone") is None,
+          json.dumps(s.get("lastDone")))
     text = api("/api/report-text")["text"]
     check("T6 report available in panel", "SAFE TO CLEAR" in text and "M 81" in text)
     check("T6 report has the Seestar section", "SEESTAR" in text.upper())

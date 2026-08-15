@@ -17,11 +17,23 @@ SEESTAR_VOL1="${SEESTAR_VOL1:-/Volumes/Seestar}"
 SEESTAR_VOL2="${SEESTAR_VOL2:-/Volumes/SEESTAR}"
 IMPORT_SCRIPT="${ASTRO_IMPORT_SCRIPT:-$HOME/bin/astro-import.py}"
 APP_SCRIPT="${ASTRO_APP_SCRIPT:-$HOME/bin/astro-app.py}"
+# The .app wrapper gives the panel its own TCC identity (drag IT into Full
+# Disk Access). When present, all panel launches go through it.
+APP_BUNDLE="${ASTRO_APP_BUNDLE:-$HOME/Applications/BrettjoAstro FITS Importer.app}"
+# Prefer python.org Python when installed: it is NOT an Apple "platform
+# binary", so macOS lets it ASK for removable-volume access (Allow once →
+# hands-free forever). Apple's /usr/bin/python3 is the fallback.
+PYTHON="${ASTRO_PYTHON:-}"
+if [ -z "$PYTHON" ]; then
+    if [ -x /usr/local/bin/python3 ]; then PYTHON=/usr/local/bin/python3
+    else PYTHON=/usr/bin/python3; fi
+fi
 PORT="${ASTRO_PANEL_PORT:-8765}"
 URL="http://127.0.0.1:$PORT"
 WATCH_LOG="${ASTRO_WATCH_LOG:-/tmp/astro-watch.log}"
 STATE_FILE="${ASTRO_WATCH_STATE:-/tmp/astro-watch.state}"
-FLAP_GUARD_S=600   # suppress repeat notifications for the same arrival within 10 min
+# suppress repeat notifications when the SAME camera set re-arrives within 10 min
+FLAP_GUARD_S="${ASTRO_FLAP_GUARD_S:-600}"
 
 wlog() { echo "$(date): $1" >> "$WATCH_LOG"; }
 
@@ -35,18 +47,40 @@ presence() {
     echo "${p:-none}"
 }
 
-read_state() {   # sets PREV and PREV_TS
-    PREV="none"; PREV_TS=0
+read_state() {   # sets PREV, PREV_TS and PREV_NOTIFIED (last camera set notified)
+    PREV="none"; PREV_TS=0; PREV_NOTIFIED=""
     if [ -f "$STATE_FILE" ]; then
         PREV="$(sed -n 1p "$STATE_FILE" 2>/dev/null)"
         PREV_TS="$(sed -n 2p "$STATE_FILE" 2>/dev/null)"
+        PREV_NOTIFIED="$(sed -n 3p "$STATE_FILE" 2>/dev/null)"
         [ -n "$PREV" ] || PREV="none"
         case "$PREV_TS" in ''|*[!0-9]*) PREV_TS=0 ;; esac
     fi
+    # older 2-line state files: assume the last notification was for PREV
+    [ -n "$PREV_NOTIFIED" ] || PREV_NOTIFIED="$PREV"
 }
 
-write_state() {  # $1 = presence, $2 = notify timestamp (or previous)
-    printf '%s\n%s\n' "$1" "$2" > "$STATE_FILE"
+write_state() {  # $1 = presence, $2 = notify ts, $3 = last-notified set
+    printf '%s\n%s\n%s\n' "$1" "$2" "$3" > "$STATE_FILE"
+}
+
+spawn_panel() {   # $1 = "--silent" to suppress the browser tab
+    if [ -d "$APP_BUNDLE" ]; then
+        # launch through the app → panel carries the app's TCC identity
+        open -g -a "$APP_BUNDLE" --args ${1:+"$1"} 2>>"$WATCH_LOG"
+    else
+        nohup "$PYTHON" "$APP_SCRIPT" --no-browser >>"$WATCH_LOG" 2>&1 &
+    fi
+}
+
+ensure_panel_silently() {
+    # Keep the panel alive on quiet paths: start it if it died (user quit,
+    # crash), but never notify, never open a tab — existing tabs self-heal.
+    if curl -s -m 2 "$URL/api/ping" >/dev/null 2>&1; then
+        return 0
+    fi
+    wlog "panel not running — restarting silently"
+    spawn_panel --silent
 }
 
 NOW="$(date +%s)"
@@ -65,7 +99,7 @@ done
 if [ "$CUR" = "none" ]; then
     if [ "$PREV" != "none" ]; then
         wlog "cameras gone (was: $PREV) — recorded, silent"
-        write_state "none" "$PREV_TS"
+        write_state "none" "$PREV_TS" "$PREV_NOTIFIED"
     fi
     exit 0
 fi
@@ -73,6 +107,7 @@ fi
 # ── Same camera set as last time: someone else touched /Volumes ────────────
 if [ "$CUR" = "$PREV" ]; then
     wlog "volume event but camera set unchanged ($CUR) — silent"
+    ensure_panel_silently
     exit 0
 fi
 
@@ -86,14 +121,17 @@ case "$CUR" in
 esac
 if [ -z "${NEW_ARRIVAL:-}" ]; then
     wlog "camera set shrank ($PREV → $CUR) — recorded, silent"
-    write_state "$CUR" "$PREV_TS"
+    write_state "$CUR" "$PREV_TS" "$PREV_NOTIFIED"
     exit 0
 fi
 
-# ── Flap guard: same set re-arriving within the window → stay quiet ────────
-if [ "$((NOW - PREV_TS))" -lt "$FLAP_GUARD_S" ]; then
-    wlog "arrival ($PREV → $CUR) but notified $((NOW - PREV_TS))s ago — flap guard, silent"
-    write_state "$CUR" "$PREV_TS"
+# ── Flap guard: the SAME set re-arriving within the window → stay quiet ────
+# (a DIFFERENT camera arriving always announces itself, e.g. Seestar → ASIAir
+#  swaps: only an exact repeat of the last-notified set is treated as a flap)
+if [ "$CUR" = "$PREV_NOTIFIED" ] && [ "$((NOW - PREV_TS))" -lt "$FLAP_GUARD_S" ]; then
+    wlog "arrival ($PREV → $CUR) but same set notified $((NOW - PREV_TS))s ago — flap guard, silent"
+    write_state "$CUR" "$PREV_TS" "$PREV_NOTIFIED"
+    ensure_panel_silently
     exit 0
 fi
 
@@ -103,24 +141,27 @@ seestar_here && DEVICES="${DEVICES:+$DEVICES + }Seestar"
 wlog "new arrival: $PREV → $CUR ($DEVICES)"
 
 # ── Quick scan for the notification text (read-only, tagged lines) ─────────
-SCAN_OUT=$(/usr/bin/python3 "$IMPORT_SCRIPT" --scan-only 2>>"$WATCH_LOG")
+SCAN_OUT=$("$PYTHON" "$IMPORT_SCRIPT" --scan-only 2>>"$WATCH_LOG")
 NEW_COUNT=$(printf '%s\n' "$SCAN_OUT" | sed -n 's/^ASIAIR-SCAN|COUNT|//p' | tail -1)
 wlog "scan: new_targets=${NEW_COUNT:-?}"
 
 if [ -n "$NEW_COUNT" ] && [ "$NEW_COUNT" -gt 0 ] 2>/dev/null; then
     NOTE="$NEW_COUNT target(s) have new frames — opening the FITS Importer panel."
-else
+elif [ "$NEW_COUNT" = "0" ]; then
     NOTE="Nothing new — all backed up. Opening the FITS Importer panel."
+else
+    # pre-scan blocked or failed — stay honest, let the panel do the scanning
+    NOTE="Camera detected — opening the FITS Importer panel."
 fi
 osascript -e 'on run argv' \
           -e 'display notification (item 1 of argv) with title ((item 2 of argv) & " detected")' \
           -e 'end run' -- "$NOTE" "$DEVICES" 2>>"$WATCH_LOG" || true
-write_state "$CUR" "$NOW"
+write_state "$CUR" "$NOW" "$CUR"
 
 # ── Make sure the panel app is running, then open/focus it ─────────────────
 if ! curl -s -m 2 "$URL/api/ping" >/dev/null 2>&1; then
-    wlog "panel not running — starting astro-app.py"
-    nohup /usr/bin/python3 "$APP_SCRIPT" --no-browser >>"$WATCH_LOG" 2>&1 &
+    wlog "panel not running — starting it"
+    spawn_panel --silent
     tries=0
     while ! curl -s -m 1 "$URL/api/ping" >/dev/null 2>&1; do
         tries=$((tries + 1))
@@ -128,7 +169,7 @@ if ! curl -s -m 2 "$URL/api/ping" >/dev/null 2>&1; then
             wlog "panel did not come up — falling back to Terminal picker"
             osascript -e "tell application \"Terminal\"
                 activate
-                do script \"/usr/bin/python3 '$IMPORT_SCRIPT' --pick 2>&1 | tee -a /tmp/astro-import.log\"
+                do script \"$PYTHON '$IMPORT_SCRIPT' --pick 2>&1 | tee -a /tmp/astro-import.log\"
             end tell" 2>>"$WATCH_LOG"
             exit 0
         fi
