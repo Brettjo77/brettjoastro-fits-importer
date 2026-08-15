@@ -1,0 +1,26 @@
+#!/bin/bash
+# BrettjoAstro FITS Importer.app — runs the panel as a child of THIS app, so
+# macOS attributes camera-drive access to the app (visible, grantable,
+# promptable) instead of to a silently-denied bare platform binary.
+URL="http://127.0.0.1:${ASTRO_PANEL_PORT:-8765}"
+SILENT=""
+for a in "$@"; do [ "$a" = "--silent" ] && SILENT=1; done
+
+# python.org Python preferred: not a platform binary → allowed to ASK for
+# removable-volume access (one Allow → permanent). Apple python = fallback.
+if [ -x /usr/local/bin/python3 ]; then PYTHON=/usr/local/bin/python3
+else PYTHON=/usr/bin/python3; fi
+
+if curl -s -m 2 "$URL/api/ping" >/dev/null 2>&1; then
+    [ -z "$SILENT" ] && open "$URL"      # already running — just focus a tab
+    exit 0
+fi
+"$PYTHON" "$HOME/bin/astro-app.py" --no-browser >>/tmp/astro-app.log 2>&1 &
+PANEL=$!
+i=0
+while [ $i -lt 20 ]; do
+    curl -s -m 1 "$URL/api/ping" >/dev/null 2>&1 && break
+    i=$((i+1)); sleep 0.5
+done
+[ -z "$SILENT" ] && open "$URL"
+wait $PANEL      # stay alive as the panel's responsible parent
