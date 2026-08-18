@@ -1,5 +1,32 @@
 # Changelog
 
+## 1.2.0 — 2026-08-18
+
+A second Seestar joined the family and a yanked USB cable taught the importer
+some manners.
+
+- **Original Seestar S30 support**: detected from its own FITS identity, with
+  its own destination tree (`Seestar S30/`), its own per-target day numbering,
+  and its own camera-presence tracking — two Seestars shooting the same target
+  never interleave. Proven live on first contact: five targets, clean scan,
+  correct tree.
+- **Night continuation for Seestar imports**: an interrupted/resumed import
+  now lands in the *same observing night's* Day folder instead of fragmenting
+  one night across several (the rule the ASIAir path always had).
+- **Repair commands**: `--merge-days "<target>" N M …` folds split Day folders
+  back together (files moved, ledger rewritten, empties removed, root-dwelling
+  stacks left in place); `--renumber-day "<target>" FROM TO` renames a Day and
+  its ledger entries to close numbering gaps.
+- **Friendlier install**: a double-clickable
+  `Install BrettjoAstro FITS Importer.command` for the download-ZIP route — no
+  terminal, no git required.
+- **HOW-IT-WORKS.md**: the entire logic in plain English for astronomers —
+  the backup-first promise, the ledger, Day folders, calibration consent,
+  what SAFE means, and what can never happen.
+
+179 end-to-end checks (133 engine + 46 panel), all green — including a
+two-Seestar simulation and the interrupted-night resume.
+
 ## 1.1.0 — 2026-08-14
 
 Two weeks of nightly real-world use (a Mac rebuild included) fed straight back

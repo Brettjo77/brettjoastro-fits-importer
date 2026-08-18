@@ -317,7 +317,7 @@ class App:
                              if t.get("device") == "seestar"}
                     ssel = sel & known if known else sel
                 if ssel is None or ssel:
-                    state.mark_cleared(s["relpaths"], device="seestar")
+                    state.mark_cleared(s["relpaths"], device="seestar", camera=s["camera"])
                     totals = eng.run_seestar_import(state, s, args, only_targets=ssel)
                     total_t += totals["targets"]; total_f += totals["files"]
             self.last_result = (f"Imported {total_f} frame(s) across "

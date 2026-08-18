@@ -110,6 +110,10 @@ SEESTAR_VOLUMES = ([SEESTAR_VOLUME_ENV] if SEESTAR_VOLUME_ENV
                    else ["/Volumes/Seestar", "/Volumes/SEESTAR"])
 SEESTAR_DEST_S30 = _env_path("SEESTAR_DEST_S30", "~/Documents/Astro/Seestar S30 Pro")
 SEESTAR_DEST_S50 = _env_path("SEESTAR_DEST_S50", "~/Documents/Astro/Seestar S50")
+# The ORIGINAL (non-Pro) S30 gets its own tree — two different optical
+# systems must never interleave in one folder (Brett's second Seestar, 2026-08-18)
+SEESTAR_DEST_S30_ORIG = _env_path("SEESTAR_DEST_S30_ORIG",
+                                  "~/Documents/Astro/Seestar S30")
 MW_PAIR_TOLERANCE = 7200          # s — MW session pairs to the simultaneous DSO
 SEESTAR_S50_ONLY_MODES = ["Solar_photo", "Solar_video", "Planetary_photo",
                           "Planetary_video", "Scenery_photo"]
@@ -542,11 +546,14 @@ class State:
             return "mismatch"
         return "yes"
 
-    def max_day_number(self, target, device="asiair"):
+    def max_day_number(self, target, device="asiair", camera=None):
         best = 0
         for e in self.ledger["files"].values():
             if e.get("device", "asiair") != device:
                 continue   # each camera numbers its own Days
+            if camera is not None and \
+                    e.get("camera", "ZWO Seestar S30 Pro") != camera:
+                continue   # ...and each SEESTAR its own, too
             if e.get("target") == target and isinstance(e.get("dayNumber"), int):
                 best = max(best, e["dayNumber"])
         return best
@@ -562,16 +569,22 @@ class State:
     def cal_entry(self, relpath):
         return self.ledger["calibration"].get(relpath) if self.ledger else None
 
-    def mark_cleared(self, camera_relpaths, device="asiair"):
+    def mark_cleared(self, camera_relpaths, device="asiair", camera=None):
         """Flag ledger entries (for ONE device) whose files vanished from that
         camera. An EMPTY scan never clears anything (half-mount safety), and a
-        scan of one camera never touches the other's entries."""
+        scan of one camera never touches the other's entries. With two
+        Seestars, `camera` narrows further: the S30's scan must not flag the
+        S30 Pro's still-on-camera files (entries without a recorded camera
+        are grandfathered to the S30 Pro, the only Seestar before 2026-08-18)."""
         if not camera_relpaths:
             return {}
         newly = defaultdict(int)
         stamp = now_stamp()
         for relpath, e in self.ledger["files"].items():
             if e.get("device", "asiair") != device:
+                continue
+            if camera is not None and \
+                    e.get("camera", "ZWO Seestar S30 Pro") != camera:
                 continue
             if relpath not in camera_relpaths and not e.get("clearedFromCamera"):
                 e["clearedFromCamera"] = True
@@ -1365,7 +1378,9 @@ def preview_dest_plan(state, scan=None, sscan=None):
                 continue
             display = seestar_display(state, t["project_name"])
             day = _seestar_day_number(state, os.path.join(dest_root, display),
-                                      t["sub_name"], t["name"])
+                                      t["sub_name"], t["name"],
+                                      incoming_files=t["new"],
+                                      camera=sscan.get("camera"))
             stack = None
             best, best_name = -1, None
             for s_ in t.get("stacks", []):
@@ -1997,6 +2012,121 @@ def run_baseline(state, assume_yes=False):
     state.publish_mirror()
     return True
 
+def run_merge_days(state, target_name, day_args):
+    """Merge several Day folders of one target into the lowest listed day —
+    heals a single observing night fragmented by interrupted/resumed imports
+    (seen live: M 8 and NGC 7293 split across three Days, 2026-08-18).
+    Moves the files, updates ledger dest/dayNumber, removes emptied folders.
+    Aborts untouched on any filename collision."""
+    if not state.has_ledger():
+        error("No ledger.")
+        return
+    try:
+        days = sorted({int(d) for d in day_args})
+    except ValueError:
+        error("--merge-days wants: TARGET DAY DAY ...  (day numbers)")
+        return
+    if len(days) < 2:
+        error("Give at least two day numbers to merge.")
+        return
+    into = days[0]
+    def _in_day_folder(e):
+        # Only frames that LIVE in a Day folder move. Stacks (and anything
+        # else kept at the project root) carry a dayNumber but must stay put
+        # (live lesson: M 8's stacks dragged into Day 2, 2026-08-18).
+        return os.path.basename(e.get("dest", "")).endswith(f"Day {e.get('dayNumber')}")
+    ents = [(rel, e) for rel, e in state.ledger["files"].items()
+            if e.get("target") == target_name and e.get("dayNumber") in days
+            and _in_day_folder(e)]
+    if not ents:
+        error(f"No ledger entries for '{target_name}' with days {days}.")
+        return
+    into_dirs = {e["dest"] for _, e in ents if e.get("dayNumber") == into}
+    if len(into_dirs) != 1:
+        error(f"Day {into} maps to {len(into_dirs)} folder(s) in the ledger — "
+              f"cannot merge safely.")
+        return
+    into_dir = into_dirs.pop()
+    movers = [(rel, e) for rel, e in ents if e.get("dayNumber") != into]
+    # pre-flight: every source present, no destination collisions
+    problems = []
+    for rel, e in movers:
+        src = os.path.join(e["dest"], e["filename"])
+        dst = os.path.join(into_dir, e["filename"])
+        if not os.path.isfile(src):
+            problems.append(f"missing on disk: {src}")
+        elif os.path.exists(dst):
+            problems.append(f"name collision at destination: {e['filename']}")
+    if problems:
+        error(f"Merge aborted — nothing was moved:")
+        for pr in problems[:6]:
+            error(f"  {pr}")
+        return
+    old_dirs = sorted({e["dest"] for _, e in movers})
+    for rel, e in movers:
+        shutil.move(os.path.join(e["dest"], e["filename"]),
+                    os.path.join(into_dir, e["filename"]))
+        e["dest"] = into_dir
+        e["dayNumber"] = into
+    for d in old_dirs:
+        try:
+            ds = os.path.join(d, ".DS_Store")
+            if os.path.isfile(ds):
+                os.remove(ds)
+            leftovers = os.listdir(d)
+            if leftovers:
+                warn(f"Left in place (unledgered content): {d} ({len(leftovers)} item(s))")
+            else:
+                os.rmdir(d)
+                info(f"Removed emptied folder: {os.path.basename(d)}")
+        except OSError as ex:
+            warn(f"Could not tidy {d}: {ex}")
+    state.history_event("days-merged", target=target_name,
+                        detail=f"days {days} → Day {into}", frames=len(movers))
+    state.save_ledger()
+    state.publish_mirror()
+    success(f"Merged {len(movers)} frame(s) from days {days[1:]} into Day {into} "
+            f"({os.path.basename(into_dir)}).")
+
+def run_renumber_day(state, target_name, from_day, to_day):
+    """Rename one Day folder to a different number (folder + every ledger
+    entry). Companion to --merge-days for closing numbering gaps left when a
+    fragment turned out to be unledgered."""
+    if not state.has_ledger():
+        error("No ledger.")
+        return
+    try:
+        from_day, to_day = int(from_day), int(to_day)
+    except ValueError:
+        error("--renumber-day wants: TARGET FROM TO")
+        return
+    ents = [e for e in state.ledger["files"].values()
+            if e.get("target") == target_name and e.get("dayNumber") == from_day
+            and os.path.basename(e.get("dest", "")).endswith(f"Day {from_day}")]
+    if not ents:
+        error(f"No ledger entries for '{target_name}' Day {from_day}.")
+        return
+    dirs = {e["dest"] for e in ents}
+    if len(dirs) != 1:
+        error(f"Day {from_day} maps to {len(dirs)} folders — cannot renumber.")
+        return
+    src_dir = dirs.pop()
+    base = os.path.basename(src_dir)
+    dst_dir = os.path.join(os.path.dirname(src_dir),
+                           base.replace(f"Day {from_day}", f"Day {to_day}"))
+    if os.path.exists(dst_dir):
+        error(f"Already exists: {dst_dir}")
+        return
+    shutil.move(src_dir, dst_dir)
+    for e in ents:
+        e["dest"] = dst_dir
+        e["dayNumber"] = to_day
+    state.history_event("day-renumbered", target=target_name,
+                        detail=f"Day {from_day} → Day {to_day}", frames=len(ents))
+    state.save_ledger()
+    state.publish_mirror()
+    success(f"Renamed {base} → {os.path.basename(dst_dir)} ({len(ents)} entries).")
+
 def run_set_filter(state, target_name, filter_tag, night=None):
     """Correct the recorded filter for already-imported frames. The ASIAir
     only writes a filter token into filenames when the app's filter setting
@@ -2080,7 +2210,7 @@ def run_reconcile(state, deep=True):
     # upgradable the same way. MW frames were RENAMED on import
     # (MilkyWay_<dso>_<stamp>.fit) so also index them under their original
     # bare-stamp camera name (stamps are unique per camera).
-    for sroot in (SEESTAR_DEST_S30, SEESTAR_DEST_S50):
+    for sroot in (SEESTAR_DEST_S30, SEESTAR_DEST_S30_ORIG, SEESTAR_DEST_S50):
         if not os.path.isdir(sroot):
             continue
         for root, _dirs, fnames in os.walk(sroot):
@@ -2396,7 +2526,8 @@ def build_report(state):
     # ── Seestar section (unification) ────────────────────────────────────
     sscan = scan_seestar(state)
     if sscan:
-        state.mark_cleared(sscan["relpaths"], device="seestar")
+        state.mark_cleared(sscan["relpaths"], device="seestar",
+                                   camera=sscan["camera"])
         if sscan["disk"]:
             state.ledger["lastSeestarDisk"] = sscan["disk"]
             state._dirty = True
@@ -2506,12 +2637,16 @@ def seestar_model(vol):
     model = "S30 Pro"
     if "S50" in creator:
         model = "S50"
-    elif "S30" in creator:
+    elif "S30 Pro" in creator:
         model = "S30 Pro"
+    elif "S30" in creator:
+        model = "S30"          # the ORIGINAL S30 — its own identity + tree
     elif any(os.path.isdir(os.path.join(myworks, m)) for m in SEESTAR_S50_ONLY_MODES):
         model = "S50"
     camera = f"ZWO Seestar {model}"
-    dest = SEESTAR_DEST_S30 if model == "S30 Pro" else SEESTAR_DEST_S50
+    dest = {"S30 Pro": SEESTAR_DEST_S30,
+            "S30": SEESTAR_DEST_S30_ORIG,
+            "S50": SEESTAR_DEST_S50}[model]
     return model, camera, dest
 
 def _stamp(name):
@@ -2653,11 +2788,39 @@ def _seestar_ledger_add(state, f, vol, camera, kind, target, display, dest_dir,
         "importedAt": now_stamp(), "dest": dest_dir, "verifiedAtImport": True,
     })
 
-def _seestar_day_number(state, dest_project_dir, day_label, target):
+_SEESTAR_STAMP_RE = re.compile(r"(20\d{6})-(\d{6})")
+
+def _seestar_file_night(filename):
+    """Observing night for a Seestar file, parsed from the timestamp in its
+    name (bare-stamp and Light_-prefixed firmware forms both carry one)."""
+    m = _SEESTAR_STAMP_RE.search(filename)
+    if not m:
+        return None
+    try:
+        dt = datetime.strptime(m.group(1) + m.group(2), "%Y%m%d%H%M%S")
+    except ValueError:
+        return None
+    return observing_night(dt)
+
+def _seestar_day_number(state, dest_project_dir, day_label, target,
+                        incoming_files=None, camera=None):
     n = 1
     while os.path.isdir(os.path.join(dest_project_dir, f"{day_label} Day {n}")):
         n += 1
-    return max(n, state.max_day_number(target, device="seestar") + 1)
+    day = max(n, state.max_day_number(target, device="seestar",
+                                      camera=camera) + 1)
+    # Night continuation (Brett, 2026-08-18): a resumed/interrupted import must
+    # land in the SAME night's folder, not fragment one night across Days —
+    # same rule the ASIAir path has always had.
+    if incoming_files:
+        nights = {_seestar_file_night(f["filename"]) for f in incoming_files}
+        nights.discard(None)
+        prev_dir = os.path.join(dest_project_dir, f"{day_label} Day {day - 1}")
+        if nights and day > 1 and os.path.isdir(prev_dir):
+            for fname in os.listdir(prev_dir):
+                if _seestar_file_night(fname) in nights:
+                    return day - 1
+    return day
 
 def _sub_meta(path):
     """EXPTIME/DATE-OBS for a Seestar sub (names carry no metadata)."""
@@ -2709,7 +2872,8 @@ def run_seestar_import(state, scan_s, args, only_targets=None):
         emit("phase", name="target", target=display, files=len(t["new"]))
         info(f"Seestar target: {display}")
         manifest = os.path.join(dest_project_dir, ".imported_files")
-        day = _seestar_day_number(state, dest_project_dir, t["sub_name"], t["name"])
+        day = _seestar_day_number(state, dest_project_dir, t["sub_name"], t["name"],
+                                  incoming_files=t["new"], camera=camera)
         day_dirname = f"{t['sub_name']} Day {day}"
         dest_day = os.path.join(dest_project_dir, day_dirname)
         verified = 0
@@ -3569,7 +3733,8 @@ def run_pick(state, args):
         sscan = scan_seestar(state)
         if sscan:
             if not args.dry_run:
-                state.mark_cleared(sscan["relpaths"], device="seestar")
+                state.mark_cleared(sscan["relpaths"], device="seestar",
+                                   camera=sscan["camera"])
             run_seestar_import(state, sscan, args, only_targets=chosen_s)
 
 def offer_eject(args):
@@ -3690,6 +3855,12 @@ def main():
                    help="restrict --set-filter to a single observing night")
     p.add_argument("--skip-target", metavar="NAME")
     p.add_argument("--unskip-target", metavar="NAME")
+    p.add_argument("--merge-days", nargs="+", metavar="ARG",
+                   help="TARGET DAY DAY ... — merge the listed Day folders into "
+                        "the lowest (heals a night split by interrupted imports)")
+    p.add_argument("--renumber-day", nargs=3, metavar=("TARGET", "FROM", "TO"),
+                   help="rename one Day folder to a different number "
+                        "(folder + ledger), e.g. after removing empty fragments")
     p.add_argument("--explain-cal", action="store_true")
     p.add_argument("--loose-cal", action="store_true")
     p.add_argument("--no-checksum", action="store_true")
@@ -3715,6 +3886,16 @@ def main():
         return
     if args.refresh_metadata:
         run_refresh_metadata(state)
+        return
+    if args.merge_days:
+        if len(args.merge_days) < 3:
+            error("--merge-days wants: TARGET DAY DAY ...")
+            sys.exit(2)
+        run_merge_days(state, args.merge_days[0], args.merge_days[1:])
+        return
+    if args.renumber_day:
+        run_renumber_day(state, args.renumber_day[0],
+                         args.renumber_day[1], args.renumber_day[2])
         return
     if args.set_filter:
         run_set_filter(state, args.set_filter[0], args.set_filter[1], night=args.night)
@@ -3828,7 +4009,8 @@ def main():
         if svol:
             sscan = scan_seestar(state)
             if not args.dry_run:
-                state.mark_cleared(sscan["relpaths"], device="seestar")
+                state.mark_cleared(sscan["relpaths"], device="seestar",
+                                   camera=sscan["camera"])
                 if sscan["disk"]:
                     state.ledger["lastSeestarDisk"] = sscan["disk"]
                 state._dirty = True

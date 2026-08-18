@@ -6,7 +6,9 @@
 
 Plug in either camera (or both). A notification fires, a local control panel opens, and every new frame is copied with cryptographic proof it arrived intact. A lifetime ledger remembers everything you have ever imported — so archiving finished targets never causes re-imports, and the tool can tell you, honestly, what is safe to delete from a camera and what is not.
 
-Built by [Brett Johnson](https://github.com/Brettjo77) for a ZWO ASI585MC Air (Askar FRA400 + Askar 107PHQ) and a Seestar S30 Pro, and generalised so it works on any Mac. First light: 686 frames imported, SHA-256-verified, and safely cleared from the camera in a single run.
+Built by [Brett Johnson](https://github.com/Brettjo77) for a ZWO ASI585MC Air (Askar FRA400 + Askar 107PHQ), a Seestar S30 Pro, and an original Seestar S30 — and generalised so it works on any Mac. First light: 686 frames imported, SHA-256-verified, and safely cleared from the camera in a single run.
+
+**New here? Read [How it works — in plain English](HOW-IT-WORKS.md)** — the whole logic in astronomer's language, no code anywhere.
 
 ---
 
@@ -41,9 +43,10 @@ Smart telescopes fill up fast, and hand-copying folders leaves you guessing. Mos
 - `--set-filter "<target>" "<filter>" [--night YYYY-MM-DD]` records the true glass for sessions where the ASIAir app's filter field was left blank (filenames carry no token)
 - The ASIAir is treated as a **backup of record**: this tool never deletes from it, ever
 
-**Seestar (S30 Pro / S50)**
+**Seestar (S30 Pro / original S30 / S50)**
 
-- Model detected from the FITS `CREATOR` header (with an S50-only-mode-folder fallback)
+- Model detected from the FITS `CREATOR` header (with an S50-only-mode-folder fallback) — each camera gets its **own** folder tree, its own per-target day numbering, and its own presence tracking, so two Seestars shooting the same nebula keep two clean stories
+- Interrupted imports resume into the **same night's** Day folder — a yanked cable costs you a replug, not a fragmented library (and `--merge-days` / `--renumber-day` exist to tidy history if it ever needs it)
 - Full MyWorks semantics: `_sub` light frames into Day folders, only the highest `Stacked_N` kept, `_mosaic_pt` panels into `panels/`, `(mosaic)` display suffixes
 - Simultaneous **Milky Way captures auto-pair** to the DSO session shot at the same moment, renamed and filed under the DSO's display name
 - S50 Lunar / Solar / Planetary / Scenery photo and video import
@@ -56,13 +59,21 @@ Requires macOS, Python 3, and `astropy`. **Install Python from
 `/usr/local/bin/python3 -m pip install astropy`) — see the permissions
 section for why Apple's bundled Python is not enough.
 
+**The no-terminal route** (nothing to learn): click the green **Code** button
+above → **Download ZIP** → unzip it → double-click
+**Install BrettjoAstro FITS Importer.command** inside the folder
+(right-click → Open the first time; macOS wants a nod for downloaded
+scripts). That's the whole install.
+
+**The git route:**
+
 ```bash
 git clone https://github.com/Brettjo77/brettjoastro-fits-importer.git
 cd brettjoastro-fits-importer
 bash install-scripts.sh
 ```
 
-The installer copies the engine, panel, and watcher to `~/bin`, installs and ad-hoc-signs the app wrapper into `~/Applications`, puts a one-double-click **Restart FITS Importer** button on your Desktop, installs a single LaunchAgent (with your `$HOME` substituted), and prints the first-run steps. Then just plug a camera in.
+Either way, the installer copies the engine, panel, and watcher to `~/bin`, installs and ad-hoc-signs the app wrapper into `~/Applications`, puts a one-double-click **Restart FITS Importer** button on your Desktop, installs a single LaunchAgent (with your `$HOME` substituted), and prints the first-run steps. Then just plug a camera in.
 
 ## macOS permissions — read this once, save a week
 
@@ -138,17 +149,19 @@ The panel covers day-to-day use; everything is also scriptable:
 
 ## Testing
 
-166 end-to-end checks run the real engine and the real panel against simulated cameras (hand-built minimal FITS files, both device layouts, crash/rename/mosaic/Milky-Way/cleanup/consent scenarios — including that the destination preview must equal the folders the import then actually creates):
+179 end-to-end checks run the real engine and the real panel against simulated cameras (hand-built minimal FITS files, every device layout, crash/rename/mosaic/Milky-Way/cleanup/consent/interruption/two-Seestar scenarios — including that the destination preview must equal the folders the import then actually creates):
 
 ```bash
-python3 test_v2.py     # 120 engine checks
+python3 test_v2.py     # 133 engine checks
 python3 test_app.py    # 46 panel checks (boots the real HTTP server)
 ```
 
 ## Project layout
 
 ```
-astro-import.py                      the engine (both cameras, ledger, report, dashboard)
+HOW-IT-WORKS.md                      the logic in plain English (start here)
+Install … .command                   double-click installer (the no-terminal route)
+astro-import.py                      the engine (all cameras, ledger, report, dashboard)
 astro-app.py                         the control panel (localhost:8765)
 astro-watch.sh                       drive watcher (one for both cameras)
 BrettjoAstro FITS Importer.app/      app wrapper — the panel's grantable macOS identity

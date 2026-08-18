@@ -7,5 +7,6 @@
   "ASIAIR_EQUIPMENT": "~/Documents/Astro/equipment.json",
   "ASIAIR_RECEIPTS": "~/Documents/Astro/astrolog-receipts",
   "SEESTAR_DEST_S30": "~/Documents/Astro/Seestar S30 Pro",
+  "SEESTAR_DEST_S30_ORIG": "~/Documents/Astro/Seestar S30",
   "SEESTAR_DEST_S50": "~/Documents/Astro/Seestar S50"
 }

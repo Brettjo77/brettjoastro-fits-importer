@@ -683,6 +683,103 @@ check("S7 unbaseline removes only the unverified straggler",
       len(mw_left) == 1 and mw_left[0]["filename"] == "20260618-225010.fit",
       str([e["filename"] for e in mw_left]))
 
+print("\n── Chain S8: night continuation + --merge-days ───────────────")
+S8 = teh.Env("S8", asiair=False, seestar=True)
+S8.add_seestar_sub("M 8", "20260817-205403")
+S8.add_seestar_sub("M 8", "20260817-205843")
+S8.add_seestar_stack("M 8", 30, "20260817-205900")   # stack lives at ROOT
+r = S8.run()   # first (interrupted-equivalent) import → Day 1
+disp8 = "M 8 - Lagoon Nebula"
+d1 = os.path.join(S8.sdest30, disp8, "M 8_sub Day 1")
+check("S8 first partial import lands in Day 1", count_fits(d1) == 2, r.stdout[-300:])
+S8.add_seestar_sub("M 8", "20260817-210202")   # the resume: same night,
+S8.add_seestar_sub("M 8", "20260817-210234")   # more frames on camera
+r = S8.run()
+check("S8 resumed import CONTINUES into Day 1 (same observing night)",
+      count_fits(d1) == 4
+      and not os.path.isdir(os.path.join(S8.sdest30, disp8, "M 8_sub Day 2")),
+      r.stdout[-300:])
+S8.add_seestar_sub("M 8", "20260818-213000")   # genuinely new night
+r = S8.run()
+d2 = os.path.join(S8.sdest30, disp8, "M 8_sub Day 2")
+check("S8 a new night still opens Day 2", count_fits(d2) == 1, r.stdout[-300:])
+# fabricate the historic damage: strand one Day-1 file in a fake Day 3
+d3 = os.path.join(S8.sdest30, disp8, "M 8_sub Day 3")
+os.makedirs(d3)
+led = S8.ledger()
+entmv = next(e for e in led["files"].values()
+             if e.get("dayNumber") == 1 and e["filename"].endswith("205843.fit"))
+shutil.move(os.path.join(d1, entmv["filename"]), os.path.join(d3, entmv["filename"]))
+entmv["dest"] = d3
+entmv["dayNumber"] = 3
+# live-bug reproduction: the root-dwelling STACK also carries a merged-day
+# number — merge must leave it at the project root untouched
+entstk = next(e for e in led["files"].values() if e.get("sourceType") == "stack")
+entstk["dayNumber"] = 3
+with open(os.path.join(S8.state, "ledger.json"), "w") as f:
+    json.dump(led, f)
+r = S8.run("--merge-days", "M 8", "1", "3")
+check("S8 --merge-days moves the strays home and removes the empty Day",
+      count_fits(d1) == 4 and not os.path.isdir(d3), r.stdout[-400:])
+led = S8.ledger()
+check("S8 merge rewrote ledger dest + dayNumber for subs",
+      all(e.get("dayNumber") == 1 and e.get("dest") == d1
+          for e in led["files"].values()
+          if e.get("target") == "M 8" and e.get("sourceType") == "sub"
+          and "20260817" in e["filename"]),
+      r.stdout[-300:])
+stk_after = next(e for e in led["files"].values() if e.get("sourceType") == "stack")
+proot = os.path.join(S8.sdest30, disp8)
+check("S8 merge left the ROOT stack untouched (live-bug regression)",
+      stk_after["dest"].rstrip("/") == proot.rstrip("/")
+      and os.path.isfile(os.path.join(proot, stk_after["filename"])),
+      str(stk_after["dest"]))
+check("S8 merge logged a history event", "days-merged" in
+      open(os.path.join(S8.state, "history.jsonl")).read(), "no event")
+# renumber: close a gap by renaming Day 2 → Day 5 and back
+r = S8.run("--renumber-day", "M 8", "2", "5")
+d5 = os.path.join(S8.sdest30, disp8, "M 8_sub Day 5")
+led = S8.ledger()
+check("S8 --renumber-day renames folder and rewrites ledger",
+      os.path.isdir(d5) and not os.path.isdir(d2) and count_fits(d5) == 1
+      and all(e.get("dayNumber") == 5 and e.get("dest") == d5
+              for e in led["files"].values()
+              if e.get("target") == "M 8" and "20260818" in e.get("filename", "")
+              and e.get("sourceType") == "sub"),
+      r.stdout[-300:])
+
+print("\n── Chain S9: two Seestars, one sky (original S30) ────────────")
+S9 = teh.Env("S9", asiair=False, seestar=True)
+S9.add_seestar_sub("M 8", "20260817-210000")
+S9.add_seestar_sub("M 8", "20260817-210500")
+r = S9.run()   # the S30 Pro's night
+disp9 = "M 8 - Lagoon Nebula"
+pro_d1 = os.path.join(S9.sdest30, disp9, "M 8_sub Day 1")
+check("S9 Pro import lands in the Pro tree Day 1", count_fits(pro_d1) == 2,
+      r.stdout[-300:])
+# swap cameras: the ORIGINAL S30 arrives carrying its own night of M 8
+shutil.rmtree(os.path.join(S9.myworks, "M 8_sub"))
+S9.add_seestar_sub("M 8", "20260818-220000", creator="ZWO Seestar S30")
+S9.add_seestar_sub("M 8", "20260818-220500", creator="ZWO Seestar S30")
+r = S9.run()
+check("S9 original S30 detected with its own destination",
+      "Seestar: S30 — destination" in r.stdout and S9.sdest30o in r.stdout,
+      r.stdout[-400:])
+orig_d1 = os.path.join(S9.sdest30o, disp9, "M 8_sub Day 1")
+check("S9 original S30 gets its OWN tree and its OWN Day 1",
+      count_fits(orig_d1) == 2 and count_fits(pro_d1) == 2, r.stdout[-300:])
+led = S9.ledger()
+pro_ents = [e for e in led["files"].values()
+            if e.get("camera") == "ZWO Seestar S30 Pro" and e.get("origin") == "import"]
+s30_ents = [e for e in led["files"].values()
+            if e.get("camera") == "ZWO Seestar S30" and e.get("origin") == "import"]
+check("S9 entries carry their own camera identity + independent Day numbers",
+      len(pro_ents) == 2 and len(s30_ents) == 2
+      and all(e["dayNumber"] == 1 for e in s30_ents), str(len(s30_ents)))
+check("S9 the S30's import did NOT flag the Pro's files as cleared",
+      not any(e.get("clearedFromCamera") for e in pro_ents),
+      str([e.get("clearedFromCamera") for e in pro_ents]))
+
 print("\n── Chain F2: --set-filter ledger correction ─────────────────")
 F2 = teh.Env("F2")
 F2.add_light("Plan", "NGC 7822", "0001", dt="20260623-235000", filt=None)

@@ -73,6 +73,7 @@ class Env:
         self.myworks = os.path.join(self.svol, "MyWorks")
         self.dest = os.path.join(self.root, "dest", "ZWO ASI AIR")
         self.sdest30 = os.path.join(self.root, "dest", "Seestar S30 Pro")
+        self.sdest30o = os.path.join(self.root, "dest", "Seestar S30")
         self.sdest50 = os.path.join(self.root, "dest", "Seestar S50")
         self.lib = os.path.join(self.root, "dest", "ASIAir Calibration Library")
         self.state = os.path.join(self.root, "state")
@@ -95,6 +96,7 @@ class Env:
             "ASIAIR_CONFIG": os.path.join(self.root, "no-config.json"),
             "SEESTAR_VOLUME": self.svol,
             "SEESTAR_DEST_S30": self.sdest30, "SEESTAR_DEST_S50": self.sdest50,
+            "SEESTAR_DEST_S30_ORIG": self.sdest30o,
         })
 
     def run(self, *args, stdin=""):
