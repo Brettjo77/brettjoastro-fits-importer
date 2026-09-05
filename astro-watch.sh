@@ -38,7 +38,16 @@ FLAP_GUARD_S="${ASTRO_FLAP_GUARD_S:-600}"
 wlog() { echo "$(date): $1" >> "$WATCH_LOG"; }
 
 asiair_here()  { [ -d "$ASIAIR_VOLUME/Autorun" ]; }
-seestar_here() { [ -d "$SEESTAR_VOL1/MyWorks" ] || [ -d "$SEESTAR_VOL2/MyWorks" ]; }
+seestar_here() {
+  # Fixed names first, then any /Volumes entry that LOOKS like a Seestar —
+  # a second unit mounts as "Seestar 1", and a new model may bring its own
+  # volume name (S50 Pro onboarding, 2026-09-05)
+  local v
+  for v in "$SEESTAR_VOL1" "$SEESTAR_VOL2" /Volumes/[Ss][Ee][Ee][Ss][Tt][Aa][Rr]*; do
+    [ -d "$v/MyWorks" ] && return 0
+  done
+  return 1
+}
 
 presence() {
     local p=""
@@ -143,10 +152,17 @@ wlog "new arrival: $PREV → $CUR ($DEVICES)"
 # ── Quick scan for the notification text (read-only, tagged lines) ─────────
 SCAN_OUT=$("$PYTHON" "$IMPORT_SCRIPT" --scan-only 2>>"$WATCH_LOG")
 NEW_COUNT=$(printf '%s\n' "$SCAN_OUT" | sed -n 's/^ASIAIR-SCAN|COUNT|//p' | tail -1)
-wlog "scan: new_targets=${NEW_COUNT:-?}"
+ATTN=$(printf '%s\n' "$SCAN_OUT" | sed -n 's/^ASIAIR-SCAN|ATTENTION|//p' | tail -1)
+wlog "scan: new_targets=${NEW_COUNT:-?} attention=${ATTN:-0}"
 
 if [ -n "$NEW_COUNT" ] && [ "$NEW_COUNT" -gt 0 ] 2>/dev/null; then
     NOTE="$NEW_COUNT target(s) have new frames — opening the FITS Importer panel."
+    if [ -n "$ATTN" ] && [ "$ATTN" -gt 0 ] 2>/dev/null; then
+        NOTE="$NEW_COUNT target(s) with new frames + $ATTN item(s) needing a look — opening the panel."
+    fi
+elif [ "$NEW_COUNT" = "0" ] && [ -n "$ATTN" ] && [ "$ATTN" -gt 0 ] 2>/dev/null; then
+    # never say "all backed up" over folders the scan could not account for
+    NOTE="$ATTN item(s) on the camera need a look — opening the FITS Importer panel."
 elif [ "$NEW_COUNT" = "0" ]; then
     NOTE="Nothing new — all backed up. Opening the FITS Importer panel."
 else

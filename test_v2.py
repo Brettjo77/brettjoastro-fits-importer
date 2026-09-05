@@ -439,7 +439,8 @@ S1 = teh.Env("S1", asiair=False, seestar=True)
 S1.add_seestar_sub("M 27", "20260618-224402")
 S1.add_seestar_sub("M 27", "20260618-224502")
 S1.add_seestar_stack("M 27", 120, "20260618-231500")
-# S30 Pro shoots Lunar too — folder present must NOT flip detection or import
+# S30 Pro shoots Lunar too — folder present must NOT flip model detection
+# (Lunar is not an S50-only mode), but since 1.3.0 its files DO back up
 S1.add_seestar_nondso("Lunar_photo", "Moon_001.fit", creator="ZWO Seestar S30 Pro")
 
 r = S1.run("--scan-only")
@@ -448,16 +449,17 @@ def tag_s(out, key):
         if line.startswith(f"ASIAIR-SCAN|{key}|"):
             return line.split("|", 2)[2]
     return None
-check("S1 scan-only emits tags for a Seestar-only session",
-      tag_s(r.stdout, "COUNT") == "1" and "Seestar" in (tag_s(r.stdout, "STORAGE") or ""),
+check("S1 scan-only emits tags for a Seestar-only session (Lunar counts now)",
+      tag_s(r.stdout, "COUNT") == "2" and "Seestar" in (tag_s(r.stdout, "STORAGE") or ""),
       r.stdout[:300])
 
 r = S1.run("--baseline")
 check("S1 baseline sees the S30 Pro", "Seestar (S30 Pro)" in r.stdout, r.stdout[:400])
 led = S1.ledger()
 sees = [e for e in led["files"].values() if e.get("device") == "seestar"]
-check("S1 baseline records Seestar files (subs+stack, Lunar ignored on S30)",
-      len(sees) == 3 and all(e["origin"] == "baseline" for e in sees),
+# 1.3.0: backup-first means Lunar is scanned on EVERY model, S30 Pro included
+check("S1 baseline records Seestar files (subs+stack+Lunar — all models)",
+      len(sees) == 4 and all(e["origin"] == "baseline" for e in sees),
       f"got {len(sees)}")
 check("S1 baseline entries carry camera + scope",
       all(e["camera"] == "ZWO Seestar S30 Pro" and e["scope"] == "Seestar S30 Pro"
@@ -779,6 +781,309 @@ check("S9 entries carry their own camera identity + independent Day numbers",
 check("S9 the S30's import did NOT flag the Pro's files as cleared",
       not any(e.get("clearedFromCamera") for e in pro_ents),
       str([e.get("clearedFromCamera") for e in pro_ents]))
+
+print("\n── Chain S10: Seestar S50 Pro — fourth camera, own identity ──")
+S10 = teh.Env("S10", asiair=False, seestar=True)
+# Phase A: a brand-new S50 Pro arrives — DSO subs + a Solar photo (four worlds)
+S10.add_seestar_sub("M 8", "20260904-213000", creator="Seestar S50 Pro")
+S10.add_seestar_sub("M 8", "20260904-213500", creator="Seestar S50 Pro")
+S10.add_seestar_nondso("Solar_photo", "Sun_20260904-120000.fit",
+                       creator="Seestar S50 Pro")
+r = S10.run()
+disp10 = "M 8 - Lagoon Nebula"
+check("S10 S50 Pro detected with its OWN destination (not the S50's)",
+      f"Seestar: S50 Pro — destination {S10.sdest50p}" in r.stdout,
+      r.stdout[-400:])
+p50_d1 = os.path.join(S10.sdest50p, disp10, "M 8_sub Day 1")
+check("S10 subs land in the S50 Pro tree Day 1", count_fits(p50_d1) == 2,
+      r.stdout[-300:])
+check("S10 non-DSO modes are live for the S50 Pro (Solar photo imported)",
+      count_fits(os.path.join(S10.sdest50p, "Solar")) == 1, r.stdout[-400:])
+led = S10.ledger()
+p50_ents = [e for e in led["files"].values()
+            if e.get("camera") == "ZWO Seestar S50 Pro" and e.get("origin") == "import"]
+check("S10 ledger entries carry the S50 Pro camera + scope identity",
+      len(p50_ents) == 3 and all(e.get("scope") == "Seestar S50 Pro"
+                                 for e in p50_ents), str(len(p50_ents)))
+# Phase B: swap to a PLAIN S50 shooting the same target — must stay separate
+shutil.rmtree(os.path.join(S10.myworks, "M 8_sub"))
+shutil.rmtree(os.path.join(S10.myworks, "Solar_photo"))
+S10.add_seestar_sub("M 8", "20260905-220000", creator="ZWO Seestar S50")
+r = S10.run()
+check("S10 plain S50 still detected as S50 with its own destination",
+      f"Seestar: S50 — destination {S10.sdest50}" in r.stdout,
+      r.stdout[-400:])
+s50_d1 = os.path.join(S10.sdest50, disp10, "M 8_sub Day 1")
+check("S10 S50 gets its OWN tree and OWN Day 1; Pro tree untouched",
+      count_fits(s50_d1) == 1 and count_fits(p50_d1) == 2, r.stdout[-300:])
+led = S10.ledger()
+p50_ents = [e for e in led["files"].values()
+            if e.get("camera") == "ZWO Seestar S50 Pro" and e.get("origin") == "import"]
+check("S10 the S50's import did NOT flag the S50 Pro's files as cleared",
+      not any(e.get("clearedFromCamera") for e in p50_ents),
+      str([e.get("clearedFromCamera") for e in p50_ents]))
+# Phase C: CREATOR spelling variant ("SeestarS50Pro", no spaces) must map to
+# the SAME S50 Pro identity — and continue its day numbering, not restart it
+shutil.rmtree(os.path.join(S10.myworks, "M 8_sub"))
+S10.add_seestar_sub("M 8", "20260906-213000", creator="SeestarS50Pro")
+r = S10.run()
+p50_d2 = os.path.join(S10.sdest50p, disp10, "M 8_sub Day 2")
+check("S10 creator-spelling variant maps to the same S50 Pro identity (Day 2)",
+      "Seestar: S50 Pro — destination" in r.stdout and count_fits(p50_d2) == 1,
+      r.stdout[-400:])
+
+print("\n── Chain S11: SAFE means EVERY file (JPEGs, rogue files) ─────")
+S11 = teh.Env("S11", asiair=False, seestar=True)
+# Solar shots land as FIT + JPG pairs — both must back up, both must clear
+S11.add_seestar_nondso("Solar_photo", "Sun_20260905-110000.fit",
+                       creator="Seestar S50 Pro")
+with open(os.path.join(S11.myworks, "Solar_photo", "Sun_20260905-110000.jpg"),
+          "wb") as f:
+    f.write(b"\xff\xd8\xff\xe0JPGDATA-sun" + b"x" * 500)
+STDIN_Y = {"ASTRO_STDIN_PROMPTS": "1"}   # let piped answers reach prompts
+# first prompt is the baseline offer (decline), second the cleanup card (YES)
+r = S11.run(stdin="n\ny\n", extra_env=STDIN_Y)
+check("S11 Solar FIT and JPG both imported (JPEGs are data too)",
+      os.path.isfile(os.path.join(S11.sdest50p, "Solar", "Sun_20260905-110000.fit"))
+      and os.path.isfile(os.path.join(S11.sdest50p, "Solar", "Sun_20260905-110000.jpg")),
+      r.stdout[-500:])
+led = S11.ledger()
+check("S11 the JPG is ledgered + verified like any frame",
+      any(e.get("filename") == "Sun_20260905-110000.jpg" and e.get("verifiedAtImport")
+          for e in led["files"].values()))
+check("S11 fully-proven Solar folder cleared on Yes (nothing left behind)",
+      not os.path.isdir(os.path.join(S11.myworks, "Solar_photo")), r.stdout[-500:])
+# A folder holding ANY file the tool did not prove backed up is NEVER offered
+S11.add_seestar_sub("M 42", "20260905-210000", creator="Seestar S50 Pro")
+rogue = os.path.join(S11.myworks, "M 42_sub", "focus-notes.txt")
+with open(rogue, "w") as f:
+    f.write("HFD 2.1 at 220am")
+r = S11.run(stdin="y\n", extra_env=STDIN_Y)
+check("S11 folder with an unproven file is NOT offered as SAFE (survives a Yes)",
+      os.path.isdir(os.path.join(S11.myworks, "M 42_sub")) and os.path.isfile(rogue)
+      and count_fits(os.path.join(S11.sdest50p, "M 42 - Orion Nebula",
+                                  "M 42_sub Day 1")) == 1,
+      r.stdout[-500:])
+# Unknown MyWorks folders: on camera, unreadable by this tool — say so loudly
+os.makedirs(os.path.join(S11.myworks, "WideField_live"), exist_ok=True)
+teh.make_seestar_fits(os.path.join(S11.myworks, "WideField_live", "pano_001.fit"),
+                      creator="Seestar S50 Pro", uniq="wf-pano-1")
+r = S11.run("--scan-only")
+check("S11 unrecognised MyWorks folders are loudly reported, never silent",
+      "NOT handled" in r.stdout and "WideField_live/" in r.stdout,
+      r.stdout[:400])
+check("S11 scan-only emits an ATTENTION count for the watcher notification",
+      "ASIAIR-SCAN|ATTENTION|1" in r.stdout, r.stdout[:400])
+# Stack JPGs must be in the scan's relpath set — a --report right after an
+# import must NOT flag them "cleared from camera" while they still sit there
+S11.add_seestar_sub("M 45", "20260906-201000", creator="Seestar S50 Pro")
+S11.add_seestar_stack("M 45", 25, "20260906-203000", creator="Seestar S50 Pro")
+sjpg = os.path.join(S11.myworks, "M 45",
+                    "Stacked_25_M 45_10.0s_IRCUT_20260906-203000.jpg")
+with open(sjpg, "wb") as f:
+    f.write(b"\xff\xd8\xff\xe0JPG-m45" + b"y" * 300)
+r = S11.run()
+r = S11.run("--report")
+led = S11.ledger()
+sj = [e for e in led["files"].values() if e.get("sourceType") == "stack-jpg"]
+check("S11 stack JPG imported+ledgered and NOT falsely marked cleared by --report",
+      len(sj) == 1 and sj[0].get("verifiedAtImport")
+      and not sj[0].get("clearedFromCamera"),
+      str(sj))
+
+print("\n── Chain S12: cleanup cleared-flags are camera-scoped ────────")
+S12 = teh.Env("S12", asiair=False, seestar=True)
+S12.add_seestar_sub("M 45", "20260901-201000", creator="Seestar S50 Pro")
+r = S12.run()                     # Pro imports M 45; card untouched (default No)
+shutil.rmtree(os.path.join(S12.myworks, "M 45_sub"))
+S12.add_seestar_sub("M 45", "20260902-201000", creator="ZWO Seestar S50")
+r = S12.run(stdin="y\n", extra_env={"ASTRO_STDIN_PROMPTS": "1"})
+# ^ the S50 imports the same-named target and the user clears ITS card
+led = S12.ledger()
+pro12 = [e for e in led["files"].values()
+         if e.get("camera") == "ZWO Seestar S50 Pro" and e.get("origin") == "import"]
+s5012 = [e for e in led["files"].values()
+         if e.get("camera") == "ZWO Seestar S50" and e.get("origin") == "import"]
+check("S12 clearing the S50's folder flags ONLY the S50's ledger entries",
+      s5012 and all(e.get("clearedFromCamera") for e in s5012)
+      and pro12 and not any(e.get("clearedFromCamera") for e in pro12),
+      f"pro={[e.get('clearedFromCamera') for e in pro12]} "
+      f"s50={[e.get('clearedFromCamera') for e in s5012]}")
+
+print("\n── Chain S13: identity refusals (unknown / mixed creators) ───")
+S13 = teh.Env("S13", asiair=False, seestar=True)
+S13.add_seestar_sub("M 51", "20260903-221000", creator="Seestar X99")
+r = S13.run()
+check("S13 unknown Seestar identity REFUSES to import (no guessed tree)",
+      r.returncode != 0 and "unrecognised Seestar identity"
+      in (r.stdout + r.stderr)
+      and "Traceback" not in r.stderr   # a designed refusal, not a crash
+      and not os.path.isdir(os.path.join(S13.sdest30, "M 51 - Whirlpool Galaxy")),
+      (r.stdout + r.stderr)[-400:])
+shutil.rmtree(os.path.join(S13.myworks, "M 51_sub"))
+S13.add_seestar_sub("M 51", "20260903-221000", creator="ZWO Seestar S30 Pro")
+S13.add_seestar_sub("M 52", "20260903-222000", creator="ZWO Seestar S50")
+r = S13.run()
+check("S13 two identities on one volume refuse the import (mixed leftovers)",
+      r.returncode != 0 and "two different Seestar identities"
+      in (r.stdout + r.stderr), (r.stdout + r.stderr)[-400:])
+
+print("\n── Chain S14: Milky Way nights continue + survive archiving ──")
+S14 = teh.Env("S14", asiair=False, seestar=True)
+S14.add_seestar_sub("M 8", "20260910-220000")
+S14.add_seestar_stack("M 8", 40, "20260910-221500")
+S14.add_seestar_sub("MilkyWay", "20260910-221000")
+r = S14.run()
+mwd = "Milky Way Core - M 8"
+mw_day1 = os.path.join(S14.sdest30, mwd, f"{mwd} Day 1")
+check("S14 MW night lands in Day 1", count_fits(mw_day1) == 1, r.stdout[-400:])
+# resumed import, SAME night (the yanked-cable case) → same Day folder
+S14.add_seestar_sub("MilkyWay", "20260910-234500")
+r = S14.run()
+check("S14 same-night MW resume continues into Day 1 (no fragmentation)",
+      count_fits(mw_day1) == 2
+      and not os.path.isdir(os.path.join(S14.sdest30, mwd, f"{mwd} Day 2")),
+      r.stdout[-400:])
+# archive the MW folder off disk; a NEW night must become Day 2, not Day 1
+shutil.move(os.path.join(S14.sdest30, mwd),
+            os.path.join(S14.sdest30, mwd + " ARCHIVED"))
+S14.add_seestar_stack("M 8", 60, "20260911-222000")   # night-2 pairing anchor
+S14.add_seestar_sub("MilkyWay", "20260911-221000")
+r = S14.run()
+led = S14.ledger()
+mw_new = [e for e in led["files"].values()
+          if e.get("sourceType") == "mw" and "20260911" in e.get("filename", "")]
+check("S14 archived MW history still counts — new night is Day 2",
+      mw_new and all(e.get("dayNumber") == 2 for e in mw_new)
+      and os.path.isdir(os.path.join(S14.sdest30, mwd, f"{mwd} Day 2")),
+      str([e.get("dayNumber") for e in mw_new]) + r.stdout[-300:])
+# THE pass-2 BLOCKER repro: an MW folder holds one keeper PER SESSION. A
+# lower-N keeper whose own session never bucketed (no subs) stays unledgered
+# — the old "superseded stack" exemption would have let a Yes DELETE it.
+S14.add_seestar_stack("MilkyWay", 10, "20260912-200000")   # orphan session
+S14.add_seestar_sub("MilkyWay", "20260912-221000")
+S14.add_seestar_stack("MilkyWay", 200, "20260912-223000")  # this session's keeper
+S14.add_seestar_stack("M 8", 80, "20260912-221500")        # pairing anchor
+r = S14.run(stdin="y\n", extra_env={"ASTRO_STDIN_PROMPTS": "1"})
+check("S14 MW folder with an unledgered session keeper is NOT SAFE, survives a Yes",
+      os.path.isdir(os.path.join(S14.myworks, "MilkyWay"))
+      and os.path.isfile(os.path.join(
+          S14.myworks, "MilkyWay",
+          "Stacked_10_MilkyWay_10.0s_IRCUT_20260912-200000.fit"))
+      and "NOT SAFE" in r.stdout and "Stacked_10" in r.stdout,
+      r.stdout[-600:])
+
+print("\n── Chain S15: stack-only projects (sub saving OFF, the default) ──")
+S15 = teh.Env("S15", asiair=False, seestar=True)
+S15.add_seestar_stack("M 101", 30, "20260913-221000")
+with open(os.path.join(S15.myworks, "M 101",
+                       "Stacked_30_M 101_10.0s_IRCUT_20260913-221000.jpg"),
+          "wb") as f:
+    f.write(b"\xff\xd8\xff\xe0JPG-m101" + b"z" * 200)
+# an unrelated _sub target with no project dir must NOT adopt "M 101"
+# via prefix matching (M 1 is a prefix of M 101 — the pass-2 matcher fix)
+S15.add_seestar_sub("M 1", "20260913-220000")
+r = S15.run(stdin="n\ny\n", extra_env={"ASTRO_STDIN_PROMPTS": "1"})
+d101 = os.path.join(S15.sdest30, "M 101 - Pinwheel Galaxy")
+check("S15 stack-only project imports (stack + JPG, no Day folder)",
+      count_fits(d101) == 1
+      and os.path.isfile(os.path.join(
+          d101, "Stacked_30_M 101_10.0s_IRCUT_20260913-221000.jpg"))
+      and not any("Day" in x for x in os.listdir(d101)),
+      r.stdout[-500:])
+check("S15 stack-only folder cleared on Yes (fully proven, ledgered)",
+      not os.path.isdir(os.path.join(S15.myworks, "M 101")), r.stdout[-400:])
+led = S15.ledger()
+m1 = [e for e in led["files"].values()
+      if e.get("target") == "M 1" and e.get("origin") == "import"]
+check("S15 'M 1' did NOT adopt 'M 101' as its project dir (exact match only)",
+      len(m1) == 1 and m1[0].get("sourceType") == "sub"
+      and count_fits(os.path.join(S15.sdest30, "M 1 - Crab Nebula",
+                                  "M 1_sub Day 1")) == 1,
+      str(m1))
+
+print("\n── Chain S16: per-sub JPEG riders (S50 Pro first light) ──────")
+S16 = teh.Env("S16", asiair=False, seestar=True)
+
+def s16_add(stamp, jpg=True, target="M 33"):
+    """S50 Pro naming form: Light_<t>_30.0s_IRCUT_<stamp>.fit (+ .jpg twin)."""
+    base = f"Light_{target}_30.0s_IRCUT_{stamp}"
+    fp = os.path.join(S16.myworks, f"{target}_sub", base + ".fit")
+    teh.make_seestar_fits(fp, creator="Seestar S50 Pro", exptime=30.0,
+                          dateobs=teh.stamp_to_dateobs(stamp),
+                          uniq=f"s16-{stamp}")
+    if jpg:
+        with open(os.path.join(S16.myworks, f"{target}_sub", base + ".jpg"),
+                  "wb") as f:
+            f.write(b"\xff\xd8\xff\xe0" + stamp.encode() + b"j" * 400)
+
+# Phase A — fresh import: FITs and their JPEG twins land together
+s16_add("20260905-013205")
+s16_add("20260905-013238")
+r = S16.run(stdin="n\ny\n", extra_env={"ASTRO_STDIN_PROMPTS": "1"})
+d16 = os.path.join(S16.sdest50p, "M 33 - Triangulum Galaxy", "M 33_sub Day 1")
+check("S16 JPEG twins land in the Day folder beside their FITs",
+      count_fits(d16) == 2
+      and os.path.isfile(os.path.join(
+          d16, "Light_M 33_30.0s_IRCUT_20260905-013205.jpg"))
+      and os.path.isfile(os.path.join(
+          d16, "Light_M 33_30.0s_IRCUT_20260905-013238.jpg")),
+      r.stdout[-500:])
+led = S16.ledger()
+sjp = [e for e in led["files"].values() if e.get("sourceType") == "sub-jpg"]
+check("S16 sub-jpg entries verified, camera-tagged, day-numbered",
+      len(sjp) == 2 and all(e.get("verifiedAtImport") and e.get("dayNumber") == 1
+                            and e.get("camera") == "ZWO Seestar S50 Pro"
+                            for e in sjp), str(sjp[:1]))
+check("S16 fully-proven folder (FITs + JPEGs) cleared on Yes",
+      not os.path.isdir(os.path.join(S16.myworks, "M 33_sub")), r.stdout[-400:])
+
+# Phase B — CATCH-UP (Brett's live 2026-09-05 state): FITs imported on an
+# older build, JPEG twins still on camera. They must join the FITs' OWN Day
+# folder via the ledger sibling lookup — never a fresh Day number.
+s16_add("20260906-013205", jpg=False)
+r = S16.run()                              # night 2 FITs alone → Day 2
+s16_add("20260906-013205", jpg=True)       # ...now the twin appears
+r = S16.run(stdin="y\n", extra_env={"ASTRO_STDIN_PROMPTS": "1"})
+d16b = os.path.join(S16.sdest50p, "M 33 - Triangulum Galaxy", "M 33_sub Day 2")
+led = S16.ledger()
+catchup = [e for e in led["files"].values()
+           if e.get("sourceType") == "sub-jpg" and "20260906" in e.get("filename", "")]
+check("S16 catch-up JPEG joins its sibling FIT's Day 2 (not a new day)",
+      os.path.isfile(os.path.join(
+          d16b, "Light_M 33_30.0s_IRCUT_20260906-013205.jpg"))
+      and len(catchup) == 1 and catchup[0].get("dayNumber") == 2,
+      r.stdout[-500:])
+check("S16 catch-up run re-arms the cleanup offer and Yes clears the folder",
+      not os.path.isdir(os.path.join(S16.myworks, "M 33_sub")), r.stdout[-400:])
+
+print("\n── Chain S17: camera re-saves its stack → re-copy, re-verify ──")
+S17 = teh.Env("S17", asiair=False, seestar=True)
+S17.add_seestar_sub("M 27", "20260907-213000", creator="Seestar S50 Pro")
+spath = S17.add_seestar_stack("M 27", 120, "20260907-215500",
+                              creator="Seestar S50 Pro")
+r = S17.run()                       # first import: sub + stack, default No
+disp17 = "M 27 - Dumbbell Nebula"
+sdst = os.path.join(S17.sdest50p, disp17, os.path.basename(spath))
+size0 = os.path.getsize(sdst)
+# The S50 Pro re-saves the stack after a session (annotation pass) — the
+# camera copy changes while our dest copy holds the OLD bytes
+with open(spath, "ab") as f:
+    f.write(b"ANNOTATED-LAYER" * 64)
+newsize = os.path.getsize(spath)
+r = S17.run(stdin="y\n", extra_env={"ASTRO_STDIN_PROMPTS": "1"})
+led = S17.ledger()
+sent = [e for e in led["files"].values() if e.get("sourceType") == "stack"
+        and e.get("target") == "M 27"]
+check("S17 changed stack re-copied atomically and re-verified",
+      os.path.getsize(sdst) == newsize and newsize > size0, r.stdout[-400:])
+check("S17 ledger updated to the camera's new stack bytes",
+      len(sent) == 1 and sent[0].get("size") == os.path.getsize(sdst)
+      and sent[0].get("verifiedAtImport"), str(sent))
+check("S17 with the refreshed stack proven, Yes clears the folder",
+      not os.path.isdir(os.path.join(S17.myworks, "M 27_sub"))
+      and not os.path.isdir(os.path.join(S17.myworks, "M 27")),
+      r.stdout[-400:])
 
 print("\n── Chain F2: --set-filter ledger correction ─────────────────")
 F2 = teh.Env("F2")

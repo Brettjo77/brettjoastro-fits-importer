@@ -114,6 +114,10 @@ SEESTAR_DEST_S50 = _env_path("SEESTAR_DEST_S50", "~/Documents/Astro/Seestar S50"
 # systems must never interleave in one folder (Brett's second Seestar, 2026-08-18)
 SEESTAR_DEST_S30_ORIG = _env_path("SEESTAR_DEST_S30_ORIG",
                                   "~/Documents/Astro/Seestar S30")
+# The S50 Pro (dual-camera 4K, 2026-09) likewise gets its own tree —
+# "S50" and "S50 Pro" are different optical systems and never interleave
+SEESTAR_DEST_S50PRO = _env_path("SEESTAR_DEST_S50PRO",
+                                "~/Documents/Astro/Seestar S50 Pro")
 MW_PAIR_TOLERANCE = 7200          # s — MW session pairs to the simultaneous DSO
 SEESTAR_S50_ONLY_MODES = ["Solar_photo", "Solar_video", "Planetary_photo",
                           "Planetary_video", "Scenery_photo"]
@@ -121,7 +125,6 @@ SEESTAR_NON_DSO_MAP = [("Lunar_photo", "Lunar"), ("Solar_photo", "Solar"),
                        ("Planetary_photo", "Planetary"), ("Scenery_photo", "Scenery"),
                        ("Lunar_video", "Lunar Video"), ("Solar_video", "Solar Video"),
                        ("Planetary_video", "Planetary Video")]
-SEESTAR_MODE_FOLDERS = set(x for x, _ in SEESTAR_NON_DSO_MAP) | {"Lunar_video"}
 SEESTAR_CATALOG_RE = re.compile(
     r"^(HIP \d+|NGC \d+|IC \d+|M \d+|C \d+|Sh2-\d+|GAIA \d+)")
 SEESTAR_HIP_REMAP = {"HIP 24727": "IC 405"}   # goto star → proper catalogue ID
@@ -149,7 +152,6 @@ LEDGER_VERSION = 1
 HISTORY_VERSION = 1
 
 SCOPE_LOOKUP = {402: "Askar FRA400", 749: "Askar 107PHQ"}
-SCOPE_SLOT_EXTRA = {"Seestar S30 Pro": 3, "Seestar S50": 3}
 
 # ── DSO Name Lookup ──────────────────────────────────────────────────────────
 DSO_NAMES = {
@@ -244,7 +246,10 @@ def safe_input(prompt, default=""):
             return default if r is None else str(r).strip()
         except Exception:
             return default
-    if not sys.stdin.isatty():
+    if not sys.stdin.isatty() and not os.environ.get("ASTRO_STDIN_PROMPTS"):
+        # Piped/headless runs answer every prompt with its (safe) default.
+        # ASTRO_STDIN_PROMPTS=1 opts into reading piped answers instead —
+        # how the test suite exercises the real Yes paths (e.g. cleanup).
         return default
     try:
         return input(prompt).strip()
@@ -448,6 +453,8 @@ def _atomic_write_json(path, data):
     tmp = path + ".tmp"
     with open(tmp, "w") as f:
         json.dump(data, f, indent=1)
+        f.flush()
+        os.fsync(f.fileno())   # a power cut must not leave a truncated ledger
     os.replace(tmp, path)
 
 class State:
@@ -466,7 +473,23 @@ class State:
 
     # ── load/save ────────────────────────────────────────────────────────
     def load(self):
+        self.ledger_corrupt = False
+        self._skip_bak_once = False
         self.ledger = self._load_json(self.ledger_path)
+        if self.ledger is None and os.path.isfile(self.ledger_path):
+            # ledger.json exists but would not parse — NEVER fall through to
+            # "no ledger" (that path offers a baseline, which would mark
+            # never-copied camera files as imported). Use the .bak, loudly.
+            if os.path.isfile(self.ledger_path + ".bak"):
+                warn("ledger.json is unreadable — recovering from ledger.json.bak")
+                self.ledger = self._load_json(self.ledger_path + ".bak")
+                if self.ledger is not None:
+                    # don't let the next save overwrite the good .bak with a
+                    # copy of the corrupt main file (pass-2 finding)
+                    self._skip_bak_once = True
+            if self.ledger is None:
+                self.ledger_corrupt = True   # both unreadable — callers must
+                #                              refuse to baseline over this
         if self.ledger is not None:
             self.ledger.setdefault("files", {})
             self.ledger.setdefault("calibration", {})
@@ -501,7 +524,10 @@ class State:
     def save_ledger(self):
         if self.ledger is None:
             return
-        if os.path.isfile(self.ledger_path):
+        if getattr(self, "_skip_bak_once", False):
+            self._skip_bak_once = False   # main file is corrupt — keep the
+            #                               .bak that just saved us intact
+        elif os.path.isfile(self.ledger_path):
             try:
                 shutil.copy2(self.ledger_path, self.ledger_path + ".bak")
             except OSError:
@@ -546,15 +572,21 @@ class State:
             return "mismatch"
         return "yes"
 
-    def max_day_number(self, target, device="asiair", camera=None):
+    def max_day_number(self, target, device="asiair", camera=None,
+                       by_display=False):
+        """Highest Day number the ledger knows for a target (survives the
+        folders being archived off-disk). by_display matches the displayName
+        field instead of target — Milky Way sessions all share the target
+        'MilkyWay' but number their Days per paired-DSO display folder."""
         best = 0
+        field = "displayName" if by_display else "target"
         for e in self.ledger["files"].values():
             if e.get("device", "asiair") != device:
                 continue   # each camera numbers its own Days
             if camera is not None and \
                     e.get("camera", "ZWO Seestar S30 Pro") != camera:
                 continue   # ...and each SEESTAR its own, too
-            if e.get("target") == target and isinstance(e.get("dayNumber"), int):
+            if e.get(field) == target and isinstance(e.get("dayNumber"), int):
                 best = max(best, e["dayNumber"])
         return best
 
@@ -680,7 +712,13 @@ def acquire_lock():
                 os.remove(LOCK_PATH)
             except OSError:
                 pass
-    with open(LOCK_PATH, "w") as f:
+    try:
+        fd = os.open(LOCK_PATH, os.O_CREAT | os.O_EXCL | os.O_WRONLY)
+    except FileExistsError:
+        # two starters raced for the lock this instant — the other one won
+        error("Another import grabbed the lock just now — try again in a moment.")
+        return False
+    with os.fdopen(fd, "w") as f:
         json.dump({"pid": os.getpid(), "started": now_stamp()}, f)
     return True
 
@@ -976,6 +1014,7 @@ def scan_camera(state):
             })
 
     calibration = []
+    cal_unparseable = []
     autorun = os.path.join(ASIAIR_VOLUME, AUTORUN_DIR)
     if os.path.isdir(autorun):
         for subdir in ["Bias", "Dark", "Flat"]:
@@ -984,10 +1023,18 @@ def scan_camera(state):
                 continue
             for fname in sorted(os.listdir(cdir)):
                 low = fname.lower()
-                if not low.endswith(".fit") or "_thn." in low:
+                if "_thn." in low or fname.startswith("._") or fname == ".DS_Store":
+                    continue
+                if not low.endswith(".fit"):
+                    # A stray non-FITS file in Autorun is a file this tool can
+                    # never prove backed up — it must weigh on the verdict too
+                    cal_unparseable.append(f"{subdir}/{fname}")
                     continue
                 parsed = parse_calibration_filename(fname)
                 if not parsed:
+                    # These never enter the Library, so they must also weigh
+                    # against any "SAFE TO CLEAR" verdict on Autorun/
+                    cal_unparseable.append(f"{subdir}/{fname}")
                     debug(f"unparseable calibration name skipped: {fname}")
                     continue
                 fpath = os.path.join(cdir, fname)
@@ -1009,6 +1056,7 @@ def scan_camera(state):
         disk = None
 
     return {"targets": targets, "calibration": calibration,
+            "cal_unparseable": cal_unparseable,
             "relpaths": all_relpaths, "disk": disk}
 
 
@@ -1374,7 +1422,7 @@ def preview_dest_plan(state, scan=None, sscan=None):
         for t in sscan["targets"]:
             if t["skipped"] or t.get("is_mw"):
                 continue
-            if not t["new"] and not t.get("new_stacks"):
+            if not t["new"] and not t.get("new_stacks") and not t.get("new_jpgs"):
                 continue
             display = seestar_display(state, t["project_name"])
             day = _seestar_day_number(state, os.path.join(dest_root, display),
@@ -1389,15 +1437,32 @@ def preview_dest_plan(state, scan=None, sscan=None):
                     best, best_name = int(ms.group(1)), s_["filename"]
             if t.get("new_stacks") and best_name:
                 stack = {"filename": best_name, "subs": best}
+            new_jpgs = t.get("new_jpgs") or []
             plan.append({
                 "device": "seestar", "target": t["name"], "display": display,
                 "askName": display in (t["project_name"], t["name"]),
                 "deviceRoot": os.path.basename(dest_root.rstrip("/")),
-                "treeRoot": [display], "dayFolder": f"{t['sub_name']} Day {day}",
-                "continuing": False,
-                "files": len(t["new"]),
-                "bytes": sum(f["size"] for f in t["new"]),
+                "treeRoot": [display],
+                # stack-only / jpg-only work creates no NEW Day folder
+                "dayFolder": f"{t['sub_name']} Day {day}" if t["new"] else None,
+                "continuing": bool(not t["new"] and new_jpgs),
+                "files": len(t["new"]) or len(new_jpgs),
+                "bytes": sum(f["size"] for f in t["new"])
+                or sum(f["size"] for f in new_jpgs),
                 "nights": [], "sharedCal": False, "stack": stack,
+            })
+        for nd in sscan["non_dso"]:
+            if not nd["new"]:
+                continue
+            plan.append({
+                "device": "seestar", "target": nd["dest_name"],
+                "display": nd["dest_name"], "askName": False,
+                "deviceRoot": os.path.basename(dest_root.rstrip("/")),
+                "treeRoot": [nd["dest_name"]], "dayFolder": None,
+                "continuing": os.path.isdir(os.path.join(dest_root, nd["dest_name"])),
+                "files": len(nd["new"]),
+                "bytes": sum(f["size"] for f in nd["new"]),
+                "nights": [], "sharedCal": False, "stack": None,
             })
     return plan
 
@@ -1918,7 +1983,13 @@ def run_import(state, args, only_targets=None):
 def run_baseline(state, assume_yes=False):
     asiair_here = os.path.isdir(ASIAIR_VOLUME)
     scan = scan_camera(state) if asiair_here else {"targets": [], "calibration": []}
-    sscan = scan_seestar(state)
+    try:
+        sscan = scan_seestar(state)
+    except RuntimeError as e:
+        error(f"Seestar NOT baselined: {e}")
+        sscan = None
+        if not asiair_here:
+            sys.exit(1)
     n_lights = sum(len(t["files"]) for t in scan["targets"])
     n_cal = len(scan["calibration"])
     n_seestar = 0
@@ -2210,12 +2281,19 @@ def run_reconcile(state, deep=True):
     # upgradable the same way. MW frames were RENAMED on import
     # (MilkyWay_<dso>_<stamp>.fit) so also index them under their original
     # bare-stamp camera name (stamps are unique per camera).
-    for sroot in (SEESTAR_DEST_S30, SEESTAR_DEST_S30_ORIG, SEESTAR_DEST_S50):
+    for sroot in (SEESTAR_DEST_S30, SEESTAR_DEST_S30_ORIG, SEESTAR_DEST_S50,
+                  SEESTAR_DEST_S50PRO):
         if not os.path.isdir(sroot):
             continue
         for root, _dirs, fnames in os.walk(sroot):
             for fname in fnames:
-                if not fname.lower().endswith((".fit", ".fits")):
+                low = fname.lower()
+                # media too: baselined JPEG/video entries must be upgradable,
+                # or the every-file SAFE gate blocks them forever (pass-2)
+                if not low.endswith((".fit", ".fits", ".jpg", ".jpeg",
+                                     ".mp4", ".avi", ".mov")):
+                    continue
+                if "_thn" in low:
                     continue
                 dest_index.setdefault(fname, os.path.join(root, fname))
                 if fname.startswith("MilkyWay_"):
@@ -2486,17 +2564,29 @@ def build_report(state):
 
     # Autorun verdict (spec §6)
     cal = scan["calibration"]
-    if cal:
+    unparse = scan.get("cal_unparseable") or []
+    if cal or unparse:
         n_ok = 0
         for c in cal:
             e = state.cal_entry(c["relpath"])
             if e and e.get("libraryPath") and e.get("verifiedAtImport"):
                 n_ok += 1
         cal_bytes = sum(c["size"] for c in cal)
-        verdict = ("SAFE TO CLEAR" if n_ok == len(cal)
-                   else f"NOT SAFE — {len(cal) - n_ok} frame(s) not yet verified in Library")
+        if unparse:
+            # Files the Library can never ingest are files we can never prove
+            # backed up — they force NOT SAFE, and they get named.
+            verdict = (f"NOT SAFE — {len(unparse)} file(s) this tool cannot "
+                       f"ingest (unrecognised names)")
+        elif n_ok == len(cal):
+            verdict = "SAFE TO CLEAR"
+        else:
+            verdict = f"NOT SAFE — {len(cal) - n_ok} frame(s) not yet verified in Library"
         out(f"Autorun/ calibration: {len(cal)} frames, {human_size(cal_bytes)} — "
             f"{n_ok} in Library ✓ → {verdict}")
+        for fn in unparse[:6]:
+            out(f"      unrecognised, NOT backed up by this tool: {fn}")
+        if len(unparse) > 6:
+            out(f"      … and {len(unparse) - 6} more")
     lib_ok = os.path.isdir(LIBRARY_DIR)
     ever_ingested = any(e.get("libraryPath") for e in state.ledger["calibration"].values())
     if not asiair_here:
@@ -2524,7 +2614,12 @@ def build_report(state):
     out()
 
     # ── Seestar section (unification) ────────────────────────────────────
-    sscan = scan_seestar(state)
+    try:
+        sscan = scan_seestar(state)
+    except RuntimeError as e:
+        sscan = None
+        out(f"SEESTAR — NOT scanned: {e}")
+        out()
     if sscan:
         state.mark_cleared(sscan["relpaths"], device="seestar",
                                    camera=sscan["camera"])
@@ -2533,12 +2628,16 @@ def build_report(state):
             state._dirty = True
         out(f"SEESTAR {sscan['model']}")
         groups = [(seestar_display(state, t["project_name"]),
-                   t["name"], t["files"] + t["stacks"]) for t in sscan["targets"]]
+                   t["name"], t["files"] + t["stacks"],
+                   [t["sub_dir"], t["project_dir"]], not t.get("is_mw"))
+                  for t in sscan["targets"]]
         groups += [(seestar_display(state, p["mosaic_name"]) + " (panels)",
-                    p["mosaic_name"].split("_mosaic")[0], p["files"])
+                    p["mosaic_name"].split("_mosaic")[0], p["files"],
+                    [p["pt_dir"]], False)
                    for p in sscan["panel_sets"]]
-        groups += [(n["dest_name"], n["dest_name"], n["files"]) for n in sscan["non_dso"]]
-        for display, tname, files in groups:
+        groups += [(n["dest_name"], n["dest_name"], n["files"],
+                    [n["src"]], False) for n in sscan["non_dso"]]
+        for display, tname, files, gdirs, exempt_sup in groups:
             if not files:
                 continue
             entries, missing = [], 0
@@ -2559,10 +2658,25 @@ def build_report(state):
                 cat, mark = "safe", "✓ SAFE TO CLEAR"
             else:
                 cat, mark = "unverified", "backed up, unverified (baseline-era)"
+            if cat == "safe":
+                # The report's SAFE must mean what the cleanup gate's SAFE
+                # means: EVERY file in the folder proven, not just the
+                # scanned frame classes (pass-2 finding)
+                unproven, _pb = _seestar_unproven_files(
+                    state, sscan["volume"], gdirs, exempt_superseded=exempt_sup)
+                if unproven:
+                    cat = "notsafe"
+                    mark = (f"NOT SAFE — {len(unproven)} file(s) not proven "
+                            f"backed up (e.g. {unproven[0]})")
             out(f"  {display:<44} {len(files)} files  {human_size(b)}  {mark}")
             state.ledger.setdefault("lastCategories", {})[f"seestar:{tname}"] = {
                 "category": cat, "files": len(files), "bytes": b}
             state._dirty = True
+        for u in sscan.get("unhandled", []):
+            out(f"  ⚠ ON CAMERA, NOT handled by this tool: {u['name']} "
+                f"({u['files']} file(s)) — in no backup accounting above")
+        for xv in sscan.get("extra_volumes", []):
+            out(f"  ⚠ Another Seestar is mounted at {xv} — one camera at a time")
         if sscan["disk"]:
             d = sscan["disk"]
             out(f"Seestar storage: {human_size(d['used'])} used / {human_size(d['total'])} "
@@ -2594,6 +2708,9 @@ def build_report(state):
     return "\n".join(lines)
 
 def run_report(state):
+    # NOTE: the CLI already holds the import lock here — main() wraps every
+    # non-scan-only command in acquire_lock(). The panel takes the same lock
+    # for its report op, so ledger saves can never race an import.
     text = build_report(state)
     print(text)
     try:
@@ -2606,47 +2723,130 @@ def run_report(state):
 
 
 # ═══════════════════════════════════════════════════════════════════════════
-# SEESTAR ADAPTER (S30 Pro / S50) — ported from seestar-import.sh
+# SEESTAR ADAPTER (S30 Pro / S30 / S50 / S50 Pro) — ported from seestar-import.sh
 # Backup-first + SAFE-aware cleanup (unification spec, agreed 2026-07-25).
 # Layout preserved exactly: Day folders in the display root ("<sub> Day N"),
 # highest stack kept in the root, panels/ for _mosaic_pt, MW pairing intact.
 # ═══════════════════════════════════════════════════════════════════════════
 
+def _volumes_named_seestar():
+    """Every mounted /Volumes entry that looks like a Seestar (name starts
+    'Seestar', any case — macOS mounts a second unit as 'Seestar 1', and a
+    future model may bring its own name) and actually carries MyWorks."""
+    out = []
+    try:
+        names = sorted(os.listdir("/Volumes"))
+    except OSError:
+        return out
+    for n in names:
+        p = os.path.join("/Volumes", n)
+        if n.lower().startswith("seestar") and \
+                os.path.isdir(os.path.join(p, "MyWorks")):
+            out.append(p)
+    return out
+
 def seestar_volume():
     for v in SEESTAR_VOLUMES:
         if os.path.isdir(os.path.join(v, "MyWorks")):
             return v
-    return None
+    named = _volumes_named_seestar()
+    return named[0] if named else None
+
+def seestar_extra_volumes(primary):
+    """Other Seestar volumes mounted besides the one being scanned — the
+    one-camera-at-a-time rule should be announced, never silent."""
+    return [p for p in _volumes_named_seestar()
+            if os.path.realpath(p) != os.path.realpath(primary or "")]
+
+def _seestar_creator_model(creator):
+    """Map one FITS CREATOR string to a Seestar model.
+    Returns None for an empty/absent header, '?' for a non-empty string that
+    matches no known camera. Spacing/case/dash variants all read the same
+    ("Seestar S50 Pro", "SeestarS50Pro", "SEESTAR_S50-PRO"); Pro variants are
+    checked BEFORE bare models (the original-S30 lesson, applied to the S50
+    family), and each token must END cleanly so "S50 PROTOTYPE" can never
+    pass as an S50 Pro."""
+    norm = re.sub(r"[\s_\-]+", "", str(creator or "")).upper()
+    if not norm:
+        return None
+    for token, model in (("S50PRO", "S50 Pro"), ("S50", "S50"),
+                         ("S30PRO", "S30 Pro"), ("S30", "S30")):
+        if re.search(re.escape(token) + r"(?=$|[^A-Z0-9])", norm):
+            return model
+    return "?"
 
 def seestar_model(vol):
-    """('S30 Pro'|'S50', camera_name, dest_root) via FITS CREATOR; mode-folder
-    fallback uses S50-only modes (NOT Lunar — the S30 Pro shoots Lunar too)."""
+    """('S30 Pro'|'S30'|'S50'|'S50 Pro', camera_name, dest_root).
+
+    Identity is read from FITS CREATOR headers — one vote per top-level
+    MyWorks folder, because one stale leftover project from another camera
+    must not classify the whole volume (os.walk order is arbitrary). Two
+    different identities, or an identity this tool does not know, REFUSE the
+    scan: a misfiled import writes a wrong camera into a ledger that never
+    forgets. Mode-folder fallback (no readable FITS anywhere) uses S50-only
+    modes (NOT Lunar — the S30 Pro shoots Lunar too); a FITS-less volume
+    cannot tell an S50 Pro from an S50 and falls back to plain S50."""
     myworks = os.path.join(vol, "MyWorks")
-    creator = ""
-    for root, _d, fnames in os.walk(myworks):
-        for fn in fnames:
-            if fn.lower().endswith(".fit"):
-                try:
-                    creator = str(get_fits().getheader(os.path.join(root, fn))
-                                  .get("CREATOR", ""))
-                except Exception:
-                    creator = ""
+    votes = {}          # model -> first folder that voted for it
+    raw = {}            # model -> the raw CREATOR string behind the vote
+    entries = sorted(os.listdir(myworks)) if os.path.isdir(myworks) else []
+    for entry in entries:
+        edir = os.path.join(myworks, entry)
+        if entry.startswith(".") or not os.path.isdir(edir):
+            continue
+        creator = None
+        # Filter AppleDouble litter BEFORE taking the sample — ._*.fit sorts
+        # ahead of real data and must not burn the tries (pass-2 finding)
+        cands = [p for p in _fits_files(edir)
+                 if not os.path.basename(p).startswith("._")][:3]
+        for p in cands:
+            try:
+                creator = str(get_fits().getheader(p).get("CREATOR", ""))
                 break
-        if creator or _d is None:
+            except Exception:
+                continue
+        m = _seestar_creator_model(creator)
+        if m is not None:
+            votes.setdefault(m, entry)
+            raw.setdefault(m, creator)
+    # Loose FITs at the MyWorks root vote too (refuse-don't-guess doctrine)
+    loose = [os.path.join(myworks, f) for f in entries
+             if f.lower().endswith(".fit") and not f.startswith("._")
+             and not f.startswith(".")
+             and os.path.isfile(os.path.join(myworks, f))][:3]
+    for p in loose:
+        try:
+            creator = str(get_fits().getheader(p).get("CREATOR", ""))
+        except Exception:
+            continue
+        m = _seestar_creator_model(creator)
+        if m is not None:
+            votes.setdefault(m, "(MyWorks root)")
+            raw.setdefault(m, creator)
             break
-    model = "S30 Pro"
-    if "S50" in creator:
-        model = "S50"
-    elif "S30 Pro" in creator:
-        model = "S30 Pro"
-    elif "S30" in creator:
-        model = "S30"          # the ORIGINAL S30 — its own identity + tree
+    known = sorted(m for m in votes if m != "?")
+    if len(known) > 1:
+        raise RuntimeError(
+            "two different Seestar identities on one volume — "
+            + "; ".join(f"'{raw[m]}' in {votes[m]}/ → {m}" for m in known)
+            + ". Mixed leftovers from another camera? Nothing was imported — "
+            "sort the card out first (one camera's files per volume).")
+    if "?" in votes:
+        raise RuntimeError(
+            f"unrecognised Seestar identity '{raw['?']}' (in {votes['?']}/). "
+            "Refusing to guess a destination tree — the ledger would remember "
+            "a wrong camera forever. This importer needs updating for that model.")
+    if known:
+        model = known[0]
     elif any(os.path.isdir(os.path.join(myworks, m)) for m in SEESTAR_S50_ONLY_MODES):
         model = "S50"
+    else:
+        model = "S30 Pro"
     camera = f"ZWO Seestar {model}"
     dest = {"S30 Pro": SEESTAR_DEST_S30,
             "S30": SEESTAR_DEST_S30_ORIG,
-            "S50": SEESTAR_DEST_S50}[model]
+            "S50": SEESTAR_DEST_S50,
+            "S50 Pro": SEESTAR_DEST_S50PRO}[model]
     return model, camera, dest
 
 def _stamp(name):
@@ -2709,6 +2909,7 @@ def scan_seestar(state):
         return (not state.has_ledger()) or state.is_imported(f["relpath"], f["size"]) != "yes"
 
     targets, panel_sets, non_dso = [], [], []
+    consumed = set()   # top-level MyWorks names the scan actually understands
     entries = sorted(os.listdir(myworks)) if os.path.isdir(myworks) else []
 
     for entry in entries:
@@ -2717,20 +2918,39 @@ def scan_seestar(state):
         sub_dir = os.path.join(myworks, entry)
         if not os.path.isdir(sub_dir):
             continue
+        consumed.add(entry)
         base = entry[:-4]
         project_dir = project_name = None
-        for cand in sorted(os.listdir(myworks)):
-            if not cand.startswith(base):
-                continue
-            if cand.endswith("_sub") or cand.endswith("_mosaic_pt"):
-                continue
-            cpath = os.path.join(myworks, cand)
-            if os.path.isdir(cpath):
-                project_dir, project_name = cpath, cand
-                break
+        # EXACT name match only — startswith() once let "M 8_sub" adopt the
+        # unrelated "M 81" project dir and rewrite its stack's ledger target
+        # (pass-2 finding; mosaic names already carry _mosaic in `base`)
+        cpath = os.path.join(myworks, base)
+        if os.path.isdir(cpath):
+            project_dir, project_name = cpath, base
+            consumed.add(base)
         subs = [x for x in (fentry(p) for p in _fits_files(sub_dir)) if x]
         stacks = [x for x in (fentry(p) for p in _fits_files(project_dir, maxdepth=1)) if x] \
             if project_dir else []
+        if project_dir:
+            # Register the stacks' JPG siblings in the relpath set: they are
+            # ledgered on import, and a relpath missing from the scan would
+            # let mark_cleared falsely flag them as gone (pass-2 finding)
+            for fn in sorted(os.listdir(project_dir)):
+                lowfn = fn.lower()
+                if lowfn.endswith((".jpg", ".jpeg")) and "_thn" not in lowfn \
+                        and not fn.startswith("._"):
+                    fentry(os.path.join(project_dir, fn))
+        # Per-sub JPEG previews (the S50 Pro writes one beside every sub —
+        # first light 2026-09-05). They are data: collected, imported as
+        # verified riders, and counted by the SAFE gate like any file.
+        jpgs = []
+        for fn in sorted(os.listdir(sub_dir)):
+            lowfn = fn.lower()
+            if lowfn.endswith((".jpg", ".jpeg")) and "_thn" not in lowfn \
+                    and not fn.startswith("._"):
+                fe = fentry(os.path.join(sub_dir, fn))
+                if fe:
+                    jpgs.append(fe)
         is_mw = base == "MilkyWay" or base.startswith("MilkyWay_")
         targets.append({
             "device": "seestar", "name": base, "sub_name": entry,
@@ -2738,34 +2958,96 @@ def scan_seestar(state):
             "project_name": project_name or base, "is_mw": is_mw,
             "files": subs, "new": [f for f in subs if is_new(f)],
             "stacks": stacks, "new_stacks": [f for f in stacks if is_new(f)],
+            "jpgs": jpgs, "new_jpgs": [f for f in jpgs if is_new(f)],
             "skipped": base in state.skiplist,
+        })
+
+    # Stack-only projects: sub-frame saving is OFF by default on Seestars, so
+    # a first night at stock settings produces project dirs with Stacked_*.fit
+    # and no _sub sibling. They import through the same path — display naming,
+    # keep-highest, JPG rider (pass-2 finding). MilkyWay stack-only dirs are
+    # deliberately NOT adopted (their multi-session keepers don't fit the
+    # keep-highest rule) and stay visibly "NOT handled" instead.
+    _mode_names = set(x for x, _ in SEESTAR_NON_DSO_MAP)
+    for entry in entries:
+        if entry in consumed or entry.startswith(".") or entry.endswith("_sub") \
+                or entry.endswith("_mosaic_pt") or entry in _mode_names \
+                or entry == "MilkyWay" or entry.startswith("MilkyWay_"):
+            continue
+        edir = os.path.join(myworks, entry)
+        if not os.path.isdir(edir):
+            continue
+        st_files = [x for x in (fentry(p) for p in _fits_files(edir, maxdepth=1)) if x]
+        if not any(re.match(r"^Stacked_\d+_", f["filename"]) for f in st_files):
+            for f in st_files:
+                relset.discard(f["relpath"])   # not adopted — stays unhandled
+            continue
+        consumed.add(entry)
+        for fn in sorted(os.listdir(edir)):
+            lowfn = fn.lower()
+            if lowfn.endswith((".jpg", ".jpeg")) and "_thn" not in lowfn \
+                    and not fn.startswith("._"):
+                fentry(os.path.join(edir, fn))
+        targets.append({
+            "device": "seestar", "name": entry, "sub_name": entry,
+            "sub_dir": None, "project_dir": edir,
+            "project_name": entry, "is_mw": False,
+            "files": [], "new": [],
+            "stacks": st_files, "new_stacks": [f for f in st_files if is_new(f)],
+            "jpgs": [], "new_jpgs": [],
+            "skipped": entry in state.skiplist,
         })
 
     for entry in entries:
         if not entry.endswith("_mosaic_pt"):
             continue
         pt_dir = os.path.join(myworks, entry)
+        if not os.path.isdir(pt_dir):
+            continue
+        consumed.add(entry)
         files = [x for x in (fentry(p) for p in _fits_files(pt_dir, maxdepth=1)) if x]
         panel_sets.append({"pt_name": entry, "pt_dir": pt_dir,
                            "mosaic_name": entry[:-3],  # strip "_pt"
                            "files": files, "new": [f for f in files if is_new(f)]})
 
-    if model == "S50":
-        for src_name, dest_name in SEESTAR_NON_DSO_MAP:
-            src = os.path.join(myworks, src_name)
-            if not os.path.isdir(src):
-                continue
-            exts = ((".mp4", ".avi", ".mov") if src_name.endswith("_video")
-                    else (".fit",))
-            files = []
-            for fn in sorted(os.listdir(src)):
-                if fn.lower().endswith(exts) and "_thn" not in fn.lower():
-                    fe = fentry(os.path.join(src, fn))
-                    if fe:
-                        files.append(fe)
-            if files:
-                non_dso.append({"src": src, "src_name": src_name, "dest_name": dest_name,
-                                "files": files, "new": [f for f in files if is_new(f)]})
+    # Non-DSO modes are scanned on EVERY model — an S30 Pro shoots Lunar too,
+    # and "backup-first" means whatever is on the card gets offered, not just
+    # the modes the model is marketed on (1.3.0 review finding).
+    for src_name, dest_name in SEESTAR_NON_DSO_MAP:
+        src = os.path.join(myworks, src_name)
+        if not os.path.isdir(src):
+            continue
+        consumed.add(src_name)
+        # _photo modes save JPEG siblings next to the FITs — back those up
+        # too, or the SAFE gate could never honestly clear the folder.
+        exts = ((".mp4", ".avi", ".mov") if src_name.endswith("_video")
+                else (".fit", ".jpg", ".jpeg"))
+        files = []
+        for fn in sorted(os.listdir(src)):
+            if fn.lower().endswith(exts) and "_thn" not in fn.lower():
+                fe = fentry(os.path.join(src, fn))
+                if fe:
+                    files.append(fe)
+        if files:
+            non_dso.append({"src": src, "src_name": src_name, "dest_name": dest_name,
+                            "files": files, "new": [f for f in files if is_new(f)]})
+
+    # Anything else in MyWorks is data this tool does NOT understand — a new
+    # firmware folder, a wide-camera product, a stack-only project. Never be
+    # silent about it: it is on the camera and NOT backed up by this tool.
+    unhandled = []
+    for entry in entries:
+        if entry in consumed or entry.startswith(".") or entry.startswith("._"):
+            continue
+        epath = os.path.join(myworks, entry)
+        if os.path.isdir(epath):
+            n = 0
+            for _r, _dd, fnames in os.walk(epath):
+                n += sum(1 for fn in fnames
+                         if not fn.startswith(".") and not fn.startswith("._"))
+            unhandled.append({"name": entry + "/", "files": n})
+        else:
+            unhandled.append({"name": entry, "files": 1})
 
     try:
         u = shutil.disk_usage(vol)
@@ -2774,7 +3056,9 @@ def scan_seestar(state):
         disk = None
     return {"device": "seestar", "volume": vol, "model": model, "camera": camera,
             "dest": dest_root, "targets": targets, "panel_sets": panel_sets,
-            "non_dso": non_dso, "relpaths": relset, "disk": disk}
+            "non_dso": non_dso, "relpaths": relset, "disk": disk,
+            "unhandled": unhandled,
+            "extra_volumes": seestar_extra_volumes(vol)}
 
 
 def _seestar_ledger_add(state, f, vol, camera, kind, target, display, dest_dir,
@@ -2803,12 +3087,13 @@ def _seestar_file_night(filename):
     return observing_night(dt)
 
 def _seestar_day_number(state, dest_project_dir, day_label, target,
-                        incoming_files=None, camera=None):
+                        incoming_files=None, camera=None, by_display=False):
     n = 1
     while os.path.isdir(os.path.join(dest_project_dir, f"{day_label} Day {n}")):
         n += 1
     day = max(n, state.max_day_number(target, device="seestar",
-                                      camera=camera) + 1)
+                                      camera=camera,
+                                      by_display=by_display) + 1)
     # Night continuation (Brett, 2026-08-18): a resumed/interrupted import must
     # land in the SAME night's folder, not fragment one night across Days —
     # same rule the ASIAir path has always had.
@@ -2848,6 +3133,12 @@ def run_seestar_import(state, scan_s, args, only_targets=None):
     if not dry_run:
         os.makedirs(dest_root, exist_ok=True)
     info(f"Seestar: {model} — destination {dest_root}")
+    for u in scan_s.get("unhandled", []):
+        warn(f"On camera but NOT handled by this tool (left untouched): "
+             f"{u['name']} — {u['files']} file(s)")
+    for xv in scan_s.get("extra_volumes", []):
+        warn(f"Another Seestar is mounted at {xv} — one camera at a time: "
+             f"this run covers only {vol}. Import it after a swap.")
     emit("run-start", device="seestar", targets=len([t for t in scan_s['targets'] if t['new']]))
 
     # ── DSO projects (non-MW) ────────────────────────────────────────────
@@ -2877,6 +3168,7 @@ def run_seestar_import(state, scan_s, args, only_targets=None):
         day_dirname = f"{t['sub_name']} Day {day}"
         dest_day = os.path.join(dest_project_dir, day_dirname)
         verified = 0
+        stacks_copied = 0
 
         if t["new"]:
             info(f"{len(t['new'])} new light frame(s) → {day_dirname}")
@@ -2914,20 +3206,36 @@ def run_seestar_import(state, scan_s, args, only_targets=None):
             if not dry_run:
                 os.makedirs(dest_project_dir, exist_ok=True)
                 dst = os.path.join(dest_project_dir, best["filename"])
-                if not os.path.isfile(dst):
+                # Re-copy when the CAMERA's stack changed since it was
+                # ledgered — the S50 Pro re-saves its stack after a session
+                # (first light, 2026-09-05). Atomic overwrite, re-verified.
+                if not os.path.isfile(dst) or \
+                        state.is_imported(best["relpath"], best["size"]) != "yes":
                     try:
                         sha, _sz = copy_file_verified(best["path"], dst, checksum=checksum)
                         _seestar_ledger_add(state, best, vol, camera, "stack",
                                             t["name"], display, dest_project_dir, sha, day=day)
+                        stacks_copied += 1
                         success(f"Copied stacked .fit ({best_count} subs)")
                     except Exception as e:
                         warn(f"Stacked copy failed: {e}")
+                # The stack's JPG rides along VERIFIED and LEDGERED — an
+                # unledgered file would (rightly) block the SAFE gate forever
                 jpg = os.path.splitext(best["path"])[0] + ".jpg"
                 if os.path.isfile(jpg):
+                    jdst = os.path.join(dest_project_dir, os.path.basename(jpg))
                     try:
-                        shutil.copy2(jpg, dest_project_dir)
-                    except OSError:
-                        pass
+                        jf = {"path": jpg, "relpath": os.path.relpath(jpg, vol),
+                              "filename": os.path.basename(jpg),
+                              "size": os.path.getsize(jpg)}
+                        if state.is_imported(jf["relpath"], jf["size"]) != "yes" \
+                                or not os.path.isfile(jdst):
+                            sha, _sz = copy_file_verified(jpg, jdst, checksum=checksum)
+                            _seestar_ledger_add(state, jf, vol, camera, "stack-jpg",
+                                                t["name"], display,
+                                                dest_project_dir, sha, day=day)
+                    except Exception as e:
+                        warn(f"Stack JPG copy failed: {e}")
                 for old in os.listdir(dest_project_dir):
                     if old.startswith("Stacked_") and old.endswith(".fit") \
                             and old != best["filename"]:
@@ -2946,19 +3254,23 @@ def run_seestar_import(state, scan_s, args, only_targets=None):
                         except OSError:
                             pass
 
-        if not dry_run and verified > 0:
+        if not dry_run and (verified > 0 or stacks_copied > 0):
             state.history_event("import", device="seestar", target=t["name"],
                                 displayName=display, scope=scope_name,
-                                frames=verified, dayFolder=dest_day)
+                                frames=verified,
+                                dayFolder=dest_day if t["new"] else None)
             state.save_ledger()
             receipt_sessions.append({
                 "targetDisplayName": display, "seestarProjectName": t["project_name"],
                 "isMosaic": "_mosaic" in t["project_name"], "dayNumber": day,
                 "framesCopied": verified, "stackedCount": max(best_count, 0),
-                "fitsFolderPath": dest_day})
-            totals["files"] += verified
-            dirs = [t["sub_dir"]] + ([t["project_dir"]] if t["project_dir"] else [])
-            cleanup.append((display, dirs))
+                "fitsFolderPath": dest_day if t["new"] else dest_project_dir})
+            # banner/receipt semantics: subs count as "frames"; a stack-only
+            # import counts its stacks so the run never reports 0 files
+            totals["files"] += verified if verified else stacks_copied
+            dirs = ([t["sub_dir"]] if t["sub_dir"] else []) \
+                + ([t["project_dir"]] if t["project_dir"] else [])
+            cleanup.append((display, dirs, True))   # DSO: keep-highest applies
         print()
 
     # ── Milky Way sessions (paired to simultaneous DSO) ──────────────────
@@ -3021,9 +3333,13 @@ def run_seestar_import(state, scan_s, args, only_targets=None):
             display = f"{mw_common} - {dso}" if dso else mw_common
             prefix = f"MilkyWay_{dso}_" if dso else "MilkyWay_"
             dest_project_dir = os.path.join(dest_root, display)
-            day = 1
-            while os.path.isdir(os.path.join(dest_project_dir, f"{display} Day {day}")):
-                day += 1
+            # Same ledger-aware, night-continuing numbering as DSO subs —
+            # a yanked cable or an archived folder must not fragment or
+            # restart a Milky Way night (1.3.0 review finding). MW entries
+            # share the target "MilkyWay*", so scope by display folder.
+            day = _seestar_day_number(state, dest_project_dir, display,
+                                      display, incoming_files=bucket,
+                                      camera=camera, by_display=True)
             day_dirname = f"{display} Day {day}"
             dest_day = os.path.join(dest_project_dir, day_dirname)
             print("───────────────────────────────────────────────────────────────")
@@ -3056,7 +3372,8 @@ def run_seestar_import(state, scan_s, args, only_targets=None):
             mw_verified_total += verified
             if keeper is not None:
                 kdst = os.path.join(dest_project_dir, f"{prefix}{a_stamp}.fit")
-                if not os.path.isfile(kdst):
+                if not os.path.isfile(kdst) or \
+                        state.is_imported(keeper["relpath"], keeper["size"]) != "yes":
                     try:
                         sha, _sz = copy_file_verified(keeper["path"], kdst, checksum=checksum)
                         _seestar_ledger_add(state, keeper, vol, camera, "mw-stack",
@@ -3066,10 +3383,19 @@ def run_seestar_import(state, scan_s, args, only_targets=None):
                         warn(f"Keeper copy failed: {e}")
                 kjpg = os.path.splitext(keeper["path"])[0] + ".jpg"
                 if os.path.isfile(kjpg):
+                    kjdst = os.path.join(dest_project_dir, f"{prefix}{a_stamp}.jpg")
                     try:
-                        shutil.copy2(kjpg, os.path.join(dest_project_dir, f"{prefix}{a_stamp}.jpg"))
-                    except OSError:
-                        pass
+                        jf = {"path": kjpg, "relpath": os.path.relpath(kjpg, vol),
+                              "filename": os.path.basename(kjpg),
+                              "size": os.path.getsize(kjpg)}
+                        if state.is_imported(jf["relpath"], jf["size"]) != "yes" \
+                                or not os.path.isfile(kjdst):
+                            sha, _sz = copy_file_verified(kjpg, kjdst, checksum=checksum)
+                            _seestar_ledger_add(state, jf, vol, camera, "mw-jpg",
+                                                t["name"], display,
+                                                dest_project_dir, sha, day=day)
+                    except Exception as e:
+                        warn(f"MW JPG copy failed: {e}")
             if verified:
                 state.history_event("import", device="seestar", target=t["name"],
                                     displayName=display, scope=scope_name,
@@ -3083,7 +3409,75 @@ def run_seestar_import(state, scan_s, args, only_targets=None):
         if mw_verified_total:
             totals["targets"] += 1
             dirs = [t["sub_dir"]] + ([t["project_dir"]] if t["project_dir"] else [])
-            cleanup.append((f"Milky Way (paired) ← {t['sub_name']}", dirs))
+            # MW dirs hold one keeper PER SESSION — never exempt "superseded"
+            # stacks there (pass-2 BLOCKER: an unledgered lower-N keeper is a
+            # different night's only copy, not a disposable duplicate)
+            cleanup.append((f"Milky Way (paired) ← {t['sub_name']}", dirs, False))
+
+    # ── JPEG riders (per-sub previews — S50 Pro first light, 2026-09-05) ──
+    # The S50 Pro writes a JPEG beside every sub. They back up like any
+    # frame — verified, ledgered, filed beside their sibling FIT — including
+    # CATCH-UP for fits imported before this existed (ledger sibling lookup
+    # supplies the right Day folder, so a later night can't misfile them).
+    cleanup_labels = {c[0] for c in cleanup}
+    mw_common_j = DSO_NAMES.get("MilkyWay", "Milky Way Core")
+    for t in scan_s["targets"]:
+        if t["skipped"] or not t.get("new_jpgs"):
+            continue
+        if only_targets is not None and t["name"] not in only_targets:
+            continue
+        display = seestar_display(state, t["project_name"], ask=False)
+        print("───────────────────────────────────────────────────────────────")
+        info(f"JPEG previews: {display} — {len(t['new_jpgs'])} new file(s)")
+        if dry_run:
+            log(f"[dry-run] Would copy {len(t['new_jpgs'])} JPEG(s) beside their FITs")
+            continue
+        done = jverified = 0
+        for jf in t["new_jpgs"]:
+            done += 1
+            sib = state.file_entry(os.path.splitext(jf["relpath"])[0] + ".fit")
+            if not sib or not sib.get("dest"):
+                warn(f"No imported sibling FIT for {jf['filename']} — left on camera")
+                continue
+            jname = jf["filename"]
+            if sib.get("sourceType") == "mw":
+                st = _stamp(jf["filename"]) or os.path.splitext(jf["filename"])[0]
+                disp = sib.get("displayName") or mw_common_j
+                dso = (disp[len(mw_common_j) + 3:]
+                       if disp.startswith(mw_common_j + " - ") else "")
+                jname = f"MilkyWay_{dso}_{st}.jpg" if dso else f"MilkyWay_{st}.jpg"
+            try:
+                os.makedirs(sib["dest"], exist_ok=True)
+                sha, _sz = copy_file_verified(jf["path"],
+                                              os.path.join(sib["dest"], jname),
+                                              checksum=checksum)
+                _seestar_ledger_add(
+                    state, jf, vol, camera,
+                    "mw-jpg" if sib.get("sourceType") == "mw" else "sub-jpg",
+                    t["name"], sib.get("displayName") or display,
+                    sib["dest"], sha, day=sib.get("dayNumber"),
+                    night=_seestar_file_night(jf["filename"]))
+                jverified += 1
+            except Exception as e:
+                warn(f"JPEG copy FAILED {jf['filename']}: {e}")
+            show_progress(done, len(t["new_jpgs"]), label="JPEGs")
+        if jverified:
+            success(f"Copied and verified {jverified} JPEG preview(s) beside their FITs")
+            state.save_ledger()
+            label = (f"Milky Way (paired) ← {t['sub_name']}" if t.get("is_mw")
+                     else display)
+            if label not in cleanup_labels:
+                dirs = ([t["sub_dir"]] if t["sub_dir"] else []) \
+                    + ([t["project_dir"]] if t["project_dir"] else [])
+                cleanup.append((label, dirs, not t.get("is_mw")))
+                cleanup_labels.add(label)
+            if not t["new"] and not t.get("new_stacks"):
+                # a jpg-only catch-up run still reports what it did
+                totals["files"] += jverified
+                state.history_event("import", device="seestar", target=t["name"],
+                                    displayName=display, scope=scope_name,
+                                    frames=jverified, jpegs=True)
+        print()
 
     # ── Mosaic panels ─────────────────────────────────────────────────────
     for ps in scan_s["panel_sets"]:
@@ -3126,13 +3520,18 @@ def run_seestar_import(state, scan_s, args, only_targets=None):
                                 frames=verified, panels=True)
             state.save_ledger()
             totals["files"] += verified
-            cleanup.append((f"{display} (panels)", [ps["pt_dir"]]))
+            cleanup.append((f"{display} (panels)", [ps["pt_dir"]], False))
         print()
 
-    # ── S50 non-DSO modes ─────────────────────────────────────────────────
+    # ── Non-DSO modes (Lunar/Solar/Planetary/Scenery), every model ───────
     for nd in scan_s["non_dso"]:
         if not nd["new"]:
             continue
+        if only_targets is not None and nd["dest_name"] not in only_targets \
+                and nd["src_name"] not in only_targets:
+            continue   # panel tick / --targets governs these too — either
+            #            the destination name ("Lunar") or the camera folder
+            #            name ("Lunar_photo") selects a mode
         dest_mode = os.path.join(dest_root, nd["dest_name"])
         print("───────────────────────────────────────────────────────────────")
         info(f"{nd['dest_name']}: {len(nd['new'])} new file(s)")
@@ -3157,7 +3556,7 @@ def run_seestar_import(state, scan_s, args, only_targets=None):
         if verified:
             totals["files"] += verified
             state.save_ledger()
-            cleanup.append((nd["dest_name"], [nd["src"]]))
+            cleanup.append((nd["dest_name"], [nd["src"]], False))
 
     # ── Receipt (per Seestar scope) ───────────────────────────────────────
     if not dry_run and receipt_sessions:
@@ -3177,49 +3576,73 @@ def run_seestar_import(state, scan_s, args, only_targets=None):
     return totals
 
 
-def seestar_safe_cleanup(state, scan_s, cleanup_candidates):
-    """SAFE-aware cleanup (Brett's chosen model): only offer source folders in
-    which EVERY .fit/video file is ledger-verified. Default No."""
-    vol = scan_s["volume"]
-    safe = []
-    for label, dirs in cleanup_candidates:
-        all_ok, total_bytes = True, 0
-        for d in dirs:
-            if not d or not os.path.isdir(d):
-                continue
-            # Superseded stacks (lower Stacked_N than the dir's highest) are
-            # disposable by the established keep-highest rule — they never
-            # enter the ledger and must not block the offer.
-            stack_best = {}
+def _seestar_unproven_files(state, vol, dirs, exempt_superseded=True):
+    """Files under `dirs` (on-camera paths) that the ledger cannot PROVE are
+    backed up — the every-file SAFE rule. Always exempt: camera thumbnails
+    (_thn) and macOS litter (._*, .DS_Store). Only where `exempt_superseded`
+    (DSO project dirs, where import itself enforces keep-highest): stacks
+    superseded by a higher Stacked_N in the same directory, and their JPG
+    siblings. MW dirs hold one keeper PER SESSION, so they never exempt.
+    Returns (unproven_names, proven_bytes)."""
+    unproven, proven_bytes = [], 0
+    for d in dirs:
+        if not d or not os.path.isdir(d):
+            continue
+        stack_best = {}
+        if exempt_superseded:
             for root, _dd, fnames in os.walk(d):
                 for fn in fnames:
                     ms = re.match(r"^Stacked_(\d+)_", fn)
                     if ms and int(ms.group(1)) > stack_best.get(root, -1):
                         stack_best[root] = int(ms.group(1))
-            for root, _dd, fnames in os.walk(d):
-                for fn in fnames:
-                    low = fn.lower()
-                    if "_thn" in low or low.endswith((".jpg", ".jpeg")):
-                        continue
-                    if not low.endswith((".fit", ".fits", ".mp4", ".avi", ".mov")):
-                        continue
-                    p = os.path.join(root, fn)
-                    try:
-                        size = os.path.getsize(p)
-                    except OSError:
-                        size = None
+        for root, _dd, fnames in os.walk(d):
+            for fn in fnames:
+                low = fn.lower()
+                if "_thn" in low or fn.startswith("._") or fn == ".DS_Store":
+                    continue   # thumbnails + macOS litter, not data
+                p = os.path.join(root, fn)
+                try:
+                    size = os.path.getsize(p)
+                except OSError:
+                    size = None
+                if exempt_superseded:
                     ms = re.match(r"^Stacked_(\d+)_", fn)
                     if ms and int(ms.group(1)) < stack_best.get(root, -1):
-                        total_bytes += size or 0   # superseded — deleted, not gating
+                        proven_bytes += size or 0   # superseded — disposable
                         continue
-                    rel = os.path.relpath(p, vol)
-                    e = state.file_entry(rel)
-                    if e is None or not e.get("verifiedAtImport") or e.get("size") != size:
-                        all_ok = False
-                    else:
-                        total_bytes += size or 0
-        if all_ok and total_bytes >= 0 and dirs:
+                rel = os.path.relpath(p, vol)
+                e = state.file_entry(rel)
+                if e is None or not e.get("verifiedAtImport") or e.get("size") != size:
+                    unproven.append(fn)
+                else:
+                    proven_bytes += size or 0
+    return unproven, proven_bytes
+
+
+def seestar_safe_cleanup(state, scan_s, cleanup_candidates):
+    """SAFE-aware cleanup (Brett's chosen model): only offer source folders in
+    which EVERY file is ledger-verified. Default No.
+
+    "Every file" means every file — including JPEGs and anything with an
+    extension this tool has never heard of (see _seestar_unproven_files for
+    the only exemptions). One unproven file makes the whole folder NOT SAFE,
+    and the refusal NAMES the files instead of going quiet (pass-2 finding)."""
+    vol = scan_s["volume"]
+    safe, blocked = [], []
+    for label, dirs, exempt_sup in cleanup_candidates:
+        dirs = [d for d in dirs if d]
+        if not dirs:
+            continue
+        unproven, total_bytes = _seestar_unproven_files(
+            state, vol, dirs, exempt_superseded=exempt_sup)
+        if unproven:
+            blocked.append((label, unproven))
+        else:
             safe.append((label, dirs, total_bytes))
+    for label, unproven in blocked:
+        shown = ", ".join(unproven[:4]) + ("…" if len(unproven) > 4 else "")
+        warn(f"NOT SAFE — {label}: {len(unproven)} file(s) on camera not "
+             f"proven backed up ({shown}). Folder left untouched.")
     if not safe:
         return
     print()
@@ -3242,7 +3665,12 @@ def seestar_safe_cleanup(state, scan_s, cleanup_candidates):
                 # relying on the next scan (which refuses to clear on empty).
                 relprefix = os.path.relpath(d, vol) + os.sep
                 for rp, e in state.ledger["files"].items():
+                    # Camera-scoped, like mark_cleared: relpaths repeat across
+                    # Seestars ("MyWorks/M 8_sub/…" exists on every unit), so
+                    # clearing THIS camera must not flag another's entries
+                    # (1.3.0 review finding).
                     if e.get("device") == "seestar" and rp.startswith(relprefix) \
+                            and e.get("camera", "ZWO Seestar S30 Pro") == scan_s["camera"] \
                             and not e.get("clearedFromCamera"):
                         e["clearedFromCamera"] = True
                         e["clearedNoticedAt"] = stamp
@@ -3259,7 +3687,7 @@ def seestar_baseline(state, scan_s):
     camera = scan_s["camera"]
     for t in scan_s["targets"]:
         display = seestar_display(state, t["project_name"], ask=False)
-        for f in t["files"] + t["stacks"]:
+        for f in t["files"] + t["stacks"] + t.get("jpgs", []):
             if state.file_entry(f["relpath"]) is None:
                 state.add_file(f["relpath"], **{
                     "filename": f["filename"], "size": f["size"], "sha256": None,
@@ -3304,7 +3732,9 @@ def seestar_baseline(state, scan_s):
 # app consumes the same contract.
 
 SCOPE_SLOT = {"Askar FRA400": 1, "Askar 107PHQ": 2,
-              "Seestar S30 Pro": 3, "Seestar S50": 3}  # fixed order; others → slot 3
+              "Seestar S30 Pro": 3, "Seestar S30": 3,
+              "Seestar S50": 3, "Seestar S50 Pro": 3}  # palette has 3 slots; all
+              # Seestars share slot 3 and are told apart by name in the legend
 
 DASHBOARD_TEMPLATE = r"""<!DOCTYPE html>
 <html lang="en"><head><meta charset="utf-8">
@@ -3609,13 +4039,27 @@ def run_scan_only(state):
             storages.append(f"ASIAir {human_size(d['used'])}/{human_size(d['total'])} "
                             f"({human_size(d['free'])} free)")
     if svol:
-        s = scan_seestar(state)
-        s_new = [t for t in s["targets"] if (t["new"] or t["new_stacks"]) and not t["skipped"]]
+        try:
+            s = scan_seestar(state)
+        except RuntimeError as e:
+            s = None
+            rows.append(f"   ✗ Seestar NOT scanned: {e}")
+    if svol and s:
+        s_new = [t for t in s["targets"]
+                 if (t["new"] or t["new_stacks"] or t.get("new_jpgs"))
+                 and not t["skipped"]]
         s_panels = [p for p in s["panel_sets"] if p["new"]]
         s_nd = [n for n in s["non_dso"] if n["new"]]
         total_new += len(s_new) + len(s_panels) + len(s_nd)
-        n_files += sum(len(t["new"]) for t in s_new) + sum(len(p["new"]) for p in s_panels)
-        n_bytes += sum(sum(f["size"] for f in t["new"]) for t in s_new)
+        n_files += (sum(len(t["new"]) + len(t["new_stacks"])
+                        + len(t.get("new_jpgs") or []) for t in s_new)
+                    + sum(len(p["new"]) for p in s_panels)
+                    + sum(len(n["new"]) for n in s_nd))
+        n_bytes += (sum(sum(f["size"] for f in
+                            t["new"] + t["new_stacks"] + (t.get("new_jpgs") or []))
+                        for t in s_new)
+                    + sum(sum(f["size"] for f in p["new"]) for p in s_panels)
+                    + sum(sum(f["size"] for f in n["new"]) for n in s_nd))
         for t in sorted(s_new, key=lambda t: -len(t["new"]))[:4]:
             disp = seestar_display(state, t["project_name"])
             rows.append(f"   {'[Seestar] ' if both else ''}{disp}  —  {len(t['new']):,} frame(s)")
@@ -3623,6 +4067,17 @@ def run_scan_only(state):
             d = s["disk"]
             storages.append(f"Seestar {human_size(d['used'])}/{human_size(d['total'])} "
                             f"({human_size(d['free'])} free)")
+        for u in s.get("unhandled", []):
+            rows.append(f"   ⚠ NOT handled by this tool: {u['name']} "
+                        f"({u['files']} file(s)) — on camera, not backed up")
+        for xv in s.get("extra_volumes", []):
+            rows.append(f"   ⚠ Another Seestar mounted at {xv} — one at a time")
+        attention = len(s.get("unhandled", [])) + len(s.get("extra_volumes", []))
+    elif svol:
+        attention = 1   # the identity check refused the scan — needs a look
+    else:
+        attention = 0
+    unhandled_n = attention
 
     if not state.has_ledger():
         summary = "No import ledger yet — first run will offer a baseline."
@@ -3630,10 +4085,17 @@ def run_scan_only(state):
         lines = [f"{total_new} target(s) have new frames — "
                  f"{n_files:,} files, {human_size(n_bytes)}", ""] + rows
         summary = "\\n".join(lines)
+    elif unhandled_n or (svol and not s):
+        # Never say "every frame is backed up" over data we couldn't read
+        # (unhandled folders, or a scan the identity check refused)
+        summary = "\\n".join(
+            ["Nothing new that this tool recognises — attention needed:", ""]
+            + rows)
     else:
         summary = "Nothing new. Every frame is backed up."
     storage = " · ".join(storages) if storages else "Camera storage: unknown"
     print(f"ASIAIR-SCAN|COUNT|{total_new}")
+    print(f"ASIAIR-SCAN|ATTENTION|{attention}")
     print(f"ASIAIR-SCAN|SUMMARY|{summary}")
     print(f"ASIAIR-SCAN|STORAGE|{storage}")
 
@@ -3687,15 +4149,25 @@ def run_pick(state, args):
                             f"{scope}"))
     svol = seestar_volume()
     if svol:
-        s = scan_seestar(state)
+        try:
+            s = scan_seestar(state)
+        except RuntimeError as e:
+            error(f"Seestar NOT scanned: {e}")
+            s = None
+            svol = None
+    if svol:
         for t in sorted([t for t in s["targets"]
-                         if (t["new"] or t["new_stacks"]) and not t["skipped"]],
+                         if (t["new"] or t["new_stacks"] or t.get("new_jpgs"))
+                         and not t["skipped"]],
                         key=lambda t: -len(t["new"])):
             idx += 1
             disp = seestar_display(state, t["project_name"], ask=True, dry_run=args.dry_run)
-            nb = sum(f["size"] for f in t["new"])
+            n_new = (len(t["new"]) or len(t.get("new_stacks") or [])
+                     or len(t.get("new_jpgs") or []))
+            nb = (sum(f["size"] for f in t["new"])
+                  or sum(f["size"] for f in t.get("new_jpgs") or []))
             entries.append(("seestar", t["name"],
-                            f"{idx} · {disp} — {len(t['new'])} new "
+                            f"{idx} · {disp} — {n_new} new "
                             f"({human_size(nb)}) — Seestar {s['model']}"))
         for p in s["panel_sets"]:
             if p["new"]:
@@ -3703,6 +4175,13 @@ def run_pick(state, args):
                 disp = seestar_display(state, p["mosaic_name"]) + " (panels)"
                 entries.append(("seestar", p["mosaic_name"].split("_mosaic")[0],
                                 f"{idx} · {disp} — {len(p['new'])} new panel(s)"))
+        for nd in s["non_dso"]:
+            if nd["new"]:
+                idx += 1
+                entries.append(("seestar", nd["dest_name"],
+                                f"{idx} · {nd['dest_name']} "
+                                f"({nd['src_name'].replace('_', ' ')}) — "
+                                f"{len(nd['new'])} new file(s)"))
     if not entries:
         info("Nothing new to import.")
         return
@@ -3730,7 +4209,11 @@ def run_pick(state, args):
     if chosen_a:
         run_import(state, args, only_targets=chosen_a)
     if chosen_s:
-        sscan = scan_seestar(state)
+        try:
+            sscan = scan_seestar(state)
+        except RuntimeError as e:
+            error(f"Seestar NOT imported: {e}")
+            sscan = None
         if sscan:
             if not args.dry_run:
                 state.mark_cleared(sscan["relpaths"], device="seestar",
@@ -3955,6 +4438,13 @@ def main():
 
         # First run: no ledger → offer restore, then baseline
         if not state.has_ledger():
+            if getattr(state, "ledger_corrupt", False):
+                error("ledger.json EXISTS but is unreadable (and no usable "
+                      ".bak). Refusing to treat this as a first run — a "
+                      "baseline now would mark never-copied files as "
+                      "imported. Restore the ledger from the iCloud mirror "
+                      "or a backup, then rerun.")
+                sys.exit(1)
             warn("No import ledger found.")
             if os.path.isfile(os.path.join(MIRROR_DIR, "ledger.json")):
                 if state.restore_from_mirror():
@@ -4007,7 +4497,16 @@ def main():
         if asiair_here:
             run_import(state, args, only_targets=only)
         if svol:
-            sscan = scan_seestar(state)
+            try:
+                sscan = scan_seestar(state)
+            except RuntimeError as e:
+                # The designed identity refusal — a clean message, never a
+                # traceback (pass-2 finding). Nothing was scanned or written.
+                error(f"Seestar NOT imported: {e}")
+                sscan = None
+                if not asiair_here:
+                    sys.exit(1)
+        if svol and sscan:
             if not args.dry_run:
                 state.mark_cleared(sscan["relpaths"], device="seestar",
                                    camera=sscan["camera"])

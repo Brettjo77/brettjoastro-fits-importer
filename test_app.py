@@ -280,6 +280,78 @@ try:
     s = wait_for(lambda s: s["status"] == "idle" and s["scan"])
     check("T7 rescan shows nothing new",
           all(t["new"] == 0 for t in s["scan"]["targets"]), json.dumps(s["scan"])[:200])
+    check("T7 scan payload carries the honesty notes field",
+          "notes" in s["scan"], json.dumps(list(s["scan"].keys())))
+
+    # ── T8: only the local page may drive the panel (Host/Origin gate) ──
+    import http.client
+
+    def raw_status(method, path, host_hdr, origin=None, body=None):
+        c = http.client.HTTPConnection("127.0.0.1", PORT, timeout=10)
+        headers = {"Host": host_hdr, "Content-Type": "application/json"}
+        if origin:
+            headers["Origin"] = origin
+        c.request(method, path,
+                  body=json.dumps(body) if body is not None else None,
+                  headers=headers)
+        st = c.getresponse().status
+        c.close()
+        return st
+
+    check("T8 spoofed Host is refused (DNS rebinding shield)",
+          raw_status("POST", "/api/scan", "evil.example.com", body={}) == 403)
+    check("T8 foreign Origin is refused (drive-by POST shield)",
+          raw_status("POST", "/api/answer", f"127.0.0.1:{PORT}",
+                     origin="https://evil.example.com",
+                     body={"value": "y"}) == 403)
+    check("T8 the local page itself still passes",
+          raw_status("GET", "/api/ping", f"127.0.0.1:{PORT}",
+                     origin=f"http://127.0.0.1:{PORT}") == 200)
+
+    # ── T9: an answer only lands on the question that is actually pending ──
+    check("T9 an answer with no question pending is ignored",
+          api("/api/answer", {"value": "y"}).get("ok") is False)
+    env.add_seestar_sub("M 42", "20260620-231500")
+    api("/api/scan", {})
+    wait_for(lambda s: s["status"] == "idle" and s["scan"])
+    api("/api/import", {"names": ["M 42"]})
+    s = wait_for(lambda s: s["question"] is not None, timeout=90)
+    qid = s["question"]["id"]
+    stale = api("/api/answer", {"id": 999999, "value": "y"})
+    s2 = api("/api/state")
+    check("T9 a stale-id answer is refused and the card survives",
+          stale.get("ok") is False and s2["question"] is not None
+          and s2["question"]["id"] == qid, json.dumps(s2.get("question")))
+    check("T9 the matching-id answer resolves the card",
+          api("/api/answer", {"id": qid, "value": "n"}).get("ok") is True)
+    wait_for(lambda s: s["status"] == "idle", timeout=120)
+    check("T9 declining kept the source on the Seestar (default-No intact)",
+          os.path.isdir(os.path.join(env.myworks, "M 42_sub")))
+
+    # ── T10: a JPEG-only catch-up is visible and importable from the panel ──
+    with open(os.path.join(env.myworks, "M 42_sub", "20260620-231500.jpg"),
+              "wb") as jf:
+        jf.write(b"\xff\xd8\xff\xe0panel-jpg" + b"k" * 300)
+    api("/api/scan", {})
+    s = wait_for(lambda s: s["status"] == "idle" and s["scan"])
+    m42 = [t for t in s["scan"]["targets"] if t["name"] == "M 42"]
+    check("T10 jpg-only catch-up shows as a target row with new work",
+          m42 and m42[0]["new"] == 1, json.dumps(m42))
+    api("/api/import", {"names": ["M 42"]})
+    s = wait_for(lambda s: s["question"] is not None or s["status"] == "idle",
+                 timeout=90)
+    while s["question"] is not None:
+        api("/api/answer", {"id": s["question"]["id"], "value": "n"})
+        time.sleep(0.4)
+        s = wait_for(lambda s: s["question"] is not None or s["status"] == "idle",
+                     timeout=90)
+    wait_for(lambda s: s["status"] == "idle", timeout=120)
+    led = env.ledger()
+    pj = [e for e in led["files"].values() if e.get("sourceType") == "sub-jpg"]
+    check("T10 the JPEG imported, verified, into its sibling's Day folder",
+          len(pj) == 1 and pj[0].get("verifiedAtImport")
+          and os.path.isfile(os.path.join(pj[0]["dest"], "20260620-231500.jpg")),
+          json.dumps(pj))
 finally:
     proc.terminate()
 

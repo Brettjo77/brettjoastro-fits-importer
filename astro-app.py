@@ -25,6 +25,7 @@ import subprocess
 import sys  # noqa: F401  (kept for parity)
 import threading
 import time
+import urllib.parse
 import webbrowser
 from collections import deque
 from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
@@ -68,11 +69,13 @@ class App:
                 piece = piece.rstrip()
                 if not piece:
                     continue
-                # progress lines overwrite the previous progress line
-                if piece.lstrip().startswith(("Copying [", "Backing up calibration [",
-                                              "Reconciling [", "Verifying [")):
-                    if self.log and self.log[-1].lstrip().startswith(piece.lstrip().split("[")[0]):
-                        self.log.pop()
+                # ANY progress line overwrites the previous line of the same
+                # label — matched by shape, not by a hardcoded label list
+                # (the "319 stacked JPEG bars" incident, 2026-09-05)
+                m = re.match(r"^(.*?) \[[█░]+\] \d+/\d+ \(\d+%\)$", piece.lstrip())
+                if m and self.log and \
+                        self.log[-1].lstrip().startswith(m.group(1) + " ["):
+                    self.log.pop()
                 self.log.append(piece)
 
     def flush(self):
@@ -96,9 +99,18 @@ class App:
         self._answer = None
         return ans
 
-    def answer(self, value):
+    def answer(self, value, qid=None):
+        """Accept an answer only for the question that is actually pending —
+        a stale click must never resolve a later, more dangerous prompt
+        (e.g. a flats answer landing on the delete-from-camera card)."""
+        q = self.question
+        if q is None:
+            return False
+        if qid is not None and str(qid) != str(q.get("id")):
+            return False
         self._answer = value
         self._answer_evt.set()
+        return True
 
     # ── engine operations (each runs in a worker thread) ────────────────
     def _camera_ok(self):
@@ -125,10 +137,14 @@ class App:
             got_lock = False
             try:
                 with contextlib.redirect_stdout(self), contextlib.redirect_stderr(self):
-                    if label in ("importing",):
+                    if label in ("importing", "reporting"):
+                        # The report saves the ledger too — saving over a
+                        # running CLI import would drop its entries, so both
+                        # take the same engine lock.
                         got_lock = eng.acquire_lock()
                         if not got_lock:
-                            self.last_result = "Another import is running (CLI?) — try again."
+                            self.last_result = ("Another import is running "
+                                                "(CLI?) — try again shortly.")
                             return
                     fn()
             except Exception as e:
@@ -220,16 +236,25 @@ class App:
                     })
                 if scan["disk"]:
                     disks.append({"label": "ASIAir", **scan["disk"]})
+            scan_notes = []
             s = eng.scan_seestar(state)
             if s:
                 for t in s["targets"]:
-                    nb = sum(f["size"] for f in t["new"])
+                    # a target with only new stacks (sub saving off) or only
+                    # new JPEG riders (catch-up) is still importable work —
+                    # and stacks + JPEGs together count together
+                    n_new = (len(t["new"])
+                             or (len(t.get("new_stacks") or [])
+                                 + len(t.get("new_jpgs") or [])))
+                    nb = (sum(f["size"] for f in t["new"])
+                          or (sum(f["size"] for f in t.get("new_stacks") or [])
+                              + sum(f["size"] for f in t.get("new_jpgs") or [])))
                     targets.append({
                         "name": t["name"], "device": "seestar",
                         "display": eng.seestar_display(state, t["project_name"]),
                         "source": "", "skipped": t["skipped"],
                         "scope": s["camera"].replace("ZWO ", ""),
-                        "files": len(t["files"]), "new": len(t["new"]),
+                        "files": len(t["files"]), "new": n_new,
                         "newBytes": nb,
                         "totalBytes": sum(f["size"] for f in t["files"]),
                         "hours": None,
@@ -249,8 +274,33 @@ class App:
                             "hours": None,
                             "lastStamp": last_stamp(p["files"]),
                         })
+                for nd in s["non_dso"]:
+                    if nd["new"]:
+                        # Mode folders (Solar/Lunar/…) are ordinary tickable
+                        # rows now — no more invisible riders on an import
+                        targets.append({
+                            "name": nd["dest_name"], "device": "seestar",
+                            "display": f"{nd['dest_name']} — "
+                                       f"{nd['src_name'].replace('_', ' ')}",
+                            "source": "", "skipped": False,
+                            "scope": s["camera"].replace("ZWO ", ""),
+                            "files": len(nd["files"]), "new": len(nd["new"]),
+                            "newBytes": sum(f["size"] for f in nd["new"]),
+                            "totalBytes": sum(f["size"] for f in nd["files"]),
+                            "hours": None,
+                            "lastStamp": last_stamp(nd["files"]),
+                        })
                 if s["disk"]:
                     disks.append({"label": f"Seestar {s['model']}", **s["disk"]})
+                notes = []
+                for u in s.get("unhandled", []):
+                    notes.append(f"On camera, NOT handled by this tool: "
+                                 f"{u['name']} ({u['files']} file(s)) — not "
+                                 f"backed up, left untouched")
+                for xv in s.get("extra_volumes", []):
+                    notes.append(f"Another Seestar is mounted at {xv} — one "
+                                 f"camera at a time (this scan: {s['volume']})")
+                scan_notes = notes
             try:
                 dest_plan = eng.preview_dest_plan(state, scan_a, s or None)
             except Exception as e:
@@ -274,6 +324,7 @@ class App:
                 "disks": disks,
                 "disk": disks[0] if disks else None,
                 "hasLedger": state.has_ledger(),
+                "notes": scan_notes,
             }
             self.scanned_at = time.strftime("%H:%M:%S")
             self.logline(f"▸ Scan: {self.scan['newTargets']} target(s) with new frames, "
@@ -412,6 +463,30 @@ class Handler(BaseHTTPRequestHandler):
     def log_message(self, *a):                # silence request logging
         pass
 
+    def _local_ok(self):
+        """Only the local panel page may talk to this server. Any web page in
+        the same browser can POST to 127.0.0.1 blind (and DNS rebinding fakes
+        the host), so every request must carry a local Host — and, if a
+        browser sent an Origin at all, a local Origin too."""
+        raw = (self.headers.get("Host") or "").strip().lower()
+        if raw.startswith("["):                    # [::1]:8765
+            host = raw[1:].split("]", 1)[0]
+        else:
+            host = raw.split(":", 1)[0]
+        if host not in ("127.0.0.1", "localhost", "::1"):
+            return False
+        origin = self.headers.get("Origin")
+        if origin:
+            # "null" (sandboxed iframes) is spoofable and never sent by our
+            # own page — refuse it like any foreign origin (pass-2 finding)
+            try:
+                ohost = urllib.parse.urlsplit(origin.lower()).hostname
+            except ValueError:
+                return False
+            if ohost not in ("127.0.0.1", "localhost", "::1"):
+                return False
+        return True
+
     def _json(self, obj, code=200):
         body = json.dumps(obj).encode()
         self.send_response(code)
@@ -438,6 +513,9 @@ class Handler(BaseHTTPRequestHandler):
             return {}
 
     def do_GET(self):
+        if not self._local_ok():
+            self._json({"error": "forbidden"}, 403)
+            return
         if self.path == "/" or self.path.startswith("/index"):
             self._html(PAGE)
         elif self.path == "/api/ping":
@@ -458,6 +536,9 @@ class Handler(BaseHTTPRequestHandler):
             self._json({"error": "not found"}, 404)
 
     def do_POST(self):
+        if not self._local_ok():
+            self._json({"error": "forbidden"}, 403)
+            return
         body = self._read_body()
         if self.path == "/api/scan":
             self._json({"started": APP.do_scan()})
@@ -473,8 +554,8 @@ class Handler(BaseHTTPRequestHandler):
         elif self.path == "/api/eject":
             self._json({"started": APP.do_eject()})
         elif self.path == "/api/answer":
-            APP.answer(str(body.get("value", "")))
-            self._json({"ok": True})
+            ok = APP.answer(str(body.get("value", "")), qid=body.get("id"))
+            self._json({"ok": bool(ok)})
         else:
             self._json({"error": "not found"}, 404)
 
@@ -687,6 +768,9 @@ iframe{width:100%;height:calc(100vh - 180px);border:1px solid var(--line);border
 .pairrow input.caldec:checked+span{color:var(--ink)}
 .pairrow.qrow{cursor:default}
 .qdot{width:8px;height:8px;border-radius:50%;background:var(--warning);flex:0 0 auto}
+.scannote{border:1px solid color-mix(in srgb, var(--warning) 55%, transparent);
+  background:color-mix(in srgb, var(--warning) 7%, var(--surface));
+  border-radius:9px;padding:7px 10px;margin:0 0 8px;font-size:12.5px;line-height:1.45}
 .qnote{font-size:11px;font-weight:600;color:var(--warning);margin-left:4px;
   background:color-mix(in srgb, var(--warning) 12%, transparent);
   padding:1px 8px;border-radius:999px}
@@ -835,6 +919,10 @@ function scopeChip(t){
          + (t.source ? `<span class="chip plain">${esc(t.source)}</span>` : "");
 }
 
+function notesHtml(scan){
+  if(!scan.notes||!scan.notes.length) return "";
+  return scan.notes.map(n=>`<div class="scannote">⚠ ${esc(n)}</div>`).join("");
+}
 function invSection(scan){
   const backed=scan.targets.filter(t=>!(t.new>0 && !t.skipped))
       .sort(byNewest);   // date order, most recent shooting at the top
@@ -857,12 +945,15 @@ function renderTargets(scan){
       .sort((a,b)=>byNewest(a,b)||b.new-a.new);   // most recent night first
   if(!withNew.length){
     const n=scan.targets.filter(t=>!t.skipped).length;
-    box.innerHTML = scan.hasLedger
-      ? `<div class="clear"><div class="ring">
+    const attn=(scan.notes||[]).length;
+    box.innerHTML = !scan.hasLedger
+      ? `<div class="clear"><b>No ledger yet</b><span>Run the baseline once from Terminal:<br>python3 ~/bin/astro-import.py --baseline</span></div>`
+      : attn
+      ? `<div class="clear"><b>Nothing new that this tool recognises</b><span>${attn} item(s) on the camera need a look — see the notes below.</span></div>`
+      : `<div class="clear"><div class="ring">
            <svg viewBox="0 0 24 24" fill="none"><path d="M4.5 12.5l5 5 10-11" stroke="var(--good)" stroke-width="2.6" stroke-linecap="round" stroke-linejoin="round"/></svg>
-         </div><b>All backed up</b><span>Every frame across ${n} targets is safe in the ledger.</span></div>`
-      : `<div class="clear"><b>No ledger yet</b><span>Run the baseline once from Terminal:<br>python3 ~/bin/astro-import.py --baseline</span></div>`;
-    $("#invBox").innerHTML = invSection(scan);
+         </div><b>All backed up</b><span>Every frame across ${n} targets is safe in the ledger.</span></div>`;
+    $("#invBox").innerHTML = notesHtml(scan) + invSection(scan);
     $("#btnImport").disabled=true;
     $("#btnImport").textContent="Import selected";
     $("#scanEyebrow").textContent="Targets";
@@ -881,7 +972,7 @@ function renderTargets(scan){
         <div class="small">frames · ${fmtGB(t.newBytes)}</div>
       </div>
     </label>`).join("");
-  $("#invBox").innerHTML = invSection(scan);
+  $("#invBox").innerHTML = notesHtml(scan) + invSection(scan);
   box.querySelectorAll(".sel").forEach(c=>c.addEventListener("change",updateImportBtn));
   updateImportBtn();
 }
@@ -911,8 +1002,8 @@ function renderQuestion(q){
                 ?'<button id="qyes">Yes</button><button class="primary" id="qno">No</button>'
                 :'<button class="primary" id="qyes">Yes</button><button id="qno">No</button>')}
     </div></div>`;
-  $("#qyes").onclick=()=>api("/api/answer",{value:isText?($("#qval").value||""):"y"});
-  $("#qno").onclick=()=>api("/api/answer",{value:isText?"":"n"});
+  $("#qyes").onclick=()=>api("/api/answer",{id:q.id,value:isText?($("#qval").value||""):"y"});
+  $("#qno").onclick=()=>api("/api/answer",{id:q.id,value:isText?"":"n"});
   if(isText) $("#qval").focus();
 }
 
@@ -959,9 +1050,11 @@ function renderDestPlan(){
         if(c.ask) cal+=` <span class="dask">flats ask at import</span>`;
         h+=`<div class="drow">${pipe}&nbsp;&nbsp;&nbsp;└─ ${cal}</div>`;
       } else {
-        if(e.files)
+        if(e.files && e.dayFolder)
           h+=`<div class="drow">${pipe}${e.stack?"├─":"└─"} <span class="dfold">${esc(e.dayFolder)}/</span> `+
              `<span class="dmeta">${e.files.toLocaleString()} lights · ${fmtGB(e.bytes)}</span></div>`;
+        else if(e.files)
+          h+=`<div class="drow">${pipe}${e.stack?"├─":"└─"} <span class="dmeta">${e.files.toLocaleString()} file(s) · ${fmtGB(e.bytes)}${e.continuing?" · joins existing folder":""}</span></div>`;
         if(e.stack)
           h+=`<div class="drow">${pipe}└─ <span class="dfold">${esc(e.stack.filename)}</span> `+
              `<span class="dmeta">${e.stack.subs.toLocaleString()} subs · replaces any older stack</span></div>`;

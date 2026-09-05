@@ -75,6 +75,7 @@ class Env:
         self.sdest30 = os.path.join(self.root, "dest", "Seestar S30 Pro")
         self.sdest30o = os.path.join(self.root, "dest", "Seestar S30")
         self.sdest50 = os.path.join(self.root, "dest", "Seestar S50")
+        self.sdest50p = os.path.join(self.root, "dest", "Seestar S50 Pro")
         self.lib = os.path.join(self.root, "dest", "ASIAir Calibration Library")
         self.state = os.path.join(self.root, "state")
         self.mirror = os.path.join(self.root, "mirror")
@@ -97,10 +98,14 @@ class Env:
             "SEESTAR_VOLUME": self.svol,
             "SEESTAR_DEST_S30": self.sdest30, "SEESTAR_DEST_S50": self.sdest50,
             "SEESTAR_DEST_S30_ORIG": self.sdest30o,
+            "SEESTAR_DEST_S50PRO": self.sdest50p,
         })
 
-    def run(self, *args, stdin=""):
-        return subprocess.run([sys.executable, SCRIPT, *args], env=self.env,
+    def run(self, *args, stdin="", extra_env=None):
+        env = dict(self.env)
+        if extra_env:
+            env.update(extra_env)
+        return subprocess.run([sys.executable, SCRIPT, *args], env=env,
                               input=stdin, capture_output=True, text=True, timeout=120)
 
     def ledger(self):

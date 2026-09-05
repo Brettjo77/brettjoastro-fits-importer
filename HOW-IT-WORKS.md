@@ -41,9 +41,11 @@ never re-imports things you archived, and why it can tell you months later
 exactly what a given night produced.
 
 The ledger lives in your Mac's Application Support folder, and a mirror copy
-is continuously published to iCloud — so even a full machine rebuild can't
-erase the tool's memory. (This has been tested by fire: one full Mac wipe,
-zero history lost.)
+is continuously published to a second folder of your choosing. Point that
+mirror at iCloud Drive (a one-line setting, and how the author runs it) and
+even a full machine rebuild can't erase the tool's memory — tested by fire:
+one full Mac wipe, zero history lost. Left at its default, the mirror is
+another folder on the same disk: browsable, but not rebuild-proof.
 
 ## Day folders
 
@@ -69,9 +71,16 @@ how many frames, what date, what rotation, versus what your lights used.
 
 The Seestar fills up, and sooner or later you'll want to clear it. The tool
 will only ever offer to delete a camera folder when **every single file in
-it** passes the fingerprint test against your Mac's copies — that's what the
-word SAFE means in the offer. The default answer is always No; nothing is
-deleted without your explicit Yes.
+it** passes the fingerprint test against your Mac's copies — every file,
+JPEG previews and all, which is why photo modes back up their JPEGs
+verified alongside the FITs. One unproven file makes the whole folder NOT
+SAFE. That's what the word SAFE means in the offer. The default answer is
+always No; nothing is deleted without your explicit Yes.
+
+And when the camera holds something the tool does not understand — a new
+firmware folder, a file type it has never seen — it says so, plainly, on
+the panel and in every report: *on camera, not backed up by this tool*.
+What it cannot read, it will never call safe.
 
 The ASIAir is different: it is treated as a **backup of record**, and the
 tool will never offer to delete anything from it, full stop.
@@ -80,7 +89,7 @@ tool will never offer to delete anything from it, full stop.
 
 The same importer serves the ZWO ASIAir (recognising which telescope shot
 each session from the optics' focal length) and multiple Seestars — S30 Pro,
-original S30, S50 — each identified from its own files and given its own
+original S30, S50, S50 Pro — each identified from its own files and given its own
 folder tree, its own day numbering, and its own presence-tracking. Plug in
 whichever camera you like; the tool works out the rest.
 
