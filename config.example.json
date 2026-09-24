@@ -1,5 +1,5 @@
 {
-  "//": "BrettjoAstro FITS Importer — optional path overrides. Copy this file to ~/Library/Application Support/Astro Import/config.json and edit. Precedence: environment variable > this file > built-in default. All paths may use ~.",
+  "//": "BrettjoAstro FITS Importer — optional path overrides. Copy this file to ~/Library/Application Support/Astro Import/config.json (Mac) or %LOCALAPPDATA%\\Astro Import\\config.json (Windows) and edit. Precedence: environment variable > this file > built-in default. All paths may use ~. The defaults below are the Mac's; on Windows the same ~/Documents/Astro paths land in your user folder on C:, and the archive default is E:\\Astro Image Data. See PARITY.md for every key on both platforms.",
 
   "ASIAIR_DEST": "~/Documents/Astro/ZWO ASI AIR",
   "ASIAIR_CAL_LIBRARY": "~/Documents/Astro/ASIAir Calibration Library",

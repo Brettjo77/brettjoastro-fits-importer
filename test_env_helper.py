@@ -100,6 +100,10 @@ class Env:
             "SEESTAR_DEST_S30_ORIG": self.sdest30o,
             "SEESTAR_DEST_S50PRO": self.sdest50p,
             "ASTRO_ARCHIVE_MOUNT": os.path.join(self.root, "archive-mount"),
+            # never look at the real machine's drives/volumes during a test
+            "ASTRO_DRIVE_ROOTS": os.path.join(self.root, "no-real-drives"),
+            # the same UTF-8 everywhere (Windows consoles default to cp1252)
+            "PYTHONUTF8": "1", "PYTHONIOENCODING": "utf-8",
         })
         self.archive = os.path.join(self.root, "archive-mount")
 
@@ -108,7 +112,8 @@ class Env:
         if extra_env:
             env.update(extra_env)
         return subprocess.run([sys.executable, SCRIPT, *args], env=env,
-                              input=stdin, capture_output=True, text=True, timeout=120)
+                              input=stdin, capture_output=True, text=True,
+                              encoding="utf-8", errors="replace", timeout=120)
 
     def ledger(self):
         with open(os.path.join(self.state, "ledger.json")) as f:

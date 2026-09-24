@@ -143,6 +143,27 @@ original S30, S50, S50 Pro — each identified from its own files and given its 
 folder tree, its own day numbering, and its own presence-tracking. Plug in
 whichever camera you like; the tool works out the rest.
 
+## Mac or Windows — or both
+
+The same importer runs on a Mac and on a Windows 11 PC, built from one set
+of files with one version number, so both do exactly the same things (the
+few unavoidable differences, like how a plugged-in camera is noticed, are
+listed in PARITY.md). On Windows a camera arrives as a drive letter, and the
+tool recognises it by what is on it — an `Autorun` folder is the ASIAir, a
+`MyWorks` folder is a Seestar.
+
+Each computer keeps **its own ledger**. They are never merged or shared:
+a ledger describes copies on *that* machine, and the SAFE rule must never
+trust a copy that lives somewhere else. Each publishes to its own mirror
+folder, writes its own ship log on the archive, and refuses to adopt the
+other's ledger. What *can* travel between them is settings — your custom
+target names, the never-import list and the scope table — with one export
+and one import.
+
+In the author's setup the PC holds the archive (E:) and does the stacking on
+its fast C: drive, so a Windows import lands on C: like the Mac's does in
+Documents, and is then filed into the archive on E: and verified there.
+
 ## When things go wrong
 
 Interruptions are expected, not exceptional. A copy that dies mid-file leaves

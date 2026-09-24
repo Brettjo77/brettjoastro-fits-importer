@@ -27,7 +27,8 @@ Modes:
   --no-checksum          size-only verification at import
   --dry-run --verbose --all
 
-Requires: Python 3.9+, astropy (pip3 install astropy --break-system-packages)
+Runs on macOS and Windows 11 from this one file — same version, same
+capabilities (see PARITY.md). Requires: Python 3.9+ and astropy.
 ==============================================================================
 """
 
@@ -38,12 +39,20 @@ import math
 import os
 import re
 import shutil
+import socket
 import subprocess
 import sys
 import threading
+import uuid
 import time
 from collections import defaultdict
 from datetime import datetime, timedelta
+
+# One version for every platform (1.5.0: the Windows 11 edition joins the Mac).
+VERSION = "1.5.1"
+IS_WINDOWS = os.name == "nt"
+IS_MAC = sys.platform == "darwin"
+PLATFORM = "windows" if IS_WINDOWS else ("mac" if IS_MAC else "linux")
 
 # ── Lazy astropy ─────────────────────────────────────────────────────────────
 _fits = None
@@ -55,8 +64,14 @@ def get_fits():
             from astropy.io import fits as _f
             _fits = _f
         except ImportError:
-            error("astropy not installed. Run:")
-            error("  pip3 install astropy --break-system-packages")
+            # name the interpreter that is actually running (the old hint
+            # named Apple's python even when python.org's was in use)
+            error("astropy not installed for this Python. Run:")
+            if IS_WINDOWS:
+                error(f'  "{sys.executable}" -m pip install --user astropy')
+            else:
+                error(f"  {sys.executable} -m pip install astropy"
+                      + (" --break-system-packages" if sys.executable.startswith("/usr/bin/") else ""))
             sys.exit(1)
     return _fits
 
@@ -69,8 +84,15 @@ def get_fits():
 # config.json lives next to the ledger (~/Library/Application Support/
 # Astro Import/config.json) and lets any user relocate destinations without
 # touching this script — see config.example.json in the repo.
+# Per-platform homes for state (the ledger) — the only default that differs
+# by OS besides where cameras and the archive appear (PARITY.md).
+if IS_WINDOWS:
+    _DEF_STATE = os.path.join(os.environ.get("LOCALAPPDATA")
+                              or os.path.expanduser("~/AppData/Local"), "Astro Import")
+else:
+    _DEF_STATE = "~/Library/Application Support/Astro Import"
 _CONFIG_PATH = os.path.expanduser(os.environ.get(
-    "ASIAIR_CONFIG", "~/Library/Application Support/Astro Import/config.json"))
+    "ASIAIR_CONFIG", os.path.join(_DEF_STATE, "config.json")))
 try:
     with open(_CONFIG_PATH) as _cf:
         _CONFIG = json.load(_cf)
@@ -83,20 +105,31 @@ def _env_path(var, default):
     value = os.environ.get(var) or _CONFIG.get(var) or default
     return os.path.expanduser(value)
 
-ASIAIR_VOLUME = _env_path("ASIAIR_VOLUME", "/Volumes/ASIAIR")
+# On Windows cameras arrive as drive letters, found by what is ON them
+# (Autorun\ = ASIAir, MyWorks\ = Seestar) — see refresh_camera_volumes().
+ASIAIR_VOLUME_FIXED = bool(os.environ.get("ASIAIR_VOLUME") or _CONFIG.get("ASIAIR_VOLUME"))
+ASIAIR_VOLUME = _env_path("ASIAIR_VOLUME", "/Volumes/ASIAIR" if not IS_WINDOWS
+                          else os.path.join(_DEF_STATE, "no ASIAir drive connected"))
 DEST_DIR      = _env_path("ASIAIR_DEST", "~/Documents/Astro/ZWO ASI AIR")
 LIBRARY_DIR   = _env_path("ASIAIR_CAL_LIBRARY", "~/Documents/Astro/ASIAir Calibration Library")
-STATE_DIR     = _env_path("ASIAIR_STATE", "~/Library/Application Support/Astro Import")
+STATE_DIR     = _env_path("ASIAIR_STATE", _DEF_STATE)
 MIRROR_DIR    = _env_path("ASIAIR_MIRROR", "~/Documents/Astro/Import Status")
 # The archive on the PC, as mounted on this Mac (SMB share). --ship files
 # verified frames there; the PC's sweep verifies them independently.
-ARCHIVE_MOUNT = _env_path("ASTRO_ARCHIVE_MOUNT", "/Volumes/AstroImageData")
+# On Windows the archive is a local folder (the PC IS the archive machine:
+# E: is the archive, C: the processing workbench — Brett, 24 Sep 2026).
+ARCHIVE_MOUNT = _env_path("ASTRO_ARCHIVE_MOUNT", "E:\\Astro Image Data" if IS_WINDOWS
+                          else "/Volumes/AstroImageData")
 ARCHIVE_LABEL = os.environ.get("ASTRO_ARCHIVE_LABEL") or _CONFIG.get("ASTRO_ARCHIVE_LABEL") \
     or "E:\\Astro Image Data"
 # smb:// URL of the share; when set, --ship asks Finder to mount it on demand
 # (the keychain supplies the password after the first "remember" connection),
 # so no permanent connection is needed.
 ARCHIVE_URL = os.environ.get("ASTRO_ARCHIVE_URL") or _CONFIG.get("ASTRO_ARCHIVE_URL") or ""
+# Each machine writes its OWN ship log; the PC's sweep reads every
+# shipped*.jsonl. No file on the archive is ever appended to by two machines.
+SHIP_LOG_NAME = os.environ.get("ASTRO_SHIP_LOG") or _CONFIG.get("ASTRO_SHIP_LOG") \
+    or ("shipped-pc.jsonl" if IS_WINDOWS else "shipped.jsonl")
 
 # One-time migration from the pre-unification state locations (spec §1).
 for _old, _new in [
@@ -118,7 +151,7 @@ for _old, _new in [
 # ── Seestar (S30 Pro / S50) ─────────────────────────────────────────────────
 SEESTAR_VOLUME_ENV = os.environ.get("SEESTAR_VOLUME") or _CONFIG.get("SEESTAR_VOLUME")
 SEESTAR_VOLUMES = ([SEESTAR_VOLUME_ENV] if SEESTAR_VOLUME_ENV
-                   else ["/Volumes/Seestar", "/Volumes/SEESTAR"])
+                   else ([] if IS_WINDOWS else ["/Volumes/Seestar", "/Volumes/SEESTAR"]))
 SEESTAR_DEST_S30 = _env_path("SEESTAR_DEST_S30", "~/Documents/Astro/Seestar S30 Pro")
 SEESTAR_DEST_S50 = _env_path("SEESTAR_DEST_S50", "~/Documents/Astro/Seestar S50")
 # The ORIGINAL (non-Pro) S30 gets its own tree — two different optical
@@ -129,6 +162,230 @@ SEESTAR_DEST_S30_ORIG = _env_path("SEESTAR_DEST_S30_ORIG",
 # "S50" and "S50 Pro" are different optical systems and never interleave
 SEESTAR_DEST_S50PRO = _env_path("SEESTAR_DEST_S50PRO",
                                 "~/Documents/Astro/Seestar S50 Pro")
+# ═══════════════════════════════════════════════════════════════════════════
+# PLATFORM LAYER — everything that differs between macOS and Windows lives
+# here, so the rest of the engine is one codebase (PARITY.md). 1.5.0.
+# ═══════════════════════════════════════════════════════════════════════════
+
+def _prefix(p):
+    """A directory path with exactly one trailing separator — safe for
+    startswith() containment checks even on a drive root ("F:\\")."""
+    return p if p.endswith(("/", "\\")) else p + os.sep
+
+def _rel(path, root):
+    """Camera-relative path as the ledger stores it: always "/"-separated,
+    so a Mac ledger and a Windows ledger describe a card the same way."""
+    return os.path.relpath(path, root).replace("\\", "/")
+
+_WIN_ERRMODE_SET = False
+
+def _drive_roots():
+    """Candidate camera drives: ASTRO_DRIVE_ROOTS (tests, or to pin drives
+    by hand), else on Windows every removable or fixed drive letter except
+    the system drive. Empty elsewhere (the Mac uses /Volumes)."""
+    env = os.environ.get("ASTRO_DRIVE_ROOTS")
+    if env is not None:
+        return [p for p in env.split(os.pathsep) if p]
+    if not IS_WINDOWS:
+        return []
+    global _WIN_ERRMODE_SET
+    roots = []
+    try:
+        import ctypes
+        k32 = ctypes.windll.kernel32
+        if not _WIN_ERRMODE_SET:
+            # never let an empty card reader pop "Insert a disk" dialogs
+            # (OR into the existing mode rather than replacing it)
+            old = k32.SetErrorMode(0x0001 | 0x8000)
+            k32.SetErrorMode(old | 0x0001 | 0x8000)
+            _WIN_ERRMODE_SET = True
+        mask = k32.GetLogicalDrives()
+        system = (os.environ.get("SystemDrive") or "C:").upper().rstrip("\\")
+        # drives that hold this tool's own folders (the archive on E:, the
+        # workbench, the ledger) are never cameras, whatever is on them
+        ours = {os.path.splitdrive(os.path.abspath(p))[0].upper()
+                for p in (ARCHIVE_MOUNT, DEST_DIR, STATE_DIR, MIRROR_DIR, LIBRARY_DIR)
+                if p}
+        for i in range(26):
+            if not mask & (1 << i):
+                continue
+            letter = chr(65 + i) + ":"
+            if letter.upper() == system:
+                continue
+            root = letter + "\\"
+            kind = k32.GetDriveTypeW(ctypes.c_wchar_p(root))
+            if kind == 2:                                    # removable: a camera or card
+                roots.append(root)
+            elif kind == 3 and letter.upper() not in ours \
+                    and not os.path.isdir(os.path.join(root, "Windows")) \
+                    and not os.path.isdir(os.path.join(root, "Users")):
+                roots.append(root)       # a USB camera that reports itself as a fixed disk
+    except Exception:
+        pass
+    return roots
+
+_VOL_CACHE = {"t": 0.0}
+
+def refresh_camera_volumes(force=False):
+    """Windows: find the ASIAir by its Autorun folder on any drive letter
+    (drives come and go while the panel runs, so this is re-checked, at most
+    every 1.5 s). A configured ASIAIR_VOLUME always wins; on the Mac the
+    fixed /Volumes/ASIAIR path is used and this does nothing."""
+    global ASIAIR_VOLUME
+    if ASIAIR_VOLUME_FIXED:
+        return
+    if not IS_WINDOWS and os.environ.get("ASTRO_DRIVE_ROOTS") is None:
+        return
+    now = time.time()
+    if not force and now - _VOL_CACHE["t"] < 1.5:
+        return
+    _VOL_CACHE["t"] = now
+    for root in _drive_roots():
+        if os.path.isdir(os.path.join(root, "Autorun")) \
+                and not os.path.isdir(os.path.join(root, "MyWorks")):
+            ASIAIR_VOLUME = root
+            return
+    ASIAIR_VOLUME = os.path.join(STATE_DIR, "no ASIAir drive connected")
+
+def pid_alive(pid):
+    """Is process `pid` running? On Windows os.kill(pid, 0) does NOT test —
+    it TERMINATES the process — so the lock check must never use it there."""
+    try:
+        pid = int(pid)
+    except (TypeError, ValueError):
+        return False
+    if pid <= 0:
+        return False
+    if IS_WINDOWS:
+        try:
+            import ctypes
+            from ctypes import wintypes
+            k32 = ctypes.WinDLL("kernel32", use_last_error=True)
+            k32.OpenProcess.restype = wintypes.HANDLE
+            k32.OpenProcess.argtypes = (wintypes.DWORD, wintypes.BOOL, wintypes.DWORD)
+            k32.GetExitCodeProcess.argtypes = (wintypes.HANDLE, ctypes.POINTER(wintypes.DWORD))
+            k32.CloseHandle.argtypes = (wintypes.HANDLE,)
+            h = k32.OpenProcess(0x1000, False, pid)        # QUERY_LIMITED_INFORMATION
+            if not h:
+                return ctypes.get_last_error() == 5          # access denied = it exists
+            code = wintypes.DWORD()
+            ok = k32.GetExitCodeProcess(h, ctypes.byref(code))
+            k32.CloseHandle(h)
+            return bool(ok) and code.value == 259            # STILL_ACTIVE
+        except Exception:
+            return True                                      # unsure: keep the lock
+    try:
+        os.kill(pid, 0)
+    except ProcessLookupError:
+        return False
+    except PermissionError:
+        return True
+    except OSError:
+        return False
+    return True
+
+def _powershell(script, env_extra=None, timeout=20):
+    """Run a PowerShell snippet with data passed ONLY through environment
+    variables (never spliced into the script), so no name can inject code."""
+    env = dict(os.environ)
+    env.update(env_extra or {})
+    return subprocess.run(["powershell.exe", "-NoProfile", "-NonInteractive",
+                           "-ExecutionPolicy", "Bypass", "-Command", script],
+                          env=env, capture_output=True, timeout=timeout,
+                          creationflags=getattr(subprocess, "CREATE_NO_WINDOW", 0))
+
+_WIN_TOAST = r"""
+$ErrorActionPreference = 'Stop'
+[Windows.UI.Notifications.ToastNotificationManager, Windows.UI.Notifications, ContentType = WindowsRuntime] > $null
+$t = [Windows.UI.Notifications.ToastNotificationManager]::GetTemplateContent([Windows.UI.Notifications.ToastTemplateType]::ToastText02)
+$x = $t.GetElementsByTagName('text')
+$x.Item(0).AppendChild($t.CreateTextNode($env:ASTRO_TOAST_TITLE)) > $null
+$x.Item(1).AppendChild($t.CreateTextNode($env:ASTRO_TOAST_MSG)) > $null
+$n = [Windows.UI.Notifications.ToastNotification]::new($t)
+[Windows.UI.Notifications.ToastNotificationManager]::CreateToastNotifier('{1AC14E77-02E7-4E5D-B744-2EB1AE5198B7}\WindowsPowerShell\v1.0\powershell.exe').Show($n)
+"""
+
+_WIN_EJECT = r"""
+$d = $env:ASTRO_EJECT_DRIVE
+(New-Object -ComObject Shell.Application).Namespace(17).ParseName($d).InvokeVerb('Eject')
+"""
+
+def eject_volume(vol):
+    """Safely eject a camera drive. True when it is gone afterwards."""
+    try:
+        if IS_MAC:
+            return subprocess.run(["diskutil", "eject", vol], capture_output=True,
+                                  text=True, timeout=60).returncode == 0
+        if IS_WINDOWS:
+            drive = os.path.splitdrive(os.path.abspath(vol))[0]     # "F:"
+            _powershell(_WIN_EJECT, {"ASTRO_EJECT_DRIVE": drive}, timeout=30)
+            for _ in range(20):
+                if not os.path.isdir(vol):
+                    return True
+                time.sleep(0.5)
+            return False
+    except Exception:
+        return False
+    return False
+
+def open_path(target):
+    """Open a file or URL with the system's default app."""
+    try:
+        if IS_WINDOWS:
+            os.startfile(target)            # noqa: platform-specific
+        elif IS_MAC:
+            subprocess.run(["open", target], capture_output=True, timeout=10)
+        else:
+            subprocess.run(["xdg-open", target], capture_output=True, timeout=10)
+    except Exception:
+        pass
+
+def machine_id():
+    """A stable id for THIS computer's importer (created once, kept in the
+    state folder). Hostnames drift on a Mac; this doesn't."""
+    p = os.path.join(STATE_DIR, "machine.json")
+    try:
+        with open(p) as f:
+            return json.load(f)["id"]
+    except (OSError, ValueError, KeyError, TypeError):
+        pass
+    rec = {"id": uuid.uuid4().hex, "platform": PLATFORM,
+           "host": socket.gethostname(), "created": datetime.now().isoformat(timespec="seconds")}
+    try:
+        os.makedirs(STATE_DIR, exist_ok=True)
+        with open(p, "w") as f:
+            json.dump(rec, f, indent=1)
+    except OSError:
+        pass
+    return rec["id"]
+
+def mirror_owner_ok(mirror_dir, claim=False):
+    """Each machine publishes to its OWN mirror folder. Two ledgers in one
+    folder would overwrite each other (the per-machine rule, 17 Sep 2026).
+    Returns (ok, owner_record)."""
+    p = os.path.join(mirror_dir, "mirror-owner.json")
+    mine = machine_id()
+    try:
+        with open(p) as f:
+            rec = json.load(f)
+    except (OSError, ValueError):
+        rec = None
+    if rec and rec.get("id") and rec["id"] != mine:
+        return False, rec
+    if claim and not rec:
+        try:
+            os.makedirs(mirror_dir, exist_ok=True)
+            with open(p, "w") as f:
+                json.dump({"id": mine, "platform": PLATFORM, "host": socket.gethostname(),
+                           "claimed": datetime.now().isoformat(timespec="seconds")}, f, indent=1)
+        except OSError:
+            pass
+    return True, rec
+
+def lock_clear_hint(path):
+    return (f'  del "{path}"' if IS_WINDOWS else f"  rm '{path}'")
+
+
 def _env_flag(var, default=False):
     """Boolean setting: environment variable > config.json > default."""
     v = os.environ.get(var)
@@ -271,7 +528,7 @@ def safe_input(prompt, default=""):
             return default if r is None else str(r).strip()
         except Exception:
             return default
-    if not sys.stdin.isatty() and not os.environ.get("ASTRO_STDIN_PROMPTS"):
+    if (sys.stdin is None or not sys.stdin.isatty()) and not os.environ.get("ASTRO_STDIN_PROMPTS"):
         # Piped/headless runs answer every prompt with its (safe) default.
         # ASTRO_STDIN_PROMPTS=1 opts into reading piped answers instead —
         # how the test suite exercises the real Yes paths (e.g. cleanup).
@@ -295,7 +552,19 @@ def now_stamp():
     return datetime.now().strftime("%Y-%m-%dT%H%M%S")
 
 def notify(message, title="FITS Importer"):
-    """macOS notification; silently logged if unavailable/unapproved."""
+    """Desktop notification (macOS Notification Centre / Windows toast);
+    silently logged if unavailable or not allowed."""
+    if IS_WINDOWS:
+        try:
+            r = _powershell(_WIN_TOAST, {"ASTRO_TOAST_TITLE": title,
+                                         "ASTRO_TOAST_MSG": message})
+            if r.returncode != 0:
+                debug(f"toast failed: {r.stderr.decode(errors='replace').strip()[:200]}")
+        except Exception as e:
+            debug(f"toast unavailable: {e}")
+        return
+    if not IS_MAC:
+        return
     try:
         r = subprocess.run(
             ["osascript", "-e", 'on run argv',
@@ -474,9 +743,16 @@ def _read_fits_filter(filepath):
 # STATE: LEDGER / HISTORY / SKIPLIST / CUSTOM NAMES / LOCK / MIRROR
 # ═══════════════════════════════════════════════════════════════════════════
 
+RECEIPT_TAG = "pc-" if IS_WINDOWS else ""   # "seestar-pc-<stamp>.json" (1.5.0)
+
 def _unique_receipt_path(rdir, stem):
     """Receipts are named by a one-second stamp; two runs inside the same
-    second (tests, or a quick re-run) must never overwrite each other (1.3.1)."""
+    second (tests, or a quick re-run) must never overwrite each other (1.3.1).
+    From 1.5.0 the PC's receipts carry "-pc", so two machines writing into
+    one receipts folder can never produce the same name."""
+    if RECEIPT_TAG:
+        kind, _, rest = stem.partition("-")
+        stem = f"{kind}-{RECEIPT_TAG}{rest}" if rest else f"{RECEIPT_TAG}{stem}"
     rpath = os.path.join(rdir, stem + ".json")
     k = 2
     while os.path.exists(rpath):
@@ -493,7 +769,16 @@ def _atomic_write_json(path, data):
         json.dump(data, f, indent=1)
         f.flush()
         os.fsync(f.fileno())   # a power cut must not leave a truncated ledger
-    os.replace(tmp, path)
+    for attempt in range(40):
+        try:
+            os.replace(tmp, path)
+            return
+        except PermissionError:
+            # Windows: a reader holding the file open blocks the rename for a
+            # moment (Python never opens with FILE_SHARE_DELETE) — wait, retry
+            if not IS_WINDOWS or attempt == 39:
+                raise
+            time.sleep(0.25)
 
 CAMERA_KEY_SEP = "|cam="
 
@@ -752,6 +1037,13 @@ class State:
             generate_dashboard(self)
         except Exception as e:
             warn(f"dashboard generation failed: {e}")
+        ok, owner = mirror_owner_ok(MIRROR_DIR, claim=True)
+        if not ok:
+            warn(f"The mirror folder {MIRROR_DIR} belongs to another computer "
+                 f"({owner.get('host', '?')}, {owner.get('platform', '?')}) — NOT published. "
+                 f"Give this machine its own ASIAIR_MIRROR folder in config.json (or, if "
+                 f"this IS that computer after a rebuild, run --restore-ledger).")
+            return False
         try:
             os.makedirs(MIRROR_DIR, exist_ok=True)
             for src in [self.ledger_path, self.history_path, self.skiplist_path,
@@ -787,6 +1079,29 @@ class State:
         if not os.path.isfile(m_ledger):
             error("No mirror ledger found — nothing to restore from.")
             return False
+        ok, owner = mirror_owner_ok(MIRROR_DIR)
+        if not ok:
+            # Another machine's ledger describes copies on THAT machine; as
+            # this one's it would let the SAFE clear trust files not here.
+            # But this may BE that machine, rebuilt — so ask, never assume.
+            warn(f"This mirror was published by {owner.get('host', '?')} "
+                 f"({owner.get('platform', '?')}), not by this computer's importer.")
+            warn("Restore it ONLY if this is that same computer after a rebuild or "
+                 "rename. Another machine's ledger describes copies that are not here.")
+            if owner.get("platform") not in (None, PLATFORM):
+                error("It came from a different kind of computer — not restored.")
+                return False
+            if safe_input("Is this that computer, rebuilt? [y/N] ", default="n").lower() != "y":
+                info("Not restored.")
+                return False
+            try:
+                with open(os.path.join(STATE_DIR, "machine.json"), "w") as f:
+                    json.dump({"id": owner["id"], "platform": PLATFORM,
+                               "host": socket.gethostname(),
+                               "adoptedFrom": owner.get("host")}, f, indent=1)
+            except OSError as e:
+                error(f"Could not adopt the mirror's identity: {e}")
+                return False
         meta = self._load_json(os.path.join(MIRROR_DIR, "meta.json")) or {}
         info(f"Mirror found: last run {meta.get('lastRunAt', 'unknown')}, "
              f"{meta.get('fileCount', '?')} light frames, "
@@ -819,10 +1134,11 @@ def acquire_lock():
             with open(LOCK_PATH) as f:
                 data = json.load(f)
             pid = int(data.get("pid", 0))
-            os.kill(pid, 0)  # raises if dead
+            if not pid_alive(pid):
+                raise ProcessLookupError(pid)
             error(f"Another import is already running (pid {pid}, started {data.get('started')}).")
             error("Wait for it to finish, or delete the lock file if it crashed:")
-            error(f"  rm '{LOCK_PATH}'")
+            error(lock_clear_hint(LOCK_PATH))
             return False
         except (OSError, ValueError, json.JSONDecodeError):
             warn("Stale lock file found — clearing it.")
@@ -903,6 +1219,16 @@ def ask_target_name(catalog_name):
             return None, False
         r = str(r).strip()
         return (r, True) if r else ("", True)
+    if not IS_MAC:
+        # Windows/Linux Terminal: ask in the console; headless = skip for now
+        if not sys.stdin or not sys.stdin.isatty():
+            return None, False
+        try:
+            r = input(f"The camera folder is named '{catalog_name}'. What is this "
+                      f"target? (blank = keep the name, '-' = never ask again): ").strip()
+        except EOFError:
+            return None, False
+        return ("", True) if r == "-" else ((r, True) if r else (None, False))
     script = (
         'on run argv\n'
         'set catName to item 1 of argv\n'
@@ -1039,10 +1365,12 @@ def sha256_of(path, bufsize=8*1024*1024):
     return h.hexdigest()
 
 
-def copy_file_verified(src, dst, checksum=True):
+def copy_file_verified(src, dst, checksum=True, partial_suffix=".partial"):
     """Copy src→dst crash-safely: write .partial, verify, rename.
-    Returns (sha256_or_None, size). Raises on failure (partial removed)."""
-    partial = dst + ".partial"
+    Returns (sha256_or_None, size). Raises on failure (partial removed).
+    The ship names its partials per machine, so two computers filing the same
+    frame into the archive can never write into one .partial."""
+    partial = dst + partial_suffix
     src_hash = hashlib.sha256() if checksum else None
     size = 0
     try:
@@ -1075,6 +1403,8 @@ def copy_file_verified(src, dst, checksum=True):
         raise
 
 def preserve_creation_time(src, dst):
+    if not IS_MAC:
+        return   # Windows keeps the copy's own creation time; mtime is preserved
     try:
         result = subprocess.run(["stat", "-f", "%B", src], capture_output=True, text=True)
         if result.returncode == 0:
@@ -1096,6 +1426,10 @@ def hardlink_or_copy(src, dst, checksum=True):
         return "copy", sha, size
 
 def tag_purple(folder_path):
+    """Finder's purple "done" tag — a macOS nicety with no Windows
+    equivalent (NTFS has no Finder labels); the ledger is the real record."""
+    if not IS_MAC:
+        return
     folder_path = folder_path.rstrip("/")
     try:
         subprocess.run(
@@ -1119,7 +1453,7 @@ def documents_under_icloud():
 # ═══════════════════════════════════════════════════════════════════════════
 
 def camera_relpath(path):
-    return os.path.relpath(path, ASIAIR_VOLUME)
+    return _rel(path, ASIAIR_VOLUME)
 
 def scan_camera(state):
     """Walk the camera. Returns dict with targets, calibration, relpath set, disk usage."""
@@ -1630,7 +1964,7 @@ def preview_dest_plan(state, scan=None, sscan=None):
 def link_calibration_into(state, matched, dest_dir, dry_run=False, checksum=True):
     """Hardlink matched Library frames into dest_dir/calibration/{...}. Idempotent."""
     counts = {"biases": 0, "darks": 0, "flats": 0}
-    dest_key = os.path.relpath(dest_dir, DEST_DIR)
+    dest_key = _rel(dest_dir, DEST_DIR)
     for cal_type in ["biases", "darks", "flats"]:
         cal_dest = os.path.join(dest_dir, "calibration", cal_type)
         if not dry_run:
@@ -2753,14 +3087,20 @@ def _ship_apply_verified(state, mount):
         if loc and not e.get("archiveVerifiedAt"):
             by_loc[loc.replace("/", "\\").lower()] = e
     n = 0
-    with open(vpath, encoding="utf-8") as f:
+    with open(vpath, encoding="utf-8", errors="replace") as f:
         for line in f:
             try:
                 r = json.loads(line)
             except ValueError:
                 continue
+            if not isinstance(r, dict):
+                continue                     # a stray line never stops a ship
+            try:
+                rsize = int(r.get("size"))
+            except (TypeError, ValueError):
+                continue
             e = by_loc.get(str(r.get("relpath", "")).replace("/", "\\").lower())
-            if e and (e.get("sha256") in (None, r.get("sha256"))) and e.get("size") == r.get("size"):
+            if e and (e.get("sha256") in (None, r.get("sha256"))) and e.get("size") == rsize:
                 e["archiveVerifiedAt"] = r.get("verifiedAt") or now_stamp()
                 state._dirty = True; n += 1
     return n
@@ -2780,7 +3120,66 @@ def _try_mount_archive(mount, url, wait=20):
         time.sleep(0.5)
     return False
 
+MACHINE_LABEL = "Mac" if IS_MAC else ("PC" if IS_WINDOWS else PLATFORM)
+SHIP_LOCK_STALE_S = 6 * 3600
+
+def _archive_ship_lock(mount):
+    """One computer ships into the archive at a time (1.5.0). The lock lives
+    ON the archive (_verify/ship.lock), so the Mac and the PC see the same one.
+    Returns the lock path, or None when another run holds it."""
+    path = os.path.join(mount, "_verify", "ship.lock")
+    me = {"machine": machine_id(), "host": socket.gethostname(), "platform": PLATFORM,
+          "pid": os.getpid(), "at": now_stamp()}
+    for _ in range(2):
+        try:
+            fd = os.open(path, os.O_CREAT | os.O_EXCL | os.O_WRONLY)
+            with os.fdopen(fd, "w") as f:
+                json.dump(me, f)
+            return path
+        except FileExistsError:
+            try:
+                with open(path) as f:
+                    held = json.load(f)
+            except (OSError, ValueError):
+                held = {}
+            try:
+                age = time.time() - os.path.getmtime(path)
+            except OSError:
+                continue
+            mine_dead = held.get("machine") == me["machine"] and not pid_alive(held.get("pid"))
+            if age > SHIP_LOCK_STALE_S or mine_dead:
+                warn(f"Clearing a stale archive ship lock ({held.get('host', '?')}, "
+                     f"{held.get('at', '?')}).")
+                try:
+                    os.remove(path)
+                except OSError:
+                    return None
+                continue
+            info(f"{held.get('host', 'Another computer')} is shipping into the archive right "
+                 f"now (since {held.get('at', '?')}) — nothing shipped; will try next time.")
+            return None
+        except OSError as e:
+            warn(f"Could not take the archive ship lock: {e}")
+            return None
+    return None
+
 def run_ship(state, dry_run=False, mount=None, checksum=True):
+    mount = mount or ARCHIVE_MOUNT
+    if not dry_run and archive_reachable(mount):
+        lock = _archive_ship_lock(mount)
+        if lock is None:
+            emit("ship", reachable=True, shipped=0, problems=0, busy=True)
+            return False
+        try:
+            return _run_ship(state, dry_run=dry_run, mount=mount, checksum=checksum)
+        finally:
+            try:
+                os.remove(lock)
+            except OSError:
+                pass
+    return _run_ship(state, dry_run=dry_run, mount=mount, checksum=checksum)
+
+def _run_ship(state, dry_run=False, mount=None, checksum=True):
     mount = mount or ARCHIVE_MOUNT
     if not archive_reachable(mount) and ARCHIVE_URL:
         info(f"Archive not mounted; asking Finder to connect to {ARCHIVE_URL} ...")
@@ -2813,10 +3212,10 @@ def run_ship(state, dry_run=False, mount=None, checksum=True):
         info("[dry-run] Nothing copied.")
         return True
     vdir = os.path.join(mount, "_verify"); os.makedirs(vdir, exist_ok=True)
-    shipped_log = os.path.join(vdir, "shipped.jsonl")
+    shipped_log = os.path.join(vdir, SHIP_LOG_NAME)   # this machine's own log
     shipped, problems, frames = 0, [], []
     stamp = now_stamp()
-    real_mount = os.path.realpath(mount) + os.sep
+    real_mount = _prefix(os.path.realpath(mount))
     for n, i in enumerate(todo, 1):
         e, rel = i["entry"], i["rel"].replace("\\", "/")
         dst = os.path.join(mount, rel)
@@ -2838,19 +3237,22 @@ def run_ship(state, dry_run=False, mount=None, checksum=True):
                 else:
                     problems.append((rel, "exists on the archive with a different size; left untouched")); continue
             else:
-                sha, _sz = copy_file_verified(i["src"], dst, checksum=checksum)
+                sha, _sz = copy_file_verified(i["src"], dst, checksum=checksum,
+                                              partial_suffix=f".{MACHINE_LABEL.lower()}.partial")
                 if checksum and e.get("sha256") and sha != e["sha256"]:
                     os.replace(dst, dst + ".BAD")
                     problems.append((rel, "read-back hash differs from the ledger; renamed .BAD")); continue
                 status = "shipped"
             loc = rel.replace("/", "\\")
+            # the log row FIRST: a frame stamped as shipped but never logged
+            # would never be swept, so never verified (1.5.0 review W6)
+            with open(shipped_log, "a", encoding="utf-8") as f:
+                f.write(json.dumps({"sha256": sha, "size": e.get("size"), "relpath": loc,
+                                    "shippedAt": stamp, "machine": MACHINE_LABEL}) + "\n")
             e["archiveLocation"] = loc; e["archiveShippedAt"] = stamp
             if e.get("sha256") is None and sha:
                 e["sha256"] = sha
             state._dirty = True
-            with open(shipped_log, "a", encoding="utf-8") as f:
-                f.write(json.dumps({"sha256": sha, "size": e.get("size"), "relpath": loc,
-                                    "shippedAt": stamp, "machine": "Mac"}) + "\n")
             frames.append({"sha256": sha, "size": e.get("size"), "filename": e["filename"],
                            "location": loc, "status": status})
             shipped += 1
@@ -2870,7 +3272,8 @@ def run_ship(state, dry_run=False, mount=None, checksum=True):
         rdir = os.path.join(RECEIPT_BASE, "_ship"); os.makedirs(rdir, exist_ok=True)
         _atomic_write_json(_unique_receipt_path(rdir, f"filed-{stamp}"),
                            {"version": 2, "kind": "filed", "at": stamp, "tool": "astro-import",
-                            "machine": "Mac", "archive": ARCHIVE_LABEL, "verifiedBy": "mac-readback",
+                            "machine": MACHINE_LABEL, "archive": ARCHIVE_LABEL,
+                            "verifiedBy": f"{MACHINE_LABEL.lower()}-readback",
                             "frames": frames, "problems": problems})
     only_mac = sum(1 for e in state.ledger["files"].values()
                    if e.get("clearedFromCamera") and e.get("verifiedAtImport")
@@ -3099,7 +3502,7 @@ def run_discard(state, target_name, night=None, reason="", dry_run=False):
     # MyWorks and every file must really live on the camera volume — a
     # symlink on the card must never steer a delete somewhere else (1.4.2).
     real_mw = os.path.realpath(os.path.join(vol, "MyWorks"))
-    real_vol = os.path.realpath(vol) + os.sep
+    real_vol = _prefix(os.path.realpath(vol))
     dirs, seen_dirs = [], set()
     for d in g["dirs"]:
         if not d or not os.path.isdir(d):
@@ -3123,7 +3526,7 @@ def run_discard(state, target_name, night=None, reason="", dry_run=False):
                 p = os.path.join(root, fn)
                 rp = os.path.realpath(p)
                 if os.path.islink(p) or not rp.startswith(real_vol):
-                    error(f"{os.path.relpath(p, vol)} is a link, or points outside the "
+                    error(f"{_rel(p, vol)} is a link, or points outside the "
                           f"camera — refusing to delete anything. Nothing was touched.")
                     return "refused"
                 if rp in seen_files:
@@ -3192,7 +3595,7 @@ def run_discard(state, target_name, night=None, reason="", dry_run=False):
         log(f"  {kept_note}")
     if dry_run:
         for p in files[:12]:
-            log(f"    would delete: {os.path.relpath(p, vol)}")
+            log(f"    would delete: {_rel(p, vol)}")
         if len(files) > 12:
             log(f"    ... and {len(files) - 12} more")
         info("[dry-run] Nothing deleted.")
@@ -3216,7 +3619,7 @@ def run_discard(state, target_name, night=None, reason="", dry_run=False):
     reg = state.ledger.setdefault("discarded", {})
     recs, unread = [], 0
     for n_done, p in enumerate(files, 1):
-        rel = os.path.relpath(p, vol)
+        rel = _rel(p, vol)
         try:
             sha = sha256_of(p)
         except OSError as ex:
@@ -3286,6 +3689,113 @@ def run_discard(state, target_name, night=None, reason="", dry_run=False):
             success(f"Never import: {t['name']}")
     state.publish_mirror()
     return "done"
+
+# Settings that mean the same thing on every computer. Paths are NOT among
+# them (a Mac path means nothing on Windows) — each machine keeps its own.
+PORTABLE_CONFIG_KEYS = ("SEESTAR_IMPORT_SUB_JPEGS", "ASTRO_ARCHIVE_LABEL")
+
+def run_export_settings(state, path=None):
+    """Write this machine's SETTINGS (not its ledger) to one JSON file, to
+    carry to another computer: custom target names, the never-import list,
+    the equipment (scope) table and the portable config keys. 1.5.0."""
+    if not path:
+        desk = os.path.expanduser(os.path.join("~", "Desktop"))
+        if not os.path.isdir(desk):          # e.g. a Desktop redirected to OneDrive
+            od = os.path.join(os.environ.get("OneDrive", ""), "Desktop")
+            desk = od if os.environ.get("OneDrive") and os.path.isdir(od) \
+                else os.path.expanduser("~")
+        path = os.path.join(desk, "fits-importer-settings.json")
+    path = os.path.expanduser(path)
+    try:
+        with open(EQUIPMENT_JSON, encoding="utf-8") as f:
+            equipment = json.load(f)
+    except (OSError, ValueError):
+        equipment = None
+    bundle = {
+        "kind": "brettjoastro-fits-importer-settings", "version": VERSION,
+        "exportedAt": now_stamp(), "fromPlatform": PLATFORM,
+        "fromHost": socket.gethostname(),
+        "customNames": dict(state.custom_names or {}),
+        "skiplist": list(state.skiplist or []),
+        "equipment": equipment,
+        "config": {k: _CONFIG[k] for k in PORTABLE_CONFIG_KEYS if k in _CONFIG},
+        "pathsForReference": {k: v for k, v in _CONFIG.items()
+                              if k not in PORTABLE_CONFIG_KEYS and not k.startswith("//")},
+    }
+    os.makedirs(os.path.dirname(os.path.abspath(path)), exist_ok=True)
+    _atomic_write_json(path, bundle)
+    success(f"Settings exported → {path}")
+    info(f"  {len(bundle['customNames'])} custom name(s), {len(bundle['skiplist'])} "
+         f"never-import target(s), equipment table: "
+         f"{'yes' if equipment is not None else 'none'}. The ledger is NOT included — "
+         f"each computer keeps its own.")
+    return path
+
+def run_import_settings(state, path, dry_run=False):
+    """Merge settings exported on another computer INTO this one. Adds what
+    is missing; never overwrites a name or the equipment table this machine
+    already has (differences are listed); never touches the ledger."""
+    try:
+        with open(os.path.expanduser(path), encoding="utf-8") as f:
+            b = json.load(f)
+    except (OSError, ValueError) as e:
+        error(f"Could not read {path}: {e}")
+        return False
+    if b.get("kind") != "brettjoastro-fits-importer-settings":
+        error(f"{path} is not a FITS Importer settings file.")
+        return False
+    added_names, clashes = 0, []
+    for k, v in (b.get("customNames") or {}).items():
+        if k not in state.custom_names:
+            if v and clean_target_name(v) is None:
+                clashes.append(f"{k}: '{v}' is not a usable folder name — skipped")
+                continue
+            state.custom_names[k] = v
+            added_names += 1
+        elif state.custom_names[k] != v:
+            clashes.append(f"{k}: kept '{state.custom_names[k]}' (other computer: '{v}')")
+    added_skips = [t for t in (b.get("skiplist") or []) if t not in state.skiplist]
+    eq_note = "none in the file"
+    if b.get("equipment") is not None:
+        if os.path.isfile(EQUIPMENT_JSON):
+            try:
+                with open(EQUIPMENT_JSON, encoding="utf-8") as f:
+                    same = json.load(f) == b["equipment"]
+            except (OSError, ValueError):
+                same = False
+            eq_note = "same as here" if same else "this computer's kept (it differs — compare by hand)"
+        else:
+            eq_note = f"written to {EQUIPMENT_JSON}"
+    cfg_added = {k: v for k, v in (b.get("config") or {}).items()
+                 if k in PORTABLE_CONFIG_KEYS and k not in _CONFIG}
+    info(f"From {b.get('fromHost', '?')} ({b.get('fromPlatform', '?')}, {b.get('version', '?')}):")
+    log(f"  custom names: {added_names} added" + (f", {len(clashes)} kept as they are" if clashes else ""))
+    for c in clashes[:20]:
+        log(f"    {c}")
+    log(f"  never-import list: {len(added_skips)} added")
+    log(f"  equipment table: {eq_note}")
+    log(f"  config: {', '.join(cfg_added) or 'nothing new'} (paths stay this computer's own)")
+    if dry_run:
+        info("[dry-run] Nothing changed.")
+        return True
+    if added_names:
+        state._save_names()
+    if added_skips:
+        state.skiplist.extend(added_skips)
+        state.save_skiplist()
+    if b.get("equipment") is not None and not os.path.isfile(EQUIPMENT_JSON):
+        os.makedirs(os.path.dirname(EQUIPMENT_JSON), exist_ok=True)
+        _atomic_write_json(EQUIPMENT_JSON, b["equipment"])
+    if cfg_added:
+        cfg = dict(_CONFIG)
+        cfg.update(cfg_added)
+        os.makedirs(os.path.dirname(_CONFIG_PATH), exist_ok=True)
+        _atomic_write_json(_CONFIG_PATH, cfg)
+    state.history_event("settings-imported", fromHost=b.get("fromHost"),
+                        names=added_names, skips=len(added_skips))
+    state.publish_mirror()
+    success("Settings imported. The ledger was not touched.")
+    return True
 
 def run_tidy_stacks(state, dry_run=False):
     """List archived Seestar stacks outranked by a higher Stacked_N from the
@@ -3770,6 +4280,11 @@ def _volumes_named_seestar():
     'Seestar', any case — macOS mounts a second unit as 'Seestar 1', and a
     future model may bring its own name) and actually carries MyWorks."""
     out = []
+    if IS_WINDOWS or os.environ.get("ASTRO_DRIVE_ROOTS") is not None:
+        # Windows: a Seestar is any drive letter carrying MyWorks\ (labels
+        # vary by firmware; what is ON the card is what makes it a Seestar)
+        return sorted(r for r in _drive_roots()
+                      if os.path.isdir(os.path.join(r, "MyWorks")))
     try:
         names = sorted(os.listdir("/Volumes"))
     except OSError:
@@ -3938,7 +4453,7 @@ def scan_seestar(state):
     relset = set()
 
     def fentry(path):
-        rel = os.path.relpath(path, vol)
+        rel = _rel(path, vol)
         relset.add(rel)
         try:
             st = os.stat(path)
@@ -4425,7 +4940,7 @@ def run_seestar_import(state, scan_s, args, only_targets=None):
                 if os.path.isfile(jpg):
                     jdst = os.path.join(dest_project_dir, os.path.basename(jpg))
                     try:
-                        jf = {"path": jpg, "relpath": os.path.relpath(jpg, vol),
+                        jf = {"path": jpg, "relpath": _rel(jpg, vol),
                               "filename": os.path.basename(jpg),
                               "size": os.path.getsize(jpg)}
                         if state.is_imported(jf["relpath"], jf["size"], camera) != "yes" \
@@ -4583,7 +5098,7 @@ def run_seestar_import(state, scan_s, args, only_targets=None):
                 if os.path.isfile(kjpg):
                     kjdst = os.path.join(dest_project_dir, f"{prefix}{a_stamp}.jpg")
                     try:
-                        jf = {"path": kjpg, "relpath": os.path.relpath(kjpg, vol),
+                        jf = {"path": kjpg, "relpath": _rel(kjpg, vol),
                               "filename": os.path.basename(kjpg),
                               "size": os.path.getsize(kjpg)}
                         if state.is_imported(jf["relpath"], jf["size"], camera) != "yes" \
@@ -4817,7 +5332,7 @@ def _seestar_unproven_files(state, vol, dirs, exempt_superseded=True, camera=Non
                     if _stack_n(fn) is None or not fn.lower().endswith(".fit"):
                         continue
                     p = os.path.join(root, fn)
-                    e = state.file_entry(os.path.relpath(p, vol), camera)
+                    e = state.file_entry(_rel(p, vol), camera)
                     if e is None or not e.get("verifiedAtImport"):
                         continue
                     try:
@@ -4856,7 +5371,7 @@ def _seestar_unproven_files(state, vol, dirs, exempt_superseded=True, camera=Non
                     # BLOCKER: a failed mode-JPEG copy was otherwise cleared)
                     ok(p, size)
                     continue
-                e = state.file_entry(os.path.relpath(p, vol), camera)
+                e = state.file_entry(_rel(p, vol), camera)
                 if e is None or not e.get("verifiedAtImport") or e.get("size") != size \
                         or _camera_changed(e, mtime):
                     unproven.append(fn)
@@ -4887,7 +5402,7 @@ def _jpeg_twin_proven(state, vol, root, fn, cache=None, camera=None):
     if not twin:
         return False
     tp = os.path.join(root, twin)
-    te = state.file_entry(os.path.relpath(tp, vol), camera)
+    te = state.file_entry(_rel(tp, vol), camera)
     try:
         st = os.stat(tp)
     except OSError:
@@ -4973,7 +5488,7 @@ def seestar_safe_cleanup(state, scan_s, cleanup_candidates):
         bad = [p for p in todo
                if not os.path.realpath(p).startswith(real_mw + os.sep) or os.path.islink(p)]
         if bad:
-            error(f"{label}: {os.path.relpath(bad[0], vol)} resolves outside the "
+            error(f"{label}: {_rel(bad[0], vol)} resolves outside the "
                   f"camera's MyWorks — nothing deleted here.")
             continue
         removed = []
@@ -4997,7 +5512,7 @@ def seestar_safe_cleanup(state, scan_s, cleanup_candidates):
                              if os.path.isdir(os.path.join(root, x))]:
                     shutil.rmtree(root, ignore_errors=True)
         # flag exactly the rows whose files were just deleted (this camera only)
-        gone = {os.path.relpath(p, vol) for p in removed}
+        gone = {_rel(p, vol) for p in removed}
         for rp, e in state.ledger["files"].items():
             if e.get("device") == "seestar" and ledger_relpath(rp) in gone \
                     and _row_camera(e) == camera and not e.get("clearedFromCamera"):
@@ -5419,7 +5934,7 @@ def run_scan_only(state):
     unhandled_n = attention
 
     if not state.has_ledger():
-        summary = "No import ledger yet — first run will offer a baseline."
+        summary = "No import ledger yet — the first import backs everything up."
     elif total_new:
         lines = [f"{total_new} target(s) have new frames — "
                  f"{n_files:,} files, {human_size(n_bytes)}", ""] + rows
@@ -5439,7 +5954,32 @@ def run_scan_only(state):
     print(f"ASIAIR-SCAN|STORAGE|{storage}")
 
 def _choose_from_list(items, prompt, title, multiple=True, timeout=3600):
-    """osascript choose from list via argv (quote-safe), killable timeout."""
+    """osascript choose from list via argv (quote-safe), killable timeout.
+    Outside macOS: a numbered list in the console (the panel is the main
+    route on every platform; this is the Terminal fallback)."""
+    if not IS_MAC:
+        if not items or not sys.stdin or not sys.stdin.isatty():
+            return None
+        print(f"\n{title} — {prompt}")
+        for i, it in enumerate(items, 1):
+            print(f"  {i:>3}. {it}")
+        hint = "numbers separated by commas, 'all', or Enter to cancel" if multiple \
+            else "a number, or Enter to cancel"
+        try:
+            ans = input(f"Choose ({hint}): ").strip().lower()
+        except EOFError:
+            return None
+        if not ans:
+            return None
+        if multiple and ans == "all":
+            return list(items)
+        picked = []
+        for tok in ans.replace(" ", "").split(","):
+            if tok.isdigit() and 1 <= int(tok) <= len(items):
+                picked.append(items[int(tok) - 1])
+        if not multiple:
+            picked = picked[:1]
+        return picked or None
     script_lines = [
         "on run argv",
         "set thePrompt to item 1 of argv",
@@ -5578,8 +6118,7 @@ def offer_eject(args):
     if resp.lower() != "y":
         return
     for name, v in vols:
-        r = subprocess.run(["diskutil", "eject", v], capture_output=True, text=True)
-        if r.returncode == 0:
+        if eject_volume(v):
             success(f"{name} ejected safely.")
         else:
             warn(f"Could not eject {name} — try manually.")
@@ -5612,10 +6151,7 @@ def open_dashboard(state):
     mirror_copy = os.path.join(MIRROR_DIR, "dashboard.html")
     target_path = mirror_copy if os.path.isfile(mirror_copy) else path
     success(f"Dashboard: {target_path}")
-    try:
-        subprocess.run(["open", target_path], capture_output=True, timeout=10)
-    except Exception:
-        pass
+    open_path(target_path)
 
 def run_skiplist_dialog(state):
     scan = scan_camera(state)
@@ -5657,6 +6193,15 @@ def main():
                    help="import only these targets (camera folder names)")
     p.add_argument("--pick", action="store_true")
     p.add_argument("--menu", action="store_true")
+    p.add_argument("--export-settings", nargs="?", const="", metavar="FILE",
+                   help="write this computer's settings (names, never-import list, "
+                        "equipment, portable config — NOT the ledger) to a file to "
+                        "carry to your other computer (default: Desktop)")
+    p.add_argument("--import-settings", metavar="FILE",
+                   help="merge settings exported on another computer (adds what is "
+                        "missing, never overwrites; --dry-run to preview)")
+    p.add_argument("--version", action="version",
+                   version=f"BrettjoAstro FITS Importer {VERSION} ({PLATFORM})")
     p.add_argument("--scan-only", action="store_true")
     p.add_argument("--report", action="store_true")
     p.add_argument("--reconcile", action="store_true")
@@ -5706,6 +6251,7 @@ def main():
     p.add_argument("--all", action="store_true")
     args = p.parse_args()
     VERBOSE = args.verbose
+    refresh_camera_volumes(force=True)
 
     if args.targets is not None and len(args.targets) == 0:
         error("--targets given with no names.")
@@ -5727,6 +6273,15 @@ def main():
             release_lock()
 
     # State-only commands that don't need the camera:
+    if args.export_settings is not None:
+        run_export_settings(state, args.export_settings or None)
+        return
+    if args.import_settings:
+        if args.dry_run:
+            run_import_settings(state, args.import_settings, dry_run=True)
+        else:
+            locked(lambda: run_import_settings(state, args.import_settings))
+        return
     if args.dashboard:
         open_dashboard(state)
         return
@@ -5803,8 +6358,13 @@ def main():
     asiair_here = os.path.isdir(ASIAIR_VOLUME)
     svol = seestar_volume()
     if not asiair_here and not svol:
-        error(f"No camera found — looked for ASIAir at {ASIAIR_VOLUME} "
-              f"and a Seestar (MyWorks) at {', '.join(SEESTAR_VOLUMES)}.")
+        if IS_WINDOWS or os.environ.get("ASTRO_DRIVE_ROOTS") is not None:
+            error("No camera found — no drive letter carries an ASIAir (Autorun\\) "
+                  "or a Seestar (MyWorks\\). Checked: "
+                  + (", ".join(_drive_roots()) or "no drives besides the system drive") + ".")
+        else:
+            error(f"No camera found — looked for ASIAir at {ASIAIR_VOLUME} "
+                  f"and a Seestar (MyWorks) at {', '.join(SEESTAR_VOLUMES)}.")
         error("Connect a camera via USB and make sure the drive is mounted.")
         sys.exit(1)
 
@@ -5928,5 +6488,45 @@ def main():
         release_lock()
 
 
+def _platform_bootstrap(script_path):
+    """Windows only: run in UTF-8 mode (every report, log and ledger line is
+    UTF-8, and a cp1252 console can't print a ✓), send output somewhere when
+    started windowless by pythonw, and switch on console colours."""
+    if not IS_WINDOWS:
+        return
+    if not sys.flags.utf8_mode:
+        # the launchers all pass -X utf8; this is only the safety net. Wait
+        # for the child through Ctrl+C (it gets the Ctrl+C too, and must be
+        # allowed to finish its cleanup — lock release, ledger save).
+        child = subprocess.Popen([sys.executable, "-X", "utf8", script_path, *sys.argv[1:]])
+        while True:
+            try:
+                sys.exit(child.wait())
+            except KeyboardInterrupt:
+                continue
+    if sys.stdout is None or sys.stderr is None:            # pythonw: no console
+        logdir = os.path.join(STATE_DIR, "Logs")
+        os.makedirs(logdir, exist_ok=True)
+        name = os.path.splitext(os.path.basename(script_path))[0]
+        f = open(os.path.join(logdir, f"{name}.console.log"), "a", encoding="utf-8",
+                 buffering=1)
+        sys.stdout = sys.stdout or f
+        sys.stderr = sys.stderr or f
+        return
+    try:
+        # ANSI colours in a real console only (NUL also reports isatty, and
+        # os.system("") there would flash a window) — ENABLE_VIRTUAL_TERMINAL
+        import ctypes
+        import msvcrt
+        k32 = ctypes.windll.kernel32
+        h = msvcrt.get_osfhandle(sys.stdout.fileno())
+        mode = ctypes.c_uint32()
+        if k32.GetConsoleMode(h, ctypes.byref(mode)):
+            k32.SetConsoleMode(h, mode.value | 0x0004)
+    except Exception:
+        pass
+
+
 if __name__ == "__main__":
+    _platform_bootstrap(os.path.abspath(__file__))
     main()

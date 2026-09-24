@@ -6,7 +6,7 @@
 
 Plug in either camera (or both). A notification fires, a local control panel opens, and every new frame is copied with cryptographic proof it arrived intact. A lifetime ledger remembers everything you have ever imported — so archiving finished targets never causes re-imports, and the tool can tell you, honestly, what is safe to delete from a camera and what is not.
 
-Built by [Brett Johnson](https://github.com/Brettjo77) for a ZWO ASI585MC Air (Askar FRA400 + Askar 107PHQ), a Seestar S30 Pro, an original Seestar S30, and a Seestar S50 Pro — and generalised so it works on any Mac. First light: 686 frames imported, SHA-256-verified, and safely cleared from the camera in a single run.
+Built by [Brett Johnson](https://github.com/Brettjo77) for a ZWO ASI585MC Air (Askar FRA400 + Askar 107PHQ), a Seestar S30 Pro, an original Seestar S30, and a Seestar S50 Pro — and generalised so it works on any **Mac or Windows 11 PC** (from 1.5.0: one codebase, one version, the same capabilities on both — see [PARITY.md](PARITY.md)). First light: 686 frames imported, SHA-256-verified, and safely cleared from the camera in a single run.
 
 **New here? Read [How it works — in plain English](HOW-IT-WORKS.md)** — the whole logic in astronomer's language, no code anywhere.
 
@@ -20,7 +20,7 @@ Smart telescopes fill up fast, and hand-copying folders leaves you guessing. Mos
 
 **For both cameras**
 
-- Watches `/Volumes` via a LaunchAgent; when a camera mounts it scans read-only, notifies you, and opens the control panel at `http://127.0.0.1:8765`
+- Notices a camera the moment it's plugged in (macOS: a LaunchAgent watching `/Volumes`; Windows: a small watcher started at logon that recognises a camera drive by what's on it), scans read-only, notifies you, and opens the control panel at `http://127.0.0.1:8765`
 - Verified copies: stream-hash from camera → write to `.partial` → fsync → re-read from disk → re-hash → rename. Interrupted copies leave a `.partial`, never a fake backup
 - One JSON ledger for every frame ever imported (SHA-256, exposure, night, scope, day number, device) — entries are never deleted, so history survives archiving
 - Day-folder numbering per target with night-continuation handling, shared display-name tables (catalogue → common names) plus your own custom names
@@ -59,6 +59,8 @@ Smart telescopes fill up fast, and hand-copying folders leaves you guessing. Mos
 - SAFE-aware cleanup: after an import — or any time, from **clear…** on a row the panel shows as backed up — it offers to clear source folders **only** when every single file in them is ledger-verified *for that camera* and unchanged since import — *every* file (the one exception: a JPEG preview whose FIT twin is proven) — with No as the default. After your Yes it checks the camera and every file **again** and deletes only what passed; clearing flags only that camera's own ledger entries. Each Seestar's ledger rows are its own, so two units shooting the same target in the same second never share one
 
 ## Install
+
+**On Windows 11**: download the ZIP, unzip it, double-click **Install on Windows.cmd** — the step-by-step is in [INSTALL.md](INSTALL.md#windows-11). The rest of this section is for the Mac.
 
 Requires macOS, Python 3, and `astropy`. **Install Python from
 [python.org](https://www.python.org/downloads/)** (then
@@ -194,17 +196,20 @@ The panel covers day-to-day use; everything is also scriptable:
 | `--set-filter "<target>" "<filter>"` | Record the true filter for a target's ASIAir frames (`--night` to limit; `none` clears) |
 | `--discard "<folder or target>" [--night YYYY-MM-DD] [--reason "…"] [--dry-run]` | Delete never-backed-up Seestar files from the camera without importing (typed DISCARD; recorded in the ledger) |
 | `--skip-target` / `--unskip-target` | Never-import list management (the panel's **import again** undoes it too) |
+| `--export-settings [FILE]` / `--import-settings FILE` | Carry custom names, the never-import list and the scope table to your other computer (never the ledger) |
+| `--version` | The one version number, and which platform this is |
 | `--unbaseline <target>` | Remove *unverified* baseline entries so files count as new again |
 | `--dry-run` | Everything printed, nothing written |
 | `--targets A B` | Restrict an import to specific targets |
 
 ## Testing
 
-339 end-to-end checks run the real engine and the real panel against simulated cameras (hand-built minimal FITS files, every device layout, crash/rename/mosaic/Milky-Way/cleanup/consent/interruption/multi-Seestar scenarios — including that the destination preview must equal the folders the import then actually creates, that a folder holding any unproven file is never offered as SAFE, and that the panel refuses foreign-origin requests):
+355 end-to-end checks run the real engine and the real panel against simulated cameras (hand-built minimal FITS files, every device layout, crash/rename/mosaic/Milky-Way/cleanup/consent/interruption/multi-Seestar scenarios — including that the destination preview must equal the folders the import then actually creates, that a folder holding any unproven file is never offered as SAFE, and that the panel refuses foreign-origin requests):
 
 ```bash
-python3 test_v2.py     # 252 engine checks
+python3 test_v2.py     # 268 engine checks (chain W1 simulates the Windows drive layer)
 python3 test_app.py    # 87 panel checks (boots the real HTTP server)
+# on Windows:  py -3 -X utf8 selftest.py   then the two suites above with  py -3 -X utf8
 ```
 
 ## Project layout
@@ -213,6 +218,7 @@ python3 test_app.py    # 87 panel checks (boots the real HTTP server)
 HOW-IT-WORKS.md                      the logic in plain English (start here)
 INSTALL.md                           installing and updating, step by step
 PC-SYNC.md                           optional: shipping to an archive on another computer
+PARITY.md                            how the Mac and Windows editions stay identical
 CHANGELOG.md                         what changed, release by release
 Install … .command                   double-click installer (the no-terminal route)
 astro-import.py                      the engine (all cameras, ledger, report, dashboard)
@@ -223,6 +229,10 @@ Restart FITS Importer.command        Desktop one-click restart (Terminal context
 com.brettjohnson.astro-import.plist  LaunchAgent template ($HOME substituted on install)
 com.brettjohnson.astro-ship.plist    optional twice-daily ship agent (only with an archive configured)
 pc/                                  the PC side of PC-SYNC.md (PowerShell sweep)
+Install on Windows.cmd               Windows: double-click to install or update
+install-windows.ps1                  Windows installer (no admin rights needed)
+astro-watch.py                       Windows camera watcher (started at logon)
+selftest.py                          install check (Mac and Windows)
 install-scripts.sh                   installer / updater
 config.example.json                  optional path overrides
 test_v2.py · test_app.py · test_env_helper.py

@@ -1,5 +1,96 @@
 # Changelog
 
+## 1.5.1 — 2026-09-24 — install check fix
+
+- **The Mac's install check reported a false FAIL** for `astro-watch.py`.
+  That file is the Windows watcher and the Mac installer rightly doesn't
+  install it; the Mac's watcher is `astro-watch.sh`. `selftest.py` now checks
+  for exactly what each platform's installer installs.
+- The check names this machine's ship log with the right separator on the
+  Mac (it printed `_verify\shipped.jsonl`).
+- New W1 checks compare the install check's file lists with
+  `install-scripts.sh` and `install-windows.ps1`, and run the check from an
+  installed folder rather than the source folder. That is how this slipped
+  through: the check had only ever been run from the source folder.
+
+**Mac / Windows:** same version on both; nothing else changed.
+
+355 end-to-end checks (268 engine + 87 panel), all green.
+
+## 1.5.0 — 2026-09-24 — the Windows 11 edition
+
+The importer now runs on **Windows 11** as well as the Mac: one codebase,
+one version number, the same capabilities. Everything that differs by
+platform lives in one small layer at the top of the engine plus each
+platform's installer and watcher. `PARITY.md` lists every capability and
+setting on both, and the rules that keep them in step.
+
+**Windows 11**
+- Cameras arrive as drive letters and are recognised by what is on them:
+  `Autorun\` is the ASIAir, `MyWorks\` is a Seestar.
+- `Install on Windows.cmd` / `install-windows.ps1` needs no administrator
+  rights. It:
+  - finds Python and adds astropy if missing;
+  - copies the importer to `%LOCALAPPDATA%\BrettjoAstro\bin`;
+  - starts the camera watcher at logon (`astro-watch.py`);
+  - puts **Restart FITS Importer** on the Desktop;
+  - schedules the ship to `E:\Astro Image Data` at 09:30 and 21:30 (the
+    Mac's run at 09:00 and 21:00) when that folder exists;
+  - points an existing archive-sweep task at the new sweep, and updates the
+    old sweep.ps1 in place so a task it can't see still runs the new one.
+- Frames land on the C: workbench (`Documents\Astro`) and are shipped into
+  the archive on E:, exactly as the Mac's ship does over the share.
+- Windows toasts, Shell eject, console versions of the Terminal fallbacks,
+  and `selftest.py` to check an install (on the Mac too).
+- Windows pitfalls handled:
+  - `os.kill(pid, 0)` *terminates* a process on Windows, so the lock's
+    liveness check has its own safe version.
+  - The consoles default to cp1252, so everything runs in UTF-8 mode.
+  - pythonw has no console, so output goes to a log.
+  - Empty card readers could pop "insert a disk" dialogs; these are
+    suppressed.
+  - Drive-root paths (`F:\`) are handled in the delete containment checks.
+
+**Both platforms**
+- **One computer ships into the archive at a time:** a lock on the archive
+  (`_verify\ship.lock`), per-machine partial files, and each ship-log row
+  written before its frame is stamped, so no frame is shipped without being
+  swept.
+- **Each computer keeps its own ledger:**
+  - A `machine.json` identity per computer.
+  - A mirror folder is owned by one machine; the importer refuses to publish
+    into another's, and refuses to restore another computer's ledger unless
+    you confirm it's the same computer, rebuilt.
+  - Per-machine ship logs on the archive (`shipped.jsonl` for the Mac,
+    `shipped-pc.jsonl` for the PC).
+  - The PC's receipts carry `-pc` in the name.
+- `--export-settings` / `--import-settings` carry custom target names, the
+  never-import list, the scope table and portable config keys to the other
+  computer. They add what's missing, never overwrite, and never touch the
+  ledger.
+- `--version`; the panel shows the same version as the engine.
+- Ledger keys are always `/`-separated, so a Windows ledger describes a card
+  exactly as a Mac ledger does.
+- The PC sweep reads every `shipped*.jsonl` with shared reads. It writes
+  UTF-8 even under Windows PowerShell 5.1, never stops on a malformed row or
+  an unparseable name, and refuses any path that leaves the archive. It
+  writes sizes as numbers, and the ship's read of `verified.jsonl` skips
+  stray lines and accepts a size written as text.
+- Review leftovers closed:
+  - The astropy hint names the Python that's actually running.
+  - The macOS disk-access hint points at the importer's own app first.
+  - The no-ledger scan message matches the new first-run flow.
+
+**Mac / Windows:** identical except where `PARITY.md` lists a difference by
+design: Finder tags, the watcher's notification wording, macOS permissions,
+and the Terminal dialogs.
+
+352 end-to-end checks (265 engine + 87 panel), all green, including the new chain
+W1 that simulates the Windows drive-letter layer. The PowerShell scripts parse
+under PowerShell 7 and the sweep was run against a test archive. Not yet run on
+real Windows: `selftest.py` and both suites on the PC are the first step
+after installing there.
+
 ## 1.4.3 — 2026-09-24
 
 The five-persona review of 1.4.2 (owner, data-safety auditor, maintainer,

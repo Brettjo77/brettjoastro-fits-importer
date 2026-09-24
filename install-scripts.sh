@@ -119,6 +119,7 @@ info "Installing scripts to $BIN_DIR..."
 install_file "$SCRIPT_DIR/astro-import.py"  "$BIN_DIR/astro-import.py"  true
 install_file "$SCRIPT_DIR/astro-app.py"     "$BIN_DIR/astro-app.py"     true
 install_file "$SCRIPT_DIR/astro-watch.sh"   "$BIN_DIR/astro-watch.sh"   true
+install_file "$SCRIPT_DIR/selftest.py"      "$BIN_DIR/selftest.py"      true
 # Compatibility copy: `asiair-import.py` IS the unified engine now.
 if [ -f "$BIN_DIR/astro-import.py" ]; then
     cp "$BIN_DIR/astro-import.py" "$BIN_DIR/asiair-import.py"

@@ -81,14 +81,14 @@ env.add_seestar_sub("M 42", "20260119-210500")
 env.add_seestar_stack("M 42", 30, "20260119-213000")
 
 r = subprocess.run([sys.executable, teh.SCRIPT, "--baseline"],
-                   env=env.env, capture_output=True, text=True)
+                   env=env.env, capture_output=True, text=True, encoding="utf-8", errors="replace")
 assert "Baseline complete" in r.stdout, r.stdout[-400:]
 # a NEW calibration set taken after the baseline → must show in calSummary
 env.add_cal("Bias", "1.0ms", "20260801-090000", seq="0099")
 # make the targets NEW again (baseline marked them imported)
 for t in ["M 81", "MYSTERY 42", "M 42"]:
     subprocess.run([sys.executable, teh.SCRIPT, "--unbaseline", t],
-                   env=env.env, capture_output=True, text=True)
+                   env=env.env, capture_output=True, text=True, encoding="utf-8", errors="replace")
 
 # ── Boot the panel server ────────────────────────────────────────────────────
 proc = subprocess.Popen([sys.executable, os.path.join(BUILD, "astro-app.py"),

@@ -44,7 +44,7 @@ From here on you do nothing on the Mac: every import ships by itself when the PC
 
 1. Copy the `pc` folder from the zip to somewhere permanent, for example `E:\Astro Image Data\Claude outputs\pc`.
 
-2. Open PowerShell as administrator (right-click, Run as administrator), go to that folder, and register the sweep:
+2. Open PowerShell (administrator rights are not needed), go to that folder, and register the sweep:
 
        cd "E:\Astro Image Data\Claude outputs\pc"
        powershell -ExecutionPolicy Bypass -File .\install_sweep.ps1
@@ -58,6 +58,10 @@ From here on you do nothing on the Mac: every import ships by itself when the PC
    Wait a minute, then look in `E:\Astro Image Data\_verify`: `verified.jsonl` lists every file the PC has re-hashed and confirmed, `problems.jsonl` should not exist or be empty, `status.json` is the summary.
 
 4. Back on the Mac, the next ship (09:00, 21:00, or `python3 ~/bin/astro-import.py --ship`) reads `verified.jsonl` and stamps the ledger. The "not yet PC-verified" number is the one to watch; zero means the PC holds everything the Mac does.
+
+## If the PC runs the importer too (1.5.0)
+
+From 1.5.0 the importer also runs on Windows 11 — see the Windows section of [INSTALL.md](INSTALL.md) and [PARITY.md](PARITY.md). The PC then imports to its own workbench on C: and ships into `E:\Astro Image Data` with the same code. It keeps its own ledger and writes its own ship log, `_verify\shipped-pc.jsonl`; the sweep reads every `shipped*.jsonl`, so the Mac's and the PC's shipments are verified by the same task. Only one computer ships at a time (a lock in `_verify`), and the PC's runs are at 09:30 and 21:30, half an hour after the Mac's. The Windows installer replaces an older `sweep.ps1` at the place Part B suggested (keeping a `.bak`) and points the sweep task at the new copy; if it can't see the task, it prints the one command to run.
 
 ## If something looks wrong
 

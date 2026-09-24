@@ -3,12 +3,15 @@
 Simulated ASIAIR volume with real (minimal) FITS files; every scenario runs
 the actual script as a subprocess with env-redirected paths."""
 
+import importlib.util
 import json
 import os
+import re
 import shutil
 import subprocess
 import sys
 import tempfile
+import time
 
 SCRIPT = os.path.join(os.path.dirname(os.path.abspath(__file__)), "astro-import.py")
 PASS, FAIL = 0, 0
@@ -80,11 +83,13 @@ class Env:
             "ASIAIR_CONFIG": os.path.join(self.root, "no-config.json"),
             # keep the unified engine blind to any real Seestar in these chains
             "SEESTAR_VOLUME": os.path.join(self.root, "no-seestar"),
+            "ASTRO_DRIVE_ROOTS": os.path.join(self.root, "no-real-drives"),
+            "PYTHONUTF8": "1", "PYTHONIOENCODING": "utf-8",
         })
 
     def run(self, *args, stdin=""):
         r = subprocess.run([sys.executable, SCRIPT, *args], env=self.env,
-                           input=stdin, capture_output=True, text=True, timeout=120)
+                           input=stdin, capture_output=True, text=True, encoding="utf-8", errors="replace", timeout=120)
         return r
 
     def ledger(self):
@@ -595,7 +600,7 @@ state.mark_cleared(sscan["relpaths"], device="seestar")
 eng.run_seestar_import(state, sscan, args)
 """
 r = subprocess.run([sys.executable, "-c", driver, SCRIPT], env=S5B.env,
-                   capture_output=True, text=True, timeout=120)
+                   capture_output=True, text=True, encoding="utf-8", errors="replace", timeout=120)
 check("S5 accepted cleanup removed the SAFE source folder",
       "Cleared" in r.stdout and not os.path.isdir(os.path.join(S5B.myworks, "M 42_sub")),
       r.stdout[-400:] + r.stderr[-400:])
@@ -1373,19 +1378,26 @@ outside = os.path.join(S20h.root, "outside")
 os.makedirs(outside)
 S20h_keep = os.path.join(outside, "20260923-213000.fit")
 teh.make_fits(S20h_keep, uniq="outside-precious")
-os.symlink(outside, os.path.join(S20h.myworks, "M 3_sub"))  # a folder link off the card
-r = S20h.run("--discard", "M 3", stdin="DISCARD\nn\n", extra_env=Y20)
-check("S20 a camera folder that links OFF the card is refused, nothing deleted",
-      r.returncode == 1 and "Nothing was touched" in (r.stdout + r.stderr)
-      and os.path.isfile(S20h_keep), (r.stdout + r.stderr)[-300:])
-os.remove(os.path.join(S20h.myworks, "M 3_sub"))
-s20_target(S20h, "M 3", ["20260923-213000"])
-os.symlink(S20h_keep, os.path.join(S20h.myworks, "M 3_sub", "20260923-213500.fit"))
-r = S20h.run("--discard", "M 3", stdin="DISCARD\nn\n", extra_env=Y20)
-check("S20 a file link inside a camera folder is refused, nothing deleted",
-      r.returncode == 1 and os.path.isfile(S20h_keep)
-      and os.path.isfile(os.path.join(S20h.myworks, "M 3_sub", "20260923-213000.fit")),
-      (r.stdout + r.stderr)[-300:])
+CAN_LINK = True
+try:
+    os.symlink(outside, os.path.join(S20h.myworks, "M 3_sub"))  # a folder link off the card
+except (OSError, NotImplementedError):
+    CAN_LINK = False     # Windows without Developer Mode: links need admin
+if CAN_LINK:
+    r = S20h.run("--discard", "M 3", stdin="DISCARD\nn\n", extra_env=Y20)
+    check("S20 a camera folder that links OFF the card is refused, nothing deleted",
+          r.returncode == 1 and "Nothing was touched" in (r.stdout + r.stderr)
+          and os.path.isfile(S20h_keep), (r.stdout + r.stderr)[-300:])
+    os.remove(os.path.join(S20h.myworks, "M 3_sub"))
+    s20_target(S20h, "M 3", ["20260923-213000"])
+    os.symlink(S20h_keep, os.path.join(S20h.myworks, "M 3_sub", "20260923-213500.fit"))
+    r = S20h.run("--discard", "M 3", stdin="DISCARD\nn\n", extra_env=Y20)
+    check("S20 a file link inside a camera folder is refused, nothing deleted",
+          r.returncode == 1 and os.path.isfile(S20h_keep)
+          and os.path.isfile(os.path.join(S20h.myworks, "M 3_sub", "20260923-213000.fit")),
+          (r.stdout + r.stderr)[-300:])
+else:
+    print("  SKIP  S20 link containment (this OS needs admin rights to make links)")
 
 # The two faults a subprocess can't stage on its own (a delete that fails, a
 # second Seestar in /Volumes) are injected through a tiny wrapper.
@@ -1408,7 +1420,7 @@ m.main()
 def run_patched(env, *args, stdin="", extra=None):
     e = dict(env.env); e.update(Y20); e.update(extra or {})
     return subprocess.run([sys.executable, PATCHED, *args], env=e, input=stdin,
-                          capture_output=True, text=True, timeout=120)
+                          capture_output=True, text=True, encoding="utf-8", errors="replace", timeout=120)
 
 S20i = teh.Env("S20i", asiair=False, seestar=True)
 s20_seed_ledger(S20i)
@@ -1561,7 +1573,7 @@ m.main()
 """)
 e = dict(H3.env); e.update(Y22)
 r = subprocess.run([sys.executable, SWAP, "--no-ship"], env=e, input="n\n",
-                   capture_output=True, text=True, timeout=120)
+                   capture_output=True, text=True, encoding="utf-8", errors="replace", timeout=120)
 left = sorted(os.listdir(os.path.join(H3.myworks, "M 51_sub"))) \
     if os.path.isdir(os.path.join(H3.myworks, "M 51_sub")) else []
 check("S22 a camera swapped while the SAFE card waited: the new camera's frames survive (H3)",
@@ -1671,6 +1683,137 @@ check("S22 discard reaches a mosaic's panels and a mode folder by camera folder 
       not os.path.isdir(os.path.join(DP.myworks, "M 31_mosaic_pt"))
       and not os.path.isdir(os.path.join(DP.myworks, "Lunar_photo"))
       and "Never import" not in r.stdout + r2.stdout, (r.stdout + r2.stdout)[-400:])
+
+print("\n── Chain W1: the Windows edition's platform layer, simulated (1.5.0) ──")
+# Cameras as "drive letters": found by what is ON them, not by /Volumes names
+W1 = teh.Env("W1", asiair=False, seestar=False)
+drives = {n: os.path.join(W1.root, "drives", n) for n in ("F", "G", "H")}
+for d in drives.values():
+    os.makedirs(d)
+teh.make_seestar_fits(os.path.join(drives["F"], "MyWorks", "M 42_sub", "20260924-210000.fit"),
+                      creator="Seestar S50 Pro", uniq="w1-sub")
+teh.make_fits(os.path.join(drives["G"], "Autorun", "Light", "M 81",
+                           teh.light_name("M 81", seq="0001")), uniq="w1-light")
+wenv = dict(W1.env)
+for k in ("SEESTAR_VOLUME", "ASIAIR_VOLUME"):
+    wenv.pop(k, None)
+wenv["ASTRO_DRIVE_ROOTS"] = os.pathsep.join(drives[n] for n in ("F", "G", "H"))
+def wrun(*args, stdin="", script=SCRIPT, extra=None):
+    e = dict(wenv); e.update(extra or {})
+    return subprocess.run([sys.executable, script, *args], env=e, input=stdin,
+                          capture_output=True, text=True, encoding="utf-8",
+                          errors="replace", timeout=120)
+r = wrun("--version")
+check("W1 --version names the one shared version", "1.5.1" in r.stdout, r.stdout + r.stderr)
+r = wrun("--once", script=os.path.join(os.path.dirname(SCRIPT), "astro-watch.py"))
+check("W1 the watcher finds the Seestar and the ASIAir by what is on each drive",
+      f"ASIAir at {drives['G']}" in r.stdout and f"Seestar at {drives['F']}" in r.stdout,
+      r.stdout + r.stderr[-300:])
+r = wrun("--scan-only")
+check("W1 the engine scans both cameras found on drive letters",
+      "|STORAGE|ASIAir" in r.stdout and "· Seestar" in r.stdout
+      and "No camera found" not in r.stdout + r.stderr, r.stdout[:400] + r.stderr[-300:])
+r = wrun("--no-ship", "--targets", "M 42", stdin="n\n", extra={"ASTRO_STDIN_PROMPTS": "1"})
+keys = list(W1.ledger()["files"].keys()) if os.path.isfile(os.path.join(W1.state, "ledger.json")) else []
+check("W1 ledger keys are relative to the drive root and '/'-separated (same as a Mac ledger)",
+      "MyWorks/M 42_sub/20260924-210000.fit" in keys, str(keys) + r.stdout[-300:])
+# the lock's liveness check must never harm the process it looks at
+spec_w = importlib.util.spec_from_file_location("engw", SCRIPT)
+engw = importlib.util.module_from_spec(spec_w); spec_w.loader.exec_module(engw)
+kid = subprocess.Popen([sys.executable, "-c", "import time; time.sleep(5)"])
+alive = engw.pid_alive(kid.pid); time.sleep(0.2)
+check("W1 the lock's process check sees a live process and leaves it running",
+      alive and kid.poll() is None)
+kid.kill(); kid.wait()
+check("W1 ...and sees a finished one as gone", not engw.pid_alive(kid.pid))
+check("W1 drive-root prefixes get exactly one separator ('F:\\\\' stays 'F:\\\\')",
+      engw._prefix("F:\\") == "F:\\" and engw._prefix("/a/b") == "/a/b" + os.sep)
+# each machine publishes its own mirror; another machine's is left alone
+W2state = os.path.join(W1.root, "second-machine-state")
+r = wrun("--skip-target", "X", extra={"ASIAIR_STATE": W2state})
+owner = json.load(open(os.path.join(W1.mirror, "mirror-owner.json")))
+check("W1 a second machine pointed at the same mirror does NOT publish over it",
+      "belongs to another computer" in r.stdout + r.stderr
+      and owner["id"] == json.load(open(os.path.join(W1.state, "machine.json")))["id"],
+      (r.stdout + r.stderr)[-300:])
+r = wrun("--restore-ledger", stdin="n\n", extra={"ASIAIR_STATE": W2state, "ASTRO_STDIN_PROMPTS": "1"})
+check("W1 ...and won't restore another machine's ledger as its own without being told",
+      "Not restored" in r.stdout + r.stderr and not os.path.isfile(os.path.join(W2state, "ledger.json")),
+      (r.stdout + r.stderr)[-300:])
+# per-machine ship log on a local archive (the PC case: E:\Astro Image Data)
+arch = os.path.join(W1.root, "E-archive")
+os.makedirs(os.path.join(arch, "S50P")); os.makedirs(os.path.join(arch, "_verify"))
+r = wrun("--ship", extra={"ASTRO_ARCHIVE_MOUNT": arch, "ASTRO_SHIP_LOG": "shipped-pc.jsonl"})
+vfiles = sorted(os.listdir(os.path.join(arch, "_verify")))
+check("W1 the PC ships into a local archive and writes its OWN ship log",
+      "shipped-pc.jsonl" in vfiles and "shipped.jsonl" not in vfiles
+      and any(f.endswith(".fit") for _dp, _d, fs in os.walk(os.path.join(arch, "S50P")) for f in fs),
+      str(vfiles) + r.stdout[-300:])
+# the sweep's verified.jsonl stamps the PC's ledger too — a stray line or a
+# size written as text never stops a ship
+_rows = [json.loads(l) for l in open(os.path.join(arch, "_verify", "shipped-pc.jsonl"),
+                                      encoding="utf-8") if l.strip()]
+with open(os.path.join(arch, "_verify", "verified.jsonl"), "w", encoding="utf-8") as vf:
+    vf.write("[1, 2]\nnot json\n")
+    for i, x in enumerate(_rows):
+        vf.write(json.dumps({"relpath": x["relpath"], "sha256": x.get("sha256"),
+                             "size": str(x["size"]) if i == 0 else x["size"],
+                             "verifiedAt": "2026-09-24T210000"}) + "\n")
+r = wrun("--ship", extra={"ASTRO_ARCHIVE_MOUNT": arch, "ASTRO_SHIP_LOG": "shipped-pc.jsonl"})
+_led = json.load(open(os.path.join(W1.state, "ledger.json"), encoding="utf-8"))["files"]
+_shipped = [e for e in _led.values() if e.get("archiveLocation")]
+check("W1 the sweep's verified.jsonl stamps the PC's ledger (stray lines and text sizes tolerated)",
+      r.returncode == 0 and _rows and _shipped
+      and all(e.get("archiveVerifiedAt") == "2026-09-24T210000" for e in _shipped),
+      f"rc={r.returncode} rows={len(_rows)} shipped={len(_shipped)} " + (r.stdout + r.stderr)[-300:])
+
+# carrying settings to the other computer (names, never-import, equipment)
+json.dump({"IC 1396": "Elephant's Trunk", "Sh2-132": "Lion Nebula"},
+          open(os.path.join(W1.state, "custom-names.json"), "w"))
+json.dump(["NGC 7000"], open(os.path.join(W1.state, "skiplist.json"), "w"))
+eqf = os.path.join(W1.root, "equipment.json")
+json.dump({"telescopes": [{"name": "Askar FRA400", "focal": 400}]}, open(eqf, "w"))
+bundle = os.path.join(W1.root, "settings.json")
+r = wrun("--export-settings", bundle)
+b = json.load(open(bundle))
+check("W1 --export-settings carries names, never-import list and equipment — not the ledger",
+      b["customNames"].get("IC 1396") == "Elephant's Trunk" and b["skiplist"] == ["NGC 7000"]
+      and b["equipment"]["telescopes"][0]["focal"] == 400
+      and "ledger" not in b and "files" not in b, json.dumps(b)[:300])
+PC = teh.Env("W1pc", asiair=False, seestar=True)
+os.makedirs(PC.state, exist_ok=True)
+json.dump({"IC 1396": "IC 1396 (kept here)"}, open(os.path.join(PC.state, "custom-names.json"), "w"))
+pc_eq = os.path.join(PC.root, "pc-equipment.json")
+r = PC.run("--import-settings", bundle, extra_env={"ASIAIR_EQUIPMENT": pc_eq})
+names = json.load(open(os.path.join(PC.state, "custom-names.json")))
+check("W1 --import-settings adds what is missing and never overwrites what the PC has",
+      names.get("Sh2-132") == "Lion Nebula" and names.get("IC 1396") == "IC 1396 (kept here)"
+      and json.load(open(os.path.join(PC.state, "skiplist.json"))) == ["NGC 7000"]
+      and json.load(open(pc_eq))["telescopes"][0]["focal"] == 400
+      and not os.path.isfile(os.path.join(PC.state, "ledger.json")), r.stdout[-400:])
+
+# the install check looks for exactly what each installer installs (1.5.0:
+# the Mac's selftest looked for astro-watch.py, which only Windows installs)
+_here = os.path.dirname(SCRIPT)
+_st_spec = importlib.util.spec_from_file_location("selftest_w1", os.path.join(_here, "selftest.py"))
+_st = importlib.util.module_from_spec(_st_spec); _st_spec.loader.exec_module(_st)
+_mac_inst = set(re.findall(r'install_file "\$SCRIPT_DIR/([^"]+)"',
+                           open(os.path.join(_here, "install-scripts.sh"), encoding="utf-8").read()))
+_ps = open(os.path.join(_here, "install-windows.ps1"), encoding="utf-8-sig").read()
+_m = re.search(r"foreach \(\$f in @\(([^)]*'astro-import\.py'[^)]*)\)\)", _ps)
+_win_inst = set(re.findall(r"'([^']+)'", _m.group(1))) if _m else set()
+check("W1 the Mac install check expects only files install-scripts.sh installs",
+      set(_st.INSTALLED["mac"]) <= _mac_inst, f"{_st.INSTALLED['mac']} vs {sorted(_mac_inst)}")
+check("W1 the Windows install check expects only files install-windows.ps1 installs",
+      set(_st.INSTALLED["windows"]) <= _win_inst, f"{_st.INSTALLED['windows']} vs {sorted(_win_inst)}")
+_bin = os.path.join(W1.root, "installed-bin")
+os.makedirs(_bin, exist_ok=True)
+for _f in _st.INSTALLED["windows"]:
+    shutil.copy2(os.path.join(_here, _f), _bin)
+r = wrun(script=os.path.join(_bin, "selftest.py"))
+check("W1 the install check passes from an installed folder (not only the source folder)",
+      " present" in r.stdout and not re.search(r"FAIL\s+\S+ present", r.stdout),
+      r.stdout[-600:] + r.stderr[-300:])
 
 print("\n── Chain P1: --ship files Seestar frames into the archive (1.4.0) ──")
 P1 = teh.Env("P1", asiair=False, seestar=True)

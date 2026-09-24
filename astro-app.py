@@ -31,13 +31,13 @@ import webbrowser
 from collections import deque
 from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 
-APP_VERSION = "2.0"
 ENGINE_PATH = os.path.join(os.path.dirname(os.path.abspath(__file__)), "astro-import.py")
 
 # ── Load the engine as a module ──────────────────────────────────────────────
 _spec = importlib.util.spec_from_file_location("asiair_engine", ENGINE_PATH)
 eng = importlib.util.module_from_spec(_spec)
 _spec.loader.exec_module(eng)
+APP_VERSION = eng.VERSION        # one version for engine, panel and platform
 
 
 # ═══════════════════════════════════════════════════════════════════════════
@@ -128,6 +128,7 @@ class App:
 
     # ── engine operations (each runs in a worker thread) ────────────────
     def _camera_ok(self):
+        eng.refresh_camera_volumes()
         if os.path.isdir(eng.ASIAIR_VOLUME) or eng.seestar_volume():
             self._no_cam_warned = False
             return True
@@ -169,7 +170,7 @@ class App:
             except Exception as e:
                 self.logline(f"✗ {label} failed: {e}")
                 self.last_result = f"{label} failed: {e}"
-                if "Operation not permitted" in str(e):
+                if "Operation not permitted" in str(e) and sys.platform == "darwin":
                     real = os.path.realpath(sys.executable)
                     app = (real.split("/Contents/MacOS/")[0]
                            if "/Contents/MacOS/" in real else real)
@@ -178,6 +179,11 @@ class App:
                         cand = os.path.join(fm.group(1), "Resources", "Python.app")
                         if os.path.isdir(cand):
                             app = cand
+                    # narrowest grant first: the importer's own app wrapper,
+                    # not the whole Python (review V6)
+                    wrapper = os.path.expanduser("~/Applications/BrettjoAstro FITS Importer.app")
+                    if os.path.isdir(wrapper):
+                        app = wrapper
                     self.logline("▸ macOS is blocking disk access for this panel "
                                  "process. Permanent fix: System Settings → Privacy "
                                  f"& Security → Full Disk Access → add: {app} "
@@ -473,6 +479,9 @@ class App:
                         timeout=5, capture_output=True)
                 except Exception:
                     pass
+            elif total_f and eng.IS_WINDOWS:
+                eng.notify(f"{total_f} frame(s) imported and verified across "
+                           f"{total_t} target(s).", "FITS Importer — import complete")
             self.scan = None  # force rescan for fresh counts
         return self._run("importing", fn)
 
@@ -571,9 +580,7 @@ class App:
                 vols.append(("Seestar", svol))
             ok = bad = 0
             for label, vol in vols:
-                r = subprocess.run(["diskutil", "eject", vol],
-                                   capture_output=True, text=True)
-                if r.returncode == 0:
+                if eng.eject_volume(vol):
                     self.logline(f"✓ {label} ejected safely.")
                     ok += 1
                 else:
@@ -586,6 +593,7 @@ class App:
 
     # ── state for the UI ─────────────────────────────────────────────────
     def snapshot(self):
+        eng.refresh_camera_volumes()          # Windows: drive letters come and go
         with self.loglock:
             tail = list(self.log)[-250:]
         return {
@@ -1598,6 +1606,21 @@ tick(); setInterval(tick, 1000);
 # Main
 # ═══════════════════════════════════════════════════════════════════════════
 
+class PanelServer(ThreadingHTTPServer):
+    """On Windows, SO_REUSEADDR lets a SECOND process bind the same port —
+    so it is off there, and SO_EXCLUSIVEADDRUSE is on: one panel per port."""
+    allow_reuse_address = not eng.IS_WINDOWS
+    daemon_threads = True
+
+    def server_bind(self):
+        if eng.IS_WINDOWS:
+            import socket as _s
+            opt = getattr(_s, "SO_EXCLUSIVEADDRUSE", None)
+            if opt is not None:
+                self.socket.setsockopt(_s.SOL_SOCKET, opt, 1)
+        super().server_bind()
+
+
 def main():
     p = argparse.ArgumentParser(description="BrettjoAstro FITS Importer control panel")
     p.add_argument("--port", type=int, default=8765)
@@ -1606,7 +1629,15 @@ def main():
 
     global PORT
     PORT = args.port
-    server = ThreadingHTTPServer(("127.0.0.1", args.port), Handler)
+    try:
+        server = PanelServer(("127.0.0.1", args.port), Handler)
+    except OSError as e:
+        # one panel per port: a second one (a watcher racing the installer,
+        # a double-clicked restart) steps aside instead of splitting the
+        # tokens and question cards between two processes (1.5.0 review W2)
+        print(f"FITS Importer panel not started: port {args.port} is in use "
+              f"(a panel is probably running already): {e}")
+        return
     url = f"http://127.0.0.1:{args.port}"
     print(f"FITS Importer panel → {url}   (Ctrl-C to quit)")
     APP.logline(f"▸ Panel started at {url}")
@@ -1619,4 +1650,5 @@ def main():
 
 
 if __name__ == "__main__":
+    eng._platform_bootstrap(os.path.abspath(__file__))   # Windows: UTF-8, pythonw logs
     main()
