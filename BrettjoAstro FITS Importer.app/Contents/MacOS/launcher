@@ -15,7 +15,8 @@ if curl -s -m 2 "$URL/api/ping" >/dev/null 2>&1; then
     [ -z "$SILENT" ] && open "$URL"      # already running — just focus a tab
     exit 0
 fi
-"$PYTHON" "$HOME/bin/astro-app.py" --no-browser >>/tmp/astro-app.log 2>&1 &
+mkdir -p "$HOME/Library/Logs"
+"$PYTHON" "$HOME/bin/astro-app.py" --no-browser >>"$HOME/Library/Logs/astro-app.log" 2>&1 &
 PANEL=$!
 i=0
 while [ $i -lt 20 ]; do
