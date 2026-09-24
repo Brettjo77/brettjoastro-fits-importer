@@ -99,7 +99,9 @@ class Env:
             "SEESTAR_DEST_S30": self.sdest30, "SEESTAR_DEST_S50": self.sdest50,
             "SEESTAR_DEST_S30_ORIG": self.sdest30o,
             "SEESTAR_DEST_S50PRO": self.sdest50p,
+            "ASTRO_ARCHIVE_MOUNT": os.path.join(self.root, "archive-mount"),
         })
+        self.archive = os.path.join(self.root, "archive-mount")
 
     def run(self, *args, stdin="", extra_env=None):
         env = dict(self.env)

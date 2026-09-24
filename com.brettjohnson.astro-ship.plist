@@ -1,0 +1,38 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd">
+<plist version="1.0">
+<dict>
+    <key>Label</key>
+    <string>com.brettjohnson.astro-ship</string>
+
+    <!-- Twice a day (09:00 and 21:00): file anything verified on this Mac but
+         not yet on the archive, and pick up the PC's verification results.
+         The engine mounts the share itself when ASTRO_ARCHIVE_URL is set in
+         config.json (password from the keychain), so no permanent connection
+         is needed. Quiet no-op when the PC is off or nothing is waiting. If
+         the Mac was asleep at the time, launchd runs it on wake.
+         Log: ~/Library/Logs/astro-ship.log (1.4.2 — /tmp is wiped on reboot,
+         which lost the evidence after the September power cut). -->
+    <key>ProgramArguments</key>
+    <array>
+        <string>/bin/bash</string>
+        <string>-lc</string>
+        <string>P=/usr/local/bin/python3; [ -x "$P" ] || P=/usr/bin/python3; "$P" "$HOME/bin/astro-import.py" --ship</string>
+    </array>
+
+    <key>StartCalendarInterval</key>
+    <array>
+        <dict><key>Hour</key><integer>9</integer><key>Minute</key><integer>0</integer></dict>
+        <dict><key>Hour</key><integer>21</integer><key>Minute</key><integer>0</integer></dict>
+    </array>
+
+    <key>RunAtLoad</key>
+    <true/>
+
+    <key>StandardOutPath</key>
+    <string>__HOME__/Library/Logs/astro-ship.log</string>
+
+    <key>StandardErrorPath</key>
+    <string>__HOME__/Library/Logs/astro-ship.log</string>
+</dict>
+</plist>

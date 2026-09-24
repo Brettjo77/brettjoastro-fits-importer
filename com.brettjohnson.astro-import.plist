@@ -30,9 +30,9 @@
     <true/>
 
     <key>StandardOutPath</key>
-    <string>/tmp/astro-watch.log</string>
+    <string>__HOME__/Library/Logs/astro-watch.log</string>
 
     <key>StandardErrorPath</key>
-    <string>/tmp/astro-watch.log</string>
+    <string>__HOME__/Library/Logs/astro-watch.log</string>
 </dict>
 </plist>

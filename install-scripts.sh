@@ -39,6 +39,8 @@ set -euo pipefail
 SCRIPT_DIR="$(cd "$(dirname "$0")" && pwd)"
 BIN_DIR="$HOME/bin"
 LAUNCH_AGENTS_DIR="$HOME/Library/LaunchAgents"
+# $HOME escaped for a sed replacement ("|", "&" and "\" would break it, V9)
+SED_HOME=$(printf '%s' "$HOME" | sed 's/[|&\\]/\\&/g')
 STATE_DIR="$HOME/Library/Application Support/Astro Import"
 FAILED=0
 
@@ -158,7 +160,7 @@ fi
 echo ""
 
 # Stop any running panel so the next launch picks up the new build
-if pkill -f "asiair-app.py|astro-app.py" 2>/dev/null; then
+if pkill -f "[Pp]ython[^ ]* .*(asiair|astro)-app\.py" 2>/dev/null; then
     success "Stopped the running panel (the watcher restarts it on next plug-in)"
 fi
 
@@ -178,7 +180,8 @@ if [ -f "$new_plist" ]; then
     launchctl unload "$new_plist" 2>/dev/null || true
 fi
 if [ -f "$SCRIPT_DIR/com.brettjohnson.astro-import.plist" ]; then
-    sed "s|__HOME__|$HOME|g" "$SCRIPT_DIR/com.brettjohnson.astro-import.plist" > "$new_plist"
+    mkdir -p "$HOME/Library/Logs"
+    sed "s|__HOME__|$SED_HOME|g" "$SCRIPT_DIR/com.brettjohnson.astro-import.plist" > "$new_plist"
     success "Installed com.brettjohnson.astro-import.plist → $new_plist"
     if launchctl load "$new_plist" 2>/dev/null; then
         success "Loaded com.brettjohnson.astro-import"
@@ -188,6 +191,39 @@ if [ -f "$SCRIPT_DIR/com.brettjohnson.astro-import.plist" ]; then
 else
     warn "Source not found: com.brettjohnson.astro-import.plist — skipping"
     FAILED=$((FAILED + 1))
+fi
+echo ""
+
+ship_plist="$LAUNCH_AGENTS_DIR/com.brettjohnson.astro-ship.plist"
+# The ship agent is only for people who keep an archive on another computer
+# (see PC-SYNC.md). Installed when an archive URL is configured, or when it
+# was already installed (an upgrade) — never by default (1.4.3, review S2).
+ARCHIVE_CONFIGURED=$(/usr/bin/python3 - <<'PY' 2>/dev/null
+import json, os
+p = os.path.expanduser("~/Library/Application Support/Astro Import/config.json")
+try:
+    print("yes" if (json.load(open(p)) or {}).get("ASTRO_ARCHIVE_URL") else "")
+except Exception:
+    print("")
+PY
+)
+if [ -f "$ship_plist" ]; then
+    launchctl unload "$ship_plist" 2>/dev/null || true
+    ARCHIVE_CONFIGURED=yes
+fi
+if [ -z "$ARCHIVE_CONFIGURED" ]; then
+    info "No PC archive configured — skipping the ship agent (optional; see PC-SYNC.md)."
+elif [ -f "$SCRIPT_DIR/com.brettjohnson.astro-ship.plist" ]; then
+    info "Installing the twice-daily ship agent (files verified frames to the PC archive)..."
+    mkdir -p "$HOME/Library/Logs"
+    sed "s|__HOME__|$SED_HOME|g" "$SCRIPT_DIR/com.brettjohnson.astro-ship.plist" > "$ship_plist"
+    if launchctl load "$ship_plist" 2>/dev/null; then
+        success "Loaded com.brettjohnson.astro-ship (09:00 and 21:00; mounts the share itself)"
+    else
+        warn "Could not load com.brettjohnson.astro-ship — may need to log out/in"
+    fi
+else
+    warn "Source not found: com.brettjohnson.astro-ship.plist — skipping"
 fi
 echo ""
 
@@ -219,13 +255,14 @@ if [ "$FAILED" -gt 0 ]; then
 fi
 success "All done! BrettjoAstro FITS Importer installed."
 echo ""
-log "First run (in order — every step before 5 is read-only):"
-log "  1. Plug in a camera (ASIAir and Seestar can both be attached)"
-log "  2. python3 ~/bin/astro-import.py --scan-only    (sanity check)"
-log "  3. python3 ~/bin/astro-import.py --report"
-log "  4. python3 ~/bin/astro-import.py --baseline     (existing files join the"
-log "     ledger without copying — read the audit list it prints)"
-log "  5. Import via the panel: http://127.0.0.1:8765"
+log "First run:"
+log "  1. Plug in a camera (ASIAir and/or Seestar) — the panel opens by itself"
+log "     (or open http://127.0.0.1:8765). Scanning only reads the camera."
+log "  2. Tick what you want and press Import. The first import starts the"
+log "     ledger and backs everything up, verified byte for byte."
+log "  Already have copies of everything on this Mac? Instead of step 2, run"
+log "     python3 ~/bin/astro-import.py --baseline"
+log "  to record them WITHOUT copying (read the audit list it prints)."
 log ""
 log "macOS permission (once): if a dialog asks to allow access to files on a"
 log "removable volume, click Allow — that makes the hands-free flow permanent."

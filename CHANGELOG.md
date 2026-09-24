@@ -1,5 +1,336 @@
 # Changelog
 
+## 1.4.3 — 2026-09-24
+
+The five-persona review of 1.4.2 (owner, data-safety auditor, maintainer,
+security reviewer, new user) found two ways the SAFE clear could delete the
+only copy of data — both older than 1.4.2 — plus a panel that sometimes said
+"backed up" when it wasn't. This release fixes them. Each data-safety finding has a
+regression test that fails on 1.4.2 and passes here.
+
+**Data safety**
+- **Two Seestars on the same target no longer share a ledger row.** Rows were
+  keyed by the camera path alone; two units stamping a sub in the same second
+  (at the same size, when the sensors match) made the second camera's frame
+  read "already imported" — never copied, then cleared as SAFE — or overwrote
+  the first camera's row. Every lookup is now camera-aware; the first camera
+  keeps its row, another camera's row for the same path is kept beside it.
+- **One stack per stacking *session*, not per night.** A second session on the
+  same night — after a filter change, or a restarted stack whose N began
+  again — was treated as "outranked", never copied, and cleared. A stack now
+  only supersedes another when it continues it: same night, exposure and
+  filter, a higher N *and* a later time. `--tidy-stacks` uses the same rule.
+- **The SAFE clear checks again at the moment it deletes.** The panel's card
+  can wait an hour; if the camera is swapped meanwhile, nothing is deleted.
+  After a Yes the camera is re-identified, every folder re-checked, and only
+  the files that passed are removed — never a blind folder delete.
+- **A stack the camera re-saves in place at the same size** is recognised
+  (the camera's file time is recorded at import), copied again, and never
+  cleared while the Mac holds the older bytes.
+- **Every command that writes the ledger takes the import lock** and re-reads
+  the ledger under it (`--tidy-stacks`, `--merge-days`, `--renumber-day`,
+  `--set-filter`, `--unbaseline`, `--refresh-metadata`, `--restore-ledger`,
+  `--skip-target`/`--unskip-target`); each save uses its own temp file.
+- `--no-checksum` copies are no longer "verified" (so they can't clear the
+  camera). A new frame at a path you once discarded is checked by fingerprint,
+  not name and size. Discard records left "still on camera" by a crash settle
+  on the next scan. A card with no readable FITS (identity guessed) never flags
+  another camera's frames as cleared. An unreadable ledger is never published
+  over the mirror. `--clean-source-previews` is gone — it deleted JPEGs from
+  the ASIAir, which this tool promises never to touch.
+- Typed target names can't become paths (no `/ \ : < > " | ? *`, no leading
+  dot), `--ship` refuses any path that would leave the archive, and a camera
+  folder named `.._sub` is not a target.
+
+**Discard and clear**
+- A discard on a **mix** now offers exactly the never-backed-up files and
+  leaves the backed-up ones (tonight's cloudy frames on a target whose earlier
+  nights are imported; stray JPEGs beside imported subs) — 1.4.2 refused,
+  which left no way out on the panel.
+- Discard reaches mosaic panel sets and mode folders (Lunar, Solar, …) by
+  their camera folder name.
+- **clear…** on any row the panel shows as backed up runs the SAFE clear on
+  demand; the SAFE card now lists the folders and says what SAFE means.
+- The never-import question after a discard now says what it really does
+  (every *future* session would be skipped); the panel lists never-import
+  targets that have new frames under "NOT backed up", with **import again**.
+
+**Panel**
+- Row pills come from the SAFE check: a target with an orphan JPEG or a failed
+  copy says **NOT backed up · N files**, never "backed up". "All backed up"
+  only appears when it's true. Imported panel sets and mode folders stay listed.
+- The panel only accepts requests from its own page: exact origin (another
+  localhost port is refused), JSON only, a per-launch token, answers must
+  name their card; it can't be framed by another site; bodies are capped and
+  type-checked.
+- Card titles say what they're asking; no raw `[y/N]`; Enter/Escape work;
+  focus lands on the safe button; a banner confirms a discard or clear; the
+  result line never shows a previous operation's verdict.
+- "Panel disconnected" no longer flashes after every scan (a JavaScript error
+  wiped the scan time). Works at phone width; muted text and the red button
+  meet contrast guidelines; screen-reader labels on every row action.
+- A first-time user can import from the panel with no ledger (the first import
+  starts one); the baseline is now clearly "only if you already have copies".
+  "Refresh report" works without a camera.
+
+**Filing and reports**
+- An import that brings two nights of subs files them as two Day folders.
+- The report's first block is labelled as the ASIAir's; discards list the
+  nights they were shot.
+- Watcher, panel and Terminal-fallback logs moved from `/tmp` to
+  `~/Library/Logs`; the watcher's state to Application Support.
+
+**Install and docs**
+- `INSTALL.md` is now a newcomer's install guide; Brett's PC runbook is
+  `PC-SYNC.md` and is optional. The ship agent is installed only when an
+  archive URL is configured (or it was already installed); the example
+  config no longer carries Brett's share address.
+- The installer survives `|` or `&` in your home path; restarting only stops
+  the running panel, never an editor with the file open.
+
+339 end-to-end checks (252 engine + 87 panel), all green. New chain S22 and
+panel checks T13–T14; T8 extended for the new request rules.
+
+## 1.4.2 — 2026-09-24
+
+Two things Brett asked for twice, and the ship log moved somewhere that
+survives a reboot.
+
+- **JPEG previews are no longer imported.** The S50 Pro writes a JPEG beside
+  every sub; since 1.3.0 each one was copied, verified, ledgered — and from
+  1.4.0 shipped to the PC — as a "rider" (about 2,250 so far, 734 from one
+  Elephant Trunk mosaic). The rule now: *a JPEG that is a preview of a proven
+  frame is not data.* A preview whose FIT twin (same name, same folder) is
+  ledger-verified is not imported, not shipped, and does not block the SAFE
+  cleanup offer. A JPEG with **no** FIT beside it is the only copy of
+  whatever it shows: it is never silently ignored — it is listed as "on
+  camera, NOT handled" on the panel, in the report and in the watcher's
+  attention count, and it keeps its folder out of SAFE. The stack's own JPG
+  and Solar/Lunar/Planetary/Scenery JPEGs still import as before. Riders
+  already in the ledger stay where they are (nothing is deleted) and simply
+  stop shipping. `SEESTAR_IMPORT_SUB_JPEGS=1` in config restores the old
+  behaviour.
+- **Discard: delete a Seestar target from the camera without importing it.**
+  For the three-frames-before-cloud nights. A quiet *discard…* link on each
+  Seestar target row (and `--discard "<target>" [--night YYYY-MM-DD] [--reason
+  "..."] [--dry-run]` in Terminal). It is the one path in the tool that
+  destroys frames with no backup, so: Seestar only — the ASIAir is refused
+  outright; it sorts the target's files with the same gate the SAFE cleanup
+  uses, and if *everything* is already backed up it simply hands over to the
+  ordinary SAFE clear (default No) — until now that offer only ever appeared
+  at the end of an import, so a declined one could never be reached again;
+  a mix of backed-up and never-backed-up files is refused untouched, with
+  the way forward (`--night` for the unimported night, or import first); a
+  red card that says what the files are and
+  that they were never backed up; confirmation by **typing DISCARD** — a
+  click or a "yes" is not enough; every file is hashed and recorded in the
+  ledger's separate `discarded` register *before* it is deleted. Nothing in
+  that register ever counts as backed up; the report lists it under
+  "Deliberately discarded from camera (NEVER backed up — by your choice)";
+  and if the same bytes ever turn up again they are recognised, not offered
+  as new. After a whole-target discard it offers to add the target to the
+  never-import list. Refused, too, before a first import has created a
+  ledger — the ledger is what remembers a discard.
+- **Target rows say what the files are.** A Seestar row used to read "1
+  frames · 47 MB" for a 458-sub stack. Rows now read, for example, "3 subs
+  (1.5 min integration)" or "1 stack of up to 458 subs", with the unit
+  ("stack", "frames") beside the size.
+- **Ship log moved to `~/Library/Logs/astro-ship.log`.** `/tmp` is wiped on
+  reboot, which is what lost the evidence after the September power cut. The
+  installer now writes the ship agent with your home path substituted.
+
+Not in this release, despite the 22 Sep runbook: clearing the ~3,700 Teddy
+Bear "missing on Mac" ship warnings. Those are bookkeeping for frames the
+rescue kit already put on E:; the fix depends on the PC sweep's records and
+moves to 1.4.3.
+
+**Hardened after an adversarial review of this release** (before it left
+the building):
+- The preview exemption applies only to per-sub previews in a `_sub`
+  folder, and only with riders off. A Lunar/Solar JPEG is data — if its copy
+  fails, the folder stays NOT SAFE (the first draft would have cleared it).
+  The FIT twin is matched whatever the extension's case (`.FIT`).
+- Discard picks its target by the camera folder name (`M 76_sub`), which is
+  unique on the card; the panel shows the link only on DSO target rows (not
+  on a mosaic's panels row or a Lunar/Solar row, whose names can collide).
+  A typed name that matches two targets is refused with the folder names.
+- Discard refuses if a second Seestar is mounted, or if any folder or file
+  it would delete resolves outside the camera (a link on the card).
+- Every discard record is written "still on camera" and flipped only after
+  its delete succeeds. A delete that fails is reported as PARTIAL (exit 1),
+  the frame keeps showing as new work, and the report doesn't count it.
+- A discard record only hides frames from the camera it came from.
+- On the panel, the first answer to a question card wins; a double click can
+  no longer overwrite a typed DISCARD (or be overwritten by one).
+- A folder literally named `_sub` is not a target (it once adopted the whole
+  MyWorks folder); it is reported as not handled.
+- Integration adds up each sub's own exposure, so a mixed 10 s / 30 s night
+  reads right.
+
+301 end-to-end checks (234 engine + 67 panel), all green. New chains S19
+(previews), S20 (discard, including the SAFE hand-over, the mixed case and
+every review fix) and S21 (what the preview exemption may not cover); S16
+kept as the opt-in rider path; panel checks T10–T12.
+
+## 1.4.1 — 2026-09-19
+
+Hardening from the first real ship (11,261 files), which met a power cut
+half way through.
+
+- **A stale share is now detected.** After the PC went down, the SMB mount
+  still listed folders from cache but refused writes, and the ship run died
+  with a traceback on `makedirs`. The reachability check now also writes and
+  removes a scratch file under `_verify`, so a dead mount reads as "not
+  reachable" and the run is a quiet no-op. If the share dies mid-run, the run
+  stops cleanly; what shipped is recorded, the rest waits.
+- **Frames moved out of their Day folder are found.** The ledger says where a
+  frame was put; Collect Lights or a hand tidy may have gathered it into a
+  flat `lights/` folder since. `--ship` now looks for the file by name and
+  size anywhere under the target folder before calling it missing. On this
+  archive that turns 5,161 "missing on Mac" lines into shipped frames,
+  including the whole ASIAir July to August run (Ced 214, Middle Heart, Veil,
+  Fish Head, Lion) that had never reached the PC.
+- **Targets match by name when the camera's token differs.** `LDN 1163 -
+  Lion Nebula` now joins the archive's `Lion Nebula (Sh2-132)` rather than
+  opening `Lion Nebula (LDN 1163)`; `C 9 - Cave Nebula` joins
+  `Cave Nebula (Sh2-155)`. A display with no separator that contains an
+  existing folder's code (`SH2-171 Teddy Bear`) also matches. Generic names
+  (Globular Cluster, Open Cluster) never match by name. This is a stopgap
+  until the shared targets table; folders already created by 1.4.0 under the
+  old rule are left where they are.
+- Resuming after an interruption is unchanged and safe: the ledger is saved
+  every 50 files, `shipped.jsonl` is appended only after a verified copy,
+  and a re-run adopts anything already on the archive with matching bytes.
+
+249 end-to-end checks (193 engine + 56 panel), all green. New chain P4 pins
+both the moved-file lookup and the name match.
+
+## 1.4.0 — 2026-09-19
+
+The Mac and the PC stay in sync on their own.
+
+The Mac takes frames off the cameras and holds the ledger; the Chillblast
+holds the archive and does the processing. Until now the gap between them
+was crossed by hand, one bespoke copy at a time. 1.4.0 makes it a standing
+part of the tool.
+
+**`--ship` (Mac).** Files every frame that is verified on this Mac and not
+yet verified on the archive into `E:\Astro Image Data` over the mounted
+share (`/Volumes/AstroImageData`). Ledger-driven, so it needs no folder
+scan and cannot be fooled by frames you have flattened into `lights`
+folders by hand. The archive's own naming and numbering win: a target that
+already exists there is reused whatever the Mac calls it; a night that
+already has a Day folder there is merged into it; a new night takes the
+next free number. So `M 27 - Dumbbell Nebula` on the Mac lands in
+`S30P\Dumbbell Nebula (M 27)\M 27_sub Day 3\`, and the ASIAir's
+`lights\<target> Day N` level becomes the archive's flat
+`ZWO Askar Scopes\<Name (CODE)>\<Name (CODE)> Day N\` (mosaic panels keep
+their panel folder). Loose stacks stay loose at the target root, mode
+folders (Lunar, Solar...) go to the scope root, anything else goes to the
+`_Working Files` shelf. Every copy goes through a `.partial` name, is read
+back from the share and compared to the ledger hash, and only then is the
+entry stamped `archiveLocation` + `archiveShippedAt` and a line appended to
+the archive's `_verify\shipped.jsonl`. A file already on the archive with
+the same bytes is adopted; one with different bytes is reported and left
+alone. Nothing is deleted anywhere, ever. `--dry-run` lists the plan.
+Quiet no-op when the share is not mounted.
+
+**Runs by itself.** After every import, while the lock is still held, the
+engine ships what just arrived if the share is up (`--no-ship` to skip).
+A new LaunchAgent, `com.brettjohnson.astro-ship`, runs `--ship` at 09:00 and
+21:00 (and on wake if the Mac slept through one). With `ASTRO_ARCHIVE_URL`
+in `config.json` the engine mounts the share on demand via Finder and the
+keychain, so the connection does not have to be kept open. The installer
+loads the agent.
+
+**The PC verifies independently (`pc\sweep.ps1`).** A scheduled task (at
+logon and 03:30, `pc\install_sweep.ps1`) re-hashes every shipped file from
+E: in a fresh process and appends the good ones to `_verify\verified.jsonl`,
+the bad or missing ones to `_verify\problems.jsonl`, and a summary to
+`_verify\status.json`. The Mac's next `--ship` reads `verified.jsonl` and
+stamps `archiveVerifiedAt`. That stamp, not the Mac's own read-back, is
+what "Safe" will mean from here on. The ship report ends with the count of
+frames cleared from a camera and not yet PC-verified: the number that
+should read zero.
+
+**Known in this release.** Back-catalogue ledger rows (origin `backfill`)
+are skipped; `--repoint` will reconcile them against the archive by hash
+later. Frames you have moved by hand out of their Day folders on the Mac
+are reported as "missing on Mac" and skipped (they are already on the
+archive from the Cyprus import; the same `--repoint` will stamp them). The
+Mac's own Day numbering can put two nights of one import run in one Day
+folder; the archive numbering corrects that on the way in. Target naming
+falls back to the `Name (CODE)` rule when no matching archive folder
+exists; the shared targets table will replace that rule.
+
+247 end-to-end checks (191 engine + 56 panel), all green. New chains P1 to
+P3 pin: dry run names the archive target and copies nothing; a same night
+merges into the archive's existing Day and a new night takes the next
+number; stacks land loose; pre-existing archive files are untouched; ledger
+stamps and `shipped.jsonl` lines per file; a `filed` receipt; re-run ships
+nothing; `verified.jsonl` from the PC stamps exactly the listed files;
+nothing on the Mac is deleted or moved; an ordinary import ships by itself
+when the share is up; ASIAir frames take the archive's flat Day convention;
+an import with the share down neither ships nor complains; `--ship` on an
+unreachable share is a quiet no-op; a conflicting
+archive file is reported, left untouched and not stamped.
+
+## 1.3.1 — 2026-09-17
+
+One stack per night, and the archive is never pruned.
+
+**The bug this closes (data loss, live).** Since 1.0 the Seestar import kept
+only the single highest `Stacked_N` per target and then deleted every other
+`Stacked_*.fit` (plus JPG and thumbnail) at the destination whose name
+differed. Two consequences: the stack from every earlier night was removed
+as each new one arrived, so "Day 1's stack, Day 2's stack" never existed on
+disk; and because the camera's `N` restarts when a project is recreated after
+a clear, a fresh low-N stack would have deleted the archived cumulative stack
+of all the nights before it, silently, logged as one grey line. Reported by
+Brett on 12 Sep 2026 (`Importer_Backlog.md` item 3).
+
+- **Never delete at the destination.** The removal loop is gone. An import
+  only ever adds files to the archive. Deletion is Brett's hand.
+- **One keeper per observing night.** Stacks on the camera are grouped by the
+  night in their filename stamp (noon-to-noon, the same rule as subs) and the
+  highest `N` within each night is imported and verified. Different nights'
+  stacks coexist at the target root under their own stamped names.
+- **Ledger entries for stacks carry `night` and `subCount`** (the camera's
+  running N), so the archive can answer "how deep was each night's stack"
+  and the dashboard can chart integration growth for free.
+- **Receipts list the per-night stacks** (`sessions[].stacks[]` with night,
+  subCount, filename). `stackedCount` stays as the overall highest.
+- **Same-night supersession is reported, never acted on.** When a later
+  import brings a higher `N` for a night that already has an archived stack,
+  the older one is left in place and named in the log.
+- **`--tidy-stacks`** lists archived stacks outranked by a higher stack from
+  the *same* night in the same target folder and offers to remove them (and
+  their JPG siblings). Typed `DELETE`, default keep, `--dry-run` lists only.
+  Ledger rows are kept and marked `tidiedAt`, never removed. Stacks from
+  different nights are never offered.
+- **SAFE gate exemption narrowed to match.** A stack on the camera is only
+  treated as disposable when a higher stack from the *same night* in the
+  same folder is itself ledger-verified. The old exemption was per directory
+  and unconditional. Milky Way folders still never exempt (one keeper per
+  session).
+- **Receipt filenames can no longer collide.** Two runs inside the same
+  second (a quick re-run) used to overwrite each other's receipt; a `-2`
+  suffix now keeps both.
+
+232 end-to-end checks (176 engine + 56 panel), all green. New chain S18
+pins: both nights' stacks archived and the same-night loser not; ledger
+night and subCount; SAFE not blocked by a verified-outranked same-night
+stack; archived stacks survive an import whose camera stack has a lower N;
+nothing ever logged as removed; same-night higher stack imported with the
+older reported and left in place; `--tidy-stacks` dry-run lists only the
+same-night loser, a non-DELETE answer keeps everything, DELETE removes it
+and marks the ledger row.
+
+Already on the PC archive: the E: layout has always allowed several loose
+`Stacked_*.fit` per target, so earlier nights' stacks may still exist there
+even where the Mac copy lost them. Worth checking before assuming history
+is gone.
+
 ## 1.3.0 — 2026-09-05
 
 The Seestar S50 Pro joined the family — the fourth camera, and the second

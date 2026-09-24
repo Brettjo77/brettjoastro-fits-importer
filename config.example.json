@@ -9,5 +9,10 @@
   "SEESTAR_DEST_S30": "~/Documents/Astro/Seestar S30 Pro",
   "SEESTAR_DEST_S30_ORIG": "~/Documents/Astro/Seestar S30",
   "SEESTAR_DEST_S50": "~/Documents/Astro/Seestar S50",
-  "SEESTAR_DEST_S50PRO": "~/Documents/Astro/Seestar S50 Pro"
+  "SEESTAR_DEST_S50PRO": "~/Documents/Astro/Seestar S50 Pro",
+  "ASTRO_ARCHIVE_MOUNT": "/Volumes/AstroImageData",
+  "ASTRO_ARCHIVE_LABEL": "E:\\Astro Image Data",
+  "//archive": "Optional — only if you keep an archive on another computer (see PC-SYNC.md). Leave the URL empty otherwise — the ship agent is then never installed and no share is ever mounted for you.",
+  "ASTRO_ARCHIVE_URL": "",
+  "SEESTAR_IMPORT_SUB_JPEGS": false
 }

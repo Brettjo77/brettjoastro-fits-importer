@@ -1002,8 +1002,9 @@ check("S15 'M 1' did NOT adopt 'M 101' as its project dir (exact match only)",
                                   "M 1_sub Day 1")) == 1,
       str(m1))
 
-print("\n── Chain S16: per-sub JPEG riders (S50 Pro first light) ──────")
+print("\n── Chain S16: per-sub JPEG riders, OPT-IN since 1.4.2 ─────────")
 S16 = teh.Env("S16", asiair=False, seestar=True)
+S16.env["SEESTAR_IMPORT_SUB_JPEGS"] = "1"   # riders are off by default since 1.4.2
 
 def s16_add(stamp, jpg=True, target="M 33"):
     """S50 Pro naming form: Light_<t>_30.0s_IRCUT_<stamp>.fit (+ .jpg twin)."""
@@ -1084,6 +1085,700 @@ check("S17 with the refreshed stack proven, Yes clears the folder",
       not os.path.isdir(os.path.join(S17.myworks, "M 27_sub"))
       and not os.path.isdir(os.path.join(S17.myworks, "M 27")),
       r.stdout[-400:])
+
+print("\n── Chain S18: one stack per night, archive never pruned (1.3.1) ──")
+S18 = teh.Env("S18", asiair=False, seestar=True)
+# Night 1: two stacks on the camera (20 then 50). Night 2: one stack (90).
+S18.add_seestar_sub("M 27", "20260901-224402")
+S18.add_seestar_stack("M 27", 20, "20260901-223000")   # night 1, superseded
+S18.add_seestar_stack("M 27", 50, "20260901-230000")   # night 1 keeper
+S18.add_seestar_sub("M 27", "20260902-224402")
+S18.add_seestar_stack("M 27", 90, "20260902-231500")   # night 2 keeper
+r = S18.run()
+disp = "M 27 - Dumbbell Nebula"
+tdir = os.path.join(S18.sdest30, disp)
+def stacks_on_disk():
+    return sorted(f for f in os.listdir(tdir) if f.startswith("Stacked_") and f.endswith(".fit"))
+check("S18 one keeper per night: both nights' stacks archived, night-1 loser not",
+      stacks_on_disk() == ["Stacked_50_M 27_10.0s_IRCUT_20260901-230000.fit",
+                           "Stacked_90_M 27_10.0s_IRCUT_20260902-231500.fit"],
+      str(stacks_on_disk()) + r.stdout[-300:])
+led = S18.ledger()
+stk = {e["filename"]: e for e in led["files"].values() if e.get("sourceType") == "stack"}
+check("S18 stack entries carry night and subCount",
+      stk.get("Stacked_50_M 27_10.0s_IRCUT_20260901-230000.fit", {}).get("night") == "2026-09-01"
+      and stk["Stacked_50_M 27_10.0s_IRCUT_20260901-230000.fit"].get("subCount") == 50
+      and stk.get("Stacked_90_M 27_10.0s_IRCUT_20260902-231500.fit", {}).get("subCount") == 90,
+      str(stk))
+check("S18 night-1 superseded stack on camera does not block SAFE (winner verified)",
+      "NOT SAFE" not in r.stdout and disp in r.stdout.split("fully imported + verified")[-1],
+      r.stdout[-500:])
+# THE regression: camera cleared, fresh project starts at a LOW N on a new night.
+# The archived higher-N stacks must survive the next import untouched.
+shutil.rmtree(os.path.join(S18.myworks, "M 27_sub"))
+shutil.rmtree(os.path.join(S18.myworks, "M 27"))
+S18.add_seestar_sub("M 27", "20260910-224402")
+S18.add_seestar_stack("M 27", 7, "20260910-230000")    # night 3, low N
+r = S18.run()
+check("S18 archived stacks survive an import whose camera stack has a lower N",
+      stacks_on_disk() == ["Stacked_50_M 27_10.0s_IRCUT_20260901-230000.fit",
+                           "Stacked_7_M 27_10.0s_IRCUT_20260910-230000.fit",
+                           "Stacked_90_M 27_10.0s_IRCUT_20260902-231500.fit"],
+      str(stacks_on_disk()) + r.stdout[-300:])
+check("S18 nothing is ever logged as removed", "Removed older stack" not in r.stdout,
+      r.stdout[-300:])
+# Same night, higher N arrives later (camera re-stacked): the older keeper is
+# reported as superseded and LEFT IN PLACE, then --tidy-stacks offers it.
+S18.add_seestar_stack("M 27", 12, "20260910-234500")   # night 3, outranks 7
+r = S18.run()
+check("S18 same-night higher stack imported, older left in place and reported",
+      "Stacked_7_M 27_10.0s_IRCUT_20260910-230000.fit" in stacks_on_disk()
+      and "Stacked_12_M 27_10.0s_IRCUT_20260910-234500.fit" in stacks_on_disk()
+      and "Superseded stack left in place" in r.stdout,
+      str(stacks_on_disk()) + r.stdout[-400:])
+r = S18.run("--tidy-stacks", "--dry-run")
+check("S18 --tidy-stacks --dry-run lists only the same-night loser",
+      "Stacked_7_" in r.stdout and "Stacked_50_" not in r.stdout
+      and "Stacked_90_" not in r.stdout and "Nothing removed" in r.stdout
+      and "Stacked_7_M 27_10.0s_IRCUT_20260910-230000.fit" in stacks_on_disk(),
+      r.stdout[-500:])
+r = S18.run("--tidy-stacks", stdin="no\n", extra_env={"ASTRO_STDIN_PROMPTS": "1"})
+check("S18 --tidy-stacks without typed DELETE keeps everything",
+      "Stacked_7_M 27_10.0s_IRCUT_20260910-230000.fit" in stacks_on_disk(), r.stdout[-300:])
+r = S18.run("--tidy-stacks", stdin="DELETE\n", extra_env={"ASTRO_STDIN_PROMPTS": "1"})
+led = S18.ledger()
+tid = [e for e in led["files"].values() if e.get("filename", "").startswith("Stacked_7_")]
+check("S18 typed DELETE removes the loser; ledger row kept and marked tidied",
+      "Stacked_7_M 27_10.0s_IRCUT_20260910-230000.fit" not in stacks_on_disk()
+      and len(stacks_on_disk()) == 3 and tid and tid[0].get("tidiedAt"),
+      str(stacks_on_disk()) + str(tid))
+rp = os.path.join(S18.receipts, "Seestar S30 Pro")
+recs = [json.load(open(os.path.join(rp, f))) for f in sorted(os.listdir(rp))]
+nights_seen = {x["night"] for rc in recs for ss in rc["sessions"] for x in ss.get("stacks", [])}
+check("S18 receipts list per-night stacks",
+      nights_seen == {"2026-09-01", "2026-09-02", "2026-09-10"}, str(nights_seen))
+
+print("\n── Chain S19: per-sub JPEG previews are NOT imported (1.4.2) ──")
+def s19_add(env, stamp, jpg=True, target="M 33"):
+    base = f"Light_{target}_30.0s_IRCUT_{stamp}"
+    fp = os.path.join(env.myworks, f"{target}_sub", base + ".fit")
+    teh.make_seestar_fits(fp, creator="Seestar S50 Pro", exptime=30.0,
+                          dateobs=teh.stamp_to_dateobs(stamp), uniq=f"{env.root}-{stamp}")
+    if jpg:
+        with open(os.path.join(env.myworks, f"{target}_sub", base + ".jpg"), "wb") as f:
+            f.write(b"\xff\xd8\xff\xe0" + stamp.encode() + b"p" * 300)
+    return base
+
+S19 = teh.Env("S19", asiair=False, seestar=True)
+Y19 = {"ASTRO_STDIN_PROMPTS": "1"}
+s19_add(S19, "20260919-013205")
+s19_add(S19, "20260919-013238")
+stk = S19.add_seestar_stack("M 33", 2, "20260919-020000", creator="Seestar S50 Pro")
+with open(stk[:-4] + ".jpg", "wb") as f:
+    f.write(b"\xff\xd8\xff\xe0stackjpg" + b"s" * 200)
+r = S19.run(stdin="n\ny\n", extra_env=Y19)
+d19 = os.path.join(S19.sdest50p, "M 33 - Triangulum Galaxy", "M 33_sub Day 1")
+check("S19 FITs import; their JPEG previews do not",
+      count_fits(d19) == 2 and not [x for x in os.listdir(d19) if x.lower().endswith(".jpg")],
+      str(os.listdir(d19)) + r.stdout[-300:])
+led = S19.ledger()
+check("S19 no sub-jpg ledger entries by default",
+      not [e for e in led["files"].values() if e.get("sourceType") in ("sub-jpg", "mw-jpg")])
+check("S19 the stack's own JPG still imports, verified",
+      any(e.get("sourceType") == "stack-jpg" and e.get("verifiedAtImport")
+          for e in led["files"].values()))
+check("S19 cleanup still offered and clears: previews of proven FITs are not data",
+      not os.path.isdir(os.path.join(S19.myworks, "M 33_sub")), r.stdout[-400:])
+# a second night, cleanup declined: its previews must not show as new work
+s19_add(S19, "20260920-013205")
+r = S19.run()
+r = S19.run("--scan-only")
+check("S19 a target whose only leftovers are previews reports nothing new",
+      "ASIAIR-SCAN|COUNT|0" in r.stdout, r.stdout[:300])
+# a JPEG with NO FIT twin is the only copy of something: it still blocks
+orphan = "Light_M 33_30.0s_IRCUT_20260920-030000.jpg"
+with open(os.path.join(S19.myworks, "M 33_sub", orphan), "wb") as f:
+    f.write(b"\xff\xd8\xff\xe0orphan" + b"o" * 200)
+r = S19.run(stdin="y\n", extra_env=Y19)
+check("S19 a JPEG with no FIT twin is never silent: reported NOT handled, left on camera",
+      os.path.isfile(os.path.join(S19.myworks, "M 33_sub", orphan))
+      and "NOT handled" in r.stdout and "JPEGs with no FIT" in r.stdout, r.stdout[-500:])
+r = S19.run("--scan-only")
+check("S19 the orphan raises the watcher's attention count",
+      "ASIAIR-SCAN|ATTENTION|1" in r.stdout, r.stdout[:400])
+r = S19.run("--report")
+check("S19 the report will not call that folder SAFE",
+      "M 33" in r.stdout and "NOT SAFE" in r.stdout and orphan in r.stdout, r.stdout[-700:])
+
+# --ship: previews ledgered by an older build stay on the Mac
+S19b = teh.Env("S19b", asiair=False, seestar=True)
+s19_add(S19b, "20260921-013205")
+r = S19b.run("--no-ship", extra_env={"SEESTAR_IMPORT_SUB_JPEGS": "1"})   # 1.4.1-style riders
+legacy = [e for e in S19b.ledger()["files"].values() if e.get("sourceType") == "sub-jpg"]
+os.makedirs(os.path.join(S19b.archive, "_verify"))
+os.makedirs(os.path.join(S19b.archive, "S50P"))
+r = S19b.run("--ship")
+landed = [os.path.join(dp, f) for dp, _d, fs in os.walk(S19b.archive) for f in fs]
+check("S19 --ship files the FIT but leaves legacy rider JPEGs on the Mac",
+      len(legacy) == 1 and any(x.endswith(".fit") for x in landed)
+      and not any(x.lower().endswith(".jpg") for x in landed),
+      str([os.path.relpath(x, S19b.archive) for x in landed]) + r.stdout[-300:])
+check("S19 --ship reports nothing outstanding afterwards",
+      "Ship: 0 file(s)" in S19b.run("--ship", "--dry-run").stdout)
+
+print("\n── Chain S20: discard — delete from camera WITHOUT importing (1.4.2) ──")
+Y20 = {"ASTRO_STDIN_PROMPTS": "1"}
+def s20_target(env, name, stamps, stack=None):
+    for st in stamps:
+        env.add_seestar_sub(name, st, creator="Seestar S50 Pro")
+        with open(os.path.join(env.myworks, f"{name}_sub", f"{st}.jpg"), "wb") as f:
+            f.write(b"\xff\xd8\xff\xe0" + st.encode() + b"d" * 100)
+    if stack:
+        env.add_seestar_stack(name, stack[0], stack[1], creator="Seestar S50 Pro")
+
+def s20_seed_ledger(env):
+    os.makedirs(env.state, exist_ok=True)
+    with open(os.path.join(env.state, "ledger.json"), "w") as f:
+        json.dump({"version": 1, "files": {}, "calibration": {}}, f)
+
+S20 = teh.Env("S20", asiair=False, seestar=True)
+S20n = teh.Env("S20n", asiair=False, seestar=True)
+s20_target(S20n, "M 101", ["20260923-213000"])
+r = S20n.run("--discard", "M 101", stdin="DISCARD\n", extra_env=Y20)
+check("S20 with no ledger at all, discard refuses (nothing could remember it)",
+      r.returncode == 1 and "No import ledger yet" in (r.stdout + r.stderr)
+      and os.path.isfile(os.path.join(S20n.myworks, "M 101_sub", "20260923-213000.fit")), r.stdout[-300:])
+s20_seed_ledger(S20)
+s20_target(S20, "M 101", ["20260923-213000", "20260923-213100", "20260923-213200"],
+           stack=(3, "20260923-214000"))
+sub_dir = os.path.join(S20.myworks, "M 101_sub")
+keep = os.path.join(S20.root, "keep.fit")
+shutil.copy2(os.path.join(sub_dir, "20260923-213000.fit"), keep)
+r = S20.run("--discard", "M 101", "--dry-run")
+check("S20 dry run describes what the files ARE and deletes nothing",
+      "3 subs" in r.stdout and "1 stack of up to 3 subs" in r.stdout
+      and "NEVER been backed up" in r.stdout and "Nothing deleted" in r.stdout
+      and len(os.listdir(sub_dir)) == 6 and r.returncode == 0, r.stdout[-600:])
+r = S20.run("--discard", "M 101")                       # headless: nobody typed anything
+check("S20 no typed DISCARD → cancelled, nothing deleted",
+      "Cancelled" in r.stdout and len(os.listdir(sub_dir)) == 6, r.stdout[-300:])
+r = S20.run("--discard", "M 101", stdin="yes\n", extra_env=Y20)
+check("S20 anything but the exact word cancels (a 'yes' is not enough)",
+      "Cancelled" in r.stdout and len(os.listdir(sub_dir)) == 6, r.stdout[-300:])
+r = S20.run("--discard", "M 101", "--reason", "3 frames, clouds",
+            stdin="DISCARD\nn\n", extra_env=Y20)
+check("S20 typed DISCARD deletes the target's folders from the camera",
+      not os.path.isdir(sub_dir) and not os.path.isdir(os.path.join(S20.myworks, "M 101"))
+      and r.returncode == 0, r.stdout[-400:])
+led = S20.ledger()
+reg = led.get("discarded", {})
+check("S20 every discarded file recorded first: hash, size, night, reason",
+      len(reg) == 7 and all(v.get("sha256") and v.get("size") and v.get("reason") == "3 frames, clouds"
+                            and v.get("origin") == "discarded" and not v.get("verifiedAtImport")
+                            for v in reg.values()), str(list(reg.values())[:1]))
+check("S20 discarded files never enter the backed-up register",
+      not [e for e in led["files"].values() if e.get("target") == "M 101"])
+check("S20 nothing was copied anywhere",
+      not os.path.isdir(os.path.join(S20.sdest50p, "M 101 - Pinwheel Galaxy")))
+r = S20.run("--report")
+check("S20 the report shows discards in their own never-backed-up category",
+      "Deliberately discarded" in r.stdout and "M 101" in r.stdout.split("Deliberately discarded")[1]
+      and "3 frames, clouds" in r.stdout, r.stdout[-600:])
+os.makedirs(sub_dir)
+shutil.copy2(keep, os.path.join(sub_dir, "20260923-213000.fit"))   # the same bytes turn up again
+r = S20.run("--scan-only")
+check("S20 bytes that were discarded are recognised, not offered as new",
+      "ASIAIR-SCAN|COUNT|0" in r.stdout, r.stdout[:300])
+
+S20b = teh.Env("S20b", asiair=False, seestar=True)
+s20_target(S20b, "M 102", ["20260923-220000", "20260923-220100"])
+r = S20b.run()                                           # imported + verified
+r = S20b.run("--discard", "M 102", stdin="n\n", extra_env=Y20)
+check("S20 an all-backed-up target is handed to the SAFE clear (default No keeps it)",
+      "SAFE clear, not a discard" in r.stdout and "Delete these SAFE source folders" in r.stdout
+      and os.path.isfile(os.path.join(S20b.myworks, "M 102_sub", "20260923-220000.fit")),
+      r.stdout[-400:])
+r = S20b.run("--discard", "M 102", stdin="y\n", extra_env=Y20)
+led = S20b.ledger()
+m102 = [e for e in led["files"].values() if e.get("target") == "M 102"]
+check("S20 ...and Yes clears it the SAFE way: flagged cleared, nothing 'discarded'",
+      not os.path.isdir(os.path.join(S20b.myworks, "M 102_sub")) and m102
+      and all(e.get("clearedFromCamera") for e in m102) and not led.get("discarded"),
+      r.stdout[-400:])
+S20f = teh.Env("S20f", asiair=False, seestar=True)
+s20_target(S20f, "M 57", ["20260922-213000"])
+r = S20f.run()                                           # night 22 imported + verified
+s20_target(S20f, "M 57", ["20260923-213000"])            # night 23 never imported
+r = S20f.run("--discard", "M 57", stdin="DISCARD\nn\n", extra_env=Y20)
+left = sorted(os.listdir(os.path.join(S20f.myworks, "M 57_sub")))
+check("S20 a mix offers ONLY the never-backed-up files; the backed-up night stays (1.4.3)",
+      r.returncode == 0 and "is a mix" in r.stdout and "stay on the camera" in r.stdout
+      and left == ["20260922-213000.fit", "20260922-213000.jpg"]
+      and "Never import" not in r.stdout, str(left) + r.stdout[-400:])
+s20_target(S20f, "M 57", ["20260923-213000"])            # night 23 re-shot
+r = S20f.run("--discard", "M 57", "--night", "2026-09-23", stdin="DISCARD\n", extra_env=Y20)
+left = sorted(os.listdir(os.path.join(S20f.myworks, "M 57_sub")))
+check("S20 ...and --night on the never-imported night discards just that",
+      left == ["20260922-213000.fit", "20260922-213000.jpg"], str(left) + r.stdout[-300:])
+
+S20c = teh.Env("S20c", asiair=False, seestar=True)
+s20_seed_ledger(S20c)
+s20_target(S20c, "M 51", ["20260922-213000", "20260923-213000", "20260923-213100"])
+r = S20c.run("--discard", "M 51", "--night", "2026-09-23", stdin="DISCARD\n", extra_env=Y20)
+left = sorted(os.listdir(os.path.join(S20c.myworks, "M 51_sub")))
+check("S20 --night discards only that night; the other night stays on the camera",
+      left == ["20260922-213000.fit", "20260922-213000.jpg"], str(left) + r.stdout[-300:])
+
+S20d = teh.Env("S20d", asiair=False, seestar=True)
+s20_seed_ledger(S20d)
+s20_target(S20d, "M 13", ["20260923-230000"])
+with open(os.path.join(S20d.myworks, "M 13_sub", "20260923-230000_thn.jpg"), "wb") as f:
+    f.write(b"thumb")                                   # camera thumbnail: neutral
+r = S20d.run("--discard", "M 13", stdin="DISCARD\ny\n", extra_env=Y20)
+check("S20 a camera thumbnail does not turn a clean discard into a 'mix'",
+      not os.path.isdir(os.path.join(S20d.myworks, "M 13_sub")), r.stdout[-300:])
+sk = json.load(open(os.path.join(S20d.state, "skiplist.json")))
+check("S20 after a whole-target discard, Yes adds it to the never-import list",
+      "M 13" in sk, str(sk) + r.stdout[-300:])
+
+S20e = teh.Env("S20e", asiair=True, seestar=False)
+S20e.add_light("Plan", "M 31", "0001")
+r = S20e.run("--discard", "M 31", stdin="DISCARD\n", extra_env=Y20)
+check("S20 the ASIAir is never deleted from — discard refuses outright",
+      r.returncode == 1 and "Seestar-only" in (r.stdout + r.stderr)
+      and any(f.endswith(".fit") for _dp, _d, fs in os.walk(S20e.cam) for f in fs), r.stdout[-300:])
+
+# ── review fixes (1.4.2): exact target, containment, partial, one camera ──
+S20g = teh.Env("S20g", asiair=False, seestar=True)
+s20_seed_ledger(S20g)
+s20_target(S20g, "M 81", ["20260923-213000"])
+s20_target(S20g, "M 81 wide", ["20260923-223000"])     # same object, second project
+r = S20g.run("--discard", "M 81", "--dry-run")
+disp = r.stdout.split("DISCARD — ")[1].split(" (")[0] if "DISCARD — " in r.stdout else "?"
+r = S20g.run("--discard", disp, stdin="DISCARD\n", extra_env=Y20)
+check("S20 a name that matches two targets is refused and lists the camera folders",
+      r.returncode == 1 and "matches more than one" in (r.stdout + r.stderr)
+      and "M 81 wide_sub" in r.stdout
+      and os.path.isdir(os.path.join(S20g.myworks, "M 81_sub"))
+      and os.path.isdir(os.path.join(S20g.myworks, "M 81 wide_sub")), disp + r.stdout[-400:])
+r = S20g.run("--discard", "M 81 wide_sub", stdin="DISCARD\nn\n", extra_env=Y20)
+check("S20 ...and the camera folder name picks exactly one (the other stays)",
+      not os.path.isdir(os.path.join(S20g.myworks, "M 81 wide_sub"))
+      and os.path.isfile(os.path.join(S20g.myworks, "M 81_sub", "20260923-213000.fit")),
+      r.stdout[-300:])
+
+S20h = teh.Env("S20h", asiair=False, seestar=True)
+s20_seed_ledger(S20h)
+outside = os.path.join(S20h.root, "outside")
+os.makedirs(outside)
+S20h_keep = os.path.join(outside, "20260923-213000.fit")
+teh.make_fits(S20h_keep, uniq="outside-precious")
+os.symlink(outside, os.path.join(S20h.myworks, "M 3_sub"))  # a folder link off the card
+r = S20h.run("--discard", "M 3", stdin="DISCARD\nn\n", extra_env=Y20)
+check("S20 a camera folder that links OFF the card is refused, nothing deleted",
+      r.returncode == 1 and "Nothing was touched" in (r.stdout + r.stderr)
+      and os.path.isfile(S20h_keep), (r.stdout + r.stderr)[-300:])
+os.remove(os.path.join(S20h.myworks, "M 3_sub"))
+s20_target(S20h, "M 3", ["20260923-213000"])
+os.symlink(S20h_keep, os.path.join(S20h.myworks, "M 3_sub", "20260923-213500.fit"))
+r = S20h.run("--discard", "M 3", stdin="DISCARD\nn\n", extra_env=Y20)
+check("S20 a file link inside a camera folder is refused, nothing deleted",
+      r.returncode == 1 and os.path.isfile(S20h_keep)
+      and os.path.isfile(os.path.join(S20h.myworks, "M 3_sub", "20260923-213000.fit")),
+      (r.stdout + r.stderr)[-300:])
+
+# The two faults a subprocess can't stage on its own (a delete that fails, a
+# second Seestar in /Volumes) are injected through a tiny wrapper.
+PATCHED = os.path.join(tempfile.mkdtemp(prefix="v2test-wrap-"), "patched.py")
+with open(PATCHED, "w") as f:
+    f.write(f'''import importlib.util, os, sys
+spec = importlib.util.spec_from_file_location("astro_import", {SCRIPT!r})
+m = importlib.util.module_from_spec(spec); spec.loader.exec_module(m)
+if os.environ.get("FAIL_REMOVE"):
+    _rm = os.remove
+    def rm(p, *a, **k):
+        if os.environ["FAIL_REMOVE"] in os.path.basename(p):
+            raise PermissionError(1, "Operation not permitted", p)
+        return _rm(p, *a, **k)
+    os.remove = rm
+if os.environ.get("EXTRA_SEESTAR"):
+    m.seestar_extra_volumes = lambda primary: [os.environ["EXTRA_SEESTAR"]]
+m.main()
+''')
+def run_patched(env, *args, stdin="", extra=None):
+    e = dict(env.env); e.update(Y20); e.update(extra or {})
+    return subprocess.run([sys.executable, PATCHED, *args], env=e, input=stdin,
+                          capture_output=True, text=True, timeout=120)
+
+S20i = teh.Env("S20i", asiair=False, seestar=True)
+s20_seed_ledger(S20i)
+s20_target(S20i, "M 92", ["20260923-213000", "20260923-213100"])
+r = run_patched(S20i, "--discard", "M 92", stdin="DISCARD\nn\n",
+                extra={"FAIL_REMOVE": "213100.fit"})
+reg = S20i.ledger().get("discarded", {})
+stuck = [v for v in reg.values() if v["filename"] == "20260923-213100.fit"]
+gone = [v for v in reg.values() if v["filename"] == "20260923-213000.fit"]
+check("S20 ...it says how many could NOT be removed and are still on the Seestar",
+      r.returncode == 1 and "could NOT be removed" in (r.stdout + r.stderr)
+      and "Discarded 1 file(s)" not in r.stdout, (r.stdout + r.stderr)[-400:])
+check("S20 ...the stuck file's record says stillOnCamera; the deleted one's doesn't",
+      stuck and stuck[0].get("stillOnCamera") is True
+      and gone and gone[0].get("stillOnCamera") is False, str(stuck) + str(gone))
+r = S20i.run("--scan-only")
+check("S20 ...and the frame still on the camera keeps showing as new work",
+      "ASIAIR-SCAN|COUNT|1" in r.stdout, r.stdout[:300])
+r = S20i.run("--report")
+check("S20 ...and the report doesn't count it as discarded",
+      "NOT deleted — still on the" in r.stdout
+      and "M 92" in r.stdout.split("Deliberately discarded")[1], r.stdout[-500:])
+
+S20j = teh.Env("S20j", asiair=False, seestar=True)
+s20_seed_ledger(S20j)
+s20_target(S20j, "M 15", ["20260923-213000"])
+r = run_patched(S20j, "--discard", "M 15", stdin="DISCARD\nn\n",
+                extra={"EXTRA_SEESTAR": "/Volumes/Seestar 1"})
+check("S20 with two Seestars mounted, discard refuses (one camera at a time)",
+      r.returncode == 1 and "one camera" in (r.stdout + r.stderr)
+      and os.path.isfile(os.path.join(S20j.myworks, "M 15_sub", "20260923-213000.fit")),
+      (r.stdout + r.stderr)[-300:])
+
+S20k = teh.Env("S20k", asiair=False, seestar=True)
+s20_seed_ledger(S20k)
+for st, exp in (("20260923-213000", "10.0"), ("20260923-213100", "30.0")):
+    p = S20k.add_seestar_sub("M 5", st, creator="Seestar S50 Pro")
+    os.rename(p, os.path.join(os.path.dirname(p), f"Light_M 5_{exp}s_IRCUT_{st}.fit"))
+r = S20k.run("--discard", "M 5", "--dry-run")
+check("S20 integration adds up each sub's own exposure (10 s + 30 s = 0.7 min)",
+      "2 subs (0.7 min integration)" in r.stdout, r.stdout[-400:])
+S20k.add_seestar_sub("", "20260923-210000", creator="Seestar S50 Pro")   # MyWorks/_sub/
+r = S20k.run("--discard", "_sub", stdin="DISCARD\nn\n", extra_env=Y20)
+r2 = S20k.run("--scan-only")
+check("S20 a folder literally named '_sub' is no target: not discardable, reported unhandled",
+      r.returncode == 1 and os.path.isfile(os.path.join(S20k.myworks, "_sub", "20260923-210000.fit"))
+      and os.path.isdir(os.path.join(S20k.myworks, "M 5_sub")) and "_sub/" in r2.stdout,
+      (r.stdout + r.stderr)[-300:] + r2.stdout[:400])
+
+print("\n── Chain S21: review fixes — what the preview exemption may NOT cover (1.4.2) ──")
+# A Lunar_photo JPEG is data (the camera's processed image), not a preview:
+# if its copy fails, the folder must stay NOT SAFE even though the FIT twin is proven.
+S21 = teh.Env("S21", asiair=False, seestar=True)
+s20_seed_ledger(S21)
+S21.add_seestar_nondso("Lunar_photo", "Lunar_20260923-220000.fit", creator="Seestar S50 Pro")
+with open(os.path.join(S21.myworks, "Lunar_photo", "Lunar_20260923-220000.jpg"), "wb") as f:
+    f.write(b"\xff\xd8\xff\xe0moon-processed" + b"L" * 500)
+os.makedirs(os.path.join(S21.sdest50p, "Lunar", "Lunar_20260923-220000.jpg.partial"))
+r = S21.run("--no-ship", stdin="y\n", extra_env=Y20)
+check("S21 a mode-folder JPEG whose copy FAILED keeps the folder NOT SAFE (twin or not)",
+      "NOT SAFE" in r.stdout and os.path.isfile(
+          os.path.join(S21.myworks, "Lunar_photo", "Lunar_20260923-220000.jpg")), r.stdout[-500:])
+# The preview exemption matches its FIT twin whatever the extension's case.
+S21b = teh.Env("S21b", asiair=False, seestar=True)
+s20_seed_ledger(S21b)
+p = S21b.add_seestar_sub("M 2", "20260923-213000", creator="Seestar S50 Pro")
+os.rename(p, p[:-4] + ".FIT")
+with open(os.path.join(S21b.myworks, "M 2_sub", "20260923-213000.jpg"), "wb") as f:
+    f.write(b"\xff\xd8\xff\xe0prev" + b"p" * 100)
+r = S21b.run("--no-ship", stdin="y\n", extra_env=Y20)
+check("S21 a preview beside an upper-case .FIT twin still clears SAFE",
+      not os.path.isdir(os.path.join(S21b.myworks, "M 2_sub")), r.stdout[-500:])
+
+print("\n── Chain S22: 1.4.3 review fixes — the SAFE rule, the ledger, the camera ──")
+Y22 = {"ASTRO_STDIN_PROMPTS": "1"}
+def s22_env(tag):
+    e = teh.Env(tag, asiair=False, seestar=True)
+    s20_seed_ledger(e)
+    return e
+def s22_sub(env, target, stamp, creator, tag, exp="10.0"):
+    p = os.path.join(env.myworks, f"{target}_sub", f"Light_{target}_{exp}s_IRCUT_{stamp}.fit")
+    teh.make_seestar_fits(p, creator=creator, dateobs=teh.stamp_to_dateobs(stamp),
+                          uniq=f"{tag}-{stamp}")
+    return p
+
+# H1 — two Seestars, same target, same second, same size: two frames, two rows
+H1 = s22_env("S22a")
+s22_sub(H1, "M 31", "20260923-213000", "ZWO Seestar S30", "S30")
+H1.run("--no-ship", stdin="n\n", extra_env=Y22)
+shutil.rmtree(H1.myworks); os.makedirs(H1.myworks)
+b = s22_sub(H1, "M 31", "20260923-213000", "ZWO Seestar S50", "S50-other-photons")
+r = H1.run("--scan-only")
+check("S22 an S50 frame with the S30's name and size is NEW, not 'already imported' (H1)",
+      "ASIAIR-SCAN|COUNT|1" in r.stdout, r.stdout[:300])
+r = H1.run("--no-ship", stdin="y\n", extra_env=Y22)
+s50copy = os.path.join(H1.sdest50, "M 31 - Andromeda Galaxy", "M 31_sub Day 1",
+                       "Light_M 31_10.0s_IRCUT_20260923-213000.fit")
+rows = [e for e in H1.ledger()["files"].values() if e["filename"].endswith("20260923-213000.fit")]
+check("S22 ...it is copied and verified before the camera is cleared",
+      os.path.isfile(s50copy) and not os.path.exists(b), r.stdout[-400:])
+check("S22 ...and both cameras keep their own ledger row (none overwritten)",
+      sorted(e["camera"] for e in rows) == ["ZWO Seestar S30", "ZWO Seestar S50"], str(rows))
+
+# H6 — a second stacking session on the same night keeps its own stack
+H6 = s22_env("S22b")
+H6.add_seestar_stack("M 33", 100, "20260923-220000", creator="Seestar S50 Pro")
+lp = os.path.join(H6.myworks, "M 33", "Stacked_150_M 33_10.0s_LP_20260923-233000.fit")
+teh.make_seestar_fits(lp, creator="Seestar S50 Pro", uniq="lp-session")
+r = H6.run("--no-ship", stdin="y\n", extra_env=Y22)
+dest33 = os.path.join(H6.sdest50p, "M 33 - Triangulum Galaxy")
+got = sorted(f for f in os.listdir(dest33) if f.startswith("Stacked_")) if os.path.isdir(dest33) else []
+check("S22 a filter change mid-night: BOTH sessions' stacks are copied before any clear (H6)",
+      any("_IRCUT_" in f and f.endswith(".fit") for f in got)
+      and any("_LP_" in f and f.endswith(".fit") for f in got), str(got) + r.stdout[-300:])
+H6b = s22_env("S22c")
+H6b.add_seestar_stack("M 33", 180, "20260923-220000", creator="Seestar S50 Pro")
+H6b.add_seestar_stack("M 33", 120, "20260924-010000", creator="Seestar S50 Pro")   # restarted, N reset
+H6b.run("--no-ship", stdin="y\n", extra_env=Y22)
+d = os.path.join(H6b.sdest50p, "M 33 - Triangulum Galaxy")
+got = sorted(f for f in os.listdir(d) if f.startswith("Stacked_") and f.endswith(".fit")) if os.path.isdir(d) else []
+check("S22 a restarted stack (lower N, later) is its own keeper, never 'outranked'",
+      len(got) == 2, str(got))
+r = H6b.run("--tidy-stacks", "--dry-run")
+check("S22 ...and --tidy-stacks does not offer either one for removal",
+      "No superseded" in r.stdout, r.stdout[-300:])
+
+# H3 — the camera is swapped while the SAFE question waits: nothing is deleted
+H3 = s22_env("S22d")
+for st in ("20260923-213000", "20260923-213100"):
+    H3.add_seestar_sub("M 51", st, creator="ZWO Seestar S30")
+SWAP = os.path.join(tempfile.mkdtemp(prefix="v2test-wrap-"), "swap.py")
+with open(SWAP, "w") as f:
+    f.write(f"""import importlib.util, os, sys, shutil
+sys.path.insert(0, {os.path.dirname(SCRIPT)!r})
+import test_env_helper as teh
+spec = importlib.util.spec_from_file_location("astro_import", {SCRIPT!r})
+m = importlib.util.module_from_spec(spec); spec.loader.exec_module(m)
+_real = m.safe_input
+def swapping(prompt, default=""):
+    if "SAFE source folders" in prompt:
+        mw = os.path.join(os.environ["SEESTAR_VOLUME"], "MyWorks")
+        shutil.rmtree(mw); os.makedirs(mw)
+        for st in ("20260924-220000", "20260924-220100"):
+            teh.make_seestar_fits(os.path.join(mw, "M 51_sub", st + ".fit"),
+                                  creator="ZWO Seestar S50", uniq="S50-" + st)
+        return "y"
+    return _real(prompt, default)
+m.safe_input = swapping
+m.main()
+""")
+e = dict(H3.env); e.update(Y22)
+r = subprocess.run([sys.executable, SWAP, "--no-ship"], env=e, input="n\n",
+                   capture_output=True, text=True, timeout=120)
+left = sorted(os.listdir(os.path.join(H3.myworks, "M 51_sub"))) \
+    if os.path.isdir(os.path.join(H3.myworks, "M 51_sub")) else []
+check("S22 a camera swapped while the SAFE card waited: the new camera's frames survive (H3)",
+      left == ["20260924-220000.fit", "20260924-220100.fit"]
+      and "no longer the" in (r.stdout + r.stderr), str(left) + (r.stdout + r.stderr)[-300:])
+
+# H4 — the camera re-saves a stack in place at the same size: re-copied, never cleared stale
+H4 = s22_env("S22e")
+H4.add_seestar_sub("M 27", "20260923-213000", creator="Seestar S50 Pro")
+stk = H4.add_seestar_stack("M 27", 1, "20260923-213500", creator="Seestar S50 Pro")
+H4.run("--no-ship", stdin="n\n", extra_env=Y22)
+data = bytearray(open(stk, "rb").read()); data[-50:] = b"R" * 50
+open(stk, "wb").write(bytes(data))
+later = os.path.getmtime(stk) + 1234   # not a whole quarter-hour (that reads as a DST/travel shift)
+os.utime(stk, (later, later))                       # re-saved at the end of the session
+r = H4.run("--scan-only")
+check("S22 a stack re-saved at the same size shows as new work (H4)",
+      "ASIAIR-SCAN|COUNT|1" in r.stdout, r.stdout[:300])
+r = H4.run("--no-ship", stdin="y\n", extra_env=Y22)
+mac = os.path.join(H4.sdest50p, "M 27 - Dumbbell Nebula", os.path.basename(stk))
+check("S22 ...the import copies the NEW bytes before the SAFE clear",
+      os.path.isfile(mac) and open(mac, "rb").read() == bytes(data), r.stdout[-300:])
+
+# H2 — a ledger-writing command waits for the lock (it never saves over an import)
+H2 = s22_env("S22f")
+H2.add_seestar_stack("M 8", 10, "20260923-220000", creator="Seestar S50 Pro")
+with open(os.path.join(H2.state, "import.lock"), "w") as f:
+    json.dump({"pid": os.getpid(), "started": "now"}, f)
+r = H2.run("--tidy-stacks", stdin="DELETE\n", extra_env=Y22)
+r2 = H2.run("--skip-target", "M 8")
+check("S22 --tidy-stacks and --skip-target refuse while an import holds the lock (H2)",
+      r.returncode == 1 and r2.returncode == 1
+      and "already running" in (r.stdout + r.stderr + r2.stdout + r2.stderr),
+      (r.stdout + r.stderr)[-200:])
+os.remove(os.path.join(H2.state, "import.lock"))
+
+# H10 — a copy without a checksum is not "verified", so it can't clear the camera
+H10 = s22_env("S22g")
+H10.add_seestar_sub("M 57", "20260923-213000", creator="Seestar S50 Pro")
+r = H10.run("--no-ship", "--no-checksum", stdin="y\n", extra_env=Y22)
+row = [e for e in H10.ledger()["files"].values() if e["filename"].startswith("2026")][0]
+check("S22 --no-checksum rows are not 'verified' and the SAFE clear is not offered (H10)",
+      row.get("verifiedAtImport") is False and row.get("checksumSkipped")
+      and os.path.isdir(os.path.join(H10.myworks, "M 57_sub")), str(row))
+
+# H11 — different bytes at a binned path are new work, not "already discarded"
+H11 = s22_env("S22h")
+p11 = H11.add_seestar_sub("M 45", "20260923-213000", creator="Seestar S50 Pro")
+H11.run("--discard", "M 45", stdin="DISCARD\nn\n", extra_env=Y22)
+teh.make_seestar_fits(p11, creator="Seestar S50 Pro", uniq="a-different-frame")
+r = H11.run("--scan-only")
+check("S22 a new frame at a discarded path (same name and size) is offered, not hidden (H11)",
+      "ASIAIR-SCAN|COUNT|1" in r.stdout, r.stdout[:300])
+
+# H7 — a card with no FITS (identity guessed) never flags another camera's frames
+H7 = s22_env("S22i")
+for st in ("20260920-213000", "20260920-213100"):
+    H7.add_seestar_sub("M 13", st, creator="ZWO Seestar S30 Pro")
+H7.run("--no-ship", stdin="n\n", extra_env=Y22)
+shutil.rmtree(H7.myworks); os.makedirs(H7.myworks)
+H7.add_seestar_nondso("Lunar_video", "Lunar_20260923-230000.mp4", creator="ZWO Seestar S50 Pro")
+H7.run("--no-ship", stdin="n\n", extra_env=Y22)
+flagged = [e for e in H7.ledger()["files"].values()
+           if e.get("target") == "M 13" and e.get("clearedFromCamera")]
+check("S22 a FITS-less card never marks the S30 Pro's frames 'cleared from camera' (H7)",
+      not flagged, str(len(flagged)))
+
+# H8 — an unreadable ledger is never published over the mirror
+H8 = s22_env("S22j")
+H8.add_seestar_sub("M 2", "20260923-213000", creator="Seestar S50 Pro")
+H8.run("--no-ship", stdin="n\n", extra_env=Y22)
+mirror_ledger = os.path.join(H8.mirror, "ledger.json")
+good = open(mirror_ledger).read()
+for n in ("ledger.json", "ledger.json.bak"):
+    with open(os.path.join(H8.state, n), "w") as f:
+        f.write("{ not json")
+H8.run("--skip-target", "M 99")
+check("S22 a corrupt ledger (and .bak) never overwrites the good mirror copy (H8)",
+      open(mirror_ledger).read() == good)
+
+# H9 — the ASIAir-deleting flag is gone
+r = teh.Env("S22k").run("--clean-source-previews", "--scan-only")
+check("S22 --clean-source-previews no longer exists (it deleted from the ASIAir, H9)",
+      r.returncode == 2 and "unrecognized" in r.stderr, r.stderr[-200:])
+
+# V3 / V4 — names never become paths
+check("S22 typed target names that are paths are refused (V3)",
+      eng.clean_target_name("../../etc") is None and eng.clean_target_name("/Users/x") is None
+      and eng.clean_target_name("Sh2-132: Lion") is None
+      and eng.clean_target_name("  Lion   Nebula ") == "Lion Nebula")
+V4 = s22_env("S22l")
+V4.add_seestar_sub("M 20", "20260923-213000", creator="Seestar S50 Pro")
+V4.add_seestar_sub("..", "20260923-213500", creator="Seestar S50 Pro")      # MyWorks/.._sub/
+r = V4.run("--no-ship", stdin="y\n", extra_env=Y22)
+check("S22 a folder named '.._sub' is not a target and the card root is never touched (V4)",
+      os.path.isdir(V4.myworks) and os.path.isdir(os.path.join(V4.myworks, ".._sub"))
+      and not os.path.isdir(os.path.join(V4.myworks, "M 20_sub"))
+      and ".._sub/" in V4.run("--scan-only").stdout, r.stdout[-300:])
+
+# discard reaches panel sets and mode folders by their camera folder name
+DP = s22_env("S22m")
+DP.add_seestar_panel("M 31_mosaic", "20260923-224000", creator="Seestar S50 Pro")
+DP.add_seestar_nondso("Lunar_photo", "Lunar_20260923-220000.fit", creator="Seestar S50 Pro")
+r = DP.run("--discard", "M 31_mosaic_pt", stdin="DISCARD\n", extra_env=Y22)
+r2 = DP.run("--discard", "Lunar_photo", stdin="DISCARD\n", extra_env=Y22)
+check("S22 discard reaches a mosaic's panels and a mode folder by camera folder name",
+      not os.path.isdir(os.path.join(DP.myworks, "M 31_mosaic_pt"))
+      and not os.path.isdir(os.path.join(DP.myworks, "Lunar_photo"))
+      and "Never import" not in r.stdout + r2.stdout, (r.stdout + r2.stdout)[-400:])
+
+print("\n── Chain P1: --ship files Seestar frames into the archive (1.4.0) ──")
+P1 = teh.Env("P1", asiair=False, seestar=True)
+# The archive already holds Dumbbell Nebula (M 27) with Day 1 (night 1 Sep) and Day 2 (night 2 Sep)
+arch = P1.archive
+tE = os.path.join(arch, "S30P", "Dumbbell Nebula (M 27)")
+for n, stamp in ((1, "20260901-223000"), (2, "20260902-223000")):
+    d = os.path.join(tE, f"M 27_sub Day {n}"); os.makedirs(d)
+    open(os.path.join(d, f"Light_M 27_10.0s_IRCUT_{stamp}.fit"), "wb").write(b"old")
+os.makedirs(os.path.join(arch, "_verify"))
+# The Mac imports night 2 Sep (again, resumed) and a new night 10 Sep, plus a stack
+P1.add_seestar_sub("M 27", "20260902-231000")
+P1.add_seestar_sub("M 27", "20260910-224402")
+P1.add_seestar_stack("M 27", 60, "20260910-230000")
+r = P1.run("--no-ship")            # import only; ship is exercised explicitly below
+r = P1.run("--ship", "--dry-run")
+check("P1 dry run names the archive target and copies nothing",
+      "Dumbbell Nebula (M 27)" in r.stdout and "Nothing copied" in r.stdout
+      and not os.path.isdir(os.path.join(tE, "M 27_sub Day 3")), r.stdout[-500:])
+r = P1.run("--ship")
+d2 = os.path.join(tE, "M 27_sub Day 2"); d3 = os.path.join(tE, "M 27_sub Day 3")
+check("P1 same night merges into the archive's Day 2, new night becomes Day 3",
+      os.path.isfile(os.path.join(d2, "20260902-231000.fit"))
+      and os.path.isfile(os.path.join(d2, "Light_M 27_10.0s_IRCUT_20260902-223000.fit"))
+      and count_fits(d3) == 1, r.stdout[-500:])
+check("P1 stack lands loose at the archive target root",
+      os.path.isfile(os.path.join(tE, "Stacked_60_M 27_10.0s_IRCUT_20260910-230000.fit")), r.stdout[-300:])
+check("P1 the archive's pre-existing file is untouched",
+      open(os.path.join(tE, "M 27_sub Day 1", "Light_M 27_10.0s_IRCUT_20260901-223000.fit"), "rb").read() == b"old")
+led = P1.ledger()
+shipped = [e for e in led["files"].values() if e.get("archiveShippedAt")]
+check("P1 ledger entries stamped with archiveLocation and archiveShippedAt, not yet verified",
+      len(shipped) == 3 and all(e.get("archiveLocation", "").startswith("S30P\\") for e in shipped)
+      and not any(e.get("archiveVerifiedAt") for e in shipped), str([e.get("archiveLocation") for e in shipped]))
+sl = os.path.join(arch, "_verify", "shipped.jsonl")
+lines = [json.loads(x) for x in open(sl)] if os.path.isfile(sl) else []
+check("P1 shipped.jsonl written for the PC sweep, one line per file with sha and size",
+      len(lines) == 3 and all(l["sha256"] and l["size"] and l["relpath"] for l in lines), str(lines[:1]))
+rdir = os.path.join(P1.receipts, "_ship")
+check("P1 a filed receipt v2 was written", os.path.isdir(rdir) and any(f.startswith("filed-") for f in os.listdir(rdir)))
+r = P1.run("--ship")
+check("P1 re-run ships nothing (already shipped, awaiting the sweep)",
+      "Ship: 0 file(s)" in r.stdout and "3 already shipped" in r.stdout, r.stdout[-400:])
+# The PC sweep verifies three of the four; the Mac stamps them on the next ship
+with open(os.path.join(arch, "_verify", "verified.jsonl"), "w") as f:
+    for l in lines[:2]:
+        f.write(json.dumps({"sha256": l["sha256"], "size": l["size"], "relpath": l["relpath"], "verifiedAt": "2026-09-19T030000"}) + "\n")
+r = P1.run("--ship")
+led = P1.ledger()
+ver = [e for e in led["files"].values() if e.get("archiveVerifiedAt")]
+check("P1 verified.jsonl from the PC stamps archiveVerifiedAt on exactly those files",
+      len(ver) == 2 and "2 frame(s) confirmed verified" in r.stdout, r.stdout[-400:])
+# (1.4.3: one import run files each night in its own Mac Day folder too)
+check("P1 nothing on the Mac was deleted or moved — and each night got its own Day",
+      os.path.isfile(os.path.join(P1.sdest30, "M 27 - Dumbbell Nebula", "M 27_sub Day 1", "20260902-231000.fit"))
+      and os.path.isfile(os.path.join(P1.sdest30, "M 27 - Dumbbell Nebula", "M 27_sub Day 2", "20260910-224402.fit")))
+
+print("\n── Chain P2: --ship ASIAir naming and archive Day convention ──")
+P2 = teh.Env("P2")
+os.makedirs(os.path.join(P2.archive, "ZWO Askar Scopes"))
+os.makedirs(os.path.join(P2.archive, "_verify"))
+P2.add_light("Plan", "M 27", "0001", dt="20260720-220512")
+P2.add_light("Plan", "M 27", "0002", dt="20260721-221512")
+r = P2.run(stdin="n\n")           # a plain import ships by itself when the share is up
+tE2 = os.path.join(P2.archive, "ZWO Askar Scopes", "Dumbbell Nebula (M 27)")
+check("P2 an ordinary import ships automatically when the archive is mounted",
+      "Shipped 2 file(s)" in r.stdout and os.path.isdir(tE2), r.stdout[-500:])
+check("P2 ASIAir frames land under ZWO Askar Scopes\\Name (CODE)\\Name (CODE) Day N, one Day per night, no lights level",
+      os.path.isdir(os.path.join(tE2, "Dumbbell Nebula (M 27) Day 1")) and os.path.isdir(os.path.join(tE2, "Dumbbell Nebula (M 27) Day 2"))
+      and not os.path.isdir(os.path.join(tE2, "lights")), r.stdout[-500:] + str(os.listdir(tE2) if os.path.isdir(tE2) else "no dir"))
+
+print("\n── Chain P3: --ship with the archive unreachable, and a conflicting file ──")
+P3 = teh.Env("P3", asiair=False, seestar=True)
+P3.add_seestar_sub("M 27", "20260910-224402")
+shutil.rmtree(P3.archive, ignore_errors=True)   # share not mounted
+r = P3.run()
+check("P3 an import with the share down neither ships nor complains", "not reachable" not in r.stdout and "Shipped" not in r.stdout, r.stdout[-300:])
+r = P3.run("--ship")
+check("P3 unreachable archive is a quiet no-op", "not reachable" in r.stdout and r.returncode == 0, r.stdout[-300:])
+os.makedirs(os.path.join(P3.archive, "S30P", "Dumbbell Nebula (M 27)", "M 27_sub Day 1"))
+open(os.path.join(P3.archive, "S30P", "Dumbbell Nebula (M 27)", "M 27_sub Day 1", "20260910-224402.fit"), "wb").write(b"different bytes")
+r = P3.run("--ship")
+check("P3 an archive file with different content is reported and left untouched, entry not stamped",
+      "different" in r.stdout and open(os.path.join(P3.archive, "S30P", "Dumbbell Nebula (M 27)", "M 27_sub Day 1", "20260910-224402.fit"), "rb").read() == b"different bytes"
+      and not any(e.get("archiveShippedAt") for e in P3.ledger()["files"].values()), r.stdout[-400:])
+
+print("\n── Chain P4: --ship finds frames moved by hand, matches targets by name (1.4.1) ──")
+P4 = teh.Env("P4", asiair=False, seestar=True)
+os.makedirs(os.path.join(P4.archive, "S30P", "Cave Nebula (Sh2-155)", "Sh2-155_sub Day 1"))
+os.makedirs(os.path.join(P4.archive, "_verify"))
+P4.add_seestar_sub("C 9", "20260910-224402")     # the camera calls it C 9; the archive says Sh2-155
+P4.add_seestar_sub("C 9", "20260910-225402")
+r = P4.run("--no-ship")
+# Brett gathers the night into a flat lights/ folder by hand (Collect Lights style)
+tmac = os.path.join(P4.sdest30, "C 9 - Cave Nebula")
+ld = [d for d in os.listdir(tmac) if d.endswith("Day 1")][0]
+os.makedirs(os.path.join(tmac, "lights"))
+for fn in os.listdir(os.path.join(tmac, ld)):
+    shutil.move(os.path.join(tmac, ld, fn), os.path.join(tmac, "lights", fn))
+r = P4.run("--ship")
+tE4 = os.path.join(P4.archive, "S30P", "Cave Nebula (Sh2-155)")
+check("P4 frames moved into a flat lights folder are still found and shipped",
+      "Shipped 2 file(s)" in r.stdout and "missing on Mac" not in r.stdout, r.stdout[-500:])
+check("P4 a target whose camera token differs joins the archive's existing folder by name, next Day",
+      os.path.isdir(os.path.join(tE4, "Sh2-155_sub Day 2"))
+      and count_fits(os.path.join(tE4, "Sh2-155_sub Day 2")) == 2
+      and not os.path.isdir(os.path.join(P4.archive, "S30P", "Cave Nebula (C 9)")),
+      str(os.listdir(os.path.join(P4.archive, "S30P"))))
 
 print("\n── Chain F2: --set-filter ledger correction ─────────────────")
 F2 = teh.Env("F2")

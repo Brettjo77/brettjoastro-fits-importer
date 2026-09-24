@@ -21,6 +21,7 @@ import importlib.util
 import json
 import os
 import re
+import secrets
 import subprocess
 import sys  # noqa: F401  (kept for parity)
 import threading
@@ -55,6 +56,7 @@ class App:
         self.question = None                  # {id, kind, prompt, default}
         self._answer = None
         self._answer_evt = threading.Event()
+        self._qlock = threading.Lock()
         self._qid = 0
         self.last_result = None               # human summary of last op
         self.last_done = None                 # completion banner payload
@@ -89,28 +91,40 @@ class App:
         self.phase = ev
 
     def on_prompt(self, q):
-        self._qid += 1
-        self.question = {"id": self._qid, "kind": q.get("kind", "confirm"),
-                         "prompt": q.get("prompt", ""), "default": q.get("default", "")}
-        self._answer_evt.clear()
+        with self._qlock:
+            self._qid += 1
+            self._answer = None
+            self._answer_evt.clear()        # before the card is visible
+            self.question = {"id": self._qid, "kind": q.get("kind", "confirm"),
+                             "prompt": q.get("prompt", ""),
+                             "default": q.get("default", ""),
+                             "expect": q.get("expect", "")}
+            my_id = self._qid
         got = self._answer_evt.wait(timeout=3600)
-        ans = self._answer if got else None
-        self.question = None
-        self._answer = None
+        with self._qlock:
+            ans = self._answer if got else None
+            if self.question is not None and self.question.get("id") == my_id:
+                self.question = None
+            self._answer = None
         return ans
 
     def answer(self, value, qid=None):
         """Accept an answer only for the question that is actually pending —
         a stale click must never resolve a later, more dangerous prompt
-        (e.g. a flats answer landing on the delete-from-camera card)."""
-        q = self.question
-        if q is None:
-            return False
-        if qid is not None and str(qid) != str(q.get("id")):
-            return False
-        self._answer = value
-        self._answer_evt.set()
-        return True
+        (e.g. a flats answer landing on the delete-from-camera card). The
+        FIRST answer wins: the card is withdrawn as it is answered, so a
+        second click (or a second tab) cannot overwrite a typed DISCARD with
+        something else, or vice versa (1.4.2)."""
+        with self._qlock:
+            q = self.question
+            if q is None:
+                return False
+            if qid is not None and str(qid) != str(q.get("id")):
+                return False
+            self._answer = value
+            self.question = None
+            self._answer_evt.set()
+            return True
 
     # ── engine operations (each runs in a worker thread) ────────────────
     def _camera_ok(self):
@@ -123,28 +137,33 @@ class App:
         self.last_result = "No camera connected."
         return False
 
-    def _run(self, label, fn):
-        if not self._camera_ok():
+    def _run(self, label, fn, need_camera=True):
+        if need_camera and not self._camera_ok():
             return False
         if not self.oplock.acquire(blocking=False):
             return False
+        # status flips BEFORE the request returns, so a poll right after
+        # "started" can never read the previous op's idle (T6)
+        self.status = label
+        if label != "scanning":
+            self.last_done = None   # banner survives rescans, not new ops
+            self.last_result = ""   # never show the previous op's verdict (S10)
         def work():
-            self.status = label
-            if label != "scanning":
-                self.last_done = None   # banner survives rescans, not new ops
             eng.PROMPT_FN = self.on_prompt
             eng.EVENT_FN = self.on_event
             got_lock = False
             try:
                 with contextlib.redirect_stdout(self), contextlib.redirect_stderr(self):
-                    if label in ("importing", "reporting"):
+                    if label in ("importing", "reporting", "discarding", "clearing",
+                                 "saving"):
                         # The report saves the ledger too — saving over a
                         # running CLI import would drop its entries, so both
                         # take the same engine lock.
                         got_lock = eng.acquire_lock()
                         if not got_lock:
-                            self.last_result = ("Another import is running "
-                                                "(CLI?) — try again shortly.")
+                            self.last_result = ("Another import is already running "
+                                                "(perhaps in Terminal). Let it finish, "
+                                                "then try again.")
                             return
                     fn()
             except Exception as e:
@@ -239,6 +258,26 @@ class App:
             scan_notes = []
             s = eng.scan_seestar(state)
             if s:
+                scope_s = s["camera"].replace("ZWO ", "")
+                groups = {g["id"]: g for g in eng.seestar_groups(state, s)}
+
+                def safety(gid):
+                    """The pill must say what the SAFE gate says, not what
+                    "no new frames" suggests (1.4.3 review B2): unproven files
+                    — orphan JPEGs, a failed copy, a baseline-only row — mean
+                    NOT backed up, whatever the new-frame count."""
+                    g = groups.get(gid)
+                    if not g or not state.has_ledger():
+                        return "notsafe", 0
+                    try:
+                        unproven, _b = eng._seestar_unproven_files(
+                            state, s["volume"], g["dirs"], exempt_superseded=g["exempt"],
+                            camera=s["camera"])
+                    except Exception as ex:
+                        self.logline(f"⚠ SAFE check failed for {g['display']}: {ex}")
+                        return "notsafe", 0
+                    return ("safe" if not unproven else "notsafe"), len(unproven)
+
                 for t in s["targets"]:
                     # a target with only new stacks (sub saving off) or only
                     # new JPEG riders (catch-up) is still importable work —
@@ -249,47 +288,73 @@ class App:
                     nb = (sum(f["size"] for f in t["new"])
                           or (sum(f["size"] for f in t.get("new_stacks") or [])
                               + sum(f["size"] for f in t.get("new_jpgs") or [])))
+                    what, unit = "", "frames"
+                    if n_new:
+                        try:
+                            d = eng.describe_seestar_files(
+                                [f["path"] for f in t["new"] + (t.get("new_stacks") or [])])
+                            what = d["label"]
+                            if not d["subs"] and d["stacks"]:
+                                unit = "stack" if d["stacks"] == 1 else "stacks"
+                        except Exception as ex:
+                            self.logline(f"⚠ could not describe {t['name']}: {ex}")
+                    st, nun = safety(t["sub_name"])
                     targets.append({
-                        "name": t["name"], "device": "seestar",
+                        "name": t["name"], "device": "seestar", "kind": "target",
                         "display": eng.seestar_display(state, t["project_name"]),
                         "source": "", "skipped": t["skipped"],
-                        "scope": s["camera"].replace("ZWO ", ""),
-                        "files": len(t["files"]), "new": n_new,
+                        "scope": scope_s,
+                        "files": len(t["files"]) + len(t.get("stacks") or []),
+                        "new": n_new,
+                        "what": what, "unit": unit,
+                        # the camera folder name: unique on the card, so the
+                        # discard link can never pick the wrong target (1.4.2)
+                        "discardId": t["sub_name"],
+                        "safeState": st, "unproven": nun,
+                        "clearId": t["sub_name"] if st == "safe" else None,
                         "newBytes": nb,
-                        "totalBytes": sum(f["size"] for f in t["files"]),
+                        "totalBytes": sum(f["size"] for f in t["files"] + (t.get("stacks") or [])),
                         "hours": None,
                         "lastStamp": last_stamp(t["files"] + t.get("stacks", [])),
                     })
+                # panel sets and mode folders are rows too — also once
+                # imported, so they can be cleared (and never just vanish, S11)
                 for p in s["panel_sets"]:
-                    if p["new"]:
-                        targets.append({
-                            "name": p["mosaic_name"].split("_mosaic")[0],
-                            "device": "seestar",
-                            "display": eng.seestar_display(state, p["mosaic_name"]) + " (panels)",
-                            "source": "", "skipped": False,
-                            "scope": s["camera"].replace("ZWO ", ""),
-                            "files": len(p["files"]), "new": len(p["new"]),
-                            "newBytes": sum(f["size"] for f in p["new"]),
-                            "totalBytes": sum(f["size"] for f in p["files"]),
-                            "hours": None,
-                            "lastStamp": last_stamp(p["files"]),
-                        })
+                    st, nun = safety(p["pt_name"])
+                    targets.append({
+                        "name": p["mosaic_name"].split("_mosaic")[0],
+                        "device": "seestar", "kind": "panels",
+                        "display": eng.seestar_display(state, p["mosaic_name"]) + " (panels)",
+                        "source": "", "skipped": False,
+                        "scope": scope_s,
+                        "files": len(p["files"]), "new": len(p["new"]),
+                        "discardId": p["pt_name"],
+                        "safeState": st, "unproven": nun,
+                        "clearId": p["pt_name"] if st == "safe" else None,
+                        "newBytes": sum(f["size"] for f in p["new"]),
+                        "totalBytes": sum(f["size"] for f in p["files"]),
+                        "hours": None,
+                        "lastStamp": last_stamp(p["files"]),
+                    })
                 for nd in s["non_dso"]:
-                    if nd["new"]:
-                        # Mode folders (Solar/Lunar/…) are ordinary tickable
-                        # rows now — no more invisible riders on an import
-                        targets.append({
-                            "name": nd["dest_name"], "device": "seestar",
-                            "display": f"{nd['dest_name']} — "
-                                       f"{nd['src_name'].replace('_', ' ')}",
-                            "source": "", "skipped": False,
-                            "scope": s["camera"].replace("ZWO ", ""),
-                            "files": len(nd["files"]), "new": len(nd["new"]),
-                            "newBytes": sum(f["size"] for f in nd["new"]),
-                            "totalBytes": sum(f["size"] for f in nd["files"]),
-                            "hours": None,
-                            "lastStamp": last_stamp(nd["files"]),
-                        })
+                    # Mode folders (Solar/Lunar/…) are ordinary tickable
+                    # rows now — no more invisible riders on an import
+                    st, nun = safety(nd["src_name"])
+                    targets.append({
+                        "name": nd["dest_name"], "device": "seestar", "kind": "mode",
+                        "display": f"{nd['dest_name']} — "
+                                   f"{nd['src_name'].replace('_', ' ')}",
+                        "source": "", "skipped": False,
+                        "scope": scope_s,
+                        "files": len(nd["files"]), "new": len(nd["new"]),
+                        "discardId": nd["src_name"],
+                        "safeState": st, "unproven": nun,
+                        "clearId": nd["src_name"] if st == "safe" else None,
+                        "newBytes": sum(f["size"] for f in nd["new"]),
+                        "totalBytes": sum(f["size"] for f in nd["files"]),
+                        "hours": None,
+                        "lastStamp": last_stamp(nd["files"]),
+                    })
                 if s["disk"]:
                     disks.append({"label": f"Seestar {s['model']}", **s["disk"]})
                 notes = []
@@ -326,6 +391,11 @@ class App:
                 "hasLedger": state.has_ledger(),
                 "notes": scan_notes,
             }
+            self.labels = getattr(self, "labels", {})
+            for t in targets:
+                for k in ("discardId", "clearId"):
+                    if t.get(k):
+                        self.labels[t[k]] = t["display"]
             self.scanned_at = time.strftime("%H:%M:%S")
             self.logline(f"▸ Scan: {self.scan['newTargets']} target(s) with new frames, "
                          f"{self.scan['newFiles']} files")
@@ -337,10 +407,23 @@ class App:
         def fn():
             state = eng.State()
             if not state.has_ledger():
-                self.logline("⚠ No ledger — run the baseline from Terminal first "
-                             "(python3 ~/bin/astro-import.py --baseline)")
-                self.last_result = "No ledger yet — baseline needed."
-                return
+                if getattr(state, "ledger_corrupt", False):
+                    self.logline("✗ ledger.json exists but can't be read — nothing "
+                                 "imported. Restore it (python3 ~/bin/astro-import.py "
+                                 "--restore-ledger) before importing.")
+                    self.last_result = "The ledger can't be read — restore it first."
+                    return
+                if os.path.isfile(os.path.join(eng.MIRROR_DIR, "ledger.json")):
+                    self.logline("⚠ No ledger here, but a mirror copy exists — restore "
+                                 "it first (python3 ~/bin/astro-import.py "
+                                 "--restore-ledger), or everything would import again.")
+                    self.last_result = "Restore the ledger from its mirror first."
+                    return
+                # First run: back EVERYTHING up. (The baseline — "I already
+                # have copies" — stays a deliberate Terminal step, S1.)
+                state.new_ledger()
+                self.logline("▸ First import: starting a new ledger — everything "
+                             "on the camera counts as new.")
             # scan-card checkbox decisions → engine pre-consent map
             eng.CAL_DECISIONS = {
                 t: {str(k): bool(v) for k, v in (m or {}).items()}
@@ -368,7 +451,7 @@ class App:
                              if t.get("device") == "seestar"}
                     ssel = sel & known if known else sel
                 if ssel is None or ssel:
-                    state.mark_cleared(s["relpaths"], device="seestar", camera=s["camera"])
+                    state.seestar_seen(s)
                     totals = eng.run_seestar_import(state, s, args, only_targets=ssel)
                     total_t += totals["targets"]; total_f += totals["files"]
             self.last_result = (f"Imported {total_f} frame(s) across "
@@ -406,7 +489,77 @@ class App:
                 pass
             self.report_text = text
             self.last_result = "Report refreshed."
-        return self._run("reporting", fn)
+        return self._run("reporting", fn, need_camera=False)
+
+    def do_discard(self, name, night=None, reason=""):
+        """Delete one Seestar target from the camera without importing it.
+        The engine does all the refusing and asks for the typed DISCARD on the
+        question card; this only runs it and rescans."""
+        def fn():
+            state = eng.State()
+            res = eng.run_discard(state, name, night=night or None, reason=reason or "")
+            label = self._label_for(name)
+            self.last_result = {
+                "done": f"Discarded {label} from the camera — recorded as never backed up.",
+                "partial": f"Discard of {label} was PARTIAL — some files could not be "
+                           f"removed and are still on the camera (see the log).",
+                "cancelled": "Discard cancelled — nothing deleted.",
+                "refused": "Discard refused — see the log for why. Nothing deleted.",
+                "safe": f"{label} is already backed up — the SAFE clear was offered "
+                        f"and you kept it on the camera.",
+                "cleared": f"{label} was already backed up — cleared from the camera "
+                           f"the SAFE way.",
+            }.get(res, "")
+            if res in ("done", "partial", "cleared"):
+                self.last_done = {"op": "discard" if res != "cleared" else "clear",
+                                  "text": self.last_result,
+                                  "warn": res == "partial",
+                                  "finishedAt": time.strftime("%H:%M:%S")}
+            self.scan = None
+        return self._run("discarding", fn)
+
+    def _label_for(self, folder_id):
+        """The friendly name the panel showed for a camera folder id (kept
+        across rescans — a discard clears the scan before it reports)."""
+        lab = getattr(self, "labels", {}).get(folder_id)
+        if lab:
+            return lab
+        return folder_id[:-4] if folder_id.endswith("_sub") else folder_id
+
+    def do_clear(self, folder_id):
+        """The SAFE clear for one thing already backed up (panel "clear…")."""
+        def fn():
+            state = eng.State()
+            res = eng.run_clear(state, folder_id)
+            label = self._label_for(folder_id)
+            self.last_result = {
+                "cleared": f"Cleared {label} from the camera — it was backed up and verified.",
+                "kept": f"{label} left on the camera.",
+                "refused": "Clear refused — see the log for why. Nothing deleted.",
+            }.get(res, "")
+            if res == "cleared":
+                self.last_done = {"op": "clear", "text": self.last_result,
+                                  "finishedAt": time.strftime("%H:%M:%S")}
+            self.scan = None
+        return self._run("clearing", fn)
+
+    def do_skip(self, name, skip):
+        """Add a target to, or take it off, the never-import list."""
+        def fn():
+            state = eng.State()
+            changed = False
+            if skip and name not in state.skiplist:
+                state.skiplist.append(name); changed = True
+            elif not skip and name in state.skiplist:
+                state.skiplist.remove(name); changed = True
+            if changed:
+                state.save_skiplist()
+                state.history_event("skiplist", target=name, skipped=skip)
+                state.publish_mirror()
+            self.last_result = (f"{name} is on the never-import list." if skip else
+                                f"{name} will be imported again.")
+            self.scan = None
+        return self._run("saving", fn, need_camera=False)
 
     def do_eject(self):
         def fn():
@@ -459,65 +612,113 @@ APP = App()
 # HTTP server
 # ═══════════════════════════════════════════════════════════════════════════
 
+# A fresh secret per launch, written into the page this server serves. Every
+# state-changing request must echo it in a header: another page — even one on
+# another localhost port, which shares the "local" hostname — can neither read
+# it nor (without a CORS preflight this server never answers) send the header
+# (1.4.3 review finding V1).
+TOKEN = secrets.token_urlsafe(24)
+PORT = 8765
+MAX_BODY = 64 * 1024
+LOCAL_HOSTS = ("127.0.0.1", "localhost", "::1")
+
+
+def _split_hostport(raw):
+    raw = (raw or "").strip().lower()
+    if raw.startswith("["):                        # [::1]:8765
+        host, _, rest = raw[1:].partition("]")
+        port = rest[1:] if rest.startswith(":") else ""
+    else:
+        host, _, port = raw.partition(":")
+    return host, port
+
+
 class Handler(BaseHTTPRequestHandler):
+    timeout = 15                              # a stalled client can't hold a thread
+
     def log_message(self, *a):                # silence request logging
         pass
 
     def _local_ok(self):
         """Only the local panel page may talk to this server. Any web page in
         the same browser can POST to 127.0.0.1 blind (and DNS rebinding fakes
-        the host), so every request must carry a local Host — and, if a
-        browser sent an Origin at all, a local Origin too."""
-        raw = (self.headers.get("Host") or "").strip().lower()
-        if raw.startswith("["):                    # [::1]:8765
-            host = raw[1:].split("]", 1)[0]
-        else:
-            host = raw.split(":", 1)[0]
-        if host not in ("127.0.0.1", "localhost", "::1"):
+        the host), so every request must carry a local Host on THIS port — and,
+        if a browser sent an Origin at all, exactly this server's origin
+        (scheme, local host AND port: a page on another localhost port is not
+        us, V1)."""
+        host, port = _split_hostport(self.headers.get("Host"))
+        if host not in LOCAL_HOSTS or (port and port != str(PORT)):
             return False
         origin = self.headers.get("Origin")
         if origin:
             # "null" (sandboxed iframes) is spoofable and never sent by our
             # own page — refuse it like any foreign origin (pass-2 finding)
             try:
-                ohost = urllib.parse.urlsplit(origin.lower()).hostname
+                u = urllib.parse.urlsplit(origin.lower())
+                ohost, oport = u.hostname, u.port
             except ValueError:
                 return False
-            if ohost not in ("127.0.0.1", "localhost", "::1"):
+            if u.scheme != "http" or ohost not in LOCAL_HOSTS or oport != PORT:
                 return False
         return True
+
+    def _post_ok(self):
+        """State-changing requests: JSON only (a text/plain 'simple request'
+        from another page is refused) and the per-launch token."""
+        ctype = (self.headers.get("Content-Type") or "").split(";")[0].strip().lower()
+        if ctype != "application/json":
+            return False
+        return secrets.compare_digest(self.headers.get("X-Astro-Token") or "", TOKEN)
+
+    def _security_headers(self, frame_self=False):
+        # never framed by another site (clickjacking, V2); the dashboard is
+        # framed by the panel's own Dashboard tab
+        self.send_header("Content-Security-Policy",
+                         "frame-ancestors 'self'" if frame_self else "frame-ancestors 'none'")
+        self.send_header("X-Frame-Options", "SAMEORIGIN" if frame_self else "DENY")
+        self.send_header("X-Content-Type-Options", "nosniff")
+        self.send_header("Cache-Control", "no-store")
 
     def _json(self, obj, code=200):
         body = json.dumps(obj).encode()
         self.send_response(code)
+        self._security_headers()
         self.send_header("Content-Type", "application/json")
         self.send_header("Content-Length", str(len(body)))
         self.end_headers()
         self.wfile.write(body)
 
-    def _html(self, text, code=200):
+    def _html(self, text, code=200, frame_self=False):
         body = text.encode()
         self.send_response(code)
+        self._security_headers(frame_self)
         self.send_header("Content-Type", "text/html; charset=utf-8")
         self.send_header("Content-Length", str(len(body)))
         self.end_headers()
         self.wfile.write(body)
 
     def _read_body(self):
-        n = int(self.headers.get("Content-Length") or 0)
-        if n <= 0:
+        """A JSON object, or None for anything malformed or oversized (V8)."""
+        try:
+            n = int(self.headers.get("Content-Length") or 0)
+        except ValueError:
+            return None
+        if n < 0 or n > MAX_BODY:
+            return None
+        if n == 0:
             return {}
         try:
-            return json.loads(self.rfile.read(n).decode() or "{}")
-        except json.JSONDecodeError:
-            return {}
+            data = json.loads(self.rfile.read(n).decode("utf-8") or "{}")
+        except (ValueError, UnicodeDecodeError, OSError):
+            return None
+        return data if isinstance(data, dict) else None
 
     def do_GET(self):
         if not self._local_ok():
             self._json({"error": "forbidden"}, 403)
             return
         if self.path == "/" or self.path.startswith("/index"):
-            self._html(PAGE)
+            self._html(PAGE.replace("__ASTRO_TOKEN__", TOKEN))
         elif self.path == "/api/ping":
             self._json({"ok": True, "app": "astro-import", "version": APP_VERSION})
         elif self.path == "/api/state":
@@ -529,33 +730,64 @@ class Handler(BaseHTTPRequestHandler):
                 state = eng.State()
                 path = eng.generate_dashboard(state)
                 with open(path) as f:
-                    self._html(f.read())
+                    self._html(f.read(), frame_self=True)
             except Exception as e:
                 self._html(f"<pre>dashboard unavailable: {e}</pre>", 500)
         else:
             self._json({"error": "not found"}, 404)
 
     def do_POST(self):
-        if not self._local_ok():
+        if not self._local_ok() or not self._post_ok():
             self._json({"error": "forbidden"}, 403)
             return
         body = self._read_body()
+        if body is None:
+            self._json({"error": "bad request"}, 400)
+            return
         if self.path == "/api/scan":
             self._json({"started": APP.do_scan()})
         elif self.path == "/api/import":
             names = body.get("names") or []
-            if not names:
+            decisions = body.get("calDecisions") or {}
+            if not isinstance(names, list) or not all(isinstance(x, str) for x in names) \
+                    or not isinstance(decisions, dict):
+                self._json({"started": False, "error": "bad request"}, 400)
+            elif not names:
                 self._json({"started": False, "error": "no targets selected"}, 400)
             else:
-                decisions = body.get("calDecisions") or {}
                 self._json({"started": APP.do_import(names, decisions)})
         elif self.path == "/api/report":
             self._json({"started": APP.do_report()})
+        elif self.path == "/api/discard":
+            name, night, reason = body.get("name"), body.get("night"), body.get("reason")
+            if not isinstance(name, str) or not name.strip() \
+                    or not isinstance(night, (str, type(None))) \
+                    or not isinstance(reason, (str, type(None))):
+                self._json({"started": False, "error": "no target named"}, 400)
+            else:
+                self._json({"started": APP.do_discard(name.strip(), night or None,
+                                                      (reason or "")[:500])})
+        elif self.path == "/api/skip":
+            name, skip = body.get("name"), body.get("skip")
+            if not isinstance(name, str) or not name.strip() or not isinstance(skip, bool):
+                self._json({"started": False, "error": "bad request"}, 400)
+            else:
+                self._json({"started": APP.do_skip(name.strip(), skip)})
+        elif self.path == "/api/clear":
+            name = body.get("name")
+            if not isinstance(name, str) or not name.strip():
+                self._json({"started": False, "error": "bad request"}, 400)
+            else:
+                self._json({"started": APP.do_clear(name.strip())})
         elif self.path == "/api/eject":
             self._json({"started": APP.do_eject()})
         elif self.path == "/api/answer":
-            ok = APP.answer(str(body.get("value", "")), qid=body.get("id"))
-            self._json({"ok": bool(ok)})
+            qid, value = body.get("id"), body.get("value", "")
+            if qid is None or not isinstance(value, (str, int, float)):
+                # an answer must name the card it answers (V1/T6)
+                self._json({"ok": False, "error": "question id required"}, 400)
+            else:
+                self._json({"ok": bool(APP.answer(str(value), qid=qid))})
         else:
             self._json({"error": "not found"}, 404)
 
@@ -573,7 +805,7 @@ PAGE = r"""<!DOCTYPE html>
 <style>
 :root{
   --page:#f4f5f8; --surface:#ffffff; --surface2:#f8f9fb;
-  --ink:#101318; --ink2:#4d545f; --muted:#8a8f98;
+  --ink:#101318; --ink2:#4d545f; --muted:#646a74;
   --line:rgba(16,19,24,.09); --line2:rgba(16,19,24,.14);
   --accent:#2a78d6; --accent-ink:#ffffff;
   --good:#0ca30c; --warning:#b97900; --serious:#c25a32;
@@ -656,7 +888,7 @@ button.primary:hover:not(:disabled){color:var(--accent-ink);filter:brightness(1.
   box-shadow:0 2px 8px rgba(0,0,0,.14);border:1px solid var(--line)}
 /* ── layout ── */
 .cols{display:grid;grid-template-columns:minmax(440px,5fr) minmax(430px,7fr);gap:18px}
-@media(max-width:1000px){.cols{grid-template-columns:1fr}}
+@media(max-width:1000px){.cols{grid-template-columns:minmax(0,1fr)}}
 /* ── one-page app layout: page never scrolls, panes scroll inside ── */
 @media(min-width:1001px){
   html,body{height:100%;overflow:hidden}
@@ -691,7 +923,8 @@ button.primary:hover:not(:disabled){color:var(--accent-ink);filter:brightness(1.
   border:solid #fff;border-width:0 2px 2px 0;transform:rotate(42deg)}
 .tmain{flex:1;min-width:0}
 .tname{font-weight:600;font-size:14.5px;white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
-.tmeta{display:flex;gap:8px;align-items:center;margin-top:3px;font-size:12px;color:var(--muted)}
+.tmeta{display:flex;gap:4px 8px;align-items:center;flex-wrap:wrap;margin-top:3px;font-size:12px;color:var(--muted)}
+.tmeta .chip{white-space:nowrap;flex:none}
 .chip{display:inline-flex;align-items:center;gap:5px;font-size:11px;font-weight:600;
   padding:2px 9px;border-radius:999px;color:#fff}
 .chip.c1{background:var(--chip1)}.chip.c2{background:var(--chip2)}.chip.c3{background:var(--chip3)}
@@ -740,6 +973,16 @@ button.primary:hover:not(:disabled){color:var(--accent-ink);filter:brightness(1.
 .done .dh svg{width:21px;height:21px;flex:none}
 .done p{color:var(--ink2);margin-bottom:12px}
 .q .qh svg{width:20px;height:20px;flex:none}
+.q.danger{border-color:color-mix(in srgb, var(--serious) 60%, transparent);
+  background:color-mix(in srgb, var(--serious) 7%, var(--surface))}
+.q p.pre{white-space:pre-line}
+.q .qfolders{font:12.5px/1.5 ui-monospace,SFMono-Regular,Menlo,monospace}
+button.dangerbtn{background:#b3261e;border-color:#b3261e;color:#fff;font-weight:600}   /* 6.5:1 in both themes (S9) */
+button.dangerbtn:hover:not(:disabled){color:#fff;filter:brightness(1.08)}
+button.disc{font-size:11.5px;font-weight:500;color:var(--muted);background:none;border:none;
+  padding:0 2px;margin-left:auto;border-radius:4px;text-decoration:underline;
+  text-underline-offset:2px;box-shadow:none}
+button.disc:hover:not(:disabled){color:var(--serious);border:none}
 .q p{color:var(--ink2);margin-bottom:12px}
 .q input[type=text]{font:inherit;width:100%;padding:9px 11px;border:1px solid var(--line2);
   border-radius:9px;background:var(--surface);color:var(--ink);margin-bottom:11px}
@@ -821,6 +1064,22 @@ details.inv summary .cnt{margin-left:auto;font-size:11.5px;font-weight:700;
 .bak{font-size:10.5px;font-weight:700;letter-spacing:.04em;padding:2px 9px;border-radius:999px;
   flex:0 0 auto;color:var(--accent);background:color-mix(in srgb, var(--accent) 14%, transparent)}
 .bak.skip{color:var(--muted);background:color-mix(in srgb, var(--muted) 16%, transparent)}
+.bak.no{color:var(--serious);background:color-mix(in srgb, var(--serious) 14%, transparent)}
+button.linkbtn{font-size:11.5px;font-weight:600;color:var(--accent);background:none;border:none;
+  padding:2px 4px;cursor:pointer;text-decoration:underline;text-underline-offset:2px;flex:0 0 auto}
+button.linkbtn:disabled{opacity:.5;cursor:default}
+.skipbox{margin-top:16px;border:1px solid color-mix(in srgb, var(--serious) 45%, transparent);
+  border-radius:12px;padding:8px 10px}
+.skipbox .eyebrow{color:var(--serious);margin-bottom:4px}
+.importrow{position:sticky;bottom:0;background:var(--surface);padding:10px 0 2px;z-index:2}
+.done.warnd{border-color:color-mix(in srgb, var(--warning) 55%, transparent)}
+.sr{position:absolute;width:1px;height:1px;overflow:hidden;clip:rect(0 0 0 0);white-space:nowrap}
+@media(max-width:520px){
+  .irow{flex-wrap:wrap;row-gap:4px}
+  .irow .nm{flex:1 1 100%}
+  .irow .dt{flex:0 0 auto;text-align:left}
+  header{flex-wrap:wrap}
+}
 </style></head>
 <body><div id="sky"></div><div id="twinkle"></div><div class="wrap">
 <header>
@@ -846,16 +1105,17 @@ details.inv summary .cnt{margin-left:auto;font-size:11.5px;font-weight:700;
   <button data-tab="dash">Dashboard</button>
 </div>
 
-<div id="qbox"></div>
-<div id="doneBox"></div>
+<div id="qbox" aria-live="assertive"></div>
+<div id="doneBox" aria-live="polite"></div>
 
 <div id="tab-panel">
   <div class="cols">
     <div>
       <div class="card">
         <div class="eyebrow" id="scanEyebrow"><span>Targets with new frames</span><span id="scannedAt"></span></div>
+        <div id="notesBox"></div>
         <div id="targetList"></div>
-        <div class="row" style="margin-top:14px">
+        <div class="row importrow" style="margin-top:14px">
           <button class="primary" id="btnImport" disabled style="flex:1">Import selected</button>
         </div>
         <div class="result" id="calNote"></div>
@@ -870,7 +1130,7 @@ details.inv summary .cnt{margin-left:auto;font-size:11.5px;font-weight:700;
         <div id="livebar"><div style="width:0%"></div></div>
       </div>
       <div id="log"></div>
-      <div class="result" id="lastResult"></div>
+      <div class="result" id="lastResult" aria-live="polite"></div>
     </div>
   </div>
 </div>
@@ -882,7 +1142,7 @@ details.inv summary .cnt{margin-left:auto;font-size:11.5px;font-weight:700;
   <iframe id="dashFrame" title="dashboard"></iframe>
 </div>
 
-<div class="foot">Engine: astro-import.py (backup-first, ASIAir + Seestar) · the camera is never modified except purple done-tags ·
+<div class="foot">Engine: astro-import.py (backup-first, ASIAir + Seestar) · the ASIAir is never modified · the Seestar is only cleared with your Yes (SAFE: backed up and verified) or a typed DISCARD ·
 tip: Safari → File → Add to Dock turns this into a Dock app</div>
 </div>
 <script>
@@ -905,9 +1165,10 @@ document.querySelectorAll(".tabs button").forEach(b=>b.addEventListener("click",
   if(b.dataset.tab==="report") loadReport();
 }));
 
+const TOKEN="__ASTRO_TOKEN__";
 async function api(path, body){
   const r=await fetch(path,{method:body!==undefined?"POST":"GET",
-    headers:{"Content-Type":"application/json"},
+    headers:{"Content-Type":"application/json","X-Astro-Token":TOKEN},
     body:body!==undefined?JSON.stringify(body):undefined});
   return r.json();
 }
@@ -923,57 +1184,110 @@ function notesHtml(scan){
   if(!scan.notes||!scan.notes.length) return "";
   return scan.notes.map(n=>`<div class="scannote">⚠ ${esc(n)}</div>`).join("");
 }
+const unitFor=t=>(t.unit==="frames"||!t.unit)?(t.new===1?"frame":"frames"):t.unit;
+function pillFor(t){
+  if(t.skipped) return `<span class="bak skip">never import</span>`;
+  if(t.device!=="seestar") return `<span class="bak">backed up · kept on ASIAir</span>`;
+  if(t.safeState==="safe") return `<span class="bak">backed up</span>`;
+  return `<span class="bak no">NOT backed up${t.unproven?` · ${t.unproven} file${t.unproven===1?"":"s"}`:""}</span>`;
+}
 function invSection(scan){
-  const backed=scan.targets.filter(t=>!(t.new>0 && !t.skipped))
-      .sort(byNewest);   // date order, most recent shooting at the top
-  if(!backed.length) return "";
-  const tot=backed.reduce((a,t)=>a+(t.totalBytes||0),0);
+  const rest=scan.targets.filter(t=>!(t.new>0 && !t.skipped)).sort(byNewest);
+  const skippedNew=rest.filter(t=>t.skipped && t.new>0);
+  const others=rest.filter(t=>!(t.skipped && t.new>0));
+  let h="";
+  if(skippedNew.length){
+    // a never-import target with new frames is NOT backed up — never listed
+    // under "all backed up" again (1.4.3 review B1)
+    h+=`<div class="skipbox"><div class="eyebrow">On the never-import list — NOT backed up</div>`+
+      skippedNew.map(t=>`<div class="irow"><div class="nm">${esc(t.display)}</div>
+        <div class="dt">${fmtStamp(t.lastStamp)}</div>
+        <div class="sz">${t.new.toLocaleString()} new · ${fmtGB(t.newBytes||0)}</div>
+        <button type="button" class="linkbtn unskip" data-name="${encodeURIComponent(t.name)}"
+          aria-label="Take ${esc(t.display)} off the never-import list">import again</button></div>`).join("")+
+      `</div>`;
+  }
+  if(!others.length) return h;
+  const notSafe=others.filter(t=>t.device==="seestar"&&!t.skipped&&t.safeState!=="safe").length;
+  const tot=others.reduce((a,t)=>a+(t.totalBytes||0),0);
   const wasOpen=!!document.querySelector("#invBox details.inv[open]");
-  return `<details class="inv"${wasOpen?" open":""}><summary>Also on camera — all backed up
-      <span class="cnt">${backed.length} target${backed.length>1?"s":""} · ${fmtGB(tot)}</span></summary>
+  h+=`<details class="inv"${wasOpen||notSafe?" open":""}><summary>${notSafe?"Also on camera":"Also on camera — all backed up"}
+      <span class="cnt">${others.length} item${others.length>1?"s":""} · ${fmtGB(tot)}${notSafe?` · ${notSafe} not backed up`:""}</span></summary>
     <div class="invlist">
-    ${backed.map(t=>`<div class="irow"><div class="nm">${esc(t.display)}</div>
+    ${others.map(t=>{
+      let act="";
+      if(t.clearId && !t.skipped)
+        act=`<button type="button" class="linkbtn clr" data-id="${encodeURIComponent(t.clearId)}"
+               aria-label="Clear ${esc(t.display)} from the camera (backed up and verified)"
+               title="Delete from the Seestar — everything in it is backed up and verified">clear…</button>`;
+      else if(t.device==="seestar" && t.safeState!=="safe" && t.discardId)
+        act=`<button type="button" class="disc" data-name="${encodeURIComponent(t.discardId)}"
+               aria-label="Discard the never-backed-up files of ${esc(t.display)}"
+               title="Delete the files that were NEVER backed up — asks you to type DISCARD">discard…</button>`;
+      return `<div class="irow"><div class="nm">${esc(t.display)}</div>
       <div class="dt">${fmtStamp(t.lastStamp)}</div>
       <div class="sz">${(t.files||0).toLocaleString()} file${t.files===1?"":"s"} · ${fmtGB(t.totalBytes||0)}</div>
-      <span class="bak${t.skipped?" skip":""}">${t.skipped?"never import":"backed up"}</span></div>`).join("")}
+      ${pillFor(t)}${act}</div>`;}).join("")}
     </div>
   </details>`;
+  return h;
 }
+function bindRowActions(root){
+  root.querySelectorAll(".disc").forEach(b=>b.addEventListener("click",e=>{
+    e.preventDefault(); e.stopPropagation();          // never toggles the row's checkbox
+    if(busy) return;
+    api("/api/discard",{name:decodeURIComponent(b.dataset.name)});
+  }));
+  root.querySelectorAll(".clr").forEach(b=>b.addEventListener("click",e=>{
+    e.preventDefault(); if(busy) return;
+    api("/api/clear",{name:decodeURIComponent(b.dataset.id)});
+  }));
+  root.querySelectorAll(".unskip").forEach(b=>b.addEventListener("click",e=>{
+    e.preventDefault(); if(busy) return;
+    api("/api/skip",{name:decodeURIComponent(b.dataset.name),skip:false});
+  }));
+}
+function setEyebrow(text){ $("#scanEyebrow").firstElementChild.textContent=text; }
 function renderTargets(scan){
   const box=$("#targetList");
   const withNew=scan.targets.filter(t=>t.new>0 && !t.skipped)
       .sort((a,b)=>byNewest(a,b)||b.new-a.new);   // most recent night first
+  $("#notesBox").innerHTML = notesHtml(scan);
   if(!withNew.length){
-    const n=scan.targets.filter(t=>!t.skipped).length;
-    const attn=(scan.notes||[]).length;
-    box.innerHTML = !scan.hasLedger
-      ? `<div class="clear"><b>No ledger yet</b><span>Run the baseline once from Terminal:<br>python3 ~/bin/astro-import.py --baseline</span></div>`
+    const notSafe=scan.targets.filter(t=>t.device==="seestar"&&!t.skipped&&t.safeState!=="safe").length;
+    const skippedNew=scan.targets.filter(t=>t.skipped&&t.new>0).length;
+    const attn=(scan.notes||[]).length+notSafe+skippedNew;
+    box.innerHTML = !scan.targets.length
+      ? `<div class="clear"><b>Nothing on the camera</b><span>No frames found to back up.</span></div>`
       : attn
-      ? `<div class="clear"><b>Nothing new that this tool recognises</b><span>${attn} item(s) on the camera need a look — see the notes below.</span></div>`
+      ? `<div class="clear"><b>Nothing new to import</b><span>${attn} item(s) on the camera are NOT backed up — see below.</span></div>`
       : `<div class="clear"><div class="ring">
-           <svg viewBox="0 0 24 24" fill="none"><path d="M4.5 12.5l5 5 10-11" stroke="var(--good)" stroke-width="2.6" stroke-linecap="round" stroke-linejoin="round"/></svg>
-         </div><b>All backed up</b><span>Every frame across ${n} targets is safe in the ledger.</span></div>`;
-    $("#invBox").innerHTML = notesHtml(scan) + invSection(scan);
+           <svg viewBox="0 0 24 24" fill="none" aria-hidden="true"><path d="M4.5 12.5l5 5 10-11" stroke="var(--good)" stroke-width="2.6" stroke-linecap="round" stroke-linejoin="round"/></svg>
+         </div><b>All backed up</b><span>Every file on the camera is backed up and verified.</span></div>`;
+    $("#invBox").innerHTML = invSection(scan);
+    bindRowActions($("#invBox"));
     $("#btnImport").disabled=true;
     $("#btnImport").textContent="Import selected";
-    $("#scanEyebrow").textContent="Targets";
+    setEyebrow("Targets");
     return;
   }
-  $("#scanEyebrow").textContent="Targets with new frames";
+  setEyebrow(scan.hasLedger?"Targets with new frames":"First import — everything on the camera is new");
   box.innerHTML = withNew.map(t=>`
     <label class="trow">
-      <input type="checkbox" class="cb sel" data-name="${encodeURIComponent(t.name)}" checked>
+      <input type="checkbox" class="cb sel" data-name="${encodeURIComponent(t.name)}" checked
+        aria-label="Import ${esc(t.display)}">
       <div class="tmain">
         <div class="tname">${esc(t.display)}</div>
-        <div class="tmeta">${scopeChip(t)}${t.hours==null?"":`<span>${t.hours.toFixed(1)} h integration</span>`}</div>
+        <div class="tmeta">${scopeChip(t)}${t.what?`<span>${esc(t.what)}</span>`:(t.hours==null?"":`<span>${t.hours.toFixed(1)} h integration</span>`)}${t.discardId&&scan.hasLedger?`<button type="button" class="disc" data-name="${encodeURIComponent(t.discardId)}" aria-label="Discard ${esc(t.display)} without importing" title="Delete from the Seestar WITHOUT importing — asks you to type DISCARD">discard…</button>`:""}</div>
       </div>
       <div class="tstats">
         <div class="big">${t.new.toLocaleString()}</div>
-        <div class="small">frames · ${fmtGB(t.newBytes)}</div>
+        <div class="small">${esc(unitFor(t))} · ${fmtGB(t.newBytes)}</div>
       </div>
     </label>`).join("");
-  $("#invBox").innerHTML = notesHtml(scan) + invSection(scan);
+  $("#invBox").innerHTML = invSection(scan);
   box.querySelectorAll(".sel").forEach(c=>c.addEventListener("change",updateImportBtn));
+  bindRowActions(box); bindRowActions($("#invBox"));
   updateImportBtn();
 }
 function updateImportBtn(){
@@ -985,26 +1299,64 @@ function updateImportBtn(){
     ? `Import ${sel.length} target${sel.length>1?"s":""}` : "Import selected";
 }
 
+const stripYN=p=>String(p||"").replace(/\s*\[[yYnN]\/[yYnN]\]\s*$/,"");
+function qTitle(q){
+  const p=q.prompt||"";
+  if(q.kind==="text") return "Name this target";
+  if(/SAFE source folders/.test(p)) return "Clear from the camera?";
+  if(/^Never import/.test(p)) return "Never import this target?";
+  if(/flat/i.test(p)) return "Flats need your decision";
+  return "A question before continuing";
+}
+function wireKeys(card, yes, no, okToSubmit){
+  card.addEventListener("keydown",e=>{
+    if(e.key==="Escape"){ e.preventDefault(); no.click(); }
+    else if(e.key==="Enter" && e.target.tagName==="INPUT" && okToSubmit()){ e.preventDefault(); yes.click(); }
+  });
+}
 function renderQuestion(q){
   const box=$("#qbox");
   if(!q){ box.innerHTML=""; box.dataset.qid=""; return; }
   if(box.dataset.qid==String(q.id)) return;
   box.dataset.qid=q.id;
   const isText=q.kind==="text";
-  box.innerHTML=`<div class="q"><div class="qh">
-    <svg viewBox="0 0 24 24" fill="none"><path d="M12 3l9.5 17h-19L12 3z" stroke="var(--warning)" stroke-width="1.8" stroke-linejoin="round"/><path d="M12 10v4.5" stroke="var(--warning)" stroke-width="1.8" stroke-linecap="round"/><circle cx="12" cy="17.4" r="1.1" fill="var(--warning)"/></svg>
-    The import needs an answer</div>
-    <p>${esc(q.prompt)}</p>
-    ${isText?'<input type="text" id="qval" placeholder="(leave blank to keep the folder name)">':""}
-    <div class="row">
-      ${isText?'<button class="primary" id="qyes">Save name</button><button id="qno">Skip</button>'
-              :(q.default==="n"
-                ?'<button id="qyes">Yes</button><button class="primary" id="qno">No</button>'
-                :'<button class="primary" id="qyes">Yes</button><button id="qno">No</button>')}
-    </div></div>`;
-  $("#qyes").onclick=()=>api("/api/answer",{id:q.id,value:isText?($("#qval").value||""):"y"});
-  $("#qno").onclick=()=>api("/api/answer",{id:q.id,value:isText?"":"n"});
+  if(q.kind==="typed"){
+    const want=q.expect||"DISCARD";
+    box.innerHTML=`<div class="q danger" role="alertdialog" aria-labelledby="qtitle"><div class="qh" id="qtitle">
+      <svg viewBox="0 0 24 24" fill="none" aria-hidden="true"><path d="M12 3l9.5 17h-19L12 3z" stroke="var(--serious)" stroke-width="1.8" stroke-linejoin="round"/><path d="M12 10v4.5" stroke="var(--serious)" stroke-width="1.8" stroke-linecap="round"/><circle cx="12" cy="17.4" r="1.1" fill="var(--serious)"/></svg>
+      Delete from the camera — these were never backed up</div>
+      <p class="pre">${esc(q.prompt.replace(/\n> $/,""))}</p>
+      <input type="text" id="qval" autocomplete="off" spellcheck="false" placeholder="type ${esc(want)} to confirm"
+        aria-label="Type ${esc(want)} to confirm">
+      <div class="row"><button class="dangerbtn" id="qyes" disabled>Delete from camera</button><button class="primary" id="qno">Cancel</button></div></div>`;
+    const inp=$("#qval"), yes=$("#qyes"), no=$("#qno");
+    inp.addEventListener("input",()=>{ yes.disabled = inp.value.trim()!==want; });
+    yes.onclick=()=>{ if(inp.value.trim()===want) api("/api/answer",{id:q.id,value:inp.value.trim()}); };
+    no.onclick=()=>api("/api/answer",{id:q.id,value:""});
+    wireKeys(box.firstElementChild, yes, no, ()=>inp.value.trim()===want);
+    inp.focus();
+    return;
+  }
+  const p=stripYN(q.prompt);
+  const safeCard=/SAFE source folders/.test(q.prompt), neverCard=/^Never import/.test(q.prompt);
+  let buttons;
+  if(isText) buttons='<button class="primary" id="qyes">Save name</button><button id="qno">Skip</button>';
+  else if(safeCard) buttons='<button class="dangerbtn" id="qyes">Delete from camera</button><button class="primary" id="qno">Keep on camera</button>';
+  else if(neverCard) buttons='<button id="qyes">Never import</button><button class="primary" id="qno">Keep importing it</button>';
+  else if(q.default==="n") buttons='<button id="qyes">Yes</button><button class="primary" id="qno">No</button>';
+  else buttons='<button class="primary" id="qyes">Yes</button><button id="qno">No</button>';
+  box.innerHTML=`<div class="q" role="alertdialog" aria-labelledby="qtitle"><div class="qh" id="qtitle">
+    <svg viewBox="0 0 24 24" fill="none" aria-hidden="true"><path d="M12 3l9.5 17h-19L12 3z" stroke="var(--warning)" stroke-width="1.8" stroke-linejoin="round"/><path d="M12 10v4.5" stroke="var(--warning)" stroke-width="1.8" stroke-linecap="round"/><circle cx="12" cy="17.4" r="1.1" fill="var(--warning)"/></svg>
+    ${esc(qTitle(q))}</div>
+    <p class="pre${safeCard?" qfolders":""}">${esc(p)}</p>
+    ${isText?'<input type="text" id="qval" placeholder="(leave blank to keep the folder name)" aria-label="Target name">':""}
+    <div class="row">${buttons}</div></div>`;
+  const yes=$("#qyes"), no=$("#qno");
+  yes.onclick=()=>api("/api/answer",{id:q.id,value:isText?($("#qval").value||""):"y"});
+  no.onclick=()=>api("/api/answer",{id:q.id,value:isText?"":"n"});
+  wireKeys(box.firstElementChild, yes, no, ()=>true);
   if(isText) $("#qval").focus();
+  else (box.querySelector("button.primary")||no).focus();
 }
 
 function calCountsFor(target){
@@ -1052,12 +1404,12 @@ function renderDestPlan(){
       } else {
         if(e.files && e.dayFolder)
           h+=`<div class="drow">${pipe}${e.stack?"├─":"└─"} <span class="dfold">${esc(e.dayFolder)}/</span> `+
-             `<span class="dmeta">${e.files.toLocaleString()} lights · ${fmtGB(e.bytes)}</span></div>`;
+             `<span class="dmeta">${e.files.toLocaleString()} lights · ${fmtGB(e.bytes)}${(e.nights||[]).length>1?` · ${e.nights.length} nights, one Day each`:""}</span></div>`;
         else if(e.files)
           h+=`<div class="drow">${pipe}${e.stack?"├─":"└─"} <span class="dmeta">${e.files.toLocaleString()} file(s) · ${fmtGB(e.bytes)}${e.continuing?" · joins existing folder":""}</span></div>`;
         if(e.stack)
           h+=`<div class="drow">${pipe}└─ <span class="dfold">${esc(e.stack.filename)}</span> `+
-             `<span class="dmeta">${e.stack.subs.toLocaleString()} subs · replaces any older stack</span></div>`;
+             `<span class="dmeta">${e.stack.count>1?`${e.stack.count} stacks, one per session`:`${e.stack.subs.toLocaleString()} subs`} · kept beside earlier stacks</span></div>`;
       }
     });
   }
@@ -1070,6 +1422,17 @@ document.addEventListener("change",e=>{
 let dismissedDone="";
 function renderDone(d){
   const box=$("#doneBox");
+  if(d && d.op && d.op!=="import" && !busy && d.finishedAt!==dismissedDone){
+    const title=d.op==="clear"?"Cleared from the camera":(d.warn?"Discard only partly done":"Discarded");
+    if(box.dataset.sig===d.finishedAt+title) return;
+    box.dataset.sig=d.finishedAt+title;
+    box.innerHTML=`<div class="done${d.warn?" warnd":""}"><div class="dh">
+      <svg viewBox="0 0 24 24" fill="none" aria-hidden="true"><circle cx="12" cy="12" r="10" stroke="var(--${d.warn?"warning":"good"})" stroke-width="1.8"/><path d="M7.5 12.5l3 3 6-7" stroke="var(--${d.warn?"warning":"good"})" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"/></svg>
+      ${esc(title)}</div><p>${esc(d.text||"")}</p><button id="doneOk">Dismiss</button></div>`;
+    $("#doneOk").onclick=()=>{dismissedDone=d.finishedAt; box.dataset.sig=""; renderDone(null);};
+    return;
+  }
+  box.dataset.sig="";
   if(!d || !d.frames || busy || d.finishedAt===dismissedDone){
     box.innerHTML=""; document.title="BrettjoAstro FITS Importer"; return;
   }
@@ -1129,7 +1492,8 @@ async function tick(){
     busy = s.status!=="idle";
     $("#busyDot").className="dot"+(busy?" busy":"");
     $("#statusText").textContent=busy?s.status+"…":"idle";
-    ["btnScan","btnReport","btnEject"].forEach(id=>$("#"+id).disabled=busy);
+    ["btnScan","btnEject"].forEach(id=>$("#"+id).disabled=busy||!s.cameraPresent);
+    $("#btnReport").disabled=busy;
     if(s.scan && (s.scannedAt!==lastScanStamp)){
       lastScanStamp=s.scannedAt;
       curScan=s.scan;
@@ -1189,6 +1553,14 @@ async function tick(){
       $("#scannedAt").textContent = s.scannedAt ? "scanned "+s.scannedAt : "";
     }
     if(!s.scan && !busy && s.cameraPresent && !(s.lastResult||"").startsWith("scanning failed")){ /* fresh state after import → rescan */ api("/api/scan",{}); }
+    if(!s.cameraPresent && !busy && !s.question){
+      if(!$("#targetList").dataset.nocam){
+        $("#targetList").dataset.nocam="1";
+        $("#targetList").innerHTML=`<div class="clear"><b>Plug in your Seestar or ASIAir</b><span>It is scanned automatically — nothing is copied or changed until you press Import.</span></div>`;
+        $("#notesBox").innerHTML=""; $("#invBox").innerHTML=""; $("#destBox").innerHTML="";
+        $("#btnImport").disabled=true; lastScanStamp=""; setEyebrow("Targets");
+      }
+    } else { $("#targetList").dataset.nocam=""; }
     updateImportBtn();
     renderQuestion(s.question);
     renderDone(s.lastDone);
@@ -1232,6 +1604,8 @@ def main():
     p.add_argument("--no-browser", action="store_true")
     args = p.parse_args()
 
+    global PORT
+    PORT = args.port
     server = ThreadingHTTPServer(("127.0.0.1", args.port), Handler)
     url = f"http://127.0.0.1:{args.port}"
     print(f"FITS Importer panel → {url}   (Ctrl-C to quit)")

@@ -30,8 +30,11 @@ if [ -z "$PYTHON" ]; then
 fi
 PORT="${ASTRO_PANEL_PORT:-8765}"
 URL="http://127.0.0.1:$PORT"
-WATCH_LOG="${ASTRO_WATCH_LOG:-/tmp/astro-watch.log}"
-STATE_FILE="${ASTRO_WATCH_STATE:-/tmp/astro-watch.state}"
+# Logs and state live in the user's own Library, not /tmp — /tmp is wiped
+# on reboot and any local account can pre-plant a symlink there (1.4.3, V5)
+WATCH_LOG="${ASTRO_WATCH_LOG:-$HOME/Library/Logs/astro-watch.log}"
+STATE_FILE="${ASTRO_WATCH_STATE:-$HOME/Library/Application Support/Astro Import/astro-watch.state}"
+mkdir -p "$(dirname "$WATCH_LOG")" "$(dirname "$STATE_FILE")" 2>/dev/null
 # suppress repeat notifications when the SAME camera set re-arrives within 10 min
 FLAP_GUARD_S="${ASTRO_FLAP_GUARD_S:-600}"
 
@@ -185,7 +188,7 @@ if ! curl -s -m 2 "$URL/api/ping" >/dev/null 2>&1; then
             wlog "panel did not come up — falling back to Terminal picker"
             osascript -e "tell application \"Terminal\"
                 activate
-                do script \"$PYTHON '$IMPORT_SCRIPT' --pick 2>&1 | tee -a /tmp/astro-import.log\"
+                do script \"$PYTHON '$IMPORT_SCRIPT' --pick 2>&1 | tee -a ~/Library/Logs/astro-import.log\"
             end tell" 2>>"$WATCH_LOG"
             exit 0
         fi

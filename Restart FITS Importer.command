@@ -3,7 +3,9 @@
 # Runs in Terminal's context (the route that has never failed), with
 # python.org Python preferred when installed.
 echo "Restarting the FITS Importer panel..."
-pkill -f astro-app.py
+# match the running panel only (python … astro-app.py), never an editor
+# that happens to have the file open (1.4.3, V9)
+pkill -f "[Pp]ython[^ ]* .*astro-app\.py" 2>/dev/null
 sleep 1
 if [ -x /usr/local/bin/python3 ]; then PYTHON=/usr/local/bin/python3
 else PYTHON=/usr/bin/python3; fi
