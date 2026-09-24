@@ -1,4 +1,4 @@
-# install_sweep.ps1  —  run once on skylarkpc as administrator.
+﻿# install_sweep.ps1  —  run once on the archive PC (no administrator rights needed).
 # Registers the sweep as a scheduled task: at every logon and daily at 03:30,
 # running as you, so the archive's verification keeps up with the Mac's
 # shipping without anyone remembering to run it.
