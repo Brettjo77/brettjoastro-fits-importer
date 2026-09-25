@@ -28,6 +28,10 @@ way. Every release updates it.
    - On the Windows PC: `selftest.py`, then the same two suites
      (`py -3 -X utf8 test_v2.py`, `py -3 -X utf8 test_app.py`).
    - The release zip is one package with both installers, built from one commit.
+   - Every test runs in test mode (`test_env_helper.make_env`), so it can't
+     touch the real archive, state, cameras, installs or the panel on 8765.
+     On Windows the proof that nothing ran is the `os-calls.jsonl` records;
+     the Mac additionally has the `EXECUTED` stand-ins and `sandbox-exec`.
 5. **Each computer keeps its own ledger.** Ledgers are never shared, and no
    file is ever written by both machines (see "Per-machine data").
 
@@ -54,6 +58,7 @@ way. Every release updates it.
 | Install check (`--toast` tries a notification) | `selftest.py` | `selftest.py` | self-test |
 | Move settings between computers | `--export-settings` / `--import-settings` | same | engine |
 | Terminal fallback (`--pick`, naming) | AppleScript dialogs | numbered list / prompt in the console | platform layer |
+| Test mode (`ASTRO_TEST_ROOT`): everything stays inside one folder, and dialogs, notifications, ejects, mounts and "open" are logged, not done | ✓ | ✓ | engine, panel, watcher, self-test |
 
 ## Settings (config.json)
 

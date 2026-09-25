@@ -3,15 +3,20 @@
 Simulated ASIAIR volume with real (minimal) FITS files; every scenario runs
 the actual script as a subprocess with env-redirected paths."""
 
+import sys
+sys.dont_write_bytecode = True   # nothing is written beside the sources
 import importlib.util
 import json
 import os
 import re
 import shutil
 import subprocess
-import sys
 import tempfile
 import time
+
+sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
+import test_env_helper as teh  # noqa: E402
+teh.isolate_runner()   # test mode for this process too, before any in-process engine load
 
 SCRIPT = os.path.join(os.path.dirname(os.path.abspath(__file__)), "astro-import.py")
 PASS, FAIL = 0, 0
@@ -73,8 +78,8 @@ class Env:
         eqp = os.path.join(self.root, "equipment.json")
         with open(eqp, "w") as f:
             json.dump({"telescopes": []}, f)
-        self.env = dict(os.environ)
-        self.env.update({
+        # (make_env also puts the archive, Seestar trees and home in the root)
+        self.env = teh.make_env(self.root, **{
             "ASIAIR_VOLUME": self.cam, "ASIAIR_DEST": self.dest,
             "ASIAIR_CAL_LIBRARY": self.lib, "ASIAIR_STATE": self.state,
             "ASIAIR_MIRROR": self.mirror, "ASIAIR_EQUIPMENT": eqp,
@@ -84,7 +89,6 @@ class Env:
             # keep the unified engine blind to any real Seestar in these chains
             "SEESTAR_VOLUME": os.path.join(self.root, "no-seestar"),
             "ASTRO_DRIVE_ROOTS": os.path.join(self.root, "no-real-drives"),
-            "PYTHONUTF8": "1", "PYTHONIOENCODING": "utf-8",
         })
 
     def run(self, *args, stdin=""):
@@ -202,7 +206,8 @@ check("A6 Autorun verdict present", "Autorun/ calibration:" in out)
 check("A6 report saved + mirrored",
       os.path.isfile(os.path.join(A.mirror, "last-report.txt")))
 
-# A7: reconcile upgrades entries whose dest copies exist
+# A7: reconcile upgrades entries whose dest copies exist (it also walks the
+# Seestar trees: before 1.5.2 those were the REAL workbench; now the Env's own)
 legacy = os.path.join(A.dest, "Sh2-129 - Flying Bat Nebula", "lights", "legacy Day 1")
 os.makedirs(legacy, exist_ok=True)
 for seq in ["0001", "0002", "0003"]:
@@ -436,9 +441,6 @@ check("G2 Live/Plan duplicates disambiguated",
       "(Live)" in r.stdout and "(Plan)" in r.stdout, r.stdout[:800])
 
 # ═══════════════ CHAIN S: Seestar adapter (unified engine) ══════════════════
-sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
-import test_env_helper as teh  # noqa: E402
-
 print("\n── Chain S1: Seestar detect + scan + baseline ────────────────")
 S1 = teh.Env("S1", asiair=False, seestar=True)
 S1.add_seestar_sub("M 27", "20260618-224402")
@@ -1400,7 +1402,7 @@ else:
     print("  SKIP  S20 link containment (this OS needs admin rights to make links)")
 
 # The two faults a subprocess can't stage on its own (a delete that fails, a
-# second Seestar in /Volumes) are injected through a tiny wrapper.
+# second Seestar mounted) are injected through a tiny wrapper.
 PATCHED = os.path.join(tempfile.mkdtemp(prefix="v2test-wrap-"), "patched.py")
 with open(PATCHED, "w") as f:
     f.write(f'''import importlib.util, os, sys
@@ -1448,7 +1450,7 @@ S20j = teh.Env("S20j", asiair=False, seestar=True)
 s20_seed_ledger(S20j)
 s20_target(S20j, "M 15", ["20260923-213000"])
 r = run_patched(S20j, "--discard", "M 15", stdin="DISCARD\nn\n",
-                extra={"EXTRA_SEESTAR": "/Volumes/Seestar 1"})
+                extra={"EXTRA_SEESTAR": os.path.join(S20j.root, "Seestar 1")})
 check("S20 with two Seestars mounted, discard refuses (one camera at a time)",
       r.returncode == 1 and "one camera" in (r.stdout + r.stderr)
       and os.path.isfile(os.path.join(S20j.myworks, "M 15_sub", "20260923-213000.fit")),
@@ -1695,8 +1697,11 @@ teh.make_seestar_fits(os.path.join(drives["F"], "MyWorks", "M 42_sub", "20260924
 teh.make_fits(os.path.join(drives["G"], "Autorun", "Light", "M 81",
                            teh.light_name("M 81", seq="0001")), uniq="w1-light")
 wenv = dict(W1.env)
-for k in ("SEESTAR_VOLUME", "ASIAIR_VOLUME"):
-    wenv.pop(k, None)
+# no fixed Seestar path: a missing one (removed, the Mac's /Volumes/Seestar
+# default would return outside test mode). ASIAIR_VOLUME is unset: any value
+# pins the ASIAir and switches off the drive-letter search tested here.
+wenv["SEESTAR_VOLUME"] = os.path.join(W1.root, "no-seestar-volume")
+wenv.pop("ASIAIR_VOLUME")
 wenv["ASTRO_DRIVE_ROOTS"] = os.pathsep.join(drives[n] for n in ("F", "G", "H"))
 def wrun(*args, stdin="", script=SCRIPT, extra=None):
     e = dict(wenv); e.update(extra or {})
@@ -1704,7 +1709,7 @@ def wrun(*args, stdin="", script=SCRIPT, extra=None):
                           capture_output=True, text=True, encoding="utf-8",
                           errors="replace", timeout=120)
 r = wrun("--version")
-check("W1 --version names the one shared version", "1.5.1" in r.stdout, r.stdout + r.stderr)
+check("W1 --version names the one shared version", "1.5.2" in r.stdout, r.stdout + r.stderr)
 r = wrun("--once", script=os.path.join(os.path.dirname(SCRIPT), "astro-watch.py"))
 check("W1 the watcher finds the Seestar and the ASIAir by what is on each drive",
       f"ASIAir at {drives['G']}" in r.stdout and f"Seestar at {drives['F']}" in r.stdout,
@@ -1784,7 +1789,9 @@ PC = teh.Env("W1pc", asiair=False, seestar=True)
 os.makedirs(PC.state, exist_ok=True)
 json.dump({"IC 1396": "IC 1396 (kept here)"}, open(os.path.join(PC.state, "custom-names.json"), "w"))
 pc_eq = os.path.join(PC.root, "pc-equipment.json")
-r = PC.run("--import-settings", bundle, extra_env={"ASIAIR_EQUIPMENT": pc_eq})
+pc_bundle = os.path.join(PC.root, "settings.json")   # carried over to the PC
+shutil.copy2(bundle, pc_bundle)
+r = PC.run("--import-settings", pc_bundle, extra_env={"ASIAIR_EQUIPMENT": pc_eq})
 names = json.load(open(os.path.join(PC.state, "custom-names.json")))
 check("W1 --import-settings adds what is missing and never overwrites what the PC has",
       names.get("Sh2-132") == "Lion Nebula" and names.get("IC 1396") == "IC 1396 (kept here)"
@@ -1808,12 +1815,13 @@ check("W1 the Windows install check expects only files install-windows.ps1 insta
       set(_st.INSTALLED["windows"]) <= _win_inst, f"{_st.INSTALLED['windows']} vs {sorted(_win_inst)}")
 _bin = os.path.join(W1.root, "installed-bin")
 os.makedirs(_bin, exist_ok=True)
-for _f in _st.INSTALLED["windows"]:
+for _f in _st.INSTALLED.get(engw.PLATFORM, _st.INSTALLED["windows"]):   # what THIS OS installs
     shutil.copy2(os.path.join(_here, _f), _bin)
 r = wrun(script=os.path.join(_bin, "selftest.py"))
 check("W1 the install check passes from an installed folder (not only the source folder)",
       " present" in r.stdout and not re.search(r"FAIL\s+\S+ present", r.stdout),
-      r.stdout[-600:] + r.stderr[-300:])
+      ("\n".join(ln for ln in r.stdout.splitlines() if "FAIL" in ln) or r.stdout[-600:])
+      + r.stderr[-300:])
 
 print("\n── Chain P1: --ship files Seestar frames into the archive (1.4.0) ──")
 P1 = teh.Env("P1", asiair=False, seestar=True)
@@ -1954,6 +1962,437 @@ check("F2 'none' clears the filter",
           if e["target"] == "NGC 7822"))
 hist = open(os.path.join(F2.state, "history.jsonl")).read()
 check("F2 history logs corrections", hist.count("filter-corrected") >= 3)
+
+# ═══════════════ CHAIN I1: test mode (1.5.2) ══════════════════════════════════
+print("\n── Chain I1: test mode — nothing outside the test root, no OS side effects (1.5.2) ──")
+# 25 Sep 2026: the 1.5.1 suites, run on the real Mac, shipped fake frames into
+# the real archive, moved a real iCloud folder and popped real dialogs. Every
+# check here but the last fails on 1.5.1. "Outside" is a sibling temp folder.
+HERE = os.path.dirname(SCRIPT)
+
+def irun(env, *args, script=SCRIPT, stdin=""):
+    return subprocess.run([sys.executable, script, *args], env=env, input=stdin,
+                          capture_output=True, text=True, encoding="utf-8",
+                          errors="replace", timeout=120)
+
+def probe(env, code, before=""):
+    """Load the engine in a child (as m), run `code`; the JSON it printed last."""
+    head = ("import importlib.util, json, os, sys\n"
+            "s = importlib.util.spec_from_file_location('eng', sys.argv[1])\n"
+            "m = importlib.util.module_from_spec(s); s.loader.exec_module(m)\n")
+    # stdin: an empty pipe, never a tty (Windows' NUL claims to be one)
+    r = subprocess.run([sys.executable, "-c", before + head + code, SCRIPT], env=env,
+                       input="", capture_output=True, text=True,
+                       encoding="utf-8", errors="replace", timeout=120)
+    try:
+        return json.loads(r.stdout.strip().splitlines()[-1])
+    except (ValueError, IndexError):
+        return {"error": (r.stdout + r.stderr)[-300:]}
+
+def inside(path, root):
+    p, r = (os.path.normcase(os.path.realpath(x)) for x in (path, root))
+    return p == r or p.startswith(r.rstrip(os.sep) + os.sep)
+
+def mentions(call, path):
+    """Does a recorded OS call name `path` (or something inside it)?"""
+    return any(isinstance(v, str) and inside(v, path)
+               for k, v in call.items() if k not in ("kind", "at"))
+
+# every configured path outside the root stops the engine before it does anything
+I1 = teh.Env("I1", asiair=False, seestar=False)
+outside = tempfile.mkdtemp(prefix="v2test-I1-outside-")
+for var in ("ASIAIR_CONFIG", "ASIAIR_VOLUME", "ASIAIR_DEST", "ASIAIR_CAL_LIBRARY",
+            "ASIAIR_STATE", "ASIAIR_MIRROR", "ASTRO_ARCHIVE_MOUNT", "SEESTAR_VOLUME",
+            "SEESTAR_DEST_S30", "SEESTAR_DEST_S50", "SEESTAR_DEST_S30_ORIG",
+            "SEESTAR_DEST_S50PRO", "ASIAIR_EQUIPMENT", "ASIAIR_RECEIPTS",
+            "ASIAIR_LEGACY_NAMES", "ASTRO_DRIVE_ROOTS", "ASTRO_WATCH_LOG", "ASTRO_WATCH_STATE",
+            "ASTRO_SHIP_LOG"):
+    r = I1.run("--version", extra_env={var: os.path.join(outside, var)})
+    out = r.stdout + r.stderr
+    check(f"I1 {var} outside the test root is refused at start (exit 3), nothing written there",
+          r.returncode == 3 and "TEST MODE:" in out and var in out and not os.listdir(outside),
+          f"rc={r.returncode} {out[-300:]}")
+# a config.json outside stops the run; the same file inside is honoured
+cfg_out = os.path.join(tempfile.mkdtemp(prefix="v2test-I1-config-"), "config.json")
+cfg_in = os.path.join(I1.root, "config.json")
+named = os.path.join(outside, "archive-named-by-config")
+for p in (cfg_out, cfg_in):
+    with open(p, "w") as f:
+        json.dump({"ASTRO_ARCHIVE_MOUNT": named}, f)
+r = irun(teh.make_env(I1.root, ASIAIR_CONFIG=cfg_out, ASTRO_ARCHIVE_MOUNT=None), "--version")
+out = r.stdout + r.stderr
+check("I1 an outside config.json stops the run, exit 3",
+      r.returncode == 3 and "ASIAIR_CONFIG" in out and "ASTRO_ARCHIVE_MOUNT" not in out
+      and named not in out, f"rc={r.returncode} {out[-300:]}")
+r = irun(teh.make_env(I1.root, ASIAIR_CONFIG=cfg_in, ASTRO_ARCHIVE_MOUNT=None), "--version")
+out = r.stdout + r.stderr
+check("I1 ...the same file inside the root IS read, and the outside archive it names refused",
+      r.returncode == 3 and "ASTRO_ARCHIVE_MOUNT" in out, f"rc={r.returncode} {out[-300:]}")
+# a path typed on the command line is judged too
+r = I1.run("--export-settings", os.path.join(outside, "settings.json"))
+check("I1 --export-settings to a file outside the test root stops (exit 3), nothing written",
+      r.returncode == 3 and "TEST MODE:" in r.stdout + r.stderr and not os.listdir(outside),
+      f"rc={r.returncode} " + (r.stdout + r.stderr)[-300:])
+# make_env takes only the allowlisted keys from the runner's own environment
+saved = dict(os.environ)
+try:
+    os.environ.update(ASTRO_LEAK_SENTINEL="1", HOME="/nonexistent-real")
+    leak = teh.make_env(I1.root)
+finally:
+    os.environ.clear()
+    os.environ.update(saved)
+check("I1 make_env passes on no stray parent key (ASTRO_LEAK_SENTINEL) and never the real HOME",
+      "ASTRO_LEAK_SENTINEL" not in leak and leak.get("HOME") == os.path.join(I1.root, "home"),
+      str({k: leak.get(k) for k in ("ASTRO_LEAK_SENTINEL", "HOME")}))
+
+# with no path set at all and HOME elsewhere, every default lands in the root
+I1d = teh.Env("I1d", asiair=False, seestar=False)
+away = tempfile.mkdtemp(prefix="v2test-I1-home-")
+got = probe(teh.make_env(I1d.root, HOME=away, USERPROFILE=away,
+                         LOCALAPPDATA=os.path.join(away, "AppData", "Local"),
+                         APPDATA=os.path.join(away, "AppData", "Roaming"),
+                         **{v: None for v in (
+                             "ASIAIR_VOLUME", "ASIAIR_DEST", "ASIAIR_CAL_LIBRARY", "ASIAIR_STATE",
+                             "ASIAIR_MIRROR", "ASIAIR_EQUIPMENT", "ASIAIR_RECEIPTS",
+                             "ASIAIR_LEGACY_NAMES", "ASIAIR_CONFIG", "SEESTAR_VOLUME",
+                             "SEESTAR_DEST_S30", "SEESTAR_DEST_S50", "SEESTAR_DEST_S30_ORIG",
+                             "SEESTAR_DEST_S50PRO", "ASTRO_ARCHIVE_MOUNT", "ASTRO_DRIVE_ROOTS")}),
+            "names = ('_CONFIG_PATH', 'ASIAIR_VOLUME', 'DEST_DIR', 'LIBRARY_DIR', 'STATE_DIR',\n"
+            "         'MIRROR_DIR', 'ARCHIVE_MOUNT', 'SEESTAR_DEST_S30', 'SEESTAR_DEST_S50',\n"
+            "         'SEESTAR_DEST_S30_ORIG', 'SEESTAR_DEST_S50PRO', 'EQUIPMENT_JSON',\n"
+            "         'RECEIPT_BASE', 'LEGACY_CUSTOM_NAMES')\n"
+            "print(json.dumps({'paths': {n: getattr(m, n) for n in names},\n"
+            "                  'seestar': m.SEESTAR_VOLUMES, 'drives': m._drive_roots(),\n"
+            "                  'home': os.path.expanduser('~')}))\n")
+paths = got.get("paths") or {}
+bad = {k: v for k, v in paths.items() if not inside(v, I1d.root)}
+check("I1 with no path set, every engine default lands inside the test root (no /Volumes, E:\\, real home)",
+      bool(paths) and not bad, str(bad or got)[:300])
+check("I1 ...no default Seestar volumes and no drive letters to look at",
+      got.get("seestar") == [] and got.get("drives") == [], str(got)[:300])
+check("I1 ...and a HOME outside the root is swapped for a fake one inside it",
+      inside(got.get("home") or away, I1d.root) and not os.listdir(away), str(got)[:300])
+
+# the one-time legacy migration (the pre-July-2026 state and iCloud folders)
+def legacy_folders(home):
+    """The two pre-unification folders under `home`, each holding a ledger."""
+    out = []
+    for parts in (("Library", "Application Support", "ASIAir Import"),
+                  ("Library", "Mobile Documents", "com~apple~CloudDocs", "Astro Tools",
+                   "ASIAir Import")):
+        d = os.path.join(home, *parts)
+        os.makedirs(d)
+        with open(os.path.join(d, "ledger.json"), "w") as f:
+            json.dump({"version": 1, "files": {}, "calibration": {}}, f)
+        out.append(d)
+    return out
+
+def stayed(d):
+    return os.path.isfile(os.path.join(d, "ledger.json")) \
+        and not os.path.exists(os.path.join(d, "MOVED.txt"))
+
+I1m = teh.Env("I1mig", asiair=False, seestar=False)
+old_state, old_mirror = legacy_folders(os.path.join(I1m.root, "home"))
+# state at its default (in the fake home), so only test mode can stop that move
+r = irun(teh.make_env(I1m.root, ASIAIR_STATE=None), "--version")
+check("I1 under a test the legacy migration never runs (both old folders stay put)",
+      r.returncode == 0 and stayed(old_state) and stayed(old_mirror), (r.stdout + r.stderr)[-300:])
+# a REAL run (no test root) with HOME, config, state and mirror all in a temp folder
+mig = tempfile.mkdtemp(prefix="v2test-I1-migrate-")
+old_state, old_mirror = legacy_folders(os.path.join(mig, "home"))
+r = irun(teh.make_env(mig, ASTRO_TEST_ROOT=None), "--version")
+check("I1 a real run never migrates into a redirected state or mirror folder",
+      r.returncode == 0 and stayed(old_state) and stayed(old_mirror), (r.stdout + r.stderr)[-300:])
+mig = tempfile.mkdtemp(prefix="v2test-I1-migrate-")
+old_state, old_mirror = legacy_folders(os.path.join(mig, "home"))
+r = irun(teh.make_env(mig, ASTRO_TEST_ROOT=None, ASIAIR_MIRROR=None), "--version")
+new_mirror = os.path.join(mig, "home", "Documents", "Astro", "Import Status")
+check("I1 ...but still migrates into the DEFAULT mirror folder (breadcrumb left), pair by pair",
+      os.path.isfile(os.path.join(new_mirror, "ledger.json"))
+      and os.path.isfile(os.path.join(old_mirror, "MOVED.txt")) and stayed(old_state),
+      (r.stdout + r.stderr)[-300:])
+# ...and into a mirror chosen in config.json (Brett's own set-up: the iCloud
+# mirror). A user's setting is not a redirect; only the environment is.
+mig = tempfile.mkdtemp(prefix="v2test-I1-migrate-")
+old_state, old_mirror = legacy_folders(os.path.join(mig, "home"))
+cfg_mirror = os.path.join(mig, "home", "iCloud", "Astro Import")
+cfg_path = os.path.join(mig, "config.json")
+with open(cfg_path, "w") as f:
+    json.dump({"ASIAIR_MIRROR": cfg_mirror}, f)
+r = irun(teh.make_env(mig, ASTRO_TEST_ROOT=None, ASIAIR_MIRROR=None,
+                      ASIAIR_CONFIG=cfg_path), "--version")
+check("I1 ...and into a mirror set in config.json (a user's choice, not a redirect)",
+      os.path.isfile(os.path.join(cfg_mirror, "ledger.json"))
+      and os.path.isfile(os.path.join(old_mirror, "MOVED.txt")) and stayed(old_state),
+      (r.stdout + r.stderr)[-300:])
+
+# an ASIAir import: notification, Finder label and the name dialog are recorded,
+# never shown. The fake OS commands first on PATH prove nothing ran.
+I1i = teh.Env("I1imp")
+I1i.add_light("Plan", "M 81", "0001", dt="20260720-221000")
+I1i.add_light("Plan", "MYSTERY 7", "0001", dt="20260720-223000")
+e = dict(I1i.env)
+e["PATH"] = teh.fake_os_commands(I1i.root) + os.pathsep + e["PATH"]
+r = irun(e, stdin="n\n")
+calls = teh.os_calls(I1i.root)
+check("I1 an import's notification and Finder label are recorded, not shown",
+      any(c["kind"] == "notify" for c in calls)
+      and any(c["kind"] == "tag" and mentions(c, I1i.cam) for c in calls),
+      json.dumps(calls)[:300] + r.stdout[-300:])
+check("I1 an unknown target's name dialog is recorded; the import goes on under the folder name",
+      any(c["kind"] == "dialog" and "MYSTERY 7" in c.values() for c in calls)
+      and count_fits(day_dir(I1i, "MYSTERY 7", 1)) == 1, json.dumps(calls)[:300] + r.stdout[-300:])
+if os.name == "nt":
+    print("  SKIP  I1 no fake OS command ran (Windows runs no shell scripts; "
+          "the records above are the proof)")
+else:
+    check("I1 ...and no OS command ran (the fake ones first on PATH stayed silent)",
+          not teh.executed(I1i.root), teh.executed(I1i.root)[-300:])
+
+# the S11 case: a piped 'y' meant for a SAFE card that never came lands on the
+# eject offer. Recorded; the temp card is never ejected.
+I1e = teh.Env("I1ej", asiair=False, seestar=True)
+s20_seed_ledger(I1e)                                   # no baseline offer to answer first
+I1e.add_seestar_sub("M 42", "20260905-210000", creator="Seestar S50 Pro")
+with open(os.path.join(I1e.myworks, "M 42_sub", "focus-notes.txt"), "w") as f:
+    f.write("HFD 2.1")                                 # unproven: no SAFE card
+e = dict(I1e.env, ASTRO_STDIN_PROMPTS="1")
+e["PATH"] = teh.fake_os_commands(I1e.root) + os.pathsep + e["PATH"]
+r = irun(e, "--no-ship", stdin="y\n")
+ej = teh.os_calls(I1e.root, "eject")
+check("I1 a stray 'y' on the eject offer is recorded and nothing is ejected (the S11 case)",
+      any(mentions(c, I1e.svol) for c in ej) and not teh.executed(I1e.root),
+      json.dumps(ej) + r.stdout[-300:])
+
+# every OS gate called directly (most are out of the suites' reach otherwise)
+I1g = teh.Env("I1gate", asiair=False, seestar=False)
+e = dict(I1g.env)
+e["PATH"] = teh.fake_os_commands(I1g.root) + os.pathsep + e["PATH"]
+GATE_PROBE = """
+import ctypes, types
+root = m.TEST_ROOT
+err = {}
+for kind, call in (
+        ('notify', lambda: m.notify('hi')),
+        ('eject', lambda: m.eject_volume(os.path.join(root, 'Seestar'))),
+        ('open', lambda: m.open_path(os.path.join(root, 'dashboard.html'))),
+        ('mount', lambda: m._try_mount_archive(os.path.join(root, 'archive-mount'),
+                                               'smb://example.invalid/x', wait=0)),
+        ('powershell', lambda: m._powershell('Write-Output hi')),
+        ('choose', lambda: m._choose_from_list(['a'], 'p', 't')),
+        ('dialog', lambda: m.ask_target_name('X')),
+        ('tag', lambda: m.tag_purple(root))):
+    try:
+        call()
+    except Exception as x:
+        err[kind] = repr(x)
+within = [m._within(root, root), m._within(os.path.join(root, 'a'), root),
+          m._within(root + '-other', root), m._within(os.path.dirname(root), root)]
+# Windows forced, no ASTRO_DRIVE_ROOTS: a stand-in ctypes that reports a
+# removable E: shows whether the real drive letters would be looked at
+os.environ.pop('ASTRO_DRIVE_ROOTS', None)
+touched = []
+class _K32:
+    def __getattr__(self, n):
+        touched.append(n)
+        return lambda *a: {'GetLogicalDrives': 1 << 4, 'GetDriveTypeW': 2}.get(n, 0)
+sys.modules['ctypes'] = types.SimpleNamespace(windll=types.SimpleNamespace(kernel32=_K32()),
+                                              c_wchar_p=str)
+was, m.IS_WINDOWS = m.IS_WINDOWS, True
+try:
+    drives = m._drive_roots()
+finally:
+    m.IS_WINDOWS = was
+    sys.modules['ctypes'] = ctypes
+# the real console fallbacks (test mode off, not a Mac): stdin is not a tty,
+# so they return at once, asking and running nothing
+tty = bool(sys.stdin and sys.stdin.isatty())
+m.TEST_ROOT, m.IS_MAC = '', False
+console = None if tty else [m._choose_from_list(['a', 'b'], 'p', 't'),
+                            list(m.ask_target_name('X'))]
+print(json.dumps({'err': err, 'within': within, 'drives': drives, 'ctypes': touched,
+                  'tty': tty, 'console': console}))
+"""
+got = probe(e, GATE_PROBE)
+calls = teh.os_calls(I1g.root)
+for kind in ("notify", "eject", "open", "mount", "powershell", "choose", "dialog", "tag"):
+    n = sum(c.get("kind") == kind for c in calls)
+    check(f"I1 gate '{kind}' called directly: recorded exactly once, not performed",
+          n == 1 and kind not in (got.get("err") or {}), f"{n} record(s) {json.dumps(got)[:300]}")
+if os.name == "nt":
+    print("  SKIP  I1 ...none of them ran a fake OS command (Windows runs no shell scripts)")
+else:
+    check("I1 ...none of them ran an OS command (the fake ones stayed silent)",
+          not teh.executed(I1g.root), teh.executed(I1g.root)[-300:])
+check("I1 _within: the root and inside it yes; a same-named sibling and the parent no",
+      got.get("within") == [True, True, False, False], str(got)[:300])
+check("I1 _drive_roots under a test, Windows forced, no ASTRO_DRIVE_ROOTS: [] and ctypes untouched",
+      got.get("drives") == [] and got.get("ctypes") == [], str(got)[:300])
+check("I1 the console fallbacks with no tty: the chooser gives None, the name question (None, False)",
+      got.get("tty") is False and got.get("console") == [None, [None, False]], str(got)[:300])
+
+# Seestar discovery never lists /Volumes (SEESTAR_VOLUME missing or unset, no drive roots)
+I1s = teh.Env("I1see", asiair=False, seestar=False)
+wrap = ("import os\nseen = []\n"
+        "for _n in ('listdir', 'scandir'):\n"
+        "    def _w(p='.', _f=getattr(os, _n)):\n"
+        "        seen.append(str(p)); return _f(p)\n"
+        "    setattr(os, _n, _w)\n")
+found = [probe(teh.make_env(I1s.root, SEESTAR_VOLUME=sv, ASTRO_DRIVE_ROOTS=None),
+               "print(json.dumps({'vol': m.seestar_volume(), 'seen': seen}))", before=wrap)
+         for sv in (os.path.join(I1s.root, "no-seestar-here"), None)]
+check("I1 Seestar discovery under a test never lists /Volumes and finds no camera",
+      all("seen" in x and x["vol"] is None
+          and not any(p.replace("\\", "/").startswith("/Volumes") for p in x["seen"])
+          for x in found), json.dumps(found)[:400])
+
+# a ledger row pointing outside the root (camera- or ledger-made paths are not
+# config, so the start guard can't see them): the operation stops before it
+I1c = teh.Env("I1conf", asiair=False, seestar=True)
+day1 = os.path.join(I1c.sdest30, "M 8 - Lagoon Nebula", "M 8_sub Day 1")
+day3 = os.path.join(tempfile.mkdtemp(prefix="v2test-I1-outside-"), "M 8_sub Day 3")
+os.makedirs(day1); os.makedirs(day3); os.makedirs(I1c.state)
+teh.make_seestar_fits(os.path.join(day1, "20260817-205403.fit"), uniq="in-the-root")
+stray = os.path.join(day3, "20260817-205843.fit")
+teh.make_seestar_fits(stray, uniq="outside-the-root")
+stray_bytes = open(stray, "rb").read()
+with open(os.path.join(I1c.state, "ledger.json"), "w") as f:
+    json.dump({"version": 1, "calibration": {}, "files": {
+        f"MyWorks/M 8_sub/{os.path.basename(p)}": {
+            "target": "M 8", "filename": os.path.basename(p), "dest": os.path.dirname(p),
+            "dayNumber": n, "device": "seestar", "sourceType": "sub"}
+        for p, n in ((os.path.join(day1, "20260817-205403.fit"), 1), (stray, 3))}}, f)
+r = I1c.run("--merge-days", "M 8", "1", "3")
+check("I1 --merge-days on a ledger row outside the test root stops (exit 3), that file untouched",
+      r.returncode == 3 and "TEST MODE:" in r.stdout + r.stderr and os.path.isfile(stray)
+      and open(stray, "rb").read() == stray_bytes and os.listdir(day1) == ["20260817-205403.fit"],
+      f"rc={r.returncode} " + (r.stdout + r.stderr)[-300:])
+r = I1c.run("--renumber-day", "M 8", "3", "2")
+check("I1 --renumber-day on a ledger row outside the test root stops (exit 3), that folder untouched",
+      r.returncode == 3 and "TEST MODE:" in r.stdout + r.stderr and os.path.isfile(stray)
+      and not os.path.exists(os.path.join(os.path.dirname(day3), "M 8_sub Day 2")),
+      f"rc={r.returncode} " + (r.stdout + r.stderr)[-300:])
+
+# a Seestar in the root whose MyWorks is a link out of it: the SAFE clear and
+# discard judge where the deletes would really land, and stop before any
+I1l = teh.Env("I1link", asiair=False, seestar=False)
+card = tempfile.mkdtemp(prefix="v2test-I1-outside-")
+os.makedirs(os.path.join(card, "MyWorks"))
+os.makedirs(I1l.svol)
+try:
+    os.symlink(os.path.join(card, "MyWorks"), I1l.myworks, target_is_directory=True)
+except (OSError, NotImplementedError):
+    I1l = None
+if I1l is None:
+    print("  SKIP  I1 a MyWorks linked out of the root (this account can't make symlinks)")
+else:
+    s20_seed_ledger(I1l)
+    subs = [I1l.add_seestar_sub("M 42", st, creator="Seestar S50 Pro")
+            for st in ("20260905-210000", "20260905-210500")]
+    r = I1l.run("--no-ship", stdin="y\ny\ny\n", extra_env={"ASTRO_STDIN_PROMPTS": "1"})
+    out = r.stdout + r.stderr
+    check("I1 the SAFE clear of a MyWorks linked out of the root stops (exit 3), the files there stay",
+          r.returncode == 3 and "the SAFE clear would touch" in out
+          and all(os.path.isfile(p) for p in subs), f"rc={r.returncode} {out[-300:]}")
+    r = I1l.run("--discard", "M 42_sub")
+    out = r.stdout + r.stderr
+    check("I1 ...and so does --discard of it (exit 3), nothing deleted",
+          r.returncode == 3 and "--discard would touch" in out
+          and all(os.path.isfile(p) for p in subs), f"rc={r.returncode} {out[-300:]}")
+
+# the self-test and the watcher never touch the real panel's port under a test
+I1t = teh.Env("I1port", asiair=False, seestar=False)
+for port, why in (("8765", ""), ("abc", ", and a port that isn't a number means 8765, no crash")):
+    r = irun(teh.make_env(I1t.root, ASTRO_PANEL_PORT=port), script=os.path.join(HERE, "selftest.py"))
+    check(f"I1 the install check under a test skips the panel on 8765 (never connects){why}",
+          re.search(r"SKIP\s+panel\b.*TEST MODE", r.stdout) is not None
+          and "127.0.0.1:8765" not in r.stdout, r.stdout[-400:] + r.stderr[-200:])
+    r = irun(teh.make_env(I1t.root, ASTRO_PANEL_PORT=port), "--once",
+             script=os.path.join(HERE, "astro-watch.py"))
+    check(f"I1 the watcher under a test refuses port 8765 (exit 3){why}",
+          r.returncode == 3 and "TEST MODE:" in r.stdout + r.stderr,
+          f"rc={r.returncode} " + (r.stdout + r.stderr)[-300:])
+
+# the watcher's own gates, in-process (the suites only ever run --once):
+# Popen and webbrowser are stand-ins that fail the check if they are reached
+I1w = teh.Env("I1watch", asiair=False, seestar=False)
+e = dict(I1w.env)
+e["PATH"] = teh.fake_os_commands(I1w.root) + os.pathsep + e["PATH"]
+WATCH_PROBE = """
+import ctypes, types
+spec = importlib.util.spec_from_file_location(
+    'watch', os.path.join(os.path.dirname(sys.argv[1]), 'astro-watch.py'))
+w = importlib.util.module_from_spec(spec); spec.loader.exec_module(w)
+ran, out = [], {}
+def _popen(*a, **k):
+    ran.append('Popen'); raise RuntimeError('a process was started')
+w.subprocess = types.SimpleNamespace(Popen=_popen)
+w.webbrowser = types.SimpleNamespace(open=lambda url: ran.append('webbrowser'))
+try:
+    out['start'] = w.start_panel()
+except Exception as x:
+    out['start'] = repr(x)
+w.panel_up = lambda: True             # as if the panel were up: on to the browser
+try:
+    w.on_arrival({'Seestar': os.path.join(m.TEST_ROOT, 'Seestar')}, {}, open_browser=True)
+except Exception as x:
+    out['arrival'] = repr(x)
+touched = []
+class _Ctypes:
+    def __getattr__(self, n):
+        touched.append(n); raise AttributeError(n)
+sys.modules['ctypes'] = _Ctypes()
+os.makedirs(os.path.dirname(w.STATE_PATH), exist_ok=True)
+was, w.eng.IS_WINDOWS = w.eng.IS_WINDOWS, True
+try:
+    out['single'] = w.single_instance()
+finally:
+    w.eng.IS_WINDOWS = was
+    sys.modules['ctypes'] = ctypes
+try:
+    out['pid'] = open(w.STATE_PATH + '.pid').read().strip() == str(os.getpid())
+except OSError:
+    out['pid'] = False
+out.update(ran=ran, ctypes=touched)
+print(json.dumps(out))
+"""
+got = probe(e, WATCH_PROBE)
+calls = teh.os_calls(I1w.root)
+def kinds(k):
+    return sum(c.get("kind") == k for c in calls)
+check("I1 watcher start_panel() under a test records panel-start and starts nothing",
+      got.get("start") is False and kinds("panel-start") == 1 and "Popen" not in (got.get("ran") or []),
+      json.dumps(got)[:300])
+check("I1 watcher on_arrival() records the notification and the browser, opens nothing",
+      "arrival" not in got and kinds("notify") == 1 and kinds("browser") == 1
+      and "webbrowser" not in (got.get("ran") or []), json.dumps(got)[:300] + json.dumps(calls)[:200])
+check("I1 watcher single_instance() under a test, Windows forced: the pid file, never the mutex",
+      got.get("single") is True and got.get("pid") is True and got.get("ctypes") == [],
+      json.dumps(got)[:300])
+if os.name == "nt":
+    print("  SKIP  I1 ...and the watcher ran no fake OS command (Windows runs no shell scripts)")
+else:
+    check("I1 ...and the watcher ran no OS command (the fake ones stayed silent)",
+          not teh.executed(I1w.root), teh.executed(I1w.root)[-300:])
+
+# no test mounts volumes or makes drive letters: cameras are temp folders
+# only. The whole text of each test file is scanned, on both OSes' commands
+# (each name is split here, so this list never matches itself).
+NO_MOUNT = re.compile("|".join((
+    "hdi" "util", "mount" "_smbfs", r"\bmount" " ", "disk" "util", r"\bsub" r"st\b",
+    "disk" "part", "mount" "vol", "Mount-" "DiskImage", "Mount-" "VHD", "New-" "VHD",
+    "New-" "PSDrive", r"\bnet\s+" r"use\b")), re.IGNORECASE)
+# the one allowed mention: the helper that makes the harmless stand-in
+# (it only writes <root>/EXECUTED)
+NO_MOUNT_OK = {("test_env_helper.py",
+                'for name in ("osascript", "disk' 'util", "open", "browser"):')}
+hits = []
+for name in ("test_v2.py", "test_app.py", "test_env_helper.py"):
+    with open(os.path.join(HERE, name), encoding="utf-8") as f:
+        hits += [f"{name}:{n}: {ln.strip()[:80]}" for n, ln in enumerate(f, 1)
+                 if NO_MOUNT.search(ln) and (name, ln.strip()) not in NO_MOUNT_OK]
+check("I1 no test file names a command that mounts a disk or makes a drive letter",
+      not hits, str(hits))
 
 # ═══════════════ Summary ═════════════════════════════════════════════════════
 print("\n═══════════════════════════════════════════════════")

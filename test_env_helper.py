@@ -1,12 +1,137 @@
-"""Shared fake-camera environment for the unified Astro Import test suites."""
+"""Shared fake-camera environment for the unified Astro Import test suites.
+
+Everything a test starts runs in TEST MODE (1.5.2): ASTRO_TEST_ROOT names a
+temp folder; the engine, panel, watcher and self-test refuse any path outside
+it and record (never perform) dialogs, notifications, ejects, mounts and
+"open" in <root>/os-calls.jsonl. make_env() builds every launched env."""
+import hashlib
 import json
 import os
+import site
+import socket
 import subprocess
 import sys
 import tempfile
 
 BUILD = os.path.dirname(os.path.abspath(__file__))
 SCRIPT = os.path.join(BUILD, "astro-import.py")
+
+# The only keys taken from the parent environment; everything else is set
+# below (an inherited ASTRO_*, SEESTAR_* or HOME must never reach a test).
+ALLOWED_PARENT_ENV = ("PATH", "SYSTEMROOT", "SystemRoot", "SYSTEMDRIVE", "WINDIR", "COMSPEC",
+                      "PATHEXT", "TEMP", "TMP", "TMPDIR", "LANG", "LC_ALL", "LC_CTYPE",
+                      "NUMBER_OF_PROCESSORS", "PROCESSOR_ARCHITECTURE",
+                      "__CF_USER_TEXT_ENCODING")
+# where this Python's --user packages live (astropy on the PC), found from the
+# REAL home at startup: with a fake home, child Pythons would lose them
+_USER_BASE = site.getuserbase()
+
+def free_port():
+    """A port nothing listens on right now, and never the real panel's 8765."""
+    while True:
+        with socket.socket() as s:
+            s.bind(("127.0.0.1", 0))
+            port = s.getsockname()[1]
+        if port != 8765:
+            return port
+
+def make_env(root, **extra):
+    """The whole environment of anything a test starts: the allowlisted parent
+    keys, test mode, a fake home and every engine path inside `root`, then
+    `extra` (None removes a key; to mean "no camera", point at a missing path
+    inside the root instead)."""
+    env = {}
+    for k in ALLOWED_PARENT_ENV:
+        v = os.environ.get(k)
+        if v is not None and k.upper() not in (x.upper() for x in env):
+            env[k] = v          # Windows keys ignore case: SystemRoot once
+    home = os.path.join(root, "home")
+    os.makedirs(home, exist_ok=True)
+    env.update({
+        "ASTRO_TEST_ROOT": root,
+        "HOME": home, "USERPROFILE": home,
+        "LOCALAPPDATA": os.path.join(home, "AppData", "Local"),
+        "APPDATA": os.path.join(home, "AppData", "Roaming"),
+        "ASIAIR_VOLUME": os.path.join(root, "ASIAIR"),
+        "ASIAIR_DEST": os.path.join(root, "dest", "ZWO ASI AIR"),
+        "ASIAIR_CAL_LIBRARY": os.path.join(root, "dest", "ASIAir Calibration Library"),
+        "ASIAIR_STATE": os.path.join(root, "state"),
+        "ASIAIR_MIRROR": os.path.join(root, "mirror"),
+        "ASIAIR_EQUIPMENT": os.path.join(root, "equipment.json"),
+        "ASIAIR_RECEIPTS": os.path.join(root, "receipts"),
+        "ASIAIR_LEGACY_NAMES": os.path.join(root, "no-legacy.json"),
+        "ASIAIR_CONFIG": os.path.join(root, "no-config.json"),
+        "SEESTAR_VOLUME": os.path.join(root, "Seestar"),
+        "SEESTAR_DEST_S30": os.path.join(root, "dest", "Seestar S30 Pro"),
+        "SEESTAR_DEST_S50": os.path.join(root, "dest", "Seestar S50"),
+        "SEESTAR_DEST_S30_ORIG": os.path.join(root, "dest", "Seestar S30"),
+        "SEESTAR_DEST_S50PRO": os.path.join(root, "dest", "Seestar S50 Pro"),
+        "ASTRO_ARCHIVE_MOUNT": os.path.join(root, "archive-mount"),
+        # never look at the real machine's drives/volumes during a test
+        "ASTRO_DRIVE_ROOTS": os.path.join(root, "no-real-drives"),
+        "ASTRO_ARCHIVE_URL": "",
+        "ASTRO_PANEL_PORT": str(free_port()),
+        # the same UTF-8 everywhere (Windows consoles default to cp1252)
+        "PYTHONUTF8": "1", "PYTHONIOENCODING": "utf-8",
+        "PYTHONDONTWRITEBYTECODE": "1",
+        "PYTHONUSERBASE": _USER_BASE,
+    })
+    for k, v in extra.items():
+        if v is None:
+            env.pop(k, None)
+        else:
+            env[k] = v
+    return env
+
+def isolate_runner():
+    """Put the test runner itself in test mode, before it loads the engine
+    in-process: os.environ becomes make_env() of a fresh session root."""
+    root = tempfile.mkdtemp(prefix="astro-test-session-")
+    env = make_env(root)
+    os.environ.clear()
+    os.environ.update(env)
+    return root
+
+def instance_id(state_dir):
+    """The "instance" /api/ping reports for a panel keeping its ledger in
+    state_dir (so a test knows it is talking to its OWN panel)."""
+    return hashlib.sha256(os.path.realpath(state_dir).encode("utf-8")).hexdigest()[:16]
+
+def os_calls(root, kind=None):
+    """What test mode recorded instead of doing (<root>/os-calls.jsonl)."""
+    out = []
+    try:
+        with open(os.path.join(root, "os-calls.jsonl"), encoding="utf-8") as f:
+            for ln in f:
+                try:
+                    out.append(json.loads(ln))
+                except ValueError:
+                    pass
+    except OSError:
+        pass
+    return [r for r in out if kind is None or r.get("kind") == kind]
+
+def fake_os_commands(root):
+    """A folder of stand-ins for the Mac's dialog, eject and "open" commands
+    (and a `browser` for $BROWSER) that only write <root>/EXECUTED: put it
+    first on PATH, and EXECUTED appearing means one of them ran (Mac/Linux;
+    Windows runs no shell scripts)."""
+    d = os.path.join(root, "fake-os-commands")
+    os.makedirs(d, exist_ok=True)
+    for name in ("osascript", "diskutil", "open", "browser"):
+        p = os.path.join(d, name)
+        with open(p, "w") as f:
+            f.write(f'#!/bin/sh\necho "{name} $*" >> "{os.path.join(root, "EXECUTED")}"\n')
+        os.chmod(p, 0o755)
+    return d
+
+def executed(root):
+    """Which fake OS commands ran ("" = none)."""
+    try:
+        with open(os.path.join(root, "EXECUTED"), encoding="utf-8", errors="replace") as f:
+            return f.read()
+    except OSError:
+        return ""
 
 def _card(key, value, string=False):
     if string:
@@ -87,8 +212,7 @@ class Env:
         eqp = os.path.join(self.root, "equipment.json")
         with open(eqp, "w") as f:
             json.dump({"telescopes": []}, f)
-        self.env = dict(os.environ)
-        self.env.update({
+        self.env = make_env(self.root, **{
             "ASIAIR_VOLUME": self.cam, "ASIAIR_DEST": self.dest,
             "ASIAIR_CAL_LIBRARY": self.lib, "ASIAIR_STATE": self.state,
             "ASIAIR_MIRROR": self.mirror, "ASIAIR_EQUIPMENT": eqp,
@@ -100,10 +224,7 @@ class Env:
             "SEESTAR_DEST_S30_ORIG": self.sdest30o,
             "SEESTAR_DEST_S50PRO": self.sdest50p,
             "ASTRO_ARCHIVE_MOUNT": os.path.join(self.root, "archive-mount"),
-            # never look at the real machine's drives/volumes during a test
             "ASTRO_DRIVE_ROOTS": os.path.join(self.root, "no-real-drives"),
-            # the same UTF-8 everywhere (Windows consoles default to cp1252)
-            "PYTHONUTF8": "1", "PYTHONIOENCODING": "utf-8",
         })
         self.archive = os.path.join(self.root, "archive-mount")
 

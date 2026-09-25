@@ -17,6 +17,7 @@ own window. The watcher opens/focuses the panel when the camera is plugged in.
 
 import argparse
 import contextlib
+import hashlib
 import importlib.util
 import json
 import os
@@ -468,7 +469,11 @@ class App:
                 "seconds": dur,
                 "finishedAt": time.strftime("%H:%M:%S"),
             }
-            if total_f and sys.platform == "darwin":
+            if total_f and eng.TEST_ROOT:              # test mode: recorded, never shown
+                eng._test_record("notify", message=f"{total_f} frame(s) imported and "
+                                 f"verified across {total_t} target(s).",
+                                 title="FITS Importer — import complete")
+            elif total_f and sys.platform == "darwin":
                 try:  # a chime for imports finished while you're elsewhere
                     subprocess.run(
                         ["osascript", "-e",
@@ -626,6 +631,9 @@ APP = App()
 # it nor (without a CORS preflight this server never answers) send the header
 # (1.4.3 review finding V1).
 TOKEN = secrets.token_urlsafe(24)
+# Which panel this is (a hash of its state folder, sent by /api/ping): a test
+# checks it is talking to its OWN panel before it trusts the token (1.5.2)
+INSTANCE = hashlib.sha256(os.path.realpath(eng.STATE_DIR).encode("utf-8")).hexdigest()[:16]
 PORT = 8765
 MAX_BODY = 64 * 1024
 LOCAL_HOSTS = ("127.0.0.1", "localhost", "::1")
@@ -728,7 +736,8 @@ class Handler(BaseHTTPRequestHandler):
         if self.path == "/" or self.path.startswith("/index"):
             self._html(PAGE.replace("__ASTRO_TOKEN__", TOKEN))
         elif self.path == "/api/ping":
-            self._json({"ok": True, "app": "astro-import", "version": APP_VERSION})
+            self._json({"ok": True, "app": "astro-import", "version": APP_VERSION,
+                        "instance": INSTANCE})
         elif self.path == "/api/state":
             self._json(APP.snapshot())
         elif self.path == "/api/report-text":
@@ -1623,9 +1632,14 @@ class PanelServer(ThreadingHTTPServer):
 
 def main():
     p = argparse.ArgumentParser(description="BrettjoAstro FITS Importer control panel")
-    p.add_argument("--port", type=int, default=8765)
+    p.add_argument("--port", type=int, default=eng.panel_port())
     p.add_argument("--no-browser", action="store_true")
     args = p.parse_args()
+    if eng.TEST_ROOT and args.port == 8765:
+        # 8765 is the real panel's port: a test panel never binds it (1.5.2)
+        print("TEST MODE: the panel never uses port 8765 under a test "
+              "(pass --port or set ASTRO_PANEL_PORT)", file=sys.stderr)
+        sys.exit(3)
 
     global PORT
     PORT = args.port
@@ -1642,7 +1656,10 @@ def main():
     print(f"FITS Importer panel → {url}   (Ctrl-C to quit)")
     APP.logline(f"▸ Panel started at {url}")
     if not args.no_browser:
-        threading.Timer(0.4, lambda: webbrowser.open(url)).start()
+        if eng.TEST_ROOT:                                   # test mode: recorded, never opened
+            eng._test_record("browser", url=url)
+        else:
+            threading.Timer(0.4, lambda: webbrowser.open(url)).start()
     try:
         server.serve_forever()
     except KeyboardInterrupt:

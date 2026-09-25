@@ -49,7 +49,7 @@ from collections import defaultdict
 from datetime import datetime, timedelta
 
 # One version for every platform (1.5.0: the Windows 11 edition joins the Mac).
-VERSION = "1.5.1"
+VERSION = "1.5.2"
 IS_WINDOWS = os.name == "nt"
 IS_MAC = sys.platform == "darwin"
 PLATFORM = "windows" if IS_WINDOWS else ("mac" if IS_MAC else "linux")
@@ -80,6 +80,91 @@ def get_fits():
 # CONFIG (env-overridable so the test harness can redirect everything)
 # ═══════════════════════════════════════════════════════════════════════════
 
+# Test mode (1.5.2). ASTRO_TEST_ROOT=<folder> marks a test run, and the engine
+# then fails closed: every default is re-rooted under that folder (with a fake
+# home, so every "~" lands there too), any configured path outside it stops
+# the run before anything is read or written (exit 3, "TEST MODE: ..."),
+# cameras are only ever ASTRO_DRIVE_ROOTS entries (never /Volumes or real
+# drive letters), and every OS side effect (dialogs, notifications, Finder
+# labels, ejects, mounts, "open", PowerShell) is recorded in
+# <root>/os-calls.jsonl instead of performed. Unset, nothing changes.
+# Why: the 1.5.1 suites, run on the real Mac, shipped fake frames into the
+# real archive and moved a real iCloud folder (25 Sep 2026).
+
+def _test_refuse(msg):
+    print(f"TEST MODE: {msg}", file=sys.stderr)
+    sys.exit(3)
+
+def _within(path, root):
+    """Is `path` the folder `root` or inside it? Both resolved (links, 8.3
+    names; case-insensitive on Windows); another drive is outside."""
+    p = os.path.normcase(os.path.realpath(path))
+    r = os.path.normcase(os.path.realpath(root))
+    try:
+        return os.path.commonpath([p, r]) == r
+    except ValueError:
+        return False
+
+TEST_ROOT = os.environ.get("ASTRO_TEST_ROOT")
+if TEST_ROOT is None:
+    TEST_ROOT = ""
+else:
+    if not TEST_ROOT or not os.path.isdir(TEST_ROOT):
+        _test_refuse(f"ASTRO_TEST_ROOT is not an existing folder: '{TEST_ROOT}'")
+    TEST_ROOT = os.path.realpath(TEST_ROOT)
+    # a fake home inside the root (child processes inherit it)
+    _home = os.path.join(TEST_ROOT, "home")
+    for _k, _v in (("HOME", _home), ("USERPROFILE", _home),
+                   ("LOCALAPPDATA", os.path.join(_home, "AppData", "Local")),
+                   ("APPDATA", os.path.join(_home, "AppData", "Roaming"))):
+        if not (os.environ.get(_k) and _within(os.environ[_k], TEST_ROOT)):
+            os.environ[_k] = _v
+    for _k in ("OneDrive", "HOMEDRIVE", "HOMEPATH"):
+        os.environ.pop(_k, None)          # so ntpath.expanduser uses USERPROFILE
+    os.makedirs(os.path.expanduser("~"), exist_ok=True)
+
+def _test_record(kind, **info):
+    """Test mode: note an OS side effect in <root>/os-calls.jsonl instead of
+    performing it. Never raises."""
+    if not TEST_ROOT:
+        return
+    try:
+        rec = {"kind": kind, "at": datetime.now().isoformat(timespec="seconds"), **info}
+        with open(os.path.join(TEST_ROOT, "os-calls.jsonl"), "a", encoding="utf-8") as f:
+            f.write(json.dumps(rec, default=str) + "\n")
+    except Exception:
+        pass
+
+def _confine(path, what):
+    """Test mode: stop before `what` touches `path` outside the root — for
+    paths that come from the ledger or the camera, not from config."""
+    if TEST_ROOT and not _within(path, TEST_ROOT):
+        _test_refuse(f"{what} would touch {path}, outside the test root {TEST_ROOT}")
+
+def _test_root_guard():
+    """Test mode: every configured path must lie inside the root, or the run
+    stops here, before anything is read or written. Called once, after the
+    last path constant below."""
+    if not TEST_ROOT:
+        return
+    paths = [("ASIAIR_CONFIG", _CONFIG_PATH), ("ASIAIR_VOLUME", ASIAIR_VOLUME),
+             ("ASIAIR_DEST", DEST_DIR), ("ASIAIR_CAL_LIBRARY", LIBRARY_DIR),
+             ("ASIAIR_STATE", STATE_DIR), ("ASIAIR_MIRROR", MIRROR_DIR),
+             ("ASTRO_ARCHIVE_MOUNT", ARCHIVE_MOUNT),
+             ("ASTRO_SHIP_LOG", os.path.join(ARCHIVE_MOUNT, "_verify", SHIP_LOG_NAME)),
+             ("SEESTAR_DEST_S30", SEESTAR_DEST_S30), ("SEESTAR_DEST_S50", SEESTAR_DEST_S50),
+             ("SEESTAR_DEST_S30_ORIG", SEESTAR_DEST_S30_ORIG),
+             ("SEESTAR_DEST_S50PRO", SEESTAR_DEST_S50PRO),
+             ("ASIAIR_EQUIPMENT", EQUIPMENT_JSON), ("ASIAIR_RECEIPTS", RECEIPT_BASE),
+             ("ASIAIR_LEGACY_NAMES", LEGACY_CUSTOM_NAMES)]
+    paths += [("SEESTAR_VOLUME", v) for v in SEESTAR_VOLUMES]
+    paths += [("ASTRO_DRIVE_ROOTS", r)
+              for r in (os.environ.get("ASTRO_DRIVE_ROOTS") or "").split(os.pathsep)]
+    paths += [(k, os.environ.get(k)) for k in ("ASTRO_WATCH_LOG", "ASTRO_WATCH_STATE")]
+    for var, p in paths:
+        if p and not _within(p, TEST_ROOT):
+            _test_refuse(f"{var} is outside the test root {TEST_ROOT}: {p}")
+
 # Precedence: environment variable > config.json > generic default.
 # config.json lives next to the ledger (~/Library/Application Support/
 # Astro Import/config.json) and lets any user relocate destinations without
@@ -93,6 +178,8 @@ else:
     _DEF_STATE = "~/Library/Application Support/Astro Import"
 _CONFIG_PATH = os.path.expanduser(os.environ.get(
     "ASIAIR_CONFIG", os.path.join(_DEF_STATE, "config.json")))
+if TEST_ROOT and _CONFIG_PATH and not _within(_CONFIG_PATH, TEST_ROOT):
+    _test_refuse(f"ASIAIR_CONFIG is outside the test root {TEST_ROOT}: {_CONFIG_PATH}")
 try:
     with open(_CONFIG_PATH) as _cf:
         _CONFIG = json.load(_cf)
@@ -102,8 +189,10 @@ except (OSError, ValueError):
     _CONFIG = {}
 
 def _env_path(var, default):
-    value = os.environ.get(var) or _CONFIG.get(var) or default
-    return os.path.expanduser(value)
+    value = os.environ.get(var) or _CONFIG.get(var)
+    if not value and TEST_ROOT and not _within(os.path.expanduser(default), TEST_ROOT):
+        value = os.path.join(TEST_ROOT, "unset", var)   # never a real default
+    return os.path.expanduser(value or default)
 
 # On Windows cameras arrive as drive letters, found by what is ON them
 # (Autorun\ = ASIAir, MyWorks\ = Seestar) — see refresh_camera_volumes().
@@ -121,7 +210,7 @@ MIRROR_DIR    = _env_path("ASIAIR_MIRROR", "~/Documents/Astro/Import Status")
 ARCHIVE_MOUNT = _env_path("ASTRO_ARCHIVE_MOUNT", "E:\\Astro Image Data" if IS_WINDOWS
                           else "/Volumes/AstroImageData")
 ARCHIVE_LABEL = os.environ.get("ASTRO_ARCHIVE_LABEL") or _CONFIG.get("ASTRO_ARCHIVE_LABEL") \
-    or "E:\\Astro Image Data"
+    or (ARCHIVE_MOUNT if TEST_ROOT else "E:\\Astro Image Data")
 # smb:// URL of the share; when set, --ship asks Finder to mount it on demand
 # (the keychain supplies the password after the first "remember" connection),
 # so no permanent connection is needed.
@@ -131,27 +220,11 @@ ARCHIVE_URL = os.environ.get("ASTRO_ARCHIVE_URL") or _CONFIG.get("ASTRO_ARCHIVE_
 SHIP_LOG_NAME = os.environ.get("ASTRO_SHIP_LOG") or _CONFIG.get("ASTRO_SHIP_LOG") \
     or ("shipped-pc.jsonl" if IS_WINDOWS else "shipped.jsonl")
 
-# One-time migration from the pre-unification state locations (spec §1).
-for _old, _new in [
-    (os.path.expanduser("~/Library/Application Support/ASIAir Import"), STATE_DIR),
-    (os.path.expanduser("~/Library/Mobile Documents/com~apple~CloudDocs/Astro Tools/ASIAir Import"),
-     MIRROR_DIR),
-]:
-    try:
-        if os.path.isdir(_old) and not os.path.isdir(_new):
-            shutil.move(_old, _new)
-            os.makedirs(_old, exist_ok=True)   # breadcrumb for anything bookmarked
-            with open(os.path.join(_old, "MOVED.txt"), "w") as _f:
-                _f.write("This folder moved to:\n  %s\n"
-                         "(ASIAir + Seestar imports were unified into 'Astro Import', "
-                         "2026-07-25)\n" % _new)
-    except OSError:
-        pass
-
 # ── Seestar (S30 Pro / S50) ─────────────────────────────────────────────────
 SEESTAR_VOLUME_ENV = os.environ.get("SEESTAR_VOLUME") or _CONFIG.get("SEESTAR_VOLUME")
 SEESTAR_VOLUMES = ([SEESTAR_VOLUME_ENV] if SEESTAR_VOLUME_ENV
-                   else ([] if IS_WINDOWS else ["/Volumes/Seestar", "/Volumes/SEESTAR"]))
+                   else ([] if IS_WINDOWS or TEST_ROOT
+                         else ["/Volumes/Seestar", "/Volumes/SEESTAR"]))
 SEESTAR_DEST_S30 = _env_path("SEESTAR_DEST_S30", "~/Documents/Astro/Seestar S30 Pro")
 SEESTAR_DEST_S50 = _env_path("SEESTAR_DEST_S50", "~/Documents/Astro/Seestar S50")
 # The ORIGINAL (non-Pro) S30 gets its own tree — two different optical
@@ -182,11 +255,12 @@ _WIN_ERRMODE_SET = False
 def _drive_roots():
     """Candidate camera drives: ASTRO_DRIVE_ROOTS (tests, or to pin drives
     by hand), else on Windows every removable or fixed drive letter except
-    the system drive. Empty elsewhere (the Mac uses /Volumes)."""
+    the system drive. Empty elsewhere (the Mac uses /Volumes) and in test
+    mode (never a real drive letter)."""
     env = os.environ.get("ASTRO_DRIVE_ROOTS")
     if env is not None:
         return [p for p in env.split(os.pathsep) if p]
-    if not IS_WINDOWS:
+    if not IS_WINDOWS or TEST_ROOT:
         return []
     global _WIN_ERRMODE_SET
     roots = []
@@ -287,6 +361,9 @@ def pid_alive(pid):
 def _powershell(script, env_extra=None, timeout=20):
     """Run a PowerShell snippet with data passed ONLY through environment
     variables (never spliced into the script), so no name can inject code."""
+    if TEST_ROOT:
+        _test_record("powershell", script=script.strip()[:200])
+        return subprocess.CompletedProcess(["powershell.exe"], 1, b"", b"test mode: not run")
     env = dict(os.environ)
     env.update(env_extra or {})
     return subprocess.run(["powershell.exe", "-NoProfile", "-NonInteractive",
@@ -312,6 +389,9 @@ $d = $env:ASTRO_EJECT_DRIVE
 
 def eject_volume(vol):
     """Safely eject a camera drive. True when it is gone afterwards."""
+    if TEST_ROOT:
+        _test_record("eject", vol=vol)
+        return False
     try:
         if IS_MAC:
             return subprocess.run(["diskutil", "eject", vol], capture_output=True,
@@ -330,6 +410,9 @@ def eject_volume(vol):
 
 def open_path(target):
     """Open a file or URL with the system's default app."""
+    if TEST_ROOT:
+        _test_record("open", target=target)
+        return
     try:
         if IS_WINDOWS:
             os.startfile(target)            # noqa: platform-specific
@@ -395,6 +478,14 @@ def _env_flag(var, default=False):
         return default
     return str(v).strip().lower() in ("1", "true", "yes", "on")
 
+def panel_port():
+    """The panel's port: ASTRO_PANEL_PORT, else 8765 (as is a value that
+    isn't a number: a typo must never stop the panel or the install check)."""
+    try:
+        return int(os.environ.get("ASTRO_PANEL_PORT") or 8765)
+    except ValueError:
+        return 8765
+
 # Per-sub JPEG previews (the S50 Pro writes one beside every sub). OFF by
 # default since 1.4.2 (Brett, 12 + 24 Sep 2026: "don't want JPGs imported").
 # When off they are neither imported nor shipped, and the SAFE gate treats a
@@ -414,6 +505,28 @@ STAMP_RE = re.compile(r"\d{8}-\d{6}")
 EQUIPMENT_JSON = _env_path("ASIAIR_EQUIPMENT", "~/Documents/Astro/equipment.json")
 RECEIPT_BASE  = _env_path("ASIAIR_RECEIPTS", "~/Documents/Astro/astrolog-receipts")
 LEGACY_CUSTOM_NAMES = _env_path("ASIAIR_LEGACY_NAMES", "~/.asiair-custom-names.json")
+_test_root_guard()
+
+# One-time migration from the pre-unification state locations (spec §1).
+# Never in test mode, and never into a folder an environment variable points
+# at: that is a test or a one-off run, not the old folder's heir (1.5.2 — a
+# test's temp mirror swallowed the real iCloud folder). config.json still counts.
+for _old, _new, _var in [
+    (os.path.expanduser("~/Library/Application Support/ASIAir Import"), STATE_DIR, "ASIAIR_STATE"),
+    (os.path.expanduser("~/Library/Mobile Documents/com~apple~CloudDocs/Astro Tools/ASIAir Import"),
+     MIRROR_DIR, "ASIAIR_MIRROR"),
+]:
+    try:
+        if not TEST_ROOT and not os.environ.get(_var) \
+                and os.path.isdir(_old) and not os.path.isdir(_new):
+            shutil.move(_old, _new)
+            os.makedirs(_old, exist_ok=True)   # breadcrumb for anything bookmarked
+            with open(os.path.join(_old, "MOVED.txt"), "w") as _f:
+                _f.write("This folder moved to:\n  %s\n"
+                         "(ASIAir + Seestar imports were unified into 'Astro Import', "
+                         "2026-07-25)\n" % _new)
+    except OSError:
+        pass
 
 CAMERA_NAME = "ZWO ASI585MC Air"
 SOURCE_SUBDIRS = ["Live/Light", "Plan/Light"]
@@ -554,6 +667,9 @@ def now_stamp():
 def notify(message, title="FITS Importer"):
     """Desktop notification (macOS Notification Centre / Windows toast);
     silently logged if unavailable or not allowed."""
+    if TEST_ROOT:
+        _test_record("notify", message=message, title=title)
+        return
     if IS_WINDOWS:
         try:
             r = _powershell(_WIN_TOAST, {"ASTRO_TOAST_TITLE": title,
@@ -1037,6 +1153,7 @@ class State:
             generate_dashboard(self)
         except Exception as e:
             warn(f"dashboard generation failed: {e}")
+        _confine(MIRROR_DIR, "the mirror publish")
         ok, owner = mirror_owner_ok(MIRROR_DIR, claim=True)
         if not ok:
             warn(f"The mirror folder {MIRROR_DIR} belongs to another computer "
@@ -1219,6 +1336,9 @@ def ask_target_name(catalog_name):
             return None, False
         r = str(r).strip()
         return (r, True) if r else ("", True)
+    if TEST_ROOT:
+        _test_record("dialog", name=catalog_name)   # = headless: skip for this run
+        return None, False
     if not IS_MAC:
         # Windows/Linux Terminal: ask in the console; headless = skip for now
         if not sys.stdin or not sys.stdin.isatty():
@@ -1428,6 +1548,9 @@ def hardlink_or_copy(src, dst, checksum=True):
 def tag_purple(folder_path):
     """Finder's purple "done" tag — a macOS nicety with no Windows
     equivalent (NTFS has no Finder labels); the ledger is the real record."""
+    if TEST_ROOT:
+        _test_record("tag", path=folder_path)
+        return
     if not IS_MAC:
         return
     folder_path = folder_path.rstrip("/")
@@ -2423,6 +2546,7 @@ def run_import(state, args, only_targets=None):
                        "telescope": scope_name, "importedAt": now_stamp(),
                        "sessions": sessions}
             rdir = os.path.join(RECEIPT_BASE, scope_name)
+            _confine(rdir, "the AstroLog receipt")
             os.makedirs(rdir, exist_ok=True)
             rpath = _unique_receipt_path(rdir, f"asiair-{receipt['importedAt']}")
             _atomic_write_json(rpath, receipt)
@@ -2600,6 +2724,8 @@ def run_merge_days(state, target_name, day_args):
         return
     into_dir = into_dirs.pop()
     movers = [(rel, e) for rel, e in ents if e.get("dayNumber") != into]
+    for d in sorted({e["dest"] for _, e in ents}):
+        _confine(d, "--merge-days")
     # pre-flight: every source present, no destination collisions
     problems = []
     for rel, e in movers:
@@ -2666,6 +2792,8 @@ def run_renumber_day(state, target_name, from_day, to_day):
     base = os.path.basename(src_dir)
     dst_dir = os.path.join(os.path.dirname(src_dir),
                            base.replace(f"Day {from_day}", f"Day {to_day}"))
+    _confine(src_dir, "--renumber-day")
+    _confine(dst_dir, "--renumber-day")
     if os.path.exists(dst_dir):
         error(f"Already exists: {dst_dir}")
         return
@@ -2875,6 +3003,7 @@ def archive_reachable(mount=None, write_test=True):
             return False
         if write_test:
             vdir = os.path.join(mount, "_verify")
+            _confine(vdir, "the archive probe")
             os.makedirs(vdir, exist_ok=True)
             probe = os.path.join(vdir, f".ship-probe-{os.getpid()}")
             with open(probe, "w") as f:
@@ -2980,6 +3109,7 @@ def _find_moved_file(dest, filename, size, index):
         if base in ("lights", "panels") or _MAC_DAY_RE.match(base):
             continue
         if d not in index:
+            _confine(d, "the moved-frame search")
             idx = {}
             if os.path.isdir(d):
                 for root, _dirs, fns in os.walk(d):
@@ -3108,6 +3238,9 @@ def _ship_apply_verified(state, mount):
 def _try_mount_archive(mount, url, wait=20):
     """Ask Finder to mount the share (password from the keychain). Returns True when
     the archive becomes reachable within `wait` seconds."""
+    if TEST_ROOT and url:
+        _test_record("mount", url=url)      # never mounted, never waited for
+        return False
     if not url or sys.platform != "darwin":
         return False
     try:
@@ -3128,6 +3261,7 @@ def _archive_ship_lock(mount):
     ON the archive (_verify/ship.lock), so the Mac and the PC see the same one.
     Returns the lock path, or None when another run holds it."""
     path = os.path.join(mount, "_verify", "ship.lock")
+    _confine(path, "the archive ship lock")
     me = {"machine": machine_id(), "host": socket.gethostname(), "platform": PLATFORM,
           "pid": os.getpid(), "at": now_stamp()}
     for _ in range(2):
@@ -3213,6 +3347,7 @@ def _run_ship(state, dry_run=False, mount=None, checksum=True):
         return True
     vdir = os.path.join(mount, "_verify"); os.makedirs(vdir, exist_ok=True)
     shipped_log = os.path.join(vdir, SHIP_LOG_NAME)   # this machine's own log
+    _confine(shipped_log, "the ship log")
     shipped, problems, frames = 0, [], []
     stamp = now_stamp()
     real_mount = _prefix(os.path.realpath(mount))
@@ -3224,6 +3359,7 @@ def _run_ship(state, dry_run=False, mount=None, checksum=True):
             # a folder name must never walk a copy out of the archive (V3)
             problems.append((rel, "path leaves the archive folder; not shipped"))
             continue
+        _confine(dst, "the ship")        # its folder, .partial and .BAD sit beside it
         try:
             os.makedirs(os.path.dirname(dst), exist_ok=True)
             if os.path.isfile(dst):
@@ -3458,6 +3594,7 @@ def run_discard(state, target_name, night=None, reason="", dry_run=False):
         error(f"Seestar NOT scanned: {e}")
         return "refused"
     vol = s["volume"]
+    _confine(vol, "--discard")
     if not dry_run:
         state.seestar_seen(s)   # settle old records first (crash mid-discard, H5)
     if s.get("extra_volumes"):
@@ -3502,6 +3639,7 @@ def run_discard(state, target_name, night=None, reason="", dry_run=False):
     # MyWorks and every file must really live on the camera volume — a
     # symlink on the card must never steer a delete somewhere else (1.4.2).
     real_mw = os.path.realpath(os.path.join(vol, "MyWorks"))
+    _confine(real_mw, "--discard")               # where the deletes really land
     real_vol = _prefix(os.path.realpath(vol))
     dirs, seen_dirs = [], set()
     for d in g["dirs"]:
@@ -3706,6 +3844,7 @@ def run_export_settings(state, path=None):
                 else os.path.expanduser("~")
         path = os.path.join(desk, "fits-importer-settings.json")
     path = os.path.expanduser(path)
+    _confine(path, "--export-settings")
     try:
         with open(EQUIPMENT_JSON, encoding="utf-8") as f:
             equipment = json.load(f)
@@ -3784,11 +3923,13 @@ def run_import_settings(state, path, dry_run=False):
         state.skiplist.extend(added_skips)
         state.save_skiplist()
     if b.get("equipment") is not None and not os.path.isfile(EQUIPMENT_JSON):
+        _confine(EQUIPMENT_JSON, "--import-settings")
         os.makedirs(os.path.dirname(EQUIPMENT_JSON), exist_ok=True)
         _atomic_write_json(EQUIPMENT_JSON, b["equipment"])
     if cfg_added:
         cfg = dict(_CONFIG)
         cfg.update(cfg_added)
+        _confine(_CONFIG_PATH, "--import-settings")
         os.makedirs(os.path.dirname(_CONFIG_PATH), exist_ok=True)
         _atomic_write_json(_CONFIG_PATH, cfg)
     state.history_event("settings-imported", fromHost=b.get("fromHost"),
@@ -3847,6 +3988,7 @@ def run_tidy_stacks(state, dry_run=False):
     stamp = now_stamp()
     removed = 0
     for pth, _size, _winner, _night in candidates:
+        _confine(pth, "--tidy-stacks")
         for cand in (pth, pth[:-4] + ".jpg"):
             if os.path.isfile(cand):
                 try:
@@ -4280,9 +4422,10 @@ def _volumes_named_seestar():
     'Seestar', any case — macOS mounts a second unit as 'Seestar 1', and a
     future model may bring its own name) and actually carries MyWorks."""
     out = []
-    if IS_WINDOWS or os.environ.get("ASTRO_DRIVE_ROOTS") is not None:
+    if IS_WINDOWS or TEST_ROOT or os.environ.get("ASTRO_DRIVE_ROOTS") is not None:
         # Windows: a Seestar is any drive letter carrying MyWorks\ (labels
-        # vary by firmware; what is ON the card is what makes it a Seestar)
+        # vary by firmware; what is ON the card is what makes it a Seestar).
+        # Test mode never lists the real /Volumes.
         return sorted(r for r in _drive_roots()
                       if os.path.isdir(os.path.join(r, "MyWorks")))
     try:
@@ -5160,6 +5303,7 @@ def run_seestar_import(state, scan_s, args, only_targets=None):
                        if disp.startswith(mw_common_j + " - ") else "")
                 jname = f"MilkyWay_{dso}_{st}.jpg" if dso else f"MilkyWay_{st}.jpg"
             try:
+                _confine(sib["dest"], "a JPEG preview copy")
                 os.makedirs(sib["dest"], exist_ok=True)
                 sha, _sz = copy_file_verified(jf["path"],
                                               os.path.join(sib["dest"], jname),
@@ -5276,6 +5420,7 @@ def run_seestar_import(state, scan_s, args, only_targets=None):
         receipt = {"version": 1, "source": "seestar-import", "telescope": scope_name,
                    "importedAt": now_stamp(), "sessions": receipt_sessions}
         rdir = os.path.join(RECEIPT_BASE, scope_name)
+        _confine(rdir, "the AstroLog receipt")
         os.makedirs(rdir, exist_ok=True)
         rpath = _unique_receipt_path(rdir, f"seestar-{receipt['importedAt']}")
         _atomic_write_json(rpath, receipt)
@@ -5426,8 +5571,10 @@ def seestar_safe_cleanup(state, scan_s, cleanup_candidates):
     folder that may since hold something else (1.4.3 review finding H3).
     Returns the number of folders cleared."""
     vol = scan_s["volume"]
+    _confine(vol, "the SAFE clear")
     camera = scan_s["camera"]
     real_mw = os.path.realpath(os.path.join(vol, "MyWorks"))
+    _confine(real_mw, "the SAFE clear")          # where the deletes really land
     safe, blocked = [], []
     for label, dirs, exempt_sup in cleanup_candidates:
         dirs = [d for d in dirs if d]
@@ -5957,6 +6104,9 @@ def _choose_from_list(items, prompt, title, multiple=True, timeout=3600):
     """osascript choose from list via argv (quote-safe), killable timeout.
     Outside macOS: a numbered list in the console (the panel is the main
     route on every platform; this is the Terminal fallback)."""
+    if TEST_ROOT:
+        _test_record("choose", prompt=prompt, title=title, items=list(items))
+        return None
     if not IS_MAC:
         if not items or not sys.stdin or not sys.stdin.isatty():
             return None

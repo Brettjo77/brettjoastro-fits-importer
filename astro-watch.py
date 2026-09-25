@@ -34,14 +34,15 @@ import webbrowser
 HERE = os.path.dirname(os.path.abspath(__file__))
 ENGINE_PATH = os.path.join(HERE, "astro-import.py")
 APP_PATH = os.path.join(HERE, "astro-app.py")
-PORT = int(os.environ.get("ASTRO_PANEL_PORT", "8765"))
-URL = f"http://127.0.0.1:{PORT}"
 POLL_S = float(os.environ.get("ASTRO_WATCH_POLL_S", "3"))
 FLAP_GUARD_S = int(os.environ.get("ASTRO_FLAP_GUARD_S", "600"))
 
 _spec = importlib.util.spec_from_file_location("astro_engine_w", ENGINE_PATH)
 eng = importlib.util.module_from_spec(_spec)
 _spec.loader.exec_module(eng)
+
+PORT = eng.panel_port()
+URL = f"http://127.0.0.1:{PORT}"
 
 LOG_DIR = os.path.join(eng.STATE_DIR, "Logs")
 LOG_PATH = os.environ.get("ASTRO_WATCH_LOG") or os.path.join(LOG_DIR, "astro-watch.log")
@@ -86,6 +87,9 @@ def panel_up():
 
 def start_panel():
     """Start the panel windowless, detached, as its own process."""
+    if eng.TEST_ROOT:                          # test mode: recorded, never started
+        eng._test_record("panel-start", port=PORT)
+        return False
     exe = sys.executable
     if eng.IS_WINDOWS and exe.lower().endswith("python.exe"):
         cand = exe[:-len("python.exe")] + "pythonw.exe"
@@ -142,15 +146,19 @@ def on_arrival(found, st, open_browser=True):
     eng.notify(f"{label} connected — opening the FITS Importer. Nothing is copied "
                f"until you press Import.", "FITS Importer")
     if open_browser:
-        webbrowser.open(URL)
+        if eng.TEST_ROOT:                      # test mode: recorded, never opened
+            eng._test_record("browser", url=URL)
+        else:
+            webbrowser.open(URL)
     st["notifiedSet"], st["notifiedAt"] = key, now
     wlog(f"{label} arrived — notified, panel opened")
 
 
 def single_instance():
     """True if this is the only watcher. A named mutex on Windows; a pid
-    file elsewhere (tests)."""
-    if eng.IS_WINDOWS:
+    file elsewhere, and under a test (which must never hold, or be refused
+    by, the real watcher's mutex)."""
+    if eng.IS_WINDOWS and not eng.TEST_ROOT:
         try:
             import ctypes
             k32 = ctypes.WinDLL("kernel32", use_last_error=True)
@@ -179,6 +187,11 @@ def main():
                     help="print the cameras seen right now and exit (changes nothing)")
     ap.add_argument("--no-browser", action="store_true")
     args = ap.parse_args()
+    if eng.TEST_ROOT and PORT == 8765:
+        # 8765 is the real panel's port: a test watcher never pings or starts it
+        print("TEST MODE: the watcher never uses port 8765 under a test "
+              "(set ASTRO_PANEL_PORT)", file=sys.stderr)
+        return 3
 
     if args.once:
         found = cameras_now()

@@ -12,6 +12,13 @@
 # drops and remounts repeatedly. bash 3.2 compatible.
 # =============================================================================
 
+# Tests never run this script (it launches the real app, Terminal and browser):
+# a test root here is a tripwire, so stop before touching anything (1.5.2)
+if [ -n "${ASTRO_TEST_ROOT+set}" ]; then
+    echo "TEST MODE: astro-watch.sh never runs under a test" >&2
+    exit 3
+fi
+
 ASIAIR_VOLUME="${ASIAIR_VOLUME:-/Volumes/ASIAIR}"
 SEESTAR_VOL1="${SEESTAR_VOL1:-/Volumes/Seestar}"
 SEESTAR_VOL2="${SEESTAR_VOL2:-/Volumes/SEESTAR}"

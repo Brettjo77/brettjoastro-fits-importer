@@ -62,6 +62,10 @@ def main():
     eng = importlib.util.module_from_spec(spec)
     spec.loader.exec_module(eng)
     print(f"  ----  engine {eng.VERSION} on {eng.PLATFORM}")
+    # the panel's port, as the watcher sees it. Under a test (eng.TEST_ROOT)
+    # the real panel's 8765 is never contacted
+    port = eng.panel_port()
+    test_8765 = bool(eng.TEST_ROOT) and port == 8765
     for f in INSTALLED.get(eng.PLATFORM, INSTALLED["windows"]):
         if f not in ("astro-import.py", "selftest.py"):
             check(f"{f} present", os.path.isfile(os.path.join(HERE, f)))
@@ -163,6 +167,10 @@ def main():
         check("Restart FITS Importer on the Desktop", os.path.isfile(desk), desk, warn_only=True)
         for task, needed in (("BrettjoAstro FITS Importer ship", os.path.isdir(eng.ARCHIVE_MOUNT)),
                              ("Astro archive sweep", os.path.isdir(eng.ARCHIVE_MOUNT))):
+            if eng.TEST_ROOT:
+                line("SKIP", f"scheduled task '{task}'",
+                     "TEST MODE: the real Task Scheduler is never queried")
+                continue
             r = subprocess.run(["schtasks", "/Query", "/TN", task], capture_output=True,
                                text=True, errors="replace",
                                creationflags=getattr(subprocess, "CREATE_NO_WINDOW", 0))
@@ -171,10 +179,13 @@ def main():
                       warn_only=True)
             else:
                 line("SKIP", f"scheduled task '{task}'", "no archive on this machine")
-        w = subprocess.run([sys.executable, "-X", "utf8", os.path.join(HERE, "astro-watch.py"),
-                            "--once"], capture_output=True, text=True, encoding="utf-8",
-                           errors="replace", timeout=60)
-        check("watcher runs", w.returncode == 0, (w.stderr or w.stdout)[-200:])
+        if test_8765:                          # the watcher would refuse (exit 3)
+            line("SKIP", "watcher runs", "TEST MODE: port 8765 is never used under a test")
+        else:
+            w = subprocess.run([sys.executable, "-X", "utf8", os.path.join(HERE, "astro-watch.py"),
+                                "--once"], capture_output=True, text=True, encoding="utf-8",
+                               errors="replace", timeout=60)
+            check("watcher runs", w.returncode == 0, (w.stderr or w.stdout)[-200:])
         if args.toast:
             eng.notify("Test notification from the FITS Importer install check.",
                        "FITS Importer")
@@ -202,10 +213,14 @@ def main():
         line("SKIP", "logon / scheduled tasks", f"not Windows or macOS ({eng.PLATFORM})")
 
     # the panel
+    url = f"http://127.0.0.1:{port}"
+    if test_8765:
+        line("SKIP", "panel", "TEST MODE: port 8765 is never used under a test")
+        return summary()
     try:
-        with urllib.request.urlopen("http://127.0.0.1:8765/api/ping", timeout=2) as r:
+        with urllib.request.urlopen(url + "/api/ping", timeout=2) as r:
             ping = json.loads(r.read().decode())
-        check("panel running on http://127.0.0.1:8765", ping.get("ok") is True)
+        check(f"panel running on {url}", ping.get("ok") is True)
         check("panel is the same version as the engine", ping.get("version") == eng.VERSION,
               f"panel {ping.get('version')} vs engine {eng.VERSION} — restart the panel")
     except Exception:

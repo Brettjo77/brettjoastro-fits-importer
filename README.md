@@ -204,11 +204,11 @@ The panel covers day-to-day use; everything is also scriptable:
 
 ## Testing
 
-355 end-to-end checks run the real engine and the real panel against simulated cameras (hand-built minimal FITS files, every device layout, crash/rename/mosaic/Milky-Way/cleanup/consent/interruption/multi-Seestar scenarios — including that the destination preview must equal the folders the import then actually creates, that a folder holding any unproven file is never offered as SAFE, and that the panel refuses foreign-origin requests):
+421 end-to-end checks run the real engine and the real panel against simulated cameras (hand-built minimal FITS files, every device layout, crash/rename/mosaic/Milky-Way/cleanup/consent/interruption/multi-Seestar scenarios — including that the destination preview must equal the folders the import then actually creates, that a folder holding any unproven file is never offered as SAFE, and that the panel refuses foreign-origin requests):
 
 ```bash
-python3 test_v2.py     # 268 engine checks (chain W1 simulates the Windows drive layer)
-python3 test_app.py    # 87 panel checks (boots the real HTTP server)
+python3 test_v2.py     # 328 engine checks (chain W1 simulates the Windows drive layer)
+python3 test_app.py    # 93 panel checks (boots the real HTTP server)
 # on Windows:  py -3 -X utf8 selftest.py   then the two suites above with  py -3 -X utf8
 ```
 

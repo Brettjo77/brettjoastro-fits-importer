@@ -1,5 +1,52 @@
 # Changelog
 
+## 1.5.2 — 2026-09-25 — the tests can never touch real data
+
+Normal use is unchanged apart from the three small points below. This
+release makes the test suites safe to run on a real Mac or PC.
+
+- **Why:** the 1.5.1 suites, run for the first time on the real Mac, reached
+  real things. They shipped 13 fake frames into the real archive (removed
+  since, nothing overwritten). They moved the old iCloud `ASIAir Import` note
+  folder. They showed real dialogs, notifications and Finder labels, and they
+  asked the real panel on port 8765 whether it was running. On the PC they
+  would have shipped into `E:\Astro Image Data` on every run, and sent
+  Explorer's "Eject" to drive C:.
+- **Test mode.** Setting `ASTRO_TEST_ROOT` to a folder marks a test run.
+  The engine, panel, watcher and install check then:
+  - keep every default inside that folder, including a pretend home;
+  - stop before reading or writing anything if a setting points outside it;
+  - never look at the real `/Volumes` or real drive letters;
+  - never use port 8765;
+  - write dialogs, notifications, Finder labels, ejects, share mounts,
+    "open", PowerShell and the browser to a log instead of doing them.
+  Every destructive step that follows a path from the ledger or the camera
+  (ship, merge, renumber, discard, SAFE clear, tidy, previews, receipts)
+  checks that path as well, including where a linked folder really leads.
+- **One test environment.** Every test run starts from a short list of basic
+  settings and a new temporary folder. Nothing else comes from the real
+  shell or computer.
+- **The one-time move of the pre-July folders** no longer moves into a folder
+  that an environment variable points at. A test's temporary mirror did
+  exactly that. A mirror chosen in `config.json` still counts.
+- **The panel and the install check** read the panel's port from
+  `ASTRO_PANEL_PORT` (the panel when `--port` isn't given), as the Windows
+  watcher already did. A value that isn't a number now means the usual 8765
+  everywhere, where it used to stop the watcher.
+- **`/api/ping`** now names which panel is answering, so a test only talks
+  to its own panel.
+- **Test fixes:**
+  - W1's install check failed on every Mac, because it filled its pretend
+    install with the Windows file list.
+  - Four tests fed a stray "y" into the eject question.
+- **New chain I1:** 60 checks that the protections work.
+
+**Mac / Windows:** the same test mode on both. It replaces `osascript`,
+`diskutil` and `open` on the Mac, and PowerShell, Shell "Eject" and
+`os.startfile` on Windows. Tests never mount disks or create drive letters.
+
+421 end-to-end checks (328 engine + 93 panel), all green on the Mac.
+
 ## 1.5.1 — 2026-09-24 — install check fix
 
 - **The Mac's install check reported a false FAIL** for `astro-watch.py`.

@@ -3,19 +3,21 @@
 simulated cameras: boots the real server, drives it through the HTTP API,
 answers the inline questions, and verifies the imports on disk + in the ledger."""
 
+import sys
+sys.dont_write_bytecode = True   # nothing is written beside the sources
 import json
 import os
 import re
 import subprocess
-import sys
 import time
 import urllib.error
 import urllib.request
 
 sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
+import test_env_helper as teh  # noqa: E402
+teh.isolate_runner()   # test mode for this process too
+
 BUILD = os.path.dirname(os.path.abspath(__file__))
-PORT = 8991
-URL = f"http://127.0.0.1:{PORT}"
 PASS = FAIL = 0
 
 def check(name, cond, detail=""):
@@ -60,10 +62,53 @@ def wait_for(pred, timeout=60, step=0.3):
         time.sleep(step)
     raise TimeoutError("condition not met; last status: " + s.get("status", "?"))
 
-# ── Build the fake two-camera world (shared helpers) ────────────────────────
-import test_env_helper as teh  # noqa: E402
+PANEL_LOGS = []   # each panel's own output, printed when anything fails
 
+def start_panel(env, port):
+    """Boot the real panel for `env`; its output goes to a log in the root."""
+    log = os.path.join(env.root, "panel.log")
+    PANEL_LOGS.append(log)
+    with open(log, "w") as out:
+        return subprocess.Popen([sys.executable, os.path.join(BUILD, "astro-app.py"),
+                                 "--no-browser", "--port", str(port)],
+                                env=dict(env.env, PYTHONUNBUFFERED="1"),   # log survives a kill
+                                stdout=out, stderr=subprocess.STDOUT, stdin=subprocess.DEVNULL)
+
+def show_panel_logs():
+    for log in PANEL_LOGS:
+        try:
+            with open(log, encoding="utf-8", errors="replace") as f:
+                print(f"\n── {log} ──\n{f.read()[-3000:]}")
+        except OSError:
+            pass
+
+def own_panel(url, env, proc, label):
+    """Wait for the panel, then make sure it is OURS (/api/ping names this
+    env's state folder) before any token is read or request sent: a leftover
+    or real panel answering on the port is never driven (1.5.2)."""
+    ping = {}
+    for _ in range(40):
+        try:
+            ping = api("/api/ping", url=url)
+            if ping.get("ok"):
+                break
+        except Exception:
+            pass
+        time.sleep(0.25)
+    want = teh.instance_id(env.state)
+    check(label, ping.get("instance") == want, f"got {ping.get('instance')!r}, want {want!r}")
+    if ping.get("instance") != want:
+        proc.terminate()
+        print(f"  another panel is answering on {url} — not driving it. Stopping.")
+        show_panel_logs()
+        sys.exit(1)
+
+# ── Build the fake two-camera world (shared helpers) ────────────────────────
 env = teh.Env("APP", asiair=True, seestar=True)
+PORT = int(env.env["ASTRO_PANEL_PORT"])   # a free port, never 8765
+URL = f"http://127.0.0.1:{PORT}"
+# the fake OS commands first on PATH: <root>/EXECUTED means one ran
+env.env["PATH"] = teh.fake_os_commands(env.root) + os.pathsep + env.env["PATH"]
 # ASIAir: known target with fresh matching cal + one UNKNOWN target (naming question)
 env.add_light("Plan", "M 81", "0001", dt="20260720-221000", focallen=749)
 env.add_light("Plan", "M 81", "0002", dt="20260720-222000", focallen=749)
@@ -81,26 +126,65 @@ env.add_seestar_sub("M 42", "20260119-210500")
 env.add_seestar_stack("M 42", 30, "20260119-213000")
 
 r = subprocess.run([sys.executable, teh.SCRIPT, "--baseline"],
-                   env=env.env, capture_output=True, text=True, encoding="utf-8", errors="replace")
+                   env=env.env, capture_output=True, text=True, encoding="utf-8", errors="replace",
+                   stdin=subprocess.DEVNULL, timeout=120)
 assert "Baseline complete" in r.stdout, r.stdout[-400:]
 # a NEW calibration set taken after the baseline → must show in calSummary
 env.add_cal("Bias", "1.0ms", "20260801-090000", seq="0099")
 # make the targets NEW again (baseline marked them imported)
 for t in ["M 81", "MYSTERY 42", "M 42"]:
     subprocess.run([sys.executable, teh.SCRIPT, "--unbaseline", t],
-                   env=env.env, capture_output=True, text=True, encoding="utf-8", errors="replace")
+                   env=env.env, capture_output=True, text=True, encoding="utf-8", errors="replace",
+                   stdin=subprocess.DEVNULL, timeout=120)
+
+# ── T0 (1.5.2): a test panel never binds the real panel's port 8765 ─────────
+def refuses_8765(args, extra):
+    try:
+        r = subprocess.run([sys.executable, os.path.join(BUILD, "astro-app.py"), "--no-browser",
+                            *args], env=dict(env.env, **extra), capture_output=True, text=True,
+                           encoding="utf-8", errors="replace", stdin=subprocess.DEVNULL, timeout=30)
+    except subprocess.TimeoutExpired:
+        return "still running after 30 s (it started serving)"
+    out = r.stdout + r.stderr
+    return "" if r.returncode == 3 and "TEST MODE:" in out and "panel →" not in out \
+        else f"rc={r.returncode} {out[-300:]}"
+why = refuses_8765(["--port", "8765"], {}) + refuses_8765([], {"ASTRO_PANEL_PORT": "8765"})
+check("T0 under a test the panel refuses port 8765 (--port or ASTRO_PANEL_PORT): exit 3, never serves",
+      not why, why)
+r = subprocess.run([sys.executable, os.path.join(BUILD, "astro-app.py"), "--port", str(PORT), "--help"],
+                   env=dict(env.env, ASTRO_PANEL_PORT="abc"), capture_output=True, text=True,
+                   encoding="utf-8", errors="replace", stdin=subprocess.DEVNULL, timeout=30)
+check("T0 an ASTRO_PANEL_PORT that isn't a number never stops the panel (it means 8765)",
+      r.returncode == 0 and "usage:" in r.stdout, f"rc={r.returncode} {(r.stdout + r.stderr)[-300:]}")
+
+# ── T0b (1.5.2): without --no-browser a test panel records the browser, opens nothing ──
+envb = teh.Env("APPB", asiair=False, seestar=False)
+fake = teh.fake_os_commands(envb.root)
+logb = os.path.join(envb.root, "panel.log")
+PANEL_LOGS.append(logb)
+eb = dict(envb.env, PYTHONUNBUFFERED="1", PATH=fake + os.pathsep + envb.env["PATH"])
+if os.name != "nt":
+    eb["BROWSER"] = os.path.join(fake, "browser")   # what webbrowser would run
+with open(logb, "w") as out:
+    procb = subprocess.Popen([sys.executable, os.path.join(BUILD, "astro-app.py"),
+                              "--port", envb.env["ASTRO_PANEL_PORT"]],
+                             env=eb, stdout=out, stderr=subprocess.STDOUT, stdin=subprocess.DEVNULL)
+try:
+    t0 = time.time()
+    while time.time() - t0 < 20 and not teh.os_calls(envb.root, "browser"):
+        time.sleep(0.25)
+    time.sleep(1.0)                  # past the 0.4 s a real browser open waits
+finally:
+    procb.terminate()
+    procb.wait(timeout=30)
+check("T0b without --no-browser a test panel records the browser and opens nothing",
+      len(teh.os_calls(envb.root, "browser")) == 1 and (os.name == "nt" or not teh.executed(envb.root)),
+      json.dumps(teh.os_calls(envb.root)) + teh.executed(envb.root)[-200:])
 
 # ── Boot the panel server ────────────────────────────────────────────────────
-proc = subprocess.Popen([sys.executable, os.path.join(BUILD, "astro-app.py"),
-                         "--no-browser", "--port", str(PORT)],
-                        env=env.env, stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL)
+proc = start_panel(env, PORT)
 try:
-    for _ in range(40):
-        try:
-            if api("/api/ping").get("ok"):
-                break
-        except Exception:
-            time.sleep(0.25)
+    own_panel(URL, env, proc, "T1 /api/ping carries this panel's instance id (it is OUR panel)")
     check("T1 server pings", api("/api/ping").get("ok") is True)
 
     page = load_token()
@@ -218,6 +302,11 @@ try:
           and s["lastDone"]["frames"] == 3 and s["lastDone"]["targets"] == 2
           and "finishedAt" in s["lastDone"] and "seconds" in s["lastDone"],
           json.dumps(s.get("lastDone")))
+    done_notes = [c for c in teh.os_calls(env.root, "notify")
+                  if "import complete" in str(c.get("title", ""))]
+    check("T3 the panel's own 'import complete' notification is recorded, never shown (1.5.2)",
+          bool(done_notes) and (os.name == "nt" or not teh.executed(env.root)),
+          json.dumps(teh.os_calls(env.root))[:300] + teh.executed(env.root)[-200:])
 
     led = env.ledger()
     m81 = [e for e in led["files"].values() if e["target"] == "M 81" and e["origin"] == "import"]
@@ -528,23 +617,17 @@ try:
           ngc and not ngc[0]["skipped"] and ngc[0]["new"] == 1, json.dumps(ngc))
 finally:
     proc.terminate()
+    proc.wait(timeout=30)
 
 # ── T14 (1.4.3): a brand-new user imports from the panel with no ledger ──
 env2 = teh.Env("APP2", asiair=False, seestar=True)
 env2.add_seestar_sub("M 33", "20260924-213000")
 env2.add_seestar_sub("M 33", "20260924-213100")
-PORT2 = PORT + 1
+PORT2 = int(env2.env["ASTRO_PANEL_PORT"])
 URL2 = f"http://127.0.0.1:{PORT2}"
-proc2 = subprocess.Popen([sys.executable, os.path.join(BUILD, "astro-app.py"),
-                          "--no-browser", "--port", str(PORT2)],
-                         env=env2.env, stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL)
+proc2 = start_panel(env2, PORT2)
 try:
-    for _ in range(40):
-        try:
-            if api("/api/ping", url=URL2).get("ok"):
-                break
-        except Exception:
-            time.sleep(0.25)
+    own_panel(URL2, env2, proc2, "T14 the second panel answers with its own instance id")
     load_token(URL2)
     api("/api/scan", {}, url=URL2)
     t0 = time.time()
@@ -573,7 +656,10 @@ try:
           json.dumps(s.get("lastResult")))
 finally:
     proc2.terminate()
+    proc2.wait(timeout=30)
 
+if FAIL:
+    show_panel_logs()
 print("\n═══════════════════════════════════════")
 print(f"  {PASS} passed, {FAIL} failed")
 sys.exit(1 if FAIL else 0)
