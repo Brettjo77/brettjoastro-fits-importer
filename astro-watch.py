@@ -17,6 +17,11 @@ until you press Import.
 Repeat arrivals of the SAME camera set within 10 minutes (a loose cable) do
 not notify again. Only one watcher runs at a time.
 
+It also runs on macOS, and imports with no side effects: the FITs Importer
+App calls poll_once() from its own loop (1.5.3). On the Mac the web version
+keeps using astro-watch.sh. While the app owns this machine (eng.app_owner())
+this watcher does nothing and exits.
+
   pythonw -X utf8 astro-watch.py            run (normally started at logon)
   python  -X utf8 astro-watch.py --once     print what it sees now, and exit
 """
@@ -128,21 +133,26 @@ def save_state(st):
         pass
 
 
-def on_arrival(found, st, open_browser=True):
-    key = presence_key(found)
+def on_arrival(found, st=None, open_browser=True, repeat=False):
+    """The web version's arrival: the panel up, a notification and the browser.
+    True when Brett was told (poll_once then starts the flap guard); False
+    when nothing was shown. repeat: the same cameras re-plugged within the
+    flap guard, so the panel is only kept up, never announced again. (st is
+    no longer read here: the guard lives in poll_once, 1.5.3.)"""
     label = " + ".join(sorted(found))
-    now = time.time()
-    repeat = (st.get("notifiedSet") == key and now - st.get("notifiedAt", 0) < FLAP_GUARD_S)
+    if eng.app_owner():                        # U1: the app handles arrivals, not this
+        wlog(f"{label} arrived — the FITs Importer App is in charge here, nothing done")
+        return False
     if not panel_up():
         wlog(f"{label} arrived — starting the panel")
         if not start_panel():
             wlog("panel did not come up — use 'Restart FITS Importer' on the Desktop")
             eng.notify(f"{label} connected, but the panel did not start. Use "
                        f"'Restart FITS Importer' on the Desktop.", "FITS Importer")
-            return
+            return False
     if repeat:
         wlog(f"{label} re-arrived within {FLAP_GUARD_S}s — no second notification")
-        return
+        return False
     eng.notify(f"{label} connected — opening the FITS Importer. Nothing is copied "
                f"until you press Import.", "FITS Importer")
     if open_browser:
@@ -150,8 +160,40 @@ def on_arrival(found, st, open_browser=True):
             eng._test_record("browser", url=URL)
         else:
             webbrowser.open(URL)
-    st["notifiedSet"], st["notifiedAt"] = key, now
     wlog(f"{label} arrived — notified, panel opened")
+    return True
+
+
+def poll_once(st, on_arrival=None, on_removed=None, on_rearrived=None):
+    """One look at the drives: [("arrived", found)] or [("gone", previous)]
+    when what is plugged in changed since the last look, else []. The same
+    cameras back within FLAP_GUARD_S of the last arrival acted on (a loose
+    cable) give [("rearrived", found)] and on_rearrived(found), never a second
+    on_arrival: the flap guard is here, for the web watcher and the app alike.
+    The callbacks get found / previous. An arrival acted on (on_arrival not
+    returning False) starts the guard, and st, guard included, is saved on
+    every change, right after the callback."""
+    found = cameras_now()
+    key = presence_key(found)
+    if key == st.get("presence"):
+        return []
+    if found:
+        now = time.time()
+        if st.get("notifiedSet") == key and now - (st.get("notifiedAt") or 0) < FLAP_GUARD_S:
+            event = ("rearrived", found)
+            if on_rearrived:
+                on_rearrived(found)
+        else:
+            event = ("arrived", found)
+            if on_arrival is None or on_arrival(found) is not False:
+                st["notifiedSet"], st["notifiedAt"] = key, now
+    else:
+        event = ("gone", st.get("found") or {})
+        if on_removed:
+            on_removed(event[1])
+    st["presence"], st["found"] = key, found
+    save_state(st)
+    return [event]
 
 
 def single_instance():
@@ -181,12 +223,12 @@ def single_instance():
     return True
 
 
-def main():
-    ap = argparse.ArgumentParser(description="FITS Importer camera watcher (Windows)")
+def main(argv=None):
+    ap = argparse.ArgumentParser(description="FITS Importer camera watcher")
     ap.add_argument("--once", action="store_true",
                     help="print the cameras seen right now and exit (changes nothing)")
     ap.add_argument("--no-browser", action="store_true")
-    args = ap.parse_args()
+    args = ap.parse_args(argv)
     if eng.TEST_ROOT and PORT == 8765:
         # 8765 is the real panel's port: a test watcher never pings or starts it
         print("TEST MODE: the watcher never uses port 8765 under a test "
@@ -201,21 +243,22 @@ def main():
         print("panel running:", "yes" if panel_up() else "no")
         return 0
 
+    rec = eng.app_owner()
+    if rec:                                    # U1: the app runs its own watcher
+        wlog(f"the FITs Importer App is in charge here ({rec.get('appPath')}) "
+             "— watcher not started")
+        return 0
     if not single_instance():
         return 0
     wlog(f"watcher {eng.VERSION} started (poll {POLL_S}s)")
     st = load_state()
     while True:
         try:
-            found = cameras_now()
-            key = presence_key(found)
-            if key != st.get("presence"):
-                if found:
-                    on_arrival(found, st, open_browser=not args.no_browser)
-                else:
-                    wlog("cameras removed")
-                st["presence"] = key
-                save_state(st)
+            poll_once(st,
+                      on_arrival=lambda found: on_arrival(found, st,
+                                                          open_browser=not args.no_browser),
+                      on_removed=lambda previous: wlog("cameras removed"),
+                      on_rearrived=lambda found: on_arrival(found, st, repeat=True))
         except Exception as e:                           # never die on a hiccup
             wlog(f"watcher error: {e}")
         time.sleep(POLL_S)

@@ -20,6 +20,8 @@
 #   ~/Desktop/Restart FITS Importer.command  <- one-double-click panel restart
 #   ~/Library/LaunchAgents/com.brettjohnson.astro-import.plist  (single agent;
 #                                     $HOME substituted at install time)
+# While the FITs Importer App is in charge here (1.5.3), only the files are
+# updated: no watcher agent, Restart button or panel restart.
 #
 # Python: every launcher prefers python.org Python (/usr/local/bin/python3)
 # when installed, falling back to Apple's /usr/bin/python3. python.org Python
@@ -126,6 +128,29 @@ if [ -f "$BIN_DIR/astro-import.py" ]; then
     chmod +x "$BIN_DIR/asiair-import.py"
     success "Compatibility copy: asiair-import.py → same unified engine"
 fi
+# Who is in charge here, the web version or the FITs Importer App (1.5.3)?
+# While the app is, only files are updated: it runs its own watcher and panel.
+if [ -x /usr/local/bin/python3 ]; then PYCHECK=/usr/local/bin/python3
+else PYCHECK=/usr/bin/python3; fi
+# >>> app-owner check (test_v2 runs this block on its own, with a fake engine)
+APP_OWNS=""
+OWNER_RC=0
+OWNER=$("$PYCHECK" "$BIN_DIR/astro-import.py" --app-owner 2>/dev/null) || OWNER_RC=$?
+case "$OWNER_RC:$OWNER" in
+    0:app\ *)
+        APP_OWNS="${OWNER#app }"
+        info "The FITs Importer App is in charge here ($APP_OWNS): files updated only — no watcher, panel or Restart button" ;;
+    2:stale\ *)
+        # the app was trashed without handing back: the web version takes
+        # over again, and the app's `launchctl disable` is undone before the load
+        if ARCHIVED=$("$PYCHECK" "$BIN_DIR/astro-import.py" --app-owner --archive-stale 2>/dev/null); then
+            success "The FITs Importer App is gone: the web version is back in charge ($ARCHIVED)"
+        else
+            warn "The FITs Importer App is gone, but its record could not be set aside — the web version runs anyway"
+        fi
+        launchctl enable "gui/$(id -u)/com.brettjohnson.astro-import" 2>/dev/null || true ;;
+esac
+# <<< app-owner check
 echo ""
 
 # ── App wrapper: the panel's own identity for macOS disk permissions ────────
@@ -153,15 +178,16 @@ else
 fi
 
 # ── Desktop restart button (Terminal context — the route that always works) ─
-if [ -f "$SCRIPT_DIR/Restart FITS Importer.command" ]; then
+if [ -z "$APP_OWNS" ] && [ -f "$SCRIPT_DIR/Restart FITS Importer.command" ]; then
     cp "$SCRIPT_DIR/Restart FITS Importer.command" "$HOME/Desktop/"
     chmod +x "$HOME/Desktop/Restart FITS Importer.command"
     success "Installed Restart FITS Importer.command → Desktop"
 fi
 echo ""
 
-# Stop any running panel so the next launch picks up the new build
-if pkill -f "[Pp]ython[^ ]* .*(asiair|astro)-app\.py" 2>/dev/null; then
+# Stop any running panel so the next launch picks up the new build: only the
+# web version's own (~/bin), never the app's (1.5.3)
+if [ -z "$APP_OWNS" ] && pkill -f "[Pp]ython[^ ]* .*$HOME/bin/(asiair|astro)-app\.py" 2>/dev/null; then
     success "Stopped the running panel (the watcher restarts it on next plug-in)"
 fi
 
@@ -175,23 +201,26 @@ for label in com.brettjohnson.seestar-import com.brettjohnson.asiair-import; do
     fi
 done
 
-info "Installing the LaunchAgent (with \$HOME substituted)..."
-new_plist="$LAUNCH_AGENTS_DIR/com.brettjohnson.astro-import.plist"
-if [ -f "$new_plist" ]; then
-    launchctl unload "$new_plist" 2>/dev/null || true
-fi
-if [ -f "$SCRIPT_DIR/com.brettjohnson.astro-import.plist" ]; then
-    mkdir -p "$HOME/Library/Logs"
-    sed "s|__HOME__|$SED_HOME|g" "$SCRIPT_DIR/com.brettjohnson.astro-import.plist" > "$new_plist"
-    success "Installed com.brettjohnson.astro-import.plist → $new_plist"
-    if launchctl load "$new_plist" 2>/dev/null; then
-        success "Loaded com.brettjohnson.astro-import"
-    else
-        warn "Could not load com.brettjohnson.astro-import — may need to log out/in"
+# while the app is in charge, the watcher agent stays exactly as the app left it
+if [ -z "$APP_OWNS" ]; then
+    info "Installing the LaunchAgent (with \$HOME substituted)..."
+    new_plist="$LAUNCH_AGENTS_DIR/com.brettjohnson.astro-import.plist"
+    if [ -f "$new_plist" ]; then
+        launchctl unload "$new_plist" 2>/dev/null || true
     fi
-else
-    warn "Source not found: com.brettjohnson.astro-import.plist — skipping"
-    FAILED=$((FAILED + 1))
+    if [ -f "$SCRIPT_DIR/com.brettjohnson.astro-import.plist" ]; then
+        mkdir -p "$HOME/Library/Logs"
+        sed "s|__HOME__|$SED_HOME|g" "$SCRIPT_DIR/com.brettjohnson.astro-import.plist" > "$new_plist"
+        success "Installed com.brettjohnson.astro-import.plist → $new_plist"
+        if launchctl load "$new_plist" 2>/dev/null; then
+            success "Loaded com.brettjohnson.astro-import"
+        else
+            warn "Could not load com.brettjohnson.astro-import — may need to log out/in"
+        fi
+    else
+        warn "Source not found: com.brettjohnson.astro-import.plist — skipping"
+        FAILED=$((FAILED + 1))
+    fi
 fi
 echo ""
 
@@ -229,11 +258,9 @@ fi
 echo ""
 
 info "Checking Python..."
-if [ -x /usr/local/bin/python3 ]; then
-    PYCHECK=/usr/local/bin/python3
+if [ "$PYCHECK" = /usr/local/bin/python3 ]; then
     success "python.org Python found — launchers will prefer it (recommended)"
 else
-    PYCHECK=/usr/bin/python3
     warn "python.org Python not found — falling back to Apple's /usr/bin/python3."
     log "Recommended: install from https://www.python.org/downloads/ — Apple's"
     log "Python is barred from asking for USB-drive access on background"
@@ -256,20 +283,25 @@ if [ "$FAILED" -gt 0 ]; then
 fi
 success "All done! BrettjoAstro FITS Importer installed."
 echo ""
-log "First run:"
-log "  1. Plug in a camera (ASIAir and/or Seestar) — the panel opens by itself"
-log "     (or open http://127.0.0.1:8765). Scanning only reads the camera."
-log "  2. Tick what you want and press Import. The first import starts the"
-log "     ledger and backs everything up, verified byte for byte."
-log "  Already have copies of everything on this Mac? Instead of step 2, run"
-log "     python3 ~/bin/astro-import.py --baseline"
-log "  to record them WITHOUT copying (read the audit list it prints)."
-log ""
-log "macOS permission (once): if a dialog asks to allow access to files on a"
-log "removable volume, click Allow — that makes the hands-free flow permanent."
-log "If a background-started panel ever logs 'Operation not permitted', use"
-log "the Desktop 'Restart FITS Importer' button and see README → Permissions."
-log ""
+if [ -z "$APP_OWNS" ]; then
+    log "First run:"
+    log "  1. Plug in a camera (ASIAir and/or Seestar) — the panel opens by itself"
+    log "     (or open http://127.0.0.1:8765). Scanning only reads the camera."
+    log "  2. Tick what you want and press Import. The first import starts the"
+    log "     ledger and backs everything up, verified byte for byte."
+    log "  Already have copies of everything on this Mac? Instead of step 2, run"
+    log "     python3 ~/bin/astro-import.py --baseline"
+    log "  to record them WITHOUT copying (read the audit list it prints)."
+    log ""
+    log "macOS permission (once): if a dialog asks to allow access to files on a"
+    log "removable volume, click Allow — that makes the hands-free flow permanent."
+    log "If a background-started panel ever logs 'Operation not permitted', use"
+    log "the Desktop 'Restart FITS Importer' button and see README → Permissions."
+    log ""
+else
+    log "Open the FITs Importer App to import: it handles the cameras on this Mac."
+    log ""
+fi
 log "Optional custom paths: copy config.example.json to"
 log "  ~/Library/Application Support/Astro Import/config.json and edit."
 echo ""

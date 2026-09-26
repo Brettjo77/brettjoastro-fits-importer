@@ -58,6 +58,9 @@ way. Every release updates it.
 | Install check (`--toast` tries a notification) | `selftest.py` | `selftest.py` | self-test |
 | Move settings between computers | `--export-settings` / `--import-settings` | same | engine |
 | Terminal fallback (`--pick`, naming) | AppleScript dialogs | numbered list / prompt in the console | platform layer |
+| Status line ("Everything is safe" / "N frames only on the Mac" or "…on this PC", with a tooltip; `--status [--json]`, `GET /api/status`, and the `statusSummary` field of `/api/state`). Worked out by `--status --json` in a short-lived child process, only when `ledger.json` changes (`STATUS_CMD` lets the app use its own command; a frozen app works it out in-process) | ✓ | ✓ | engine + panel |
+| Quit the panel from another program (`POST /api/quit`: token, JSON and origin rules; 409 `busy` while an operation runs or a question card is up) | ✓ | ✓ | panel |
+| Stands aside while the desktop app is in charge (`app-takeover.json`, with an absolute `appPath`; `--app-owner`) | ✓ watcher, Restart, installer, app wrapper | ✓ watcher, Restart, installer | engine + installers |
 | Test mode (`ASTRO_TEST_ROOT`): everything stays inside one folder, and dialogs, notifications, ejects, mounts and "open" are logged, not done | ✓ | ✓ | engine, panel, watcher, self-test |
 
 ## Settings (config.json)

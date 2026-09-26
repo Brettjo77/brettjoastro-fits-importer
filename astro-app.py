@@ -24,7 +24,7 @@ import os
 import re
 import secrets
 import subprocess
-import sys  # noqa: F401  (kept for parity)
+import sys
 import threading
 import time
 import urllib.parse
@@ -139,6 +139,28 @@ class App:
         self.last_result = "No camera connected."
         return False
 
+    def _state_to_write(self):
+        """eng.State() for an operation that writes, or None when a newer
+        importer wrote the ledger: refused before anything is copied or
+        deleted, not only at the save (U3, like the CLI). Says so."""
+        state = eng.State()
+        if state.ledger_too_new():            # its message goes to the log
+            self.last_result = ("This ledger was written by a newer version of the "
+                                "importer. Update this copy first; nothing was done.")
+            return None
+        return state
+
+    @staticmethod
+    def _lock_holder():
+        """What holds the engine lock: import / ship / panel / discard (U6);
+        "import" for a pre-1.5.3 lock, or one gone just now."""
+        try:
+            with open(eng.LOCK_PATH, encoding="utf-8") as f:
+                what = json.load(f).get("what")
+        except (OSError, ValueError, AttributeError):
+            what = None
+        return what if isinstance(what, str) and what else "import"
+
     def _run(self, label, fn, need_camera=True):
         if need_camera and not self._camera_ok():
             return False
@@ -161,11 +183,13 @@ class App:
                         # The report saves the ledger too — saving over a
                         # running CLI import would drop its entries, so both
                         # take the same engine lock.
-                        got_lock = eng.acquire_lock()
+                        got_lock = eng.acquire_lock(what="panel")
                         if not got_lock:
-                            self.last_result = ("Another import is already running "
-                                                "(perhaps in Terminal). Let it finish, "
-                                                "then try again.")
+                            holder = self._lock_holder()   # the engine's own words (U6)
+                            self.last_result = (
+                                eng.lock_busy_text(holder)
+                                + (" (perhaps in Terminal)" if holder == "import" else "")
+                                + ". Let it finish, then try again.")
                             return
                     fn()
             except Exception as e:
@@ -196,6 +220,7 @@ class App:
                 self.phase = None
                 self.status = "idle"
                 self.oplock.release()
+                STATUS.refresh()          # the status line, after every operation (U9)
         threading.Thread(target=work, daemon=True).start()
         return True
 
@@ -412,7 +437,9 @@ class App:
         t0 = time.time()
 
         def fn():
-            state = eng.State()
+            state = self._state_to_write()
+            if state is None:
+                return
             if not state.has_ledger():
                 if getattr(state, "ledger_corrupt", False):
                     self.logline("✗ ledger.json exists but can't be read — nothing "
@@ -469,30 +496,18 @@ class App:
                 "seconds": dur,
                 "finishedAt": time.strftime("%H:%M:%S"),
             }
-            if total_f and eng.TEST_ROOT:              # test mode: recorded, never shown
-                eng._test_record("notify", message=f"{total_f} frame(s) imported and "
-                                 f"verified across {total_t} target(s).",
-                                 title="FITS Importer — import complete")
-            elif total_f and sys.platform == "darwin":
-                try:  # a chime for imports finished while you're elsewhere
-                    subprocess.run(
-                        ["osascript", "-e",
-                         'display notification "%d frame(s) imported and '
-                         'verified across %d target(s)." with title '
-                         '"FITS Importer — import complete" sound name "Glass"'
-                         % (total_f, total_t)],
-                        timeout=5, capture_output=True)
-                except Exception:
-                    pass
-            elif total_f and eng.IS_WINDOWS:
+            if total_f:  # a chime for imports finished while you're elsewhere (U5)
                 eng.notify(f"{total_f} frame(s) imported and verified across "
-                           f"{total_t} target(s).", "FITS Importer — import complete")
+                           f"{total_t} target(s).", "FITS Importer — import complete",
+                           sound=True)
             self.scan = None  # force rescan for fresh counts
         return self._run("importing", fn)
 
     def do_report(self):
         def fn():
-            state = eng.State()
+            state = self._state_to_write()
+            if state is None:
+                return
             text = eng.build_report(state)
             state.save_ledger()
             state.publish_mirror()
@@ -510,7 +525,9 @@ class App:
         The engine does all the refusing and asks for the typed DISCARD on the
         question card; this only runs it and rescans."""
         def fn():
-            state = eng.State()
+            state = self._state_to_write()
+            if state is None:
+                return
             res = eng.run_discard(state, name, night=night or None, reason=reason or "")
             label = self._label_for(name)
             self.last_result = {
@@ -543,7 +560,9 @@ class App:
     def do_clear(self, folder_id):
         """The SAFE clear for one thing already backed up (panel "clear…")."""
         def fn():
-            state = eng.State()
+            state = self._state_to_write()
+            if state is None:
+                return
             res = eng.run_clear(state, folder_id)
             label = self._label_for(folder_id)
             self.last_result = {
@@ -615,10 +634,104 @@ class App:
             "lastResult": self.last_result,
             "lastDone": self.last_done,
             "hasReport": self.report_text is not None,
+            # "status" above is the operation; this is the status line (U9)
+            "statusSummary": STATUS.value,
         }
 
 
 APP = App()
+
+
+# The status line's command (U9). None: this engine's own --status --json, run
+# in a short-lived child process, so the parsed ledger (~100 MB on disk, far
+# more in memory) never stays in the panel; a frozen app with no command works
+# it out in-process instead, keeping nothing. The app may set its own: a list,
+# run the same way, printing the same JSON.
+STATUS_CMD = None
+STATUS_KEYS = ("safe", "onlyHere", "text", "machine")
+
+
+def _status_in_process():
+    """status_summary() in this process, returning only the dict: the State
+    (the whole parsed ledger) is dropped as this returns, never kept."""
+    return eng.status_summary(eng.State())
+
+
+def compute_status():
+    """The status line as status_summary() words it, worked out without
+    keeping the ledger in this process. Raises when it can't be."""
+    cmd = STATUS_CMD
+    if cmd is None:
+        if getattr(sys, "frozen", False):     # no Python here to run the engine with
+            return _status_in_process()
+        cmd = [sys.executable, "-X", "utf8", ENGINE_PATH, "--status", "--json"]
+    r = subprocess.run(list(cmd), capture_output=True, text=True, encoding="utf-8",
+                       errors="replace", stdin=subprocess.DEVNULL, timeout=600,
+                       creationflags=getattr(subprocess, "CREATE_NO_WINDOW", 0))
+    if r.returncode != 0:
+        raise RuntimeError(f"exit {r.returncode}: {r.stderr.strip()[-300:]}")
+    return json.loads(r.stdout)
+
+
+class SafeStatus:
+    """The status line: "Everything is safe" / "N frames only on the Mac"
+    (U9). The ledger is ~100 MB, so it is never loaded per request, nor kept:
+    one thread works it out (compute_status) at start and whenever
+    ledger.json's (mtime, size) changes, looking straight after each
+    operation (never during one); requests read the cached line."""
+
+    poll_s = 2                                # how often ledger.json is looked at
+
+    def __init__(self):
+        self.value = None                     # status_summary()'s dict, None until computed
+        self.ready = threading.Event()        # set after the first computation
+        self._kick = threading.Event()
+        self._started = False
+
+    def start(self):
+        if not self._started:
+            self._started = True
+            threading.Thread(target=self._loop, daemon=True).start()
+
+    def refresh(self):
+        """Look at ledger.json now (after an operation): the line is worked
+        out again only if the file changed."""
+        self._kick.set()
+
+    @staticmethod
+    def signature():
+        try:
+            s = os.stat(os.path.join(eng.STATE_DIR, "ledger.json"))
+            return (s.st_mtime_ns, s.st_size)
+        except OSError:
+            return None
+
+    @staticmethod
+    def compute():
+        """compute_status(), or "Status unknown" when it fails in any way: a
+        line from before the failure (say "Everything is safe") is never kept."""
+        try:
+            got = compute_status()
+            if isinstance(got, dict) and all(k in got for k in STATUS_KEYS) \
+                    and isinstance(got["text"], str) and got["text"]:
+                return got
+        except Exception:
+            pass
+        return eng.status_unknown()
+
+    def _loop(self):
+        seen, first = None, True
+        while True:
+            sig = self.signature()
+            if (first or sig != seen) and not APP.oplock.locked():
+                first, seen = False, sig
+                self.value = self.compute()
+                self.ready.set()
+            self._kick.wait(self.poll_s)
+            self._kick.clear()
+
+
+STATUS = SafeStatus()
 
 
 # ═══════════════════════════════════════════════════════════════════════════
@@ -636,6 +749,9 @@ TOKEN = secrets.token_urlsafe(24)
 INSTANCE = hashlib.sha256(os.path.realpath(eng.STATE_DIR).encode("utf-8")).hexdigest()[:16]
 PORT = 8765
 MAX_BODY = 64 * 1024
+# the status line's tooltip: what "N frames only on the Mac" means (U9)
+STATUS_TIP = (f"Cleared from the camera; the only verified copy is on this "
+              f"{'PC' if eng.IS_WINDOWS else 'Mac'} until the PC's sweep checks it")
 LOCAL_HOSTS = ("127.0.0.1", "localhost", "::1")
 
 
@@ -734,12 +850,16 @@ class Handler(BaseHTTPRequestHandler):
             self._json({"error": "forbidden"}, 403)
             return
         if self.path == "/" or self.path.startswith("/index"):
-            self._html(PAGE.replace("__ASTRO_TOKEN__", TOKEN))
+            self._html(PAGE.replace("__ASTRO_TOKEN__", TOKEN)
+                       .replace("__STATUS_TIP__", STATUS_TIP))
         elif self.path == "/api/ping":
             self._json({"ok": True, "app": "astro-import", "version": APP_VERSION,
                         "instance": INSTANCE})
         elif self.path == "/api/state":
             self._json(APP.snapshot())
+        elif self.path == "/api/status":
+            STATUS.ready.wait(5)               # just after start: the first computation
+            self._json(STATUS.value)
         elif self.path == "/api/report-text":
             self._json({"text": APP.report_text or ""})
         elif self.path == "/dashboard" or self.path.startswith("/dashboard?"):
@@ -805,6 +925,20 @@ class Handler(BaseHTTPRequestHandler):
                 self._json({"ok": False, "error": "question id required"}, 400)
             else:
                 self._json({"ok": bool(APP.answer(str(value), qid=qid))})
+        elif self.path == "/api/quit":
+            # only when idle: never mid-operation, never with a card on
+            # screen (U8). Holding oplock, no new operation can start.
+            if APP.question is not None or not APP.oplock.acquire(blocking=False):
+                self._json({"ok": False, "reason": "busy"}, 409)
+            else:
+                self._json({"ok": True})
+                srv = self.server
+
+                def stop():
+                    srv.shutdown()
+                    srv.server_close()
+                    APP.oplock.release()
+                threading.Thread(target=stop, daemon=True).start()
         else:
             self._json({"error": "not found"}, 404)
 
@@ -875,6 +1009,12 @@ header{display:flex;align-items:center;gap:16px;flex-wrap:wrap;margin-bottom:20p
 .brand svg{width:34px;height:34px;flex:none}
 .brand h1{font-size:20px;font-weight:700;letter-spacing:.2px}
 .brand .sub{font-size:12px;color:var(--muted);margin-top:1px}
+/* the status line (U9): green when safe, amber otherwise — mixed toward ink for contrast */
+.brand .safe{font-size:12px;font-weight:600;margin-top:1px;
+  color:color-mix(in srgb, var(--good) 75%, var(--ink))}
+.brand .safe.warn{color:color-mix(in srgb, var(--warning) 75%, var(--ink))}
+.brand .safe::before{content:"";display:inline-block;width:7px;height:7px;border-radius:50%;
+  background:currentColor;margin-right:6px;vertical-align:1px}
 .pill{display:inline-flex;align-items:center;gap:7px;font-size:12.5px;font-weight:500;color:var(--ink2);
   border:1px solid var(--line2);border-radius:999px;padding:5px 12px;background:var(--surface)}
 .dot{width:8px;height:8px;border-radius:50%;background:var(--muted)}
@@ -1105,7 +1245,8 @@ button.linkbtn:disabled{opacity:.5;cursor:default}
       <circle cx="22" cy="24" r="1.6" fill="#cfe0ff"/><circle cx="44" cy="16" r="1.1" fill="#cfe0ff"/>
       <circle cx="50" cy="38" r="1.4" fill="#cfe0ff"/><circle cx="14" cy="44" r="1.1" fill="#cfe0ff"/>
       <path d="M32 14l4.2 10.6L47 28l-10.8 3.4L32 42l-4.2-10.6L17 28l10.8-3.4z" fill="#3987e5"/></svg>
-    <div><h1>FITS Importer</h1><div class="sub">by BrettjoAstro · backup-first · everything local</div></div>
+    <div><h1>FITS Importer</h1><div class="sub">by BrettjoAstro · backup-first · everything local</div>
+      <div class="safe" id="safeLine" hidden></div></div>
   </div>
   <span class="pill"><span class="dot" id="camDot"></span><span id="camText">checking…</span></span>
   <span class="pill"><span class="dot" id="busyDot"></span><span id="statusText">idle</span></span>
@@ -1183,6 +1324,7 @@ document.querySelectorAll(".tabs button").forEach(b=>b.addEventListener("click",
 }));
 
 const TOKEN="__ASTRO_TOKEN__";
+const STATUS_TIP="__STATUS_TIP__";
 async function api(path, body){
   const r=await fetch(path,{method:body!==undefined?"POST":"GET",
     headers:{"Content-Type":"application/json","X-Astro-Token":TOKEN},
@@ -1511,6 +1653,10 @@ async function tick(){
     $("#statusText").textContent=busy?s.status+"…":"idle";
     ["btnScan","btnEject"].forEach(id=>$("#"+id).disabled=busy||!s.cameraPresent);
     $("#btnReport").disabled=busy;
+    const sum=s.statusSummary, sl=$("#safeLine");
+    sl.hidden=!sum;
+    if(sum){ sl.textContent=sum.text; sl.className="safe"+(sum.safe?"":" warn");
+             sl.title=sum.onlyHere?STATUS_TIP:""; }
     if(s.scan && (s.scannedAt!==lastScanStamp)){
       lastScanStamp=s.scannedAt;
       curScan=s.scan;
@@ -1630,32 +1776,38 @@ class PanelServer(ThreadingHTTPServer):
         super().server_bind()
 
 
-def main():
-    p = argparse.ArgumentParser(description="BrettjoAstro FITS Importer control panel")
-    p.add_argument("--port", type=int, default=eng.panel_port())
-    p.add_argument("--no-browser", action="store_true")
-    args = p.parse_args()
-    if eng.TEST_ROOT and args.port == 8765:
-        # 8765 is the real panel's port: a test panel never binds it (1.5.2)
-        print("TEST MODE: the panel never uses port 8765 under a test "
-              "(pass --port or set ASTRO_PANEL_PORT)", file=sys.stderr)
-        sys.exit(3)
-
+def make_server(port):
+    """The panel bound to 127.0.0.1:port, with PORT set to the port bound
+    (port 0: a free one); None if the port is in use. The app runs
+    serve_forever() on it in its own thread (U10)."""
     global PORT
-    PORT = args.port
+    if eng.TEST_ROOT and port == 8765:
+        # 8765 is the real panel's port: a test panel never binds it (1.5.2)
+        eng._test_refuse("the panel never uses port 8765 under a test "
+                         "(pass --port or set ASTRO_PANEL_PORT)")
     try:
-        server = PanelServer(("127.0.0.1", args.port), Handler)
+        server = PanelServer(("127.0.0.1", port), Handler)
     except OSError as e:
         # one panel per port: a second one (a watcher racing the installer,
         # a double-clicked restart) steps aside instead of splitting the
         # tokens and question cards between two processes (1.5.0 review W2)
-        print(f"FITS Importer panel not started: port {args.port} is in use "
+        print(f"FITS Importer panel not started: port {port} is in use "
               f"(a panel is probably running already): {e}")
+        return None
+    PORT = server.server_address[1]        # the port bound: port 0 means any free one
+    STATUS.start()
+    return server
+
+
+def serve(port=None, open_browser=False):
+    """Run the panel until Ctrl-C or /api/quit (blocking)."""
+    server = make_server(eng.panel_port() if port is None else port)
+    if server is None:
         return
-    url = f"http://127.0.0.1:{args.port}"
+    url = f"http://127.0.0.1:{PORT}"
     print(f"FITS Importer panel → {url}   (Ctrl-C to quit)")
     APP.logline(f"▸ Panel started at {url}")
-    if not args.no_browser:
+    if open_browser:
         if eng.TEST_ROOT:                                   # test mode: recorded, never opened
             eng._test_record("browser", url=url)
         else:
@@ -1664,6 +1816,16 @@ def main():
         server.serve_forever()
     except KeyboardInterrupt:
         pass
+    finally:
+        server.server_close()
+
+
+def main():
+    p = argparse.ArgumentParser(description="BrettjoAstro FITS Importer control panel")
+    p.add_argument("--port", type=int, default=eng.panel_port())
+    p.add_argument("--no-browser", action="store_true")
+    args = p.parse_args()
+    serve(args.port, open_browser=not args.no_browser)
 
 
 if __name__ == "__main__":

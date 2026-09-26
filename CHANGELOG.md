@@ -1,5 +1,79 @@
 # Changelog
 
+## 1.5.3 — 2026-09-26 — ready for the desktop app, and a status line
+
+The web version carries on as it is. This release adds what the coming
+desktop app (FITs Importer App, a separate repo) needs from the shared
+engine and panel. The web version gets two things from it: a status line,
+and a newer-ledger guard.
+
+- **Status line.** The panel's header now says **"Everything is safe"**
+  (green) or **"N frames only on the Mac"** (amber; "only on this PC" on
+  Windows). It counts frames already cleared from a camera whose only
+  verified copy is on this computer, the same count the ship summary gives.
+  - Hover over a count to see what it means: "Cleared from the camera; the
+    only verified copy is on this Mac until the PC's sweep checks it"
+    ("this PC" on Windows).
+  - It says "Nothing imported yet" on a new machine, and "Status unknown:
+    the ledger can't be read" (amber) if the ledger can't be read, or if
+    working the line out fails for any reason. It never says "safe" when
+    it can't tell, and never keeps showing an earlier line.
+  - It is light on memory. The panel never holds the ledger (about 100 MB)
+    itself: the line is worked out by a short-lived `--status --json`
+    process, and only when `ledger.json` changes. With a 116 MB ledger the
+    idle panel stays at about 59 MB, as in 1.5.2.
+  - Also available as `--status` (or `--status --json`),
+    `GET /api/status`, and the `statusSummary` field of `/api/state`.
+- **Newer ledger, older importer.** An older importer now refuses to work
+  on a ledger written by a newer one, and changes nothing, instead of
+  saving over it. This matters once the app and the web version share a
+  computer. The refusal comes before anything is copied, tagged or deleted,
+  on every path: an import, a SAFE clear, a discard, a ship, a restore from
+  the mirror (a first run, or `--restore-ledger`), recovery from
+  `ledger.json.bak`, and a ledger replaced while the importer waited for
+  its lock.
+- **Taking turns with the app.** The app will leave a note in the state
+  folder while it is in charge (`app-takeover.json`). While that note is
+  there:
+  - the web watchers and Restart buttons stand aside;
+  - the installers update files only: no watcher, no panel, no browser;
+  - the install check says who is in charge.
+
+  If the app was thrown away without handing back, the next web install
+  notices, puts the web version back and keeps the note (renamed, never
+  deleted). `--app-owner` answers the question for scripts. Only a note
+  naming the app by a full path counts, so every script gets the same
+  answer wherever it runs from. While the app is in charge, the
+  installers end with one line: open the FITs Importer App. On Windows
+  the Restart button's window then stays open for a few seconds, so the
+  message can be read.
+- **Stopping the panel stops only the web version's own panel.** The
+  installers' and Restart buttons' stop commands now match only the web
+  version's own files, never another program's Python.
+- **Clearer "busy" messages.** A command that finds the importer busy now
+  says what is busy, in the same words on the command line and on the
+  panel: "Another import is already running", "The twice-daily ship to
+  the PC is running right now", or "The panel is busy right now".
+- **For the app:**
+  - a notification hook;
+  - the Windows watcher, now importable and able to run on the Mac too,
+    with the 10-minute flap guard inside `poll_once` (a camera re-plugged
+    within it gives a `rearrived` event, never a second arrival);
+  - `POST /api/quit` (token required, refused while busy);
+  - a proper way to start the panel from another program
+    (`make_server` / `serve`; `make_server(0)` picks a free port);
+  - `STATUS_CMD`, for the app's own status-line command;
+  - a packaged app is never relaunched as a script.
+
+**Mac / Windows:** the same on both. On Windows the installer's changes
+(Startup shortcut, Restart button, panel start) follow the same three
+cases as the Mac's. PowerShell lines changed: to be parse-checked on the PC.
+The Windows installer's and Restart button's owner checks have tests that
+run only on Windows (through `powershell.exe` and `cmd.exe`); on the Mac
+they print SKIP.
+
+495 end-to-end checks (375 engine + 120 panel), all green on the Mac.
+
 ## 1.5.2 — 2026-09-25 — the tests can never touch real data
 
 Normal use is unchanged apart from the three small points below. This

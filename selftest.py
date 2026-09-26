@@ -17,6 +17,7 @@ import argparse
 import importlib.util
 import json
 import os
+import re
 import subprocess
 import sys
 import tempfile
@@ -93,6 +94,15 @@ def main():
         line("SKIP", "config.json", "none yet (defaults in use)")
     mid = eng.machine_id()
     check("this computer has an importer identity", bool(mid), mid)
+    # who runs this machine: the web version or the FITs Importer App (U1)
+    owner, rec = eng.app_owner_state()
+    app_path = (rec or {}).get("appPath")
+    print("  ----  owner: " + (f"FITs Importer App ({app_path})" if owner == "app"
+                               else "web version"))
+    if owner == "stale":
+        line("WARN", "owner record", f"names the FITs Importer App at {app_path}, which "
+             "is gone — run the web installer, or reinstall the app")
+    app_note = "the FITs Importer App is in charge"
 
     # the lock check must never kill (os.kill(pid, 0) terminates on Windows)
     child = subprocess.Popen([sys.executable, "-c", "import time; time.sleep(6)"])
@@ -162,9 +172,18 @@ def main():
         startup = os.path.join(os.environ.get("APPDATA", ""),
                                r"Microsoft\Windows\Start Menu\Programs\Startup",
                                "BrettjoAstro FITS Importer watcher.lnk")
-        check("camera watcher starts at logon", os.path.isfile(startup), startup)
+        if owner == "app":
+            check(f"web watcher does not start at logon ({app_note})",
+                  not os.path.isfile(startup), f"{startup} is back — open the app, "
+                  "it offers to take over again", warn_only=True)
+        else:
+            check("camera watcher starts at logon", os.path.isfile(startup), startup)
         desk = os.path.join(os.path.expanduser("~"), "Desktop", "Restart FITS Importer.cmd")
-        check("Restart FITS Importer on the Desktop", os.path.isfile(desk), desk, warn_only=True)
+        if owner == "app":                     # the installer leaves it out then (U1)
+            line("SKIP", "Restart FITS Importer on the Desktop", f"not needed: {app_note}")
+        else:
+            check("Restart FITS Importer on the Desktop", os.path.isfile(desk), desk,
+                  warn_only=True)
         for task, needed in (("BrettjoAstro FITS Importer ship", os.path.isdir(eng.ARCHIVE_MOUNT)),
                              ("Astro archive sweep", os.path.isdir(eng.ARCHIVE_MOUNT))):
             if eng.TEST_ROOT:
@@ -192,8 +211,23 @@ def main():
             line("PASS", "notification sent", "did a toast appear bottom-right?")
     elif eng.IS_MAC:
         la = os.path.expanduser("~/Library/LaunchAgents")
-        check("camera watcher LaunchAgent installed",
-              os.path.isfile(os.path.join(la, "com.brettjohnson.astro-import.plist")))
+        plist = os.path.join(la, "com.brettjohnson.astro-import.plist")
+        if owner == "app":
+            disabled = False                   # a test never asks the real launchd
+            if not eng.TEST_ROOT and os.path.isfile(plist):
+                try:
+                    r = subprocess.run(["launchctl", "print-disabled", f"gui/{os.getuid()}"],
+                                       capture_output=True, text=True, timeout=10)
+                    m = re.search(r'"com\.brettjohnson\.astro-import"\s*=>\s*(\w+)', r.stdout)
+                    disabled = bool(m) and m.group(1) in ("disabled", "true")
+                except (OSError, subprocess.SubprocessError):
+                    pass
+            check(f"web watcher does not start at login ({app_note})",
+                  not os.path.isfile(plist) or disabled,
+                  "its LaunchAgent is on again — open the app, it offers to take over "
+                  "again", warn_only=True)
+        else:
+            check("camera watcher LaunchAgent installed", os.path.isfile(plist))
         ship = os.path.isfile(os.path.join(la, "com.brettjohnson.astro-ship.plist"))
         if eng.ARCHIVE_URL or os.path.isdir(eng.ARCHIVE_MOUNT):
             check("twice-daily ship LaunchAgent installed", ship, warn_only=True)
@@ -202,9 +236,12 @@ def main():
         check("app wrapper installed",
               os.path.isdir(os.path.expanduser("~/Applications/BrettjoAstro FITS Importer.app")),
               warn_only=True)
-        check("Restart FITS Importer on the Desktop",
-              os.path.isfile(os.path.expanduser("~/Desktop/Restart FITS Importer.command")),
-              warn_only=True)
+        if owner == "app":                     # the installer leaves it out then (U1)
+            line("SKIP", "Restart FITS Importer on the Desktop", f"not needed: {app_note}")
+        else:
+            check("Restart FITS Importer on the Desktop",
+                  os.path.isfile(os.path.expanduser("~/Desktop/Restart FITS Importer.command")),
+                  warn_only=True)
         if args.toast:
             eng.notify("Test notification from the FITS Importer install check.",
                        "FITS Importer")

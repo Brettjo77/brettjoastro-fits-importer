@@ -11,6 +11,14 @@ for a in "$@"; do [ "$a" = "--silent" ] && SILENT=1; done
 if [ -x /usr/local/bin/python3 ]; then PYTHON=/usr/local/bin/python3
 else PYTHON=/usr/bin/python3; fi
 
+# the FITs Importer App is in charge here: open it, never the web panel (1.5.3)
+# >>> app-owner check (test_v2 runs this block on its own, with a fake engine)
+if OWNER=$("$PYTHON" "$HOME/bin/astro-import.py" --app-owner 2>/dev/null); then
+    open -a "${OWNER#app }"
+    exit 0
+fi
+# <<< app-owner check
+
 if curl -s -m 2 "$URL/api/ping" >/dev/null 2>&1; then
     [ -z "$SILENT" ] && open "$URL"      # already running — just focus a tab
     exit 0

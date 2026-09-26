@@ -33,6 +33,7 @@ capabilities (see PARITY.md). Requires: Python 3.9+ and astropy.
 """
 
 import argparse
+import contextlib
 import hashlib
 import json
 import math
@@ -49,7 +50,7 @@ from collections import defaultdict
 from datetime import datetime, timedelta
 
 # One version for every platform (1.5.0: the Windows 11 edition joins the Mac).
-VERSION = "1.5.2"
+VERSION = "1.5.3"
 IS_WINDOWS = os.name == "nt"
 IS_MAC = sys.platform == "darwin"
 PLATFORM = "windows" if IS_WINDOWS else ("mac" if IS_MAC else "linux")
@@ -605,6 +606,7 @@ VERBOSE = False
 # ── App hooks (set by asiair-app.py; None = classic CLI behavior) ───────────
 PROMPT_FN = None   # fn({kind:'confirm'|'text', prompt, default}) -> str | None
 EVENT_FN = None    # fn({event: str, ...}) — structured progress for the panel
+NOTIFY_FN = None   # fn(message, title) — the app shows notifications itself (1.5.3)
 
 def emit(event, **fields):
     if EVENT_FN is not None:
@@ -664,11 +666,18 @@ def human_hours(seconds):
 def now_stamp():
     return datetime.now().strftime("%Y-%m-%dT%H%M%S")
 
-def notify(message, title="FITS Importer"):
+def notify(message, title="FITS Importer", sound=False):
     """Desktop notification (macOS Notification Centre / Windows toast);
-    silently logged if unavailable or not allowed."""
+    silently logged if unavailable or not allowed. sound=True adds the
+    panel's "Glass" chime on the Mac (a Windows toast brings its own)."""
+    if NOTIFY_FN is not None:
+        try:
+            NOTIFY_FN(message, title)
+        except Exception:
+            pass
+        return
     if TEST_ROOT:
-        _test_record("notify", message=message, title=title)
+        _test_record("notify", message=message, title=title, sound=sound)
         return
     if IS_WINDOWS:
         try:
@@ -684,7 +693,8 @@ def notify(message, title="FITS Importer"):
     try:
         r = subprocess.run(
             ["osascript", "-e", 'on run argv',
-             "-e", 'display notification (item 1 of argv) with title (item 2 of argv)',
+             "-e", 'display notification (item 1 of argv) with title (item 2 of argv)'
+             + (' sound name "Glass"' if sound else ""),
              "-e", "end run", "--", message, title],
             capture_output=True, timeout=10,
         )
@@ -908,6 +918,16 @@ def _row_camera(e):
         return None
     return e.get("camera") or "ZWO Seestar S30 Pro"
 
+def refuse_newer_ledger(ledger):
+    """True, and says so, for a ledger a newer importer wrote (1.5.3, U3):
+    this version never writes it, restores it or acts on it."""
+    v = ledger.get("version") if isinstance(ledger, dict) else None
+    if isinstance(v, (int, float)) and v > LEDGER_VERSION:
+        error(f"This ledger was written by a newer version of the importer "
+              f"(ledger v{v}). Update this copy first; nothing was written.")
+        return True
+    return False
+
 class State:
     def __init__(self):
         os.makedirs(STATE_DIR, exist_ok=True)
@@ -980,9 +1000,16 @@ class State:
         self.ledger = {"version": LEDGER_VERSION, "files": {}, "calibration": {}}
         self._dirty = True
 
+    def ledger_too_new(self):
+        """A ledger written by a newer importer is never written by this one:
+        its rows may mean things this version doesn't know (1.5.3). Says so."""
+        return refuse_newer_ledger(self.ledger)
+
     def save_ledger(self):
         if self.ledger is None:
             return
+        if self.ledger_too_new():
+            sys.exit(2)          # before the .bak too: both files stay as they are
         if getattr(self, "_skip_bak_once", False):
             self._skip_bak_once = False   # main file is corrupt — keep the
             #                               .bak that just saved us intact
@@ -1196,6 +1223,10 @@ class State:
         if not os.path.isfile(m_ledger):
             error("No mirror ledger found — nothing to restore from.")
             return False
+        if refuse_newer_ledger(self._load_json_quiet(m_ledger)):
+            # a newer importer's ledger is never restored by this one: stop
+            # before anything is copied, here or by the import that asked (U3)
+            sys.exit(2)
         ok, owner = mirror_owner_ok(MIRROR_DIR)
         if not ok:
             # Another machine's ledger describes copies on THAT machine; as
@@ -1244,7 +1275,17 @@ class State:
 
 LOCK_PATH = os.path.join(STATE_DIR, "import.lock")
 
-def acquire_lock():
+# What Brett reads when the lock is held, by what holds it: the same words
+# from the command line and on the panel's banner (1.5.3)
+LOCK_HOLDER_TEXT = {"panel": "The panel is busy right now",
+                    "ship": "The twice-daily ship to the PC is running right now"}
+
+def lock_busy_text(what):
+    """'The panel is busy right now', 'Another import is already running', ..."""
+    return LOCK_HOLDER_TEXT.get(what) or f"Another {what} is already running"
+
+def acquire_lock(what="import"):
+    """`what` holds it: import / ship / panel / clear / discard (1.5.3)."""
     os.makedirs(STATE_DIR, exist_ok=True)
     if os.path.isfile(LOCK_PATH):
         try:
@@ -1253,7 +1294,8 @@ def acquire_lock():
             pid = int(data.get("pid", 0))
             if not pid_alive(pid):
                 raise ProcessLookupError(pid)
-            error(f"Another import is already running (pid {pid}, started {data.get('started')}).")
+            what = data.get("what") or "import"
+            error(lock_busy_text(what) + f" (pid {pid}, started {data.get('started')}).")
             error("Wait for it to finish, or delete the lock file if it crashed:")
             error(lock_clear_hint(LOCK_PATH))
             return False
@@ -1270,7 +1312,7 @@ def acquire_lock():
         error("Another import grabbed the lock just now — try again in a moment.")
         return False
     with os.fdopen(fd, "w") as f:
-        json.dump({"pid": os.getpid(), "started": now_stamp()}, f)
+        json.dump({"pid": os.getpid(), "started": now_stamp(), "what": what}, f)
     return True
 
 def release_lock():
@@ -1278,6 +1320,48 @@ def release_lock():
         os.remove(LOCK_PATH)
     except OSError:
         pass
+
+
+# ── Who runs this machine: the web version or the FITs Importer App (1.5.3) ──
+# Only the app writes this record; the engine reads it, and archives a stale
+# one (never deletes it). The web watchers and installers step aside for "app".
+
+APP_OWNER_FILE = os.path.join(STATE_DIR, "app-takeover.json")
+
+def app_owner_state():
+    """("app", record) while the app that took over is on disk; ("stale",
+    record) when it was trashed without handing back; ("web", None) otherwise,
+    an unreadable record, or one whose appPath isn't absolute, included."""
+    try:
+        with open(APP_OWNER_FILE, encoding="utf-8-sig") as f:
+            rec = json.load(f)
+    except (OSError, ValueError):
+        return "web", None
+    if not isinstance(rec, dict) or rec.get("owner") != "app":
+        return "web", None
+    path = rec.get("appPath")
+    if not (isinstance(path, str) and os.path.isabs(path)):
+        # a relative path would mean one thing to the installer (run from
+        # the home folder) and another to the watcher (run from /): only an
+        # absolute one counts, the same everywhere
+        return "web", None
+    return ("app" if os.path.exists(path) else "stale"), rec
+
+def app_owner():
+    """The app's record while it owns this machine, else None."""
+    owner, rec = app_owner_state()
+    return rec if owner == "app" else None
+
+def archive_stale_owner():
+    """Rename the record aside as app-takeover.handed-back-<stamp>.json (never
+    over another). Returns the new name."""
+    stamp, n = now_stamp(), 1
+    name = f"app-takeover.handed-back-{stamp}.json"
+    while os.path.exists(os.path.join(STATE_DIR, name)):
+        n += 1
+        name = f"app-takeover.handed-back-{stamp}-{n}.json"
+    os.rename(APP_OWNER_FILE, os.path.join(STATE_DIR, name))
+    return name
 
 
 # ═══════════════════════════════════════════════════════════════════════════
@@ -3136,6 +3220,39 @@ def _is_unshipped_rider(e):
         return True
     return st == "mw-jpg" and _stack_n(e.get("filename") or "") is None
 
+def only_on_this_machine(state):
+    """Frames whose one copy is here: cleared from a camera, verified at
+    import, not yet PC-verified on the archive (riders don't ship, so don't count)."""
+    if not state.ledger:
+        return 0
+    return sum(1 for e in state.ledger["files"].values()
+               if e.get("clearedFromCamera") and e.get("verifiedAtImport")
+               and not e.get("archiveVerifiedAt") and not _is_unshipped_rider(e))
+
+def status_unknown(why="the ledger can't be read"):
+    """The status line when it can't be worked out: never "safe" (1.5.3).
+    The panel shows it too when computing the line fails."""
+    return {"safe": False, "onlyHere": None, "machine": "PC" if IS_WINDOWS else "Mac",
+            "text": f"Status unknown: {why}"}
+
+def status_summary(state):
+    """The one status line the panel and the app show (1.5.3). Never "safe"
+    when the ledger can't be read."""
+    machine = "PC" if IS_WINDOWS else "Mac"
+    if getattr(state, "ledger_corrupt", False):
+        return status_unknown()
+    if state.ledger and (state.ledger.get("version") or 0) > LEDGER_VERSION:
+        # written by a newer importer: this one can't vouch for its rows
+        return status_unknown("the ledger is from a newer version of the importer")
+    if not state.ledger:
+        return {"safe": True, "onlyHere": 0, "text": "Nothing imported yet",
+                "machine": machine}
+    n = only_on_this_machine(state)
+    text = "Everything is safe" if n == 0 else \
+        f"{n:,} frame{'' if n == 1 else 's'} only on {'this PC' if IS_WINDOWS else 'the Mac'}"
+    return {"safe": n == 0, "onlyHere": n, "text": text,
+            "machine": "PC" if IS_WINDOWS else "Mac"}
+
 def ship_plan(state, mount):
     """Return (items, notes). items: dict(rel, src, entry, key). rel is the
     archive-relative path with the archive's own separators (\\\\)."""
@@ -3411,9 +3528,7 @@ def _run_ship(state, dry_run=False, mount=None, checksum=True):
                             "machine": MACHINE_LABEL, "archive": ARCHIVE_LABEL,
                             "verifiedBy": f"{MACHINE_LABEL.lower()}-readback",
                             "frames": frames, "problems": problems})
-    only_mac = sum(1 for e in state.ledger["files"].values()
-                   if e.get("clearedFromCamera") and e.get("verifiedAtImport")
-                   and not e.get("archiveVerifiedAt") and not _is_unshipped_rider(e))
+    only_mac = only_on_this_machine(state)
     success(f"Shipped {shipped} file(s). Problems: {len(problems)}. "
             f"Frames cleared from a camera and not yet PC-verified: {only_mac}.")
     for rel, why in problems[:20]:
@@ -6352,6 +6467,15 @@ def main():
                         "missing, never overwrites; --dry-run to preview)")
     p.add_argument("--version", action="version",
                    version=f"BrettjoAstro FITS Importer {VERSION} ({PLATFORM})")
+    p.add_argument("--app-owner", action="store_true",
+                   help="who runs this computer's importer: prints 'app PATH' (exit 0), "
+                        "'web' (exit 1) or 'stale PATH' (exit 2)")
+    p.add_argument("--archive-stale", action="store_true",
+                   help="with --app-owner: rename a stale owner record aside (never deleted)")
+    p.add_argument("--status", action="store_true",
+                   help="one line: everything safe, or how many frames are only on this "
+                        "computer (--json for the details; no lock, no camera)")
+    p.add_argument("--json", action="store_true")
     p.add_argument("--scan-only", action="store_true")
     p.add_argument("--report", action="store_true")
     p.add_argument("--reconcile", action="store_true")
@@ -6401,6 +6525,26 @@ def main():
     p.add_argument("--all", action="store_true")
     args = p.parse_args()
     VERBOSE = args.verbose
+
+    # Read-only answers for the installers, watchers and the app: no lock,
+    # no camera, no astropy (1.5.3)
+    if args.app_owner:
+        owner, rec = app_owner_state()
+        if owner == "stale" and args.archive_stale:
+            try:
+                print(f"archived {archive_stale_owner()}")
+                sys.exit(0)
+            except OSError as e:
+                error(f"Could not archive {APP_OWNER_FILE}: {e}")
+        print("web" if rec is None else f"{owner} {rec.get('appPath') or ''}")
+        sys.exit({"app": 0, "web": 1, "stale": 2}[owner])
+    if args.status:
+        with contextlib.redirect_stdout(sys.stderr if args.json else sys.stdout):
+            st = State()            # load warnings never mix into --json
+        s = status_summary(st)
+        print(json.dumps(s) if args.json else s["text"])
+        sys.exit(0)
+
     refresh_camera_volumes(force=True)
 
     if args.targets is not None and len(args.targets) == 0:
@@ -6408,6 +6552,16 @@ def main():
         sys.exit(2)
 
     state = State()
+    if state.ledger_too_new():
+        sys.exit(2)
+
+    def reload():
+        """Re-read the ledger under the lock (H2), and refuse it again if a
+        newer importer replaced it since the check above: before anything is
+        copied, tagged or deleted (U3)."""
+        state.load()
+        if state.ledger_too_new():
+            sys.exit(2)
 
     def locked(fn):
         """Every command that SAVES the ledger holds the import lock and
@@ -6417,7 +6571,7 @@ def main():
         if not acquire_lock():
             sys.exit(1)
         try:
-            state.load()
+            reload()
             return fn()
         finally:
             release_lock()
@@ -6448,19 +6602,19 @@ def main():
             locked(lambda: run_tidy_stacks(state))
         return
     if args.ship:
-        if not acquire_lock():
+        if not acquire_lock("ship"):
             sys.exit(1)
         try:
-            state.load()
+            reload()
             run_ship(state, dry_run=args.dry_run, checksum=not args.no_checksum)
         finally:
             release_lock()
         return
     if args.discard:
-        if not acquire_lock():
+        if not acquire_lock("discard"):
             sys.exit(1)
         try:
-            state.load()
+            reload()
             res = run_discard(state, args.discard, night=args.night,
                               reason=args.reason or "", dry_run=args.dry_run)
         finally:
@@ -6525,7 +6679,7 @@ def main():
     if not acquire_lock():
         sys.exit(1)
     try:
-        state.load()   # re-read under the lock (H2)
+        reload()       # re-read under the lock (H2), refused if newer (U3)
         print("═══════════════════════════════════════════════════════════════")
         print("  BrettjoAstro FITS Importer — backup-first (ASIAir + Seestar)")
         print("═══════════════════════════════════════════════════════════════")
@@ -6644,8 +6798,9 @@ def _platform_bootstrap(script_path):
     started windowless by pythonw, and switch on console colours."""
     if not IS_WINDOWS:
         return
-    if not sys.flags.utf8_mode:
-        # the launchers all pass -X utf8; this is only the safety net. Wait
+    if not sys.flags.utf8_mode and not getattr(sys, "frozen", False):
+        # the launchers all pass -X utf8; this is only the safety net (never
+        # in a frozen app: its executable is the app, not Python). Wait
         # for the child through Ctrl+C (it gets the Ctrl+C too, and must be
         # allowed to finish its cleanup — lock release, ledger save).
         child = subprocess.Popen([sys.executable, "-X", "utf8", script_path, *sys.argv[1:]])

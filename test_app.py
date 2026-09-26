@@ -5,10 +5,15 @@ answers the inline questions, and verifies the imports on disk + in the ledger."
 
 import sys
 sys.dont_write_bytecode = True   # nothing is written beside the sources
+import contextlib
+import gc
+import importlib.util
+import io
 import json
 import os
 import re
 import subprocess
+import threading
 import time
 import urllib.error
 import urllib.request
@@ -103,6 +108,42 @@ def own_panel(url, env, proc, label):
         show_panel_logs()
         sys.exit(1)
 
+# ── The status line (U9, 1.5.3) ─────────────────────────────────────────────
+HERE_WORDS = "this PC" if os.name == "nt" else "the Mac"
+HERE_MACHINE = "PC" if os.name == "nt" else "Mac"
+STATUS_KEYS = {"safe", "onlyHere", "text", "machine"}
+
+def status_line(url=None):
+    """GET /api/status with no token, as the page and the app do."""
+    try:
+        with urllib.request.urlopen((url or URL) + "/api/status", timeout=15) as r:
+            return json.loads(r.read().decode())
+    except Exception as e:
+        return {"error": repr(e)}
+
+def wait_status(pred, timeout=20):
+    """The status line once pred(it) holds (it is computed off the request
+    thread, so it can trail an operation a little); else the last one seen."""
+    t0, last = time.time(), None
+    while time.time() - t0 < timeout:
+        last = status_line()
+        if isinstance(last, dict) and STATUS_KEYS <= set(last) and pred(last):
+            return last
+        time.sleep(0.3)
+    return last
+
+def in_state(s):
+    """The status object /api/state carries, found by its shape ("status"
+    there already names the operation: idle, scanning, ...)."""
+    return next((v for v in s.values() if isinstance(v, dict) and STATUS_KEYS <= set(v)), None)
+
+def answers(url):
+    try:
+        urllib.request.urlopen(url + "/api/ping", timeout=2).close()
+        return True
+    except Exception:
+        return False
+
 # ── Build the fake two-camera world (shared helpers) ────────────────────────
 env = teh.Env("APP", asiair=True, seestar=True)
 PORT = int(env.env["ASTRO_PANEL_PORT"])   # a free port, never 8765
@@ -194,6 +235,50 @@ try:
     s = api("/api/state")
     check("T1 camera present in state", s["cameraPresent"] is True)
     check("T1 both devices listed", s["devices"] == ["ASIAir", "Seestar"], str(s["devices"]))
+
+    # ── U9 (1.5.3): the status line, served with no token like every GET ──
+    st0 = wait_status(lambda x: True)
+    check("U9 /api/status (no token) serves the status line: 'Everything is safe' here",
+          st0 == {"safe": True, "onlyHere": 0, "text": "Everything is safe",
+                  "machine": HERE_MACHINE}, json.dumps(st0))
+    s = api("/api/state")
+    check("U9 /api/state carries the same object, beside the operation's own 'status'",
+          in_state(s) == st0 and s.get("status") == "idle",
+          json.dumps({k: v for k, v in s.items() if k != "log"})[:300])
+
+    # ── U7 (1.5.3): a second panel on the same port steps aside (since
+    #    1.5.0 W2; checked now because the app relies on it) ──
+    envc = teh.Env("APPC", asiair=False, seestar=False)
+    try:
+        r = subprocess.run([sys.executable, os.path.join(BUILD, "astro-app.py"), "--no-browser",
+                            "--port", str(PORT)], env=envc.env, capture_output=True, text=True,
+                           encoding="utf-8", errors="replace", stdin=subprocess.DEVNULL, timeout=30)
+        second = r.stdout + r.stderr
+    except subprocess.TimeoutExpired:
+        second = "still running after 30 s (it bound the port too)"
+    check("U7 a second panel on the same port steps aside, saying the port is in use; "
+          "the first still answers as itself",
+          "in use" in second and "panel →" not in second
+          and api("/api/ping").get("instance") == teh.instance_id(env.state)
+          and api("/api/state").get("status") == "idle", second[-300:])
+
+    # ── U6 (1.5.3): the panel's own banner names what holds the lock ──
+    lockp = os.path.join(env.state, "import.lock")
+    said = {}
+    try:
+        for what in ("ship", "panel"):
+            with open(lockp, "w") as f:         # held by a live process (this runner)
+                json.dump({"pid": os.getpid(), "started": "2026-09-26T101500", "what": what}, f)
+            api("/api/report", {})
+            s = wait_for(lambda s: s["status"] == "idle", timeout=30)
+            said[what] = str(s.get("lastResult"))
+    finally:
+        os.remove(lockp)
+    check("U6 the panel's banner says what holds the lock in the engine's own words: "
+          "'The twice-daily ship to the PC is running right now', 'The panel is busy right now'",
+          said.get("ship", "").startswith("The twice-daily ship to the PC is running right now. ")
+          and said.get("panel", "").startswith("The panel is busy right now. ")
+          and not s.get("hasReport"), json.dumps(said))
 
     # ── Scan ────────────────────────────────────────────────────────────
     api("/api/scan", {})
@@ -307,6 +392,12 @@ try:
     check("T3 the panel's own 'import complete' notification is recorded, never shown (1.5.2)",
           bool(done_notes) and (os.name == "nt" or not teh.executed(env.root)),
           json.dumps(teh.os_calls(env.root))[:300] + teh.executed(env.root)[-200:])
+    with open(os.path.join(BUILD, "astro-app.py"), encoding="utf-8") as f:
+        panel_src = f.read()
+    check("U5 ...it goes through eng.notify with the chime (recorded with sound true); "
+          "no osascript left in the panel",
+          bool(done_notes) and all(c.get("sound") is True for c in done_notes)
+          and "osascript" not in panel_src, json.dumps(done_notes)[:300])
 
     led = env.ledger()
     m81 = [e for e in led["files"].values() if e["target"] == "M 81" and e["origin"] == "import"]
@@ -454,6 +545,19 @@ try:
     api("/api/import", {"names": ["M 42"]})
     s = wait_for(lambda s: s["question"] is not None, timeout=90)
     qid = s["question"]["id"]
+    try:
+        with open(os.path.join(env.state, "import.lock"), encoding="utf-8") as f:
+            held = json.load(f)
+    except (OSError, ValueError):
+        held = {}
+    check("U6 while the panel works, import.lock says the panel holds it (what: panel)",
+          held.get("what") == "panel", json.dumps(held))
+    no_token = raw_status("POST", "/api/quit", f"127.0.0.1:{PORT}", body={}, token=False)
+    busy = api("/api/quit", {})
+    check("U8 /api/quit needs the token (403) and is refused mid-import (409 busy); a card on its "
+          "own and an operation on its own are each checked in-process (U8 below)",
+          no_token == 403 and busy.get("_status") == 409 and busy.get("ok") is False
+          and busy.get("reason") == "busy", json.dumps([no_token, busy]))
     stale = api("/api/answer", {"id": 999999, "value": "y"})
     s2 = api("/api/state")
     check("T9 a stale-id answer is refused and the card survives",
@@ -598,6 +702,20 @@ try:
           not os.path.isdir(os.path.join(env.myworks, "M 42_sub"))
           and (s.get("lastDone") or {}).get("op") == "clear"
           and "Cleared" in (s.get("lastResult") or ""), json.dumps(s.get("lastResult")))
+    r = subprocess.run([sys.executable, teh.SCRIPT, "--status", "--json"], env=env.env,
+                       capture_output=True, text=True, encoding="utf-8", errors="replace",
+                       stdin=subprocess.DEVNULL, timeout=120)
+    try:
+        want = json.loads(r.stdout)
+    except ValueError:
+        want = {"error": (r.stdout + r.stderr)[-200:]}
+    st1 = wait_status(lambda x: x == want)
+    n = st1.get("onlyHere") if isinstance(st1, dict) else None
+    check("U9 after the SAFE clear the status line counts the frames now only here "
+          "(the same as the CLI's --status)",
+          isinstance(n, int) and n >= 1 and st1 == want and st1.get("safe") is False
+          and st1.get("text") == f"{n:,} frame{'' if n == 1 else 's'} only on {HERE_WORDS}",
+          json.dumps([st1, want]))
     # never-import list: a skipped target with new frames is NOT backed up
     env.add_seestar_sub("NGC 7000", "20260924-213000")
     r = api("/api/skip", {"name": "NGC 7000", "skip": True})
@@ -615,6 +733,28 @@ try:
     ngc = [t for t in s["scan"]["targets"] if t["name"] == "NGC 7000"]
     check("T13 'import again' takes it off the list — offered as new work",
           ngc and not ngc[0]["skipped"] and ngc[0]["new"] == 1, json.dumps(ngc))
+
+    # ── U9: the status line follows ledger.json (the PC sweep's stamps) ──
+    led_path = os.path.join(env.state, "ledger.json")
+    led = env.ledger()
+    for row in led["files"].values():
+        if row.get("clearedFromCamera") and row.get("verifiedAtImport"):
+            row["archiveVerifiedAt"] = "2026-09-26T120000"
+    with open(led_path + ".u9", "w") as f:
+        json.dump(led, f)
+    os.replace(led_path + ".u9", led_path)
+    st2 = wait_status(lambda x: x["safe"])
+    check("U9 ...and recomputed when ledger.json changes (all now PC-verified): 'Everything is safe'",
+          st2 == {"safe": True, "onlyHere": 0, "text": "Everything is safe",
+                  "machine": HERE_MACHINE}, json.dumps(st2))
+
+    # ── U8 (1.5.3): an idle panel quits on /api/quit ──
+    bye = api("/api/quit", {})
+    t0 = time.time()
+    while answers(URL) and time.time() - t0 < 15:
+        time.sleep(0.2)
+    check("U8 an idle panel quits on /api/quit (200, ok) and the port then stops answering",
+          bye.get("ok") is True and "_status" not in bye and not answers(URL), json.dumps(bye))
 finally:
     proc.terminate()
     proc.wait(timeout=30)
@@ -657,6 +797,371 @@ try:
 finally:
     proc2.terminate()
     proc2.wait(timeout=30)
+
+# ── U3 (1.5.3): the panel never works on a ledger from a newer importer ──
+# The engine refuses to save it; the panel must refuse before it copies or
+# deletes anything, not only at the save (like the CLI): an import, the SAFE
+# clear, a discard and the report. M 51 is backed up first (under ledger v1,
+# kept on the camera) so a clear there would really delete; M 52 is new.
+# Every card a refused operation should never show is answered YES here.
+env3 = teh.Env("APP3", asiair=False, seestar=True)
+m51 = env3.add_seestar_sub("M 51", "20260924-213000")
+r = subprocess.run([sys.executable, teh.SCRIPT, "--no-ship"], input="n\nn\nn\nn\n",
+                   env=dict(env3.env, ASTRO_STDIN_PROMPTS="1"), capture_output=True, text=True,
+                   encoding="utf-8", errors="replace", timeout=120)
+m52 = env3.add_seestar_sub("M 52", "20260925-213000")
+led3 = os.path.join(env3.state, "ledger.json")
+with open(led3, encoding="utf-8") as f:
+    newer3 = json.load(f)
+backed = [e for e in newer3.get("files", {}).values()
+          if e.get("target") == "M 51" and e.get("verifiedAtImport")]
+newer3["version"] = 2                          # the app's newer ledger, rows and all
+with open(led3, "w", encoding="utf-8") as f:
+    json.dump(newer3, f)
+def u3_bytes():
+    out = {}
+    for p in (led3, led3 + ".bak"):
+        if os.path.exists(p):
+            with open(p, "rb") as f:
+                out[os.path.basename(p)] = f.read()
+    return out
+led3_bytes = u3_bytes()
+def u3_copies():
+    return sorted(os.path.join(d, n) for d, _, fs in os.walk(env3.sdest30) for n in fs
+                  if n.lower().endswith(".fit"))
+copies3 = u3_copies()
+PORT3 = int(env3.env["ASTRO_PANEL_PORT"])
+URL3 = f"http://127.0.0.1:{PORT3}"
+proc3 = start_panel(env3, PORT3)
+u3 = {"setup": bool(backed) and len(copies3) == 1, "said": {}}
+
+def u3_op(path, body):
+    """Run one operation on panel 3 to the end, saying yes to any card."""
+    api(path, body, url=URL3)
+    t0, s = time.time(), {}
+    while time.time() - t0 < 60:
+        s = api("/api/state", url=URL3)
+        q = s.get("question")
+        if q:
+            val = q.get("expect") or ("y" if q.get("kind") == "confirm" else "")
+            api("/api/answer", {"id": q["id"], "value": val}, url=URL3)
+        elif s["status"] == "idle" and time.time() - t0 > 1:
+            break
+        time.sleep(0.3)
+    return s
+
+try:
+    own_panel(URL3, env3, proc3, "U3 a panel on a newer importer's ledger (v2) answers as itself")
+    load_token(URL3)
+    api("/api/scan", {}, url=URL3)
+    t0 = time.time()
+    while time.time() - t0 < 60:
+        s = api("/api/state", url=URL3)
+        if s["status"] == "idle" and s["scan"]:
+            break
+        time.sleep(0.3)
+    s = u3_op("/api/import", {"names": ["M 52"]})
+    u3["said"]["import"] = s.get("lastResult")
+    u3["log"] = [ln for ln in s.get("log") or [] if "newer version" in str(ln)][-2:]
+    u3["copied"] = u3_copies() != copies3
+    for what, path, body in (("clear", "/api/clear", {"name": "M 51_sub"}),
+                             ("discard", "/api/discard", {"name": "M 52_sub"}),
+                             ("report", "/api/report", {})):
+        u3["said"][what] = u3_op(path, body).get("lastResult")
+    u3["same"] = u3_bytes() == led3_bytes
+    u3["camera"] = [os.path.isfile(m51), os.path.isfile(m52)]
+    u3["copies"] = u3_copies() == copies3
+finally:
+    proc3.terminate()
+    proc3.wait(timeout=30)
+check("U3 ...an import there is refused before anything is copied, and says why; "
+      "the ledger and its .bak byte-identical",
+      u3.get("setup") is True and u3.get("same") is True and u3.get("copied") is False
+      and "newer version" in str(u3["said"].get("import")) and bool(u3.get("log")),
+      json.dumps(u3)[:600])
+check("U3 ...and so are the panel's SAFE clear, discard and report: each says why, both "
+      "camera files stay, nothing is copied and the ledger is byte-identical",
+      u3.get("setup") is True
+      and all("newer version" in str(u3["said"].get(k)) for k in ("clear", "discard", "report"))
+      and u3.get("camera") == [True, True] and u3.get("copies") is True
+      and u3.get("same") is True, json.dumps(u3)[:600])
+
+# ── U9 (1.5.3): the status line tells the truth when the ledger can't be read ──
+# The panel shows status_summary's own words, and never keeps an earlier line
+# ("Everything is safe", "1 frame only on the Mac") after it fails to work one out.
+env4 = teh.Env("APP4", asiair=False, seestar=False)
+os.makedirs(env4.state)
+led4 = os.path.join(env4.state, "ledger.json")
+def put4(path, data):
+    with open(path + ".t", "wb") as f:
+        f.write(data)
+    os.replace(path + ".t", path)
+ONE_HERE = json.dumps({"version": 1, "calibration": {}, "files": {
+    "MyWorks/M 42_sub/20260901-000000.fit": {
+        "target": "M 42", "filename": "20260901-000000.fit", "device": "seestar",
+        "camera": "ZWO Seestar S50 Pro", "sourceType": "sub", "origin": "import",
+        "size": 2880, "verifiedAtImport": True, "clearedFromCamera": True}}}).encode()
+UNKNOWN = {"safe": False, "onlyHere": None, "text": "Status unknown: the ledger can't be read",
+           "machine": HERE_MACHINE}
+put4(led4, json.dumps({"version": 1, "files": {}, "calibration": {}}).encode())
+PORT4 = int(env4.env["ASTRO_PANEL_PORT"])
+URL4 = f"http://127.0.0.1:{PORT4}"
+proc4 = start_panel(env4, PORT4)
+u4, page4 = {}, ""
+
+def status4(pred, timeout=30):
+    t0, last = time.time(), None
+    while time.time() - t0 < timeout:
+        last = status_line(URL4)
+        if isinstance(last, dict) and STATUS_KEYS <= set(last) and pred(last):
+            break
+        time.sleep(0.3)
+    return last
+
+try:
+    own_panel(URL4, env4, proc4, "U9 a panel for the status-line checks answers as itself")
+    page4 = load_token(URL4)
+    u4["good"] = status4(lambda x: True)
+    put4(led4, b"{not json")
+    put4(led4 + ".bak", b"{not json")
+    u4["corrupt"] = status4(lambda x: x["text"] != (u4.get("good") or {}).get("text"))
+    u4["corruptState"] = in_state(api("/api/state", url=URL4))
+    put4(led4, ONE_HERE)
+    u4["one"] = status4(lambda x: x["onlyHere"] == 1)
+    put4(led4, ONE_HERE + b"\xff")          # the engine can't even open it (exit 1)
+    u4["broken"] = status4(lambda x: x["onlyHere"] != 1)
+    u4["brokenState"] = in_state(api("/api/state", url=URL4))
+    for p in (led4, led4 + ".bak"):
+        os.remove(p)
+    u4["none"] = status4(lambda x: x["text"] != UNKNOWN["text"])
+finally:
+    proc4.terminate()
+    proc4.wait(timeout=30)
+check("U9 ledger and .bak unreadable: the panel shows status_summary's own 'Status unknown: "
+      "the ledger can't be read' (never hidden, never safe), in /api/status and /api/state",
+      (u4.get("good") or {}).get("text") == "Everything is safe" and u4.get("corrupt") == UNKNOWN
+      and u4.get("corruptState") == UNKNOWN, json.dumps(u4)[:600])
+check("U9 ...a ledger the engine can't even open (a stray byte, a crash): 'Status unknown', "
+      "never the line from before ('1 frame only …')",
+      (u4.get("one") or {}).get("text") == f"1 frame only on {HERE_WORDS}"
+      and u4.get("broken") == UNKNOWN and u4.get("brokenState") == UNKNOWN, json.dumps(u4)[:600])
+check("U9 ...and no ledger at all: 'Nothing imported yet'",
+      u4.get("none") == {"safe": True, "onlyHere": 0, "text": "Nothing imported yet",
+                         "machine": HERE_MACHINE}, json.dumps(u4.get("none")))
+TIP = (f"Cleared from the camera; the only verified copy is on this {HERE_MACHINE} "
+       "until the PC's sweep checks it")
+check("U9 the status line's tooltip, worded for this computer, explains a count "
+      "('… only on this Mac/PC until the PC's sweep checks it')",
+      f'const STATUS_TIP="{TIP}";' in page4 and "sl.title=sum.onlyHere?STATUS_TIP" in page4,
+      re.findall(r"const STATUS_TIP=.*", page4)[:1])
+
+# ── U10 (1.5.3): the app runs the panel in-process — make_server() / serve() ──
+u10, said = {}, io.StringIO()
+computed = []                     # each time the status line is worked out (U9 below)
+try:
+    with contextlib.redirect_stdout(said):
+        spec = importlib.util.spec_from_file_location("astro_app_u10",
+                                                      os.path.join(BUILD, "astro-app.py"))
+        panel = importlib.util.module_from_spec(spec)
+        spec.loader.exec_module(panel)
+        # U9 below: the status line then moves only when an operation (or a
+        # test) asks it to look, never on its 2-second poll
+        panel.STATUS.poll_s = 3600
+        real_compute = panel.compute_status
+
+        def spy_compute():
+            computed.append(time.time())
+            return real_compute()
+        panel.compute_status = spy_compute
+        u10["instance"] = teh.instance_id(panel.eng.STATE_DIR)
+        port = teh.free_port()
+        url = f"http://127.0.0.1:{port}"
+        srv = panel.make_server(port)
+        t = threading.Thread(target=srv.serve_forever, daemon=True)
+        t.start()
+        u10.update(ping=api("/api/ping", url=url), port=panel.PORT == port)
+        srv.shutdown()
+        srv.server_close()
+        t.join(10)
+        u10["closed"] = not answers(url)
+        port = teh.free_port()
+        url = f"http://127.0.0.1:{port}"
+        t = threading.Thread(target=panel.serve, args=(port,), kwargs={"open_browser": False},
+                             daemon=True)
+        t.start()
+        t0 = time.time()
+        while not answers(url) and time.time() - t0 < 15:
+            time.sleep(0.2)
+        u10["ping2"] = api("/api/ping", url=url)
+        TOKEN["v"] = panel.TOKEN
+        u10["quit"] = api("/api/quit", {}, url=url)
+        t.join(15)
+        u10["ended"] = not t.is_alive() and not answers(url)
+except Exception as x:
+    u10["error"] = repr(x)
+u10["said"] = said.getvalue()[-200:]
+check("U10 make_server(port) in-process answers as this panel with PORT set; shutdown() stops it",
+      u10.get("instance") and (u10.get("ping") or {}).get("instance") == u10["instance"]
+      and u10.get("port") is True and u10.get("closed") is True, json.dumps(u10)[:400])
+check("U10 serve(port, open_browser=False) in a thread: it pings, opens no browser, "
+      "and returns after /api/quit",
+      (u10.get("ping2") or {}).get("ok") is True and (u10.get("quit") or {}).get("ok") is True
+      and u10.get("ended") is True
+      and not teh.os_calls(os.environ["ASTRO_TEST_ROOT"], "browser"), json.dumps(u10)[:400])
+
+# ── In-process: port 0, /api/quit while busy, and how the status line is
+#    worked out (the same panel module, driven directly) ──
+ip = {}
+IP_LEDGER = None
+
+def ip_ledger(n):
+    """A ledger with n frames only on this computer, in the runner's own state."""
+    rows = {f"MyWorks/M 42_sub/20260901-{i:06d}.fit": {
+        "target": "M 42", "filename": f"20260901-{i:06d}.fit", "device": "seestar",
+        "camera": "ZWO Seestar S50 Pro", "sourceType": "sub", "origin": "import",
+        "size": 2880, "verifiedAtImport": True, "clearedFromCamera": True} for i in range(n)}
+    os.makedirs(panel.eng.STATE_DIR, exist_ok=True)
+    tmp = IP_LEDGER + ".t"
+    with open(tmp, "w", encoding="utf-8") as f:
+        json.dump({"version": 1, "files": rows, "calibration": {}}, f)
+    os.replace(tmp, IP_LEDGER)
+
+def ip_status(url, pred, timeout=20):
+    t0, last = time.time(), None
+    while time.time() - t0 < timeout:
+        last = status_line(url)
+        if isinstance(last, dict) and pred(last):
+            break
+        time.sleep(0.2)
+    return last
+
+def ip_idle(timeout=20):
+    t0 = time.time()
+    while panel.APP.status != "idle" and time.time() - t0 < timeout:
+        time.sleep(0.1)
+    return panel.APP.status == "idle"
+
+def only_here(n):
+    return {"safe": n == 0, "onlyHere": n, "machine": HERE_MACHINE,
+            "text": "Everything is safe" if n == 0 else
+            f"{n} frame{'' if n == 1 else 's'} only on {HERE_WORDS}"}
+
+try:
+    with contextlib.redirect_stdout(said):
+        IP_LEDGER = os.path.join(panel.eng.STATE_DIR, "ledger.json")
+        srv = panel.make_server(0)                      # port 0: any free one
+        t = threading.Thread(target=srv.serve_forever, daemon=True)
+        t.start()
+        url = f"http://127.0.0.1:{srv.server_address[1]}"
+        TOKEN["v"] = panel.TOKEN
+        ip["port0"] = [panel.PORT, srv.server_address[1]]
+        ip["ping0"] = api("/api/ping", url=url)        # the browser's Host names the real port
+
+        # U9: worked out again only when ledger.json changes, and straight
+        # after an operation (the 2-second poll is off here)
+        ip["first"] = ip_status(url, lambda x: "text" in x)
+        n0 = len(computed)
+        panel.APP._run("testing", lambda: None, need_camera=False)   # writes nothing
+        ip["idle1"] = ip_idle()
+        time.sleep(1.5)
+        ip["unchanged"] = len(computed) - n0
+        panel.APP._run("testing", lambda: ip_ledger(1), need_camera=False)
+        ip["idle2"] = ip_idle()
+        ip["afterOp"] = ip_status(url, lambda x: x.get("onlyHere") == 1, timeout=15)
+
+        # a failure to work it out: "Status unknown", never the line before
+        panel.STATUS_CMD = [sys.executable, "-c", "import sys; sys.exit(3)"]
+        ip_ledger(2)
+        panel.STATUS.refresh()
+        ip["failed"] = ip_status(url, lambda x: x.get("onlyHere") != 1)
+        # the app's own command is used when set
+        panel.STATUS_CMD = [sys.executable, "-c", "import json; print(json.dumps({'safe': True, "
+                            "'onlyHere': 0, 'text': 'from the app', 'machine': 'Mac'}))"]
+        ip_ledger(3)
+        panel.STATUS.refresh()
+        ip["appCmd"] = ip_status(url, lambda x: x.get("text") == "from the app")
+
+        # the default: the engine's --status --json in a child, so this
+        # process never builds a State (the whole parsed ledger) for it...
+        RealState = panel.eng.State
+        made = []
+
+        class CountingState(RealState):
+            def __init__(self, *a, **k):
+                made.append(1)
+                super().__init__(*a, **k)
+        panel.eng.State = CountingState
+        panel.STATUS_CMD = None
+        ip_ledger(4)
+        panel.STATUS.refresh()
+        ip["child"] = ip_status(url, lambda x: x.get("onlyHere") == 4)
+        ip["madeByChild"] = len(made)
+        # ...and a frozen app (no Python to run) works it out here, keeping nothing
+        sys.frozen = True
+        try:
+            ip_ledger(5)
+            panel.STATUS.refresh()
+            ip["frozen"] = ip_status(url, lambda x: x.get("onlyHere") == 5)
+        finally:
+            del sys.frozen
+            panel.eng.State = RealState
+        ip["madeFrozen"] = len(made)
+        gc.collect()
+        ip["alive"] = sum(isinstance(o, RealState) for o in gc.get_objects())
+
+        # U8: /api/quit is refused while an operation runs, and the operation finishes
+        gate = threading.Event()
+
+        def slow():
+            gate.wait(20)
+            panel.APP.last_result = "the slow operation finished"
+        panel.APP._run("testing", slow, need_camera=False)
+        ip["quitBusy"] = api("/api/quit", {}, url=url)
+        ip["stillUp"] = answers(url)
+        gate.set()
+        ip["idle3"] = ip_idle()
+        ip["finished"] = panel.APP.last_result
+        # ...and while a card waits for an answer, even with no operation holding the lock
+        panel.APP.question = {"id": 424242, "kind": "confirm", "prompt": "test card",
+                              "default": "n", "expect": ""}
+        try:
+            ip["quitCard"] = api("/api/quit", {}, url=url)
+            ip["stillUp2"] = answers(url)
+        finally:
+            panel.APP.question = None
+        ip["quitIdle"] = api("/api/quit", {}, url=url)
+        t.join(15)
+        ip["ended"] = not t.is_alive() and not answers(url)
+except Exception as x:
+    ip["error"] = repr(x)
+check("U10 make_server(0) binds a free port and sets PORT to it, so the page's own requests pass",
+      ip.get("port0", [0, 0])[0] == ip.get("port0", [0, 1])[1] != 0
+      and (ip.get("ping0") or {}).get("ok") is True, json.dumps(ip)[:400])
+check("U9 the status line is not worked out again after an operation that left ledger.json "
+      "alone; after one that changed it, it is, straight away (not on a poll)",
+      ip.get("idle1") is True and ip.get("unchanged") == 0 and ip.get("idle2") is True
+      and ip.get("afterOp") == only_here(1), json.dumps(ip)[:600])
+check("U9 when working it out fails, the line says 'Status unknown', never the line before; "
+      "an app's own STATUS_CMD is used when set",
+      ip.get("failed") == UNKNOWN and (ip.get("appCmd") or {}).get("text") == "from the app",
+      json.dumps(ip)[:600])
+check("U9 by default the engine's --status --json works it out in a short-lived child: this "
+      "process never builds a State (the parsed ledger) for it",
+      ip.get("child") == only_here(4) and ip.get("madeByChild") == 0, json.dumps(ip)[:600])
+check("U9 ...a frozen app works it out in-process, and no State is kept afterwards",
+      ip.get("frozen") == only_here(5) and ip.get("madeFrozen") == 1 and ip.get("alive") == 0,
+      json.dumps(ip)[:600])
+check("U8 /api/quit while an operation runs: 409 busy, the panel stays up, and the operation "
+      "finishes",
+      (ip.get("quitBusy") or {}).get("_status") == 409
+      and (ip.get("quitBusy") or {}).get("reason") == "busy" and ip.get("stillUp") is True
+      and ip.get("idle3") is True and ip.get("finished") == "the slow operation finished",
+      json.dumps(ip)[:600])
+check("U8 ...and while a question card is pending (no operation holding the lock): 409 busy; "
+      "idle again, it quits",
+      (ip.get("quitCard") or {}).get("_status") == 409 and ip.get("stillUp2") is True
+      and (ip.get("quitIdle") or {}).get("ok") is True and ip.get("ended") is True,
+      json.dumps(ip)[:600])
 
 if FAIL:
     show_panel_logs()

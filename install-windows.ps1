@@ -15,6 +15,8 @@
 #   6. schedules the twice-daily ship (09:30, 21:30) when an archive is set
 #   7. points the archive sweep task at the new sweep.ps1, if you have one
 # Your ledger, config and backed-up frames are never touched.
+# While the FITs Importer App is in charge here (1.5.3), only the files are
+# updated: no watcher, Restart button or panel start (4, 5 and the start).
 
 param([switch]$NoStart)
 # 'Continue', not 'Stop': in Windows PowerShell 5.1 a native program writing
@@ -71,11 +73,6 @@ $bin = Join-Path $env:LOCALAPPDATA 'BrettjoAstro\bin'
 New-Item -ItemType Directory -Force -Path $bin -ErrorAction Stop | Out-Null
 New-Item -ItemType Directory -Force -Path (Join-Path $bin 'pc') -ErrorAction Stop | Out-Null
 
-# stop a running panel / watcher so the new build is picked up
-Get-CimInstance Win32_Process -ErrorAction SilentlyContinue |
-    Where-Object { $_.Name -match '^pythonw?\.exe$' -and $_.CommandLine -and $_.CommandLine -match 'astro-(app|watch)\.py' } |
-    ForEach-Object { try { Stop-Process -Id $_.ProcessId -Force -ErrorAction Stop; Info "Stopped the running $($_.Name) ($($_.ProcessId))" } catch { } }
-
 foreach ($f in @('astro-import.py', 'astro-app.py', 'astro-watch.py', 'selftest.py')) {
     $src = Join-Path $here $f
     if (-not (Test-Path -LiteralPath $src)) { Warn "Missing from the package: $f"; exit 1 }
@@ -86,6 +83,33 @@ foreach ($f in @('sweep.ps1', 'install_sweep.ps1')) {
     if (Test-Path -LiteralPath $src) { Copy-Item -LiteralPath $src -Destination (Join-Path $bin 'pc') -Force }
 }
 Ok "Engine, panel and watcher copied to $bin"
+
+# Who is in charge here, the web version or the FITs Importer App (1.5.3)?
+# While the app is, only files are updated: it runs its own watcher and panel.
+# >>> app-owner check (test_v2 runs this block on its own on Windows, with a fake engine)
+$owner = & $py -X utf8 "$bin\astro-import.py" --app-owner 2>$null
+$ownerRc = $LASTEXITCODE
+$appOwns = $ownerRc -eq 0 -and "$owner" -like 'app *'
+if ($appOwns) {
+    Info "The FITs Importer App is in charge here ($($owner -replace '^app ')): files updated only - no watcher, panel or Restart button"
+} elseif ($ownerRc -eq 2 -and "$owner" -like 'stale *') {
+    # the app was removed without handing back: the web version takes over again
+    $archived = & $py -X utf8 "$bin\astro-import.py" --app-owner --archive-stale 2>$null
+    if ($LASTEXITCODE -eq 0) {
+        Ok "The FITs Importer App is gone: the web version is back in charge ($archived)"
+    } else {
+        Warn "The FITs Importer App is gone, but its record could not be set aside - the web version runs anyway"
+    }
+}
+# <<< app-owner check
+
+# stop a running panel / watcher so the new build is picked up: only the web
+# version's own (bin\), never the app's
+if (-not $appOwns) {
+    Get-CimInstance Win32_Process -ErrorAction SilentlyContinue |
+        Where-Object { $_.Name -match '^pythonw?\.exe$' -and $_.CommandLine -and $_.CommandLine -match ([regex]::Escape("$env:LOCALAPPDATA\BrettjoAstro\bin\") + 'astro-(app|watch)\.py') } |
+        ForEach-Object { try { Stop-Process -Id $_.ProcessId -Force -ErrorAction Stop; Info "Stopped the running $($_.Name) ($($_.ProcessId))" } catch { } }
+}
 
 # ── 3. Config (never overwritten) ────────────────────────────────────────────
 $state = Join-Path $env:LOCALAPPDATA 'Astro Import'
@@ -117,16 +141,26 @@ $lnk.TargetPath = $pyw
 $lnk.Arguments = "-X utf8 `"$bin\astro-watch.py`""
 $lnk.WorkingDirectory = $bin
 $lnk.Description = 'Opens the FITS Importer when a Seestar or ASIAir is plugged in'
-$lnk.Save()
-Ok "Camera watcher starts at every logon"
+if (-not $appOwns) {
+    $lnk.Save()
+    Ok "Camera watcher starts at every logon"
+}
 
 # ── 5. Desktop restart button ────────────────────────────────────────────────
 $desktop = [Environment]::GetFolderPath('Desktop')
 $restart = @"
 @echo off
 rem BrettjoAstro FITS Importer - restart the control panel (Windows)
+rem app-owner check: begin
+"$py" -X utf8 "%LOCALAPPDATA%\BrettjoAstro\bin\astro-import.py" --app-owner >nul 2>&1
+if %errorlevel% equ 0 (
+    echo The FITs Importer App is in charge here: open it instead. You can close this window.
+    timeout /t 8 >nul
+    exit /b 0
+)
+rem app-owner check: end
 echo Restarting the FITS Importer panel...
-powershell -NoProfile -ExecutionPolicy Bypass -Command "Get-CimInstance Win32_Process | Where-Object { `$_.Name -match '^pythonw?\.exe$' -and `$_.CommandLine -match 'astro-app\.py' } | ForEach-Object { Stop-Process -Id `$_.ProcessId -Force }"
+powershell -NoProfile -ExecutionPolicy Bypass -Command "Get-CimInstance Win32_Process | Where-Object { `$_.Name -match '^pythonw?\.exe$' -and `$_.CommandLine -match ([regex]::Escape(`$env:LOCALAPPDATA + '\BrettjoAstro\bin\') + 'astro-app\.py') } | ForEach-Object { Stop-Process -Id `$_.ProcessId -Force }"
 timeout /t 1 /nobreak >nul
 start "" "$pyw" -X utf8 "%LOCALAPPDATA%\BrettjoAstro\bin\astro-app.py" --no-browser
 timeout /t 2 /nobreak >nul
@@ -136,8 +170,10 @@ echo Done - the panel is open in your browser. You can close this window.
 # cmd.exe reads batch files in the OEM code page — write it that way, so a
 # Python path with an accented user name survives
 $oem = [System.Text.Encoding]::GetEncoding([System.Globalization.CultureInfo]::CurrentCulture.TextInfo.OEMCodePage)
-[System.IO.File]::WriteAllText((Join-Path $desktop 'Restart FITS Importer.cmd'), ($restart -replace "`r?`n", "`r`n"), $oem)
-Ok "Restart FITS Importer is on your Desktop"
+if (-not $appOwns) {
+    [System.IO.File]::WriteAllText((Join-Path $desktop 'Restart FITS Importer.cmd'), ($restart -replace "`r?`n", "`r`n"), $oem)
+    Ok "Restart FITS Importer is on your Desktop"
+}
 
 # ── 6. Twice-daily ship (only with an archive) ───────────────────────────────
 $shipTask = 'BrettjoAstro FITS Importer ship'
@@ -190,7 +226,7 @@ if ($sweepTask) {
 }
 
 # ── 8. Start ─────────────────────────────────────────────────────────────────
-if (-not $NoStart) {
+if (-not $NoStart -and -not $appOwns) {
     Start-Process -FilePath $pyw -ArgumentList @('-X', 'utf8', "`"$bin\astro-watch.py`"") -WorkingDirectory $bin -WindowStyle Hidden
     Start-Process -FilePath $pyw -ArgumentList @('-X', 'utf8', "`"$bin\astro-app.py`"", '--no-browser') -WorkingDirectory $bin -WindowStyle Hidden
     Start-Sleep -Seconds 2
@@ -202,10 +238,14 @@ $ver = & $py -X utf8 "$bin\astro-import.py" --version 2>$null
 Write-Host ""
 Write-Host "All done: $ver" -ForegroundColor Green
 Write-Host ""
-Write-Host "Next:" -ForegroundColor White
-Write-Host "  1. Plug in your Seestar or ASIAir - the panel opens by itself (http://127.0.0.1:8765)."
-Write-Host "  2. Tick what you want and press Import. The first import starts this PC's ledger."
-Write-Host "  3. Check the install any time (in Terminal):  & `"$py`" -X utf8 `"$bin\selftest.py`""
+if (-not $appOwns) {
+    Write-Host "Next:" -ForegroundColor White
+    Write-Host "  1. Plug in your Seestar or ASIAir - the panel opens by itself (http://127.0.0.1:8765)."
+    Write-Host "  2. Tick what you want and press Import. The first import starts this PC's ledger."
+    Write-Host "  3. Check the install any time (in Terminal):  & `"$py`" -X utf8 `"$bin\selftest.py`""
+} else {
+    Write-Host "Open the FITs Importer App to import: it handles the cameras on this PC." -ForegroundColor White
+}
 Write-Host ""
 Write-Host "Frames go to $env:USERPROFILE\Documents\Astro (your C: workbench); the ledger lives in $state."
 if ($archiveSet) { Write-Host "Verified frames are filed into the archive at $archive." }

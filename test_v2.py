@@ -1709,7 +1709,7 @@ def wrun(*args, stdin="", script=SCRIPT, extra=None):
                           capture_output=True, text=True, encoding="utf-8",
                           errors="replace", timeout=120)
 r = wrun("--version")
-check("W1 --version names the one shared version", "1.5.2" in r.stdout, r.stdout + r.stderr)
+check("W1 --version names the one shared version", "1.5.3" in r.stdout, r.stdout + r.stderr)
 r = wrun("--once", script=os.path.join(os.path.dirname(SCRIPT), "astro-watch.py"))
 check("W1 the watcher finds the Seestar and the ASIAir by what is on each drive",
       f"ASIAir at {drives['G']}" in r.stdout and f"Seestar at {drives['F']}" in r.stdout,
@@ -2393,6 +2393,975 @@ for name in ("test_v2.py", "test_app.py", "test_env_helper.py"):
                  if NO_MOUNT.search(ln) and (name, ln.strip()) not in NO_MOUNT_OK]
 check("I1 no test file names a command that mounts a disk or makes a drive letter",
       not hits, str(hits))
+
+# ═══════════════ CHAIN U: what the FITs Importer App needs (1.5.3) ═══════════
+print("\n── Chain U: what the FITs Importer App needs from the web version (1.5.3) ──")
+# The app (app repo, PLAN.md "Upstream first") runs this same engine, panel and
+# watcher. Every check here fails on 1.5.2; where only part of a check is new,
+# the rest keeps it honest (a watcher that always stood aside would pass alone).
+HERE_WORDS = "this PC" if os.name == "nt" else "the Mac"      # the status line's
+HERE_MACHINE = "PC" if os.name == "nt" else "Mac"
+
+def upr(env, code, before=""):
+    """probe(), but a watcher that never returns is a failed check, not a hang."""
+    try:
+        return probe(env, code, before)
+    except subprocess.TimeoutExpired:
+        return {"error": "timed out"}
+
+def owner_record(env, app_path, owner="app", path=None):
+    """The app's owner record (only the app writes it; here the test does)."""
+    os.makedirs(env.state, exist_ok=True)
+    with open(path or os.path.join(env.state, "app-takeover.json"), "w", encoding="utf-8") as f:
+        json.dump({"owner": owner, "appPath": app_path, "appVersion": "0.1.0",
+                   "engine": "1.5.3", "at": "2026-09-26T101500", "steps": []}, f)
+
+def the_app(env):
+    """The app in this root, on disk; and where a trashed one used to be."""
+    p = os.path.join(env.root, "Applications", "BrettjoAstro FITs Importer.app")
+    os.makedirs(p, exist_ok=True)
+    return p, os.path.join(env.root, "Trash", "BrettjoAstro FITs Importer.app")
+
+def hold_lock(env, what="import"):
+    """import.lock held by a live process (this runner)."""
+    os.makedirs(env.state, exist_ok=True)
+    p = os.path.join(env.state, "import.lock")
+    with open(p, "w") as f:
+        json.dump({"pid": os.getpid(), "started": "2026-09-26T101500", "what": what}, f)
+    return p
+
+# U1 — the owner record: --app-owner answers the installers, watchers and app
+U1 = teh.Env("U1", asiair=False, seestar=False)
+OWNER = os.path.join(U1.state, "app-takeover.json")
+U1_APP, U1_GONE = the_app(U1)
+
+def app_owner(*extra, flags=(), cwd=None):
+    r = subprocess.run([sys.executable, *flags, SCRIPT, "--app-owner", *extra], env=U1.env,
+                       input="", capture_output=True, text=True, encoding="utf-8",
+                       errors="replace", timeout=120, cwd=cwd)
+    return r.returncode, r.stdout.strip()
+
+def handed_back():
+    return sorted(f for f in os.listdir(U1.state) if f.startswith("app-takeover.handed-back-"))
+
+os.makedirs(U1.state)
+got = app_owner()
+check("U1 --app-owner with no record: 'web', exit 1", got == (1, "web"), str(got))
+owner_record(U1, U1_APP)
+lock = hold_lock(U1)
+got = app_owner(flags=("-S",))                  # -S: no site-packages, so no astropy
+check("U1 ...the app's record, its app on disk: 'app <path>', exit 0 (a lock held, no astropy)",
+      got == (0, f"app {U1_APP}") and os.path.isfile(lock), str(got))
+os.remove(lock)
+owner_record(U1, U1_GONE)
+got = app_owner()
+check("U1 ...its app gone (trashed without handing back): 'stale <path>', exit 2",
+      got == (2, f"stale {U1_GONE}"), str(got))
+with open(OWNER, "w") as f:
+    f.write('{"owner": "app", "appPath": ')                # cut short
+bad = app_owner()
+owner_record(U1, U1_APP, owner="web")
+other = app_owner()
+check("U1 ...an unreadable record, or one not owned by 'app', means 'web', exit 1",
+      bad == (1, "web") and other == (1, "web"), str([bad, other]))
+# an appPath that isn't absolute means 'web' wherever it is asked from: the
+# installer (run from the home folder) and the watcher (run from /) never
+# disagree. Asked from the root, where the relative app path exists:
+rel = os.path.relpath(U1_APP, U1.root)
+got_rel = []
+for p in (rel, ".", os.path.join("Trash", "gone.app")):
+    owner_record(U1, p)
+    got_rel.append(app_owner(cwd=U1.root))
+check("U1 ...an appPath that isn't absolute (an existing relative one, '.', a missing one) "
+      "means 'web', exit 1: never app or stale",
+      os.path.isdir(os.path.join(U1.root, rel)) and got_rel == [(1, "web")] * 3, str(got_rel))
+owner_record(U1, U1_GONE)
+stale_bytes = open(OWNER, "rb").read()
+got = app_owner("--archive-stale")
+named = re.fullmatch(r"archived (app-takeover\.handed-back-[^\\/]+\.json)", got[1])
+kept = os.path.join(U1.state, named.group(1)) if named else ""
+after = app_owner()
+check("U1 --app-owner --archive-stale renames a stale record aside, exit 0 (never deleted), then 'web'",
+      got[0] == 0 and named is not None and handed_back() == [named.group(1)]
+      and not os.path.exists(OWNER) and open(kept, "rb").read() == stale_bytes
+      and after == (1, "web"), str([got, after, sorted(os.listdir(U1.state))]))
+owner_record(U1, U1_APP)
+got = app_owner("--archive-stale")
+still = os.path.isfile(OWNER)
+os.remove(OWNER)
+none = app_owner("--archive-stale")
+check("U1 ...and is plain --app-owner otherwise: the app's own record is never archived",
+      got == (0, f"app {U1_APP}") and still and none == (1, "web") and len(handed_back()) == 1,
+      str([got, none, handed_back()]))
+
+# the watcher, in-process in test mode, run through main() with time.sleep
+# replaced: each nap runs the next step, and after the last it stops the loop
+WATCH_LOOP = """
+import time
+spec = importlib.util.spec_from_file_location(
+    'watch', os.path.join(os.path.dirname(sys.argv[1]), 'astro-watch.py'))
+w = importlib.util.module_from_spec(spec); spec.loader.exec_module(w)
+class Stop(BaseException):
+    pass
+polls = []
+if hasattr(w, 'poll_once'):           # main() is the loop around poll_once (U4)
+    def _spy(*a, _poll=w.poll_once, **k):
+        polls.append(1)
+        return _poll(*a, **k)
+    w.poll_once = _spy
+w.panel_up = lambda: True             # as if the panel were up: on to the notification
+def _nap(s):
+    if not STEPS:
+        raise Stop()
+    STEPS.pop(0)()
+time.sleep = _nap
+sys.argv = ['astro-watch.py']
+try:
+    out = {'rc': w.main()}
+except Stop:
+    out = {'rc': 'still polling'}
+out['polls'] = len(polls)
+print(json.dumps(out))
+"""
+
+def acted(env):
+    return {k: len(teh.os_calls(env.root, k)) for k in ("notify", "browser", "panel-start")}
+
+def watch_log(env):
+    try:
+        with open(os.path.join(env.state, "Logs", "astro-watch.log"), encoding="utf-8") as f:
+            return f.read()
+    except OSError:
+        return ""
+
+U1wa = teh.Env("U1wapp")                                # a camera is plugged in
+owner_record(U1wa, the_app(U1wa)[0])
+got_a = upr(U1wa.env, WATCH_LOOP, before="STEPS = []\n")
+U1ws = teh.Env("U1wstale")
+owner_record(U1ws, the_app(U1ws)[1])
+got_s = upr(U1ws.env, WATCH_LOOP, before="STEPS = []\n")
+check("U1 the watcher exits 0 and does nothing while the app owns the machine (one log line); "
+      "on a stale record it acts as before",
+      got_a.get("rc") == 0 and "in charge" in watch_log(U1wa)
+      and acted(U1wa) == {"notify": 0, "browser": 0, "panel-start": 0}
+      and got_s.get("rc") == "still polling" and acted(U1ws)["notify"] == 1
+      and acted(U1ws)["browser"] == 1,
+      json.dumps([got_a, acted(U1wa), got_s, acted(U1ws)]) + watch_log(U1wa)[-200:])
+# the app takes over while the watcher runs: the next arrival is left alone
+U1wb = teh.Env("U1wlate", asiair=False)
+staged = os.path.join(U1wb.root, "app-takeover.staged.json")
+owner_record(U1wb, the_app(U1wb)[0], path=staged)
+got_b = upr(U1wb.env, WATCH_LOOP, before=(
+    f"STEPS = [lambda: (os.replace({staged!r}, "
+    f"{os.path.join(U1wb.state, 'app-takeover.json')!r}), os.makedirs({U1wb.cam!r}))]\n"))
+check("U1 ...and an arrival after the app took over is left alone (no panel, notification or browser)",
+      got_b.get("rc") in (0, "still polling") and not os.path.exists(staged)
+      and acted(U1wb) == {"notify": 0, "browser": 0, "panel-start": 0},
+      json.dumps([got_b, acted(U1wb)]) + watch_log(U1wb)[-200:])
+
+# the install check names the owner, and WARNs when both would run
+U1t = teh.Env("U1self", asiair=False, seestar=False)
+os.makedirs(U1t.state)
+set_to_start = (   # the web watcher's autostart: the Mac's LaunchAgent, the PC's Startup shortcut
+    os.path.join(U1t.root, "home", "Library", "LaunchAgents", "com.brettjohnson.astro-import.plist"),
+    os.path.join(U1t.env["APPDATA"], "Microsoft", "Windows", "Start Menu", "Programs", "Startup",
+                 "BrettjoAstro FITS Importer watcher.lnk"))
+
+def selftest():
+    r = irun(U1t.env, script=os.path.join(HERE, "selftest.py"))
+    return r.stdout + r.stderr
+
+def warns(out, word=""):
+    return [ln.strip() for ln in out.splitlines()
+            if ln.strip().startswith("WARN") and word in ln.lower()]
+
+out_web = selftest()
+t_app, t_gone = the_app(U1t)
+owner_record(U1t, t_app)
+out_off = selftest()
+for p in set_to_start:
+    os.makedirs(os.path.dirname(p), exist_ok=True)
+    open(p, "w").close()
+out_on = selftest()
+owner_record(U1t, t_gone)
+out_stale = selftest()
+check("U1 the install check names the owner: 'web version' with no record",
+      "web version" in out_web, out_web[-600:])
+check("U1 ...'FITs Importer App (<path>)' when the app owns it, and WARNs only while "
+      "the web watcher is still set to start",
+      f"FITs Importer App ({t_app})" in out_off and not warns(out_off, "watcher")
+      and warns(out_on, "watcher"), str(warns(out_off) + warns(out_on)) + out_off[-400:])
+check("U1 ...and no Restart-button WARN while the app owns it (the installer leaves the "
+      "button out then); with no record the WARN stays",
+      not warns(out_off, "restart") and not warns(out_on, "restart")
+      and warns(out_web, "restart"), str(warns(out_off) + warns(out_web)))
+check("U1 ...a stale record is a WARN, with the fix",
+      any("run the web installer, or reinstall the app" in ln for ln in warns(out_stale)),
+      str(warns(out_stale)) + out_stale[-400:])
+
+# The scripts' own owner checks. Tests never run the installers, the Restart
+# buttons, astro-watch.sh or the launcher: each script marks its owner check
+# ("# >>> app-owner check" ... "# <<< app-owner check"; "rem app-owner check:
+# begin/end" in the Windows Restart .cmd), and only that block runs here, in
+# a temp script with every path in a test root, launchctl and "open" stubbed,
+# and a fake engine answering as the app, a stale record, the web version, a
+# crash, or an engine too old to know --app-owner (exit 2, usage on stderr).
+U1g = teh.Env("U1gate", asiair=False, seestar=False)
+G_BIN = os.path.join(U1g.root, "home", "bin")                # ~/bin, the web version's
+G_WINBIN = os.path.join(U1g.env["LOCALAPPDATA"], "BrettjoAstro", "bin")
+G_APP = os.path.join(U1g.root, "Applications", "BrettjoAstro FITs Importer.app")
+G_CALLS = os.path.join(U1g.root, "engine-calls.jsonl")
+G_LAUNCHCTL = os.path.join(U1g.root, "launchctl.log")
+G_STUBS = os.path.join(U1g.root, "stubs")
+FAKE_ENGINE = '''import json, os, sys
+with open(os.environ["FAKE_CALLS"], "a", encoding="utf-8") as f:
+    f.write(json.dumps(sys.argv[1:]) + "\\n")
+mode, app = os.environ["FAKE_OWNER"], os.environ["FAKE_APP"]
+if mode == "crash":
+    raise RuntimeError("the engine crashed")
+if mode == "old":                        # 1.5.2's engine: no --app-owner at all
+    sys.stderr.write("usage: astro-import.py [-h] ...\\n"
+                     "astro-import.py: error: unrecognized arguments: --app-owner\\n")
+    sys.exit(2)
+if mode == "app":
+    print("app " + app)
+    sys.exit(0)
+if mode == "stale":
+    if "--archive-stale" in sys.argv:
+        print("archived app-takeover.handed-back-20260926T120000.json")
+        sys.exit(0)
+    print("stale " + app)
+    sys.exit(2)
+print("web")
+sys.exit(1)
+'''
+for d in (G_BIN, G_WINBIN, G_STUBS, G_APP):
+    os.makedirs(d, exist_ok=True)
+for d in (G_BIN, G_WINBIN):
+    with open(os.path.join(d, "astro-import.py"), "w", encoding="utf-8") as f:
+        f.write(FAKE_ENGINE)
+with open(os.path.join(G_STUBS, "launchctl"), "w") as f:
+    f.write(f'#!/bin/sh\necho "$*" >> "{G_LAUNCHCTL}"\n')
+os.chmod(os.path.join(G_STUBS, "launchctl"), 0o755)
+OWNER_MODES = ("app", "stale", "web", "crash", "old")
+
+def owner_block(path, begin="# >>> app-owner check", end="# <<< app-owner check"):
+    """The lines between a script's owner-check markers (None if not exactly one block)."""
+    with open(path, encoding="utf-8-sig") as f:
+        lines = f.read().splitlines()
+    a = [i for i, ln in enumerate(lines) if ln.strip().startswith(begin)]
+    b = [i for i, ln in enumerate(lines) if ln.strip().startswith(end)]
+    if len(a) != 1 or len(b) != 1 or b[0] <= a[0] + 1:
+        return None
+    return lines[a[0] + 1:b[0]]
+
+def gate_env(mode):
+    for p in (G_CALLS, G_LAUNCHCTL):
+        if os.path.exists(p):
+            os.remove(p)
+    return dict(U1g.env, FAKE_OWNER=mode, FAKE_CALLS=G_CALLS, FAKE_APP=G_APP,
+                PATH=G_STUBS + os.pathsep + teh.fake_os_commands(U1g.root)
+                + os.pathsep + U1g.env["PATH"])
+
+def gate_calls():
+    """The fake engine's calls (argv lists) and launchctl's, since gate_env()."""
+    calls = []
+    if os.path.exists(G_CALLS):
+        with open(G_CALLS, encoding="utf-8") as f:
+            calls = [json.loads(ln) for ln in f if ln.strip()]
+    lc = open(G_LAUNCHCTL).read().split("\n") if os.path.exists(G_LAUNCHCTL) else []
+    return calls, [x for x in lc if x]
+
+shq = lambda p: "'" + p.replace("'", "'\\''") + "'"         # a bash single-quoted word
+BASH_GATES = {   # script: (what the block needs set first, what it prints after)
+    "install-scripts.sh": (
+        "set -euo pipefail\n"
+        'info() { echo "INFO $1"; }; success() { echo "OK $1"; }; warn() { echo "WARN $1"; }\n'
+        f"BIN_DIR={shq(G_BIN)}\nPYCHECK={shq(sys.executable)}\n",
+        'echo "DECISION APP_OWNS=[$APP_OWNS]"\n'),
+    "astro-watch.sh": (
+        'wlog() { echo "LOG $1"; }\n'
+        f"PYTHON={shq(sys.executable)}\nIMPORT_SCRIPT={shq(os.path.join(G_BIN, 'astro-import.py'))}\n",
+        'echo "DECISION normal"\n'),
+    "Restart FITS Importer.command": (
+        f"PYTHON={shq(sys.executable)}\n", 'echo "DECISION normal"\n'),
+    os.path.join("BrettjoAstro FITS Importer.app", "Contents", "MacOS", "launcher"): (
+        'open() { echo "OPEN $*"; }\n'                  # never the real open
+        f"PYTHON={shq(sys.executable)}\n", 'echo "DECISION normal"\n'),
+}
+
+def bash_decision(name, rc, out):
+    calls, lc = gate_calls()
+    archived = ["--app-owner", "--archive-stale"] in calls
+    enabled = any(x.startswith("enable gui/") and x.endswith("/com.brettjohnson.astro-import")
+                  for x in lc)
+    if name == "install-scripts.sh":
+        m = re.search(r"^DECISION APP_OWNS=\[(.*)\]$", out, re.M)
+        if rc != 0 or not m:
+            return f"broken (rc={rc})"
+        if m.group(1):
+            return "skip web setup" if m.group(1) == G_APP and not archived and not lc \
+                else f"skip web setup?? {m.group(1)} {archived} {lc}"
+        if archived and enabled and len(lc) == 1:
+            return "archive+enable"
+        return "normal" if not archived and not lc else f"normal?? {archived} {lc}"
+    if "DECISION normal" in out:
+        return "normal" if "OPEN" not in out else "normal??"
+    if rc != 0:
+        return f"broken (rc={rc})"
+    if name.endswith("launcher"):
+        return "open the app" if f"OPEN -a {G_APP}" in out else "stand aside??"
+    return "stand aside"
+
+if os.name == "nt" or not shutil.which("bash"):
+    for name in BASH_GATES:
+        print(f"  SKIP  U1 {os.path.basename(name)}'s owner check (no bash here)")
+else:
+    for name, (pre, post) in BASH_GATES.items():
+        block = owner_block(os.path.join(HERE, name))
+        want = {"app": "open the app" if name.endswith("launcher") else
+                ("skip web setup" if name == "install-scripts.sh" else "stand aside"),
+                "stale": "archive+enable" if name == "install-scripts.sh" else "normal",
+                "web": "normal", "crash": "normal", "old": "normal"}
+        got = {}
+        if block is not None:
+            path = os.path.join(U1g.root, "block-" + os.path.basename(name).replace(" ", "-") + ".sh")
+            with open(path, "w", encoding="utf-8") as f:
+                f.write("#!/bin/bash\n" + pre + "\n".join(block) + "\n" + post)
+            for mode in OWNER_MODES:
+                r = subprocess.run(["bash", path], env=gate_env(mode), cwd=U1g.root,
+                                   stdin=subprocess.DEVNULL, capture_output=True, text=True,
+                                   encoding="utf-8", errors="replace", timeout=60)
+                got[mode] = bash_decision(name, r.returncode, r.stdout)
+        check(f"U1 {os.path.basename(name)}'s own owner check, run on its own: app → "
+              f"{want['app']}; stale → {want['stale']}; web, a crash or an old engine → normal",
+              got == want, json.dumps(got) if block is not None else "no marked block")
+
+# The Windows installer's owner check and the Restart .cmd it writes: the same,
+# through powershell.exe and cmd.exe (Windows only: they can't run here)
+with open(os.path.join(HERE, "install-windows.ps1"), encoding="utf-8-sig") as f:
+    PS_TEXT = f.read()
+CMD_BLOCK = owner_block(os.path.join(HERE, "install-windows.ps1"),
+                        begin="rem app-owner check: begin", end="rem app-owner check: end")
+cmd_exit = [ln.strip().lower() for ln in (CMD_BLOCK or [])]
+check("U1 the Restart .cmd's owner check waits before it closes (its message can be read)",
+      "exit /b 0" in cmd_exit and any(ln.startswith("timeout /t ") for ln in
+                                      cmd_exit[:cmd_exit.index("exit /b 0")]),
+      str(CMD_BLOCK))
+if os.name != "nt":
+    print("  SKIP  U1 install-windows.ps1's owner check through powershell.exe (Windows only)")
+    print("  SKIP  U1 the Restart .cmd's owner check through cmd.exe (Windows only)")
+else:
+    SYSROOT = os.environ.get("SYSTEMROOT") or r"C:\Windows"
+    POWERSHELL = os.path.join(SYSROOT, "System32", "WindowsPowerShell", "v1.0", "powershell.exe")
+    POWERSHELL = POWERSHELL if os.path.isfile(POWERSHELL) else "powershell.exe"
+    CMD = os.environ.get("COMSPEC") or "cmd.exe"
+    ps_block = owner_block(os.path.join(HERE, "install-windows.ps1"))
+    got = {}
+    if ps_block is not None:
+        path = os.path.join(U1g.root, "block-install-windows.ps1")
+        psq = lambda p: "'" + p.replace("'", "''") + "'"
+        with open(path, "w", encoding="utf-8-sig", newline="\r\n") as f:
+            f.write("$ErrorActionPreference = 'Continue'\n"
+                    "[Console]::OutputEncoding = New-Object System.Text.UTF8Encoding $false\n"
+                    'function Ok($m)   { Write-Output "OK $m" }\n'
+                    'function Info($m) { Write-Output "INFO $m" }\n'
+                    'function Warn($m) { Write-Output "WARN $m" }\n'
+                    f"$py = {psq(sys.executable)}\n$bin = {psq(G_WINBIN)}\n"
+                    + "\n".join(ps_block) + '\nWrite-Output "DECISION appOwns=$appOwns"\n')
+        for mode in OWNER_MODES:
+            r = subprocess.run([POWERSHELL, "-NoProfile", "-NonInteractive",
+                                "-ExecutionPolicy", "Bypass", "-File", path],
+                               env=gate_env(mode), cwd=U1g.root, stdin=subprocess.DEVNULL,
+                               capture_output=True, text=True, encoding="utf-8",
+                               errors="replace", timeout=120)
+            calls, _ = gate_calls()
+            archived = ["--app-owner", "--archive-stale"] in calls
+            if "DECISION appOwns=True" in r.stdout:
+                got[mode] = "skip web setup" if not archived else "skip web setup??"
+            elif "DECISION appOwns=False" in r.stdout:
+                got[mode] = "archive" if archived else "normal"
+            else:
+                got[mode] = f"broken (rc={r.returncode}) {(r.stdout + r.stderr)[-200:]}"
+    check("U1 install-windows.ps1's own owner check, run on its own: app → skip web setup; "
+          "stale → archive; web, a crash or an old engine → normal",
+          got == {"app": "skip web setup", "stale": "archive", "web": "normal",
+                  "crash": "normal", "old": "normal"},
+          json.dumps(got) if ps_block is not None else "no marked block")
+    got = {}
+    if CMD_BLOCK is not None:
+        path = os.path.join(U1g.root, "block-restart.cmd")
+        # the installer's here-string fills in $py; nothing else in the block is PowerShell's
+        text = "\n".join(CMD_BLOCK).replace('"$py"', f'"{sys.executable}"')
+        with open(path, "w", encoding="oem", errors="replace", newline="\r\n") as f:
+            f.write("@echo off\n" + text + "\necho DECISION normal\n")
+        for mode in OWNER_MODES:
+            r = subprocess.run([CMD, "/d", "/c", path], env=gate_env(mode), cwd=U1g.root,
+                               stdin=subprocess.DEVNULL, capture_output=True, text=True,
+                               encoding="oem", errors="replace", timeout=120)
+            if "DECISION normal" in r.stdout:
+                got[mode] = "normal"
+            elif "in charge here" in r.stdout:
+                got[mode] = "stand aside"
+            else:
+                got[mode] = f"broken (rc={r.returncode}) {(r.stdout + r.stderr)[-200:]}"
+    check("U1 the Restart .cmd's own owner check, run on its own: app → stand aside; "
+          "stale, web, a crash or an old engine → normal",
+          got == {"app": "stand aside", "stale": "normal", "web": "normal",
+                  "crash": "normal", "old": "normal"},
+          json.dumps(got) if CMD_BLOCK is not None else "no marked block")
+
+# ...and what the installers do with the answer: every web-only step (the
+# watcher, the Restart button, stopping the panel, starting it, the first-run
+# text) sits under an "only when the app isn't in charge" guard
+def bash_unguarded(path, steps):
+    """Lines doing one of `steps` (regexes) outside an if whose condition is
+    [ -z "$APP_OWNS" ] (or the else of [ -n "$APP_OWNS" ]), or an inline guard."""
+    stack, bad, heredoc = [], [], None
+    with open(path, encoding="utf-8") as f:
+        lines = f.read().splitlines()
+    for n, ln in enumerate(lines, 1):
+        t = ln.strip()
+        if heredoc:
+            heredoc = None if t == heredoc else heredoc
+            continue
+        if t.startswith("#") or not t:
+            continue
+        m = re.search(r"<<-?\s*'?(\w+)'?", t)
+        if m:
+            heredoc = m.group(1)
+        if t.startswith("if "):
+            stack.append([t, False])
+        elif t.startswith("elif "):
+            stack[-1] = [t, False]
+        elif (t == "else" or t.startswith("else ")) and stack:
+            stack[-1][1] = True
+        guarded = any(('-z "$APP_OWNS"' in c and not e) or ('-n "$APP_OWNS"' in c and e)
+                      for c, e in stack)
+        for rx in steps:
+            hit = re.search(rx, ln)
+            if hit and not guarded and '-z "$APP_OWNS"' not in ln[:hit.start()]:
+                bad.append(f"{n}: {t[:70]}")
+        if re.search(r"(^|[;\s])fi$", t) and stack:
+            stack.pop()
+    return bad
+
+def ps_unguarded(text, steps):
+    """The same for PowerShell: outside a { } block whose header says -not $appOwns
+    (here-string bodies are the .cmd's text, not code)."""
+    stack, bad, here = [], [], False
+    for n, ln in enumerate(text.splitlines(), 1):
+        t = ln.strip()
+        if here:
+            here = not t.startswith('"@')
+            continue
+        if t.startswith("#"):
+            continue
+        for rx in steps:
+            if re.search(rx, ln) and not any("-not $appOwns" in h for h in stack):
+                bad.append(f"{n}: {t[:70]}")
+        for i, ch in enumerate(ln):
+            if ch == "{":
+                stack.append(ln[:i])
+            elif ch == "}" and stack:
+                stack.pop()
+        if t.endswith('@"'):
+            here = True
+    return bad
+
+mac_bad = bash_unguarded(os.path.join(HERE, "install-scripts.sh"), (
+    r'cp "\$SCRIPT_DIR/Restart FITS Importer\.command"', r"\bpkill\b",
+    r'launchctl load "\$new_plist"', r'log "First run:"'))
+win_bad = ps_unguarded(PS_TEXT, (
+    r"\$lnk\.Save\(\)", r"WriteAllText\(\(Join-Path \$desktop", r"\bStop-Process\b",
+    r"Start-Process -FilePath \$pyw", r"Start-Process 'http", r'Write-Host "Next:"'))
+with open(os.path.join(HERE, "install-scripts.sh"), encoding="utf-8") as f:
+    SH_TEXT = f.read()
+check("U1 while the app is in charge, the installers only update files: the watcher, the "
+      "Restart button, the panel stop and start, and the first-run text are all guarded "
+      "(one line says to open the app instead)",
+      not mac_bad and not win_bad and "Open the FITs Importer App" in PS_TEXT
+      and "Open the FITs Importer App" in SH_TEXT, str(mac_bad + win_bad))
+
+# U2 — every kill pattern matches only the web version's own files. The Mac's
+# are real patterns (pkill -f is an extended regex on the whole command line):
+# fill in $HOME and the script's own variables, and try them on command lines
+U2_HOME = "/Users/brett"
+U2_WEB = [f"/usr/local/bin/python3 {U2_HOME}/bin/astro-app.py --no-browser",
+          "/Library/Frameworks/Python.framework/Versions/3.12/Resources/Python.app/"
+          f"Contents/MacOS/Python {U2_HOME}/bin/astro-app.py --no-browser"]
+U2_OLD = f"/usr/local/bin/python3 {U2_HOME}/bin/asiair-app.py"      # the old panel name
+U2_NOT = [  # the app's own Python, its own copies, a source folder, an editor (V9)
+    "/Applications/BrettjoAstro FITs Importer.app/Contents/Resources/python/bin/python3 "
+    "/Applications/BrettjoAstro FITs Importer.app/Contents/Resources/app/astro-app.py",
+    "/Applications/BrettjoAstro FITs Importer.app/Contents/MacOS/python3 "
+    f"{U2_HOME}/Library/Application Support/BrettjoAstro FITs Importer App/bin/astro-app.py",
+    f"/usr/local/bin/python3 {U2_HOME}/Code/brettjoastro-fits-importer/astro-app.py --port 50123",
+    f"vim {U2_HOME}/bin/astro-app.py"]
+
+def kill_patterns(path):
+    """Every pkill/pgrep -f pattern in a shell script, its variables filled in."""
+    vals = {"HOME": U2_HOME}
+    def fill(s):
+        return re.sub(r"\$\{?([A-Za-z_]\w*)\}?", lambda v: vals.get(v.group(1), v.group(0)), s)
+    pats = []
+    with open(path, encoding="utf-8") as f:
+        for ln in f:
+            if ln.lstrip().startswith("#"):
+                continue
+            a = re.match(r"\s*(?:export\s+|local\s+)?([A-Za-z_]\w*)="
+                         r"(?:\"([^\"]*)\"|'([^']*)'|([^\s;]*))", ln)
+            if a:
+                vals[a.group(1)] = a.group(3) if a.group(3) is not None \
+                    else fill(a.group(2) if a.group(2) is not None else a.group(4))
+            for k in re.finditer(r"\b(?:pkill|pgrep)\b(?:\s+-\w+)*?\s+-f\s+(?:--\s+)?"
+                                 r"(?:\"([^\"]*)\"|'([^']*)'|(\S+))", ln):
+                pats.append(k.group(2) if k.group(2) is not None
+                            else fill(k.group(1) if k.group(1) is not None else k.group(3)))
+    return pats
+
+u2 = {n: kill_patterns(os.path.join(HERE, n)) for n in (
+    "install-scripts.sh", "Restart FITS Importer.command", "astro-watch.sh",
+    os.path.join("BrettjoAstro FITS Importer.app", "Contents", "MacOS", "launcher"))}
+bad = []
+for n, pats in u2.items():
+    for p in pats:
+        try:
+            rx = re.compile(p)
+        except re.error as x:
+            bad.append(f"{n}: {p!r} ({x})")
+            continue
+        need = U2_WEB + ([U2_OLD] if n == "install-scripts.sh" else [])
+        miss = [c for c in need if not rx.search(c)]
+        hit = [c for c in U2_NOT if rx.search(c)]
+        if miss or hit:
+            bad.append(f"{n}: {p!r} misses {miss} / matches {hit}")
+check("U2 the Mac kill patterns (installer, Restart .command) match only ~/bin's panel: "
+      "never the app's own Python, a source folder or an editor",
+      u2["install-scripts.sh"] and u2["Restart FITS Importer.command"] and not bad,
+      str(bad or u2))
+# Windows: no pwsh here, so the filter lines are read: each names the web bin
+with open(os.path.join(HERE, "install-windows.ps1"), encoding="utf-8-sig") as f:
+    ps_filters = [ln.strip() for ln in f.read().splitlines() if "CommandLine" in ln]
+bare = [ln for ln in ps_filters
+        if "astro-" not in ln or not re.search(r"BrettjoAstro\\{1,2}bin|\$bin\b", ln)]
+check("U2 the Windows kill filters (installer and its Restart .cmd) name "
+      "%LOCALAPPDATA%\\BrettjoAstro\\bin: no bare astro-app.py match left",
+      len(ps_filters) >= 2 and not bare, str(bare or ps_filters))
+
+# U3 — a ledger from a newer version is never written by this one
+U3 = Env("U3")
+U3.add_light("Plan", "M 81", "0001", dt="20260720-221000")
+os.makedirs(U3.state)
+u3_ledger = os.path.join(U3.state, "ledger.json")
+newer = (json.dumps({"version": 2, "files": {}, "calibration": {}, "futureRows": {}},
+                    indent=1) + "\n").encode()
+with open(u3_ledger, "wb") as f:
+    f.write(newer)
+r = U3.run(stdin="n\n")
+out = r.stdout + r.stderr
+check("U3 an import refuses a ledger from a newer version (v2): exit 2, says so, "
+      "the ledger byte-identical, nothing copied",
+      r.returncode == 2 and "newer version of the importer" in out and "nothing was written" in out
+      and open(u3_ledger, "rb").read() == newer and not os.path.exists(u3_ledger + ".bak")
+      and count_fits(day_dir(U3, "M 81 - Bode's Galaxy", 1)) == 0,
+      f"rc={r.returncode} {out[-300:]}")
+rv, rs, ro = U3.run("--version"), U3.run("--status"), U3.run("--app-owner")
+check("U3 ...while --version, --status and --app-owner still answer (status: unknown, "
+      "never 'safe', for a newer ledger)",
+      rv.returncode == 0 and "1.5.3" in rv.stdout
+      and (rs.returncode, rs.stdout.strip())
+      == (0, "Status unknown: the ledger is from a newer version of the importer")
+      and (ro.returncode, ro.stdout.strip()) == (1, "web") and open(u3_ledger, "rb").read() == newer,
+      str([(x.returncode, (x.stdout + x.stderr)[-150:]) for x in (rv, rs, ro)]))
+
+def dest_fits(env):
+    return sum(1 for _d, _s, fs in os.walk(env.dest) for f in fs if f.lower().endswith(".fit"))
+
+# ...and every path that restores or re-reads the ledger refuses a newer one
+# before anything is copied, tagged or deleted: the mirror (a first run, or
+# --restore-ledger), the .bak, and a ledger replaced after the first look
+U3m = Env("U3mirror")
+U3m.add_light("Plan", "M 81", "0001", dt="20260720-221000")
+U3m.run("--baseline")
+m_led = os.path.join(U3m.mirror, "ledger.json")
+with open(m_led, encoding="utf-8") as f:
+    mled = json.load(f)
+mled["version"] = 2                                     # the app's newer ledger, mirrored
+with open(m_led, "w", encoding="utf-8") as f:
+    json.dump(mled, f)
+with open(m_led, "rb") as f:
+    m_bytes = f.read()
+for n in ("ledger.json", "ledger.json.bak"):           # this Mac's own copy lost
+    if os.path.exists(os.path.join(U3m.state, n)):
+        os.remove(os.path.join(U3m.state, n))
+u3_new = [U3m.add_light("Plan", "M 81", "0002", dt="20260721-220512"),
+          U3m.add_light("Plan", "M 81", "0003", dt="20260721-221012")]
+
+def u3_yes(env, *args):
+    """A run that answers yes to everything it is asked."""
+    return subprocess.run([sys.executable, SCRIPT, *args], env=dict(env.env, ASTRO_STDIN_PROMPTS="1"),
+                          input="y\ny\ny\ny\n", capture_output=True, text=True,
+                          encoding="utf-8", errors="replace", timeout=120)
+
+r1, r2 = u3_yes(U3m, "--no-ship"), u3_yes(U3m, "--restore-ledger")
+out1, out2 = r1.stdout + r1.stderr, r2.stdout + r2.stderr
+check("U3 a newer importer's ledger in the mirror is never restored: a first-run import "
+      "stops (exit 2) before it copies or tags anything, and --restore-ledger copies nothing",
+      r1.returncode == 2 and "newer version of the importer" in out1 and dest_fits(U3m) == 0
+      and "Tagging" not in out1 and all(os.path.isfile(p) for p in u3_new)
+      and r2.returncode == 2 and "newer version of the importer" in out2
+      and not os.path.exists(os.path.join(U3m.state, "ledger.json"))
+      and open(m_led, "rb").read() == m_bytes,
+      f"rc={r1.returncode}/{r2.returncode} fits={dest_fits(U3m)} {out1[-300:]} | {out2[-200:]}")
+U3b = Env("U3bak")
+U3b.add_light("Plan", "M 81", "0001", dt="20260720-221000")
+os.makedirs(U3b.state)
+with open(os.path.join(U3b.state, "ledger.json"), "w") as f:
+    f.write("{not json")                                   # unreadable: the .bak is used
+with open(os.path.join(U3b.state, "ledger.json.bak"), "wb") as f:
+    f.write(newer)
+r = u3_yes(U3b, "--no-ship")
+check("U3 ...an unreadable ledger whose .bak is a newer importer's: refused (exit 2), nothing "
+      "copied, both files as they were",
+      r.returncode == 2 and "newer version of the importer" in r.stdout + r.stderr
+      and dest_fits(U3b) == 0 and open(os.path.join(U3b.state, "ledger.json")).read() == "{not json"
+      and open(os.path.join(U3b.state, "ledger.json.bak"), "rb").read() == newer,
+      f"rc={r.returncode} {(r.stdout + r.stderr)[-300:]}")
+# the ledger is fine at the first look, and a newer importer saves it before
+# the lock is taken: re-read under the lock, it is refused again
+U3r = Env("U3race")
+U3r.add_light("Plan", "M 81", "0001", dt="20260720-221000")
+os.makedirs(U3r.state)
+got = probe(dict(U3r.env, ASTRO_STDIN_PROMPTS="1"), """
+led = os.path.join(m.STATE_DIR, 'ledger.json')
+v1 = json.dumps({'version': 1, 'files': {}, 'calibration': {}})
+v2 = json.dumps({'version': 2, 'files': {}, 'calibration': {}})
+real = m.acquire_lock
+def acquire(what='import'):
+    ok = real(what)
+    with open(led, 'w') as f:
+        f.write(v2)                        # a newer importer saved it just now
+    return ok
+m.acquire_lock = acquire
+out = {}
+for argv in (['--no-ship'], ['--ship'], ['--discard', 'M 81'], ['--skip-target', 'M 81']):
+    with open(led, 'w') as f:
+        f.write(v1)
+    sys.argv = ['astro-import.py'] + argv
+    try:
+        m.main()
+        out[argv[0]] = 'ran'
+    except SystemExit as e:
+        out[argv[0]] = e.code
+out['after'] = open(led).read() == v2
+print(json.dumps(out))
+""")
+check("U3 ...a ledger a newer importer saves after the first look is refused again under the "
+      "lock (exit 2) by an import, --ship, --discard and --skip-target; nothing copied",
+      got == {"--no-ship": 2, "--ship": 2, "--discard": 2, "--skip-target": 2, "after": True}
+      and dest_fits(U3r) == 0, json.dumps(got)[:300] + f" fits={dest_fits(U3r)}")
+
+# U4 — the watcher imports cleanly and polls through poll_once(), on this OS too
+U4 = teh.Env("U4", asiair=False, seestar=False)
+u4_drive = os.path.join(U4.root, "drives", "F")
+u4_out = os.path.join(U4.root, "unplugged-F")        # a Seestar card, out of its slot
+teh.make_seestar_fits(os.path.join(u4_out, "MyWorks", "M 42_sub", "20260926-210000.fit"),
+                      creator="Seestar S50 Pro", uniq="u4-sub")
+os.makedirs(os.path.dirname(u4_drive))
+u4env = dict(U4.env, SEESTAR_VOLUME=os.path.join(U4.root, "no-seestar-volume"),
+             ASTRO_DRIVE_ROOTS=u4_drive)
+u4env.pop("ASIAIR_VOLUME")                           # the drive-root search, as W1
+POLL_PROBE = """
+def files():
+    return sorted(os.path.join(d, f) for d, _s, fs in os.walk(m.TEST_ROOT) for f in fs)
+before = files()
+spec = importlib.util.spec_from_file_location(
+    'watch', os.path.join(os.path.dirname(sys.argv[1]), 'astro-watch.py'))
+w = importlib.util.module_from_spec(spec); spec.loader.exec_module(w)
+out = {'quiet': files() == before}
+calls = []
+st = w.load_state()
+def look():
+    ev = w.poll_once(st, on_arrival=lambda *a, **k: calls.append(['arrival', list(a), k]),
+                     on_removed=lambda *a, **k: calls.append(['removed', list(a), k]),
+                     on_rearrived=lambda *a, **k: calls.append(['rearrived', list(a), k]))
+    try:
+        with open(w.STATE_PATH, encoding='utf-8') as f:
+            saved = json.load(f)
+    except (OSError, ValueError):
+        saved = {}
+    return [ev, len(calls), saved.get('presence'),
+            [saved.get('notifiedSet'), bool(saved.get('notifiedAt'))]]
+steps = [look()]
+os.rename(OUT, DRIVE)
+steps += [look(), look()]
+os.rename(DRIVE, OUT)
+steps += [look()]
+os.rename(OUT, DRIVE)                 # the same card back seconds later: a loose cable
+steps += [look()]
+os.rename(DRIVE, OUT)
+steps += [look()]
+w.FLAP_GUARD_S = 0                    # the guard has run out
+os.rename(OUT, DRIVE)
+steps += [look()]
+out.update(steps=steps, calls=calls)
+print(json.dumps(out))
+"""
+got = upr(u4env, POLL_PROBE, before=f"OUT, DRIVE = {u4_out!r}, {u4_drive!r}\n")
+steps = (got.get("steps") or []) + [[None, 0, None, None]] * 7
+calls = (got.get("calls") or []) + [[None, [], {}]] * 5
+
+def event(step):
+    """A look's only event as (kind, payload), else (None, None)."""
+    ev = step[0]
+    if isinstance(ev, list) and len(ev) == 1 and isinstance(ev[0], list) and len(ev[0]) == 2:
+        return tuple(ev[0])
+    return None, None
+
+def same(a, b):
+    n = lambda p: os.path.normcase(os.path.realpath(p)).rstrip("\\/")
+    return isinstance(a, str) and n(a) == n(b)
+
+def passed(call, found):
+    """Was `found` handed to this callback?"""
+    return found in call[1] + list(call[2].values())
+
+kind, found = event(steps[1])
+found = found if isinstance(found, dict) else {}
+check("U4 the watcher imports with no side effects (no file, no OS call); "
+      "poll_once() with no camera: []",
+      got.get("quiet") is True and steps[0][0] == [] and not teh.os_calls(U4.root),
+      json.dumps(got)[:400])
+check("U4 poll_once on a fake drive root: an arrival → [('arrived', found)], on_arrival(found), "
+      "the state file saved; no change → []",
+      kind == "arrived" and set(found) == {"Seestar"} and same(found.get("Seestar"), u4_drive)
+      and steps[1][1] == 1 and calls[0][0] == "arrival" and passed(calls[0], found)
+      and steps[1][2] not in (None, "none") and steps[2][:2] == [[], 1],
+      json.dumps(got)[:400])
+check("U4 ...and a removal → [('gone', previous)], on_removed(previous), saved as none",
+      bool(found) and event(steps[3]) == ("gone", found) and steps[3][1] == 2
+      and calls[1][0] == "removed" and passed(calls[1], found) and steps[3][2] == "none",
+      json.dumps(got)[:400])
+check("U4 poll_once keeps the flap guard itself (for the app too): the arrival acted on is "
+      "saved with it (notifiedSet, notifiedAt) in the same save; back within FLAP_GUARD_S → "
+      "[('rearrived', found)] and on_rearrived, never a second on_arrival; later, an arrival",
+      bool(found) and steps[1][3] == [steps[1][2], True]
+      and event(steps[4]) == ("rearrived", found) and event(steps[6]) == ("arrived", found)
+      and [c[0] for c in calls[:5]] == ["arrival", "removed", "rearrived", "removed", "arrival"]
+      and passed(calls[2], found), json.dumps(got)[-600:])
+U4f = teh.Env("U4flap")                              # a camera is plugged in
+unplugged = U4f.cam + "-unplugged"
+got = upr(U4f.env, WATCH_LOOP, before=(
+    f"STEPS = [lambda: os.rename({U4f.cam!r}, {unplugged!r}), "
+    f"lambda: os.rename({unplugged!r}, {U4f.cam!r})]\n"))
+check("U4 main() is the loop around poll_once: an arrival is acted on as before (notification, "
+      "browser); re-plugged within 10 minutes, no second one (flap guard)",
+      got.get("polls", 0) >= 3 and got.get("rc") == "still polling"
+      and acted(U4f) == {"notify": 1, "browser": 1, "panel-start": 0},
+      json.dumps([got, acted(U4f)]) + watch_log(U4f)[-300:])
+
+# U5 — NOTIFY_FN: the app shows notifications itself
+U5 = teh.Env("U5", asiair=False, seestar=False)
+e = dict(U5.env)
+e["PATH"] = teh.fake_os_commands(U5.root) + os.pathsep + e["PATH"]
+got = probe(e, """
+got = []
+m.NOTIFY_FN = lambda message, title: got.append([message, title])
+m.notify('3 frames imported', 'FITS Importer - import complete', sound=True)
+def _boom(message, title):
+    raise RuntimeError('the app is closing')
+m.NOTIFY_FN = _boom
+try:
+    m.notify('into a closing app')
+    quiet = True
+except Exception as x:
+    quiet = repr(x)
+m.NOTIFY_FN = None
+m.notify('plain')
+m.notify('chime', 'FITS Importer', sound=True)
+print(json.dumps({'got': got, 'quiet': quiet}))
+""")
+notes = teh.os_calls(U5.root, "notify")
+check("U5 NOTIFY_FN receives message and title; nothing is recorded or run",
+      got.get("got") == [["3 frames imported", "FITS Importer - import complete"]]
+      and not [c for c in notes if c.get("message") in ("3 frames imported", "into a closing app")]
+      and (os.name == "nt" or not teh.executed(U5.root)),
+      json.dumps(got)[:300] + json.dumps(notes)[:300])
+check("U5 ...a NOTIFY_FN that fails never stops the engine", got.get("quiet") is True,
+      json.dumps(got)[:300])
+check("U5 without one, test mode records the notification with its sound (False, True when asked)",
+      [(c.get("message"), c.get("sound")) for c in notes] == [("plain", False), ("chime", True)],
+      json.dumps(notes)[:300])
+
+# U6 — import.lock says what holds it
+U6 = teh.Env("U6", asiair=True, seestar=False)   # a camera, so an import gets as far as the lock
+got = probe(U6.env, """
+out = {}
+for what in (None, 'ship'):
+    ok = m.acquire_lock() if what is None else m.acquire_lock(what)
+    with open(m.LOCK_PATH, encoding='utf-8') as f:
+        out[str(what)] = [ok, json.load(f).get('what')]
+    m.release_lock()
+seen = []
+m.acquire_lock = lambda what='import': seen.append(what) or False
+for argv in (['--ship'], ['--discard', 'M 42'], ['--no-ship']):
+    sys.argv = ['astro-import.py'] + argv
+    try:
+        m.main()
+    except SystemExit:
+        pass
+out['callers'] = seen
+print(json.dumps(out))
+""")
+check("U6 import.lock records what holds it ('import' by default, else as passed)",
+      got.get("None") == [True, "import"] and got.get("ship") == [True, "ship"],
+      json.dumps(got)[:300])
+check("U6 ...and the engine's callers pass the right word: ship, discard, import",
+      got.get("callers") == ["ship", "discard", "import"], json.dumps(got)[:300])
+lock = hold_lock(U6, "ship")
+r = U6.run("--skip-target", "M 42")
+check("U6 a command meeting the held lock says what holds it ('The twice-daily ship to the PC "
+      "is running right now')",
+      r.returncode == 1
+      and "The twice-daily ship to the PC is running right now" in r.stdout + r.stderr,
+      f"rc={r.returncode} " + (r.stdout + r.stderr)[-300:])
+os.remove(lock)
+lock = hold_lock(U6, "panel")
+r = U6.run("--skip-target", "M 42")
+check("U6 ...and a lock the panel holds reads 'The panel is busy right now', not 'another panel'",
+      r.returncode == 1 and "The panel is busy right now" in r.stdout + r.stderr
+      and "Another panel" not in r.stdout + r.stderr,
+      f"rc={r.returncode} " + (r.stdout + r.stderr)[-300:])
+os.remove(lock)
+
+# U9 — the status line: frames whose only copy is on this computer
+U9 = teh.Env("U9", asiair=False, seestar=False)
+os.makedirs(U9.state)
+
+def u9_ledger(counted):
+    """`counted` frames only here, and one of each kind that must not count."""
+    rows = {}
+    def row(name, **kw):
+        e = {"target": "M 42", "filename": name, "device": "seestar",
+             "camera": "ZWO Seestar S50 Pro", "sourceType": "sub", "origin": "import",
+             "size": 2880, "verifiedAtImport": True, "clearedFromCamera": True}
+        e.update(kw)
+        rows[f"MyWorks/M 42_sub/{name}"] = e
+    for i in range(counted):
+        row(f"20260901-{i:06d}.fit")
+    row("20260902-210000.fit", clearedFromCamera=False)              # still on the camera
+    row("20260902-210100.fit", archiveVerifiedAt="2026-09-03T090000")  # the PC has it too
+    row("20260902-210200.fit", verifiedAtImport=False)               # never proven (baseline)
+    row("20260902-210300.jpg", sourceType="sub-jpg")                 # a preview rider: never ships
+    with open(os.path.join(U9.state, "ledger.json"), "w", encoding="utf-8") as f:
+        json.dump({"version": 1, "files": rows, "calibration": {}}, f)
+
+def u9_status(*extra):
+    r = U9.run("--status", *extra)
+    if "--json" not in extra:
+        return r.returncode, r.stdout.strip()
+    try:
+        return r.returncode, json.loads(r.stdout)
+    except ValueError:
+        return r.returncode, (r.stdout + r.stderr)[-200:]
+
+u9_ledger(0)
+a, b = u9_status(), u9_status("--json")
+check("U9 --status: 'Everything is safe' when nothing is only here (uncleared, PC-verified, "
+      "unproven and rider rows don't count)",
+      a == (0, "Everything is safe") and b == (0, {"safe": True, "onlyHere": 0,
+                                                   "text": "Everything is safe",
+                                                   "machine": HERE_MACHINE}), str([a, b]))
+u9_ledger(1)
+a = u9_status()
+check(f"U9 ...one frame: '1 frame only on {HERE_WORDS}'", a == (0, f"1 frame only on {HERE_WORDS}"),
+      str(a))
+u9_ledger(2769)
+lock = hold_lock(U9)
+a, b = u9_status(), u9_status("--json")
+check("U9 ...2,769 frames, with the thousands separator; --json gives the dict; "
+      "no lock taken (one is held), exit 0",
+      a == (0, f"2,769 frames only on {HERE_WORDS}")
+      and b == (0, {"safe": False, "onlyHere": 2769, "text": f"2,769 frames only on {HERE_WORDS}",
+                    "machine": HERE_MACHINE}) and os.path.isfile(lock), str([a, b]))
+os.remove(lock)
+FORCE = """
+out = []
+for win in (True, False):
+    m.IS_WINDOWS, m.IS_MAC = win, not win
+    m.PLATFORM, m.MACHINE_LABEL = ('windows', 'PC') if win else ('mac', 'Mac')
+    out.append(m.status_summary(m.State()))
+print(json.dumps(out))
+"""
+many = probe(U9.env, FORCE)
+os.makedirs(os.path.join(U9.archive, "S50P"))        # a reachable archive, nothing to ship
+r = U9.run("--ship")
+u9_ledger(1)
+one = probe(U9.env, FORCE)
+both = (one if isinstance(one, list) else [one]) + (many if isinstance(many, list) else [many])
+check("U9 the platform forced in-process: '1 frame only on this PC', '2,769 frames only on "
+      "this PC', machine PC (and the Mac's wording forced the other way)",
+      [(x.get("text"), x.get("machine")) for x in both]
+      == [("1 frame only on this PC", "PC"), ("1 frame only on the Mac", "Mac"),
+          ("2,769 frames only on this PC", "PC"), ("2,769 frames only on the Mac", "Mac")],
+      json.dumps(both)[:400])
+check("U9 the ship summary line is unchanged (2769, no separator), the same count as --status",
+      "✓ Shipped 0 file(s). Problems: 0. Frames cleared from a camera and not yet "
+      "PC-verified: 2769." in r.stdout.splitlines()
+      and isinstance(b[1], dict) and b[1].get("onlyHere") == 2769, r.stdout[-400:])
+# never "safe" when it can't tell: no ledger yet, an unreadable ledger, and the
+# .bak recovery warning never mixed into --json (the app parses it)
+U9n = teh.Env("U9n", asiair=False, seestar=False)
+r = U9n.run("--status")
+check("U9 with no ledger yet: 'Nothing imported yet', not 'Everything is safe'",
+      r.returncode == 0 and r.stdout.strip() == "Nothing imported yet", (r.stdout + r.stderr)[-200:])
+with open(os.path.join(U9.state, "ledger.json"), "w") as f:
+    f.write("{not json")
+shutil.copy(os.path.join(U9.state, "ledger.json"), os.path.join(U9.state, "ledger.json.bak"))
+a, b = u9_status(), u9_status("--json")
+check("U9 ledger and .bak unreadable: 'Status unknown: the ledger can't be read', safe false, "
+      "and --json is still pure JSON",
+      a[0] == 0 and a[1].splitlines()[-1] == "Status unknown: the ledger can't be read"
+      and b[0] == 0 and isinstance(b[1], dict) and b[1].get("safe") is False
+      and b[1].get("onlyHere") is None, str([a, b]))
+u9_ledger(1)
+shutil.copy(os.path.join(U9.state, "ledger.json"), os.path.join(U9.state, "ledger.json.bak"))
+with open(os.path.join(U9.state, "ledger.json"), "w") as f:
+    f.write("{not json")
+r = U9.run("--status", "--json")
+try:
+    rec = json.loads(r.stdout)
+except ValueError:
+    rec = None
+check("U9 recovering from ledger.json.bak: the warning goes to stderr, --json stays parseable",
+      isinstance(rec, dict) and rec.get("onlyHere") == 1 and "ledger.json.bak" in r.stderr,
+      (r.stdout + " | " + r.stderr)[-300:])
+
+# U11 — a frozen app is never re-launched as "python -X utf8"
+U11 = teh.Env("U11", asiair=False, seestar=False)
+got = probe(dict(U11.env, PYTHONUTF8="0"), """
+import subprocess
+class _Spawned(Exception):
+    pass
+def _popen(*a, **k):
+    raise _Spawned()
+subprocess.Popen = _popen
+m.IS_WINDOWS = True                  # the only platform that re-launches
+out = {'utf8': sys.flags.utf8_mode}
+for frozen in (False, True):
+    if frozen:
+        sys.frozen = True
+    try:
+        m._platform_bootstrap(sys.argv[1])
+        out[str(frozen)] = 'no relaunch'
+    except _Spawned:
+        out[str(frozen)] = 'relaunched'
+print(json.dumps(out))
+""")
+check("U11 with sys.frozen set, _platform_bootstrap never re-launches "
+      "(Windows forced, UTF-8 mode off; without sys.frozen it does)",
+      got == {"utf8": 0, "False": "relaunched", "True": "no relaunch"}, json.dumps(got))
 
 # ═══════════════ Summary ═════════════════════════════════════════════════════
 print("\n═══════════════════════════════════════════════════")

@@ -41,7 +41,7 @@ commands he can paste, and go one step at a time.
 
 ## Testing
 
-- Mac: `/usr/local/bin/python3 test_v2.py` (engine, 328 checks) and `/usr/local/bin/python3 test_app.py` (panel, 93 checks). Use python.org's Python, which has astropy; Apple's `python3` may not.
+- Mac: `/usr/local/bin/python3 test_v2.py` (engine, 375 checks) and `/usr/local/bin/python3 test_app.py` (panel, 120 checks). Use python.org's Python, which has astropy; Apple's `python3` may not.
 - **Tests run in test mode, always** (1.5.2). Build every environment a test starts with `test_env_helper.make_env(root)`. Call `teh.isolate_runner()` at the top of a test file, before it loads the engine in-process. With `ASTRO_TEST_ROOT` set:
   - the engine, panel, watcher and self-test refuse any path outside the root, and never use port 8765;
   - dialogs, notifications, ejects, mounts and "open" are written to `<root>/os-calls.jsonl` instead of happening. Check them with `teh.os_calls()`.

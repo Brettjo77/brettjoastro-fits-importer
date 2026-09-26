@@ -102,6 +102,14 @@ ensure_panel_silently() {
     spawn_panel --silent
 }
 
+# ── The FITs Importer App runs its own watcher: stand aside (1.5.3) ────────
+# >>> app-owner check (test_v2 runs this block on its own, with a fake engine)
+if "$PYTHON" "$IMPORT_SCRIPT" --app-owner >/dev/null 2>&1; then
+    wlog "the FITs Importer App is in charge here — nothing to do"
+    exit 0
+fi
+# <<< app-owner check
+
 NOW="$(date +%s)"
 read_state
 
