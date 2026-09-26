@@ -1,16 +1,16 @@
 # Optional: keeping the Mac and a PC archive in sync
 
 *Skip this whole page unless you keep an archive on another computer. Nothing
-here is installed until you configure it. Written for the author's setup (a
-Windows PC called SKYLARKPC sharing `E:\Astro Image Data`); change the names to
-yours.*
+here is installed until you configure it. Written for a setup like the author's (a
+Windows PC sharing `E:\Astro Image Data`, called YOURPC below); change the names
+to yours.*
 
 No permanent connection between the machines is needed. The Mac connects to the PC's share only when it has something to file, using the password saved in your keychain, and disconnects when done. Checks run twice a day (09:00 and 21:00) plus straight after every import.
 
 ## Part A: on the Mac (about 10 minutes, once)
 
 1. Save the share password in the keychain, once.
-   Finder, Go, Connect to Server, type `smb://astro@SKYLARKPC/AstroImageData` (your PC's name and share), click Connect, enter the password, and tick **Remember this password in my keychain**. Once it has mounted you can eject it; the Mac now knows how to reconnect on its own.
+   Finder, Go, Connect to Server, type `smb://youruser@YOURPC/AstroImageData` (your PC's name and share), click Connect, enter the password, and tick **Remember this password in my keychain**. Once it has mounted you can eject it; the Mac now knows how to reconnect on its own.
 
 2. Tell the engine where the share lives, once (adds two lines to your config):
 
@@ -20,7 +20,7 @@ No permanent connection between the machines is needed. The Mac connects to the 
        os.makedirs(os.path.dirname(p), exist_ok=True)
        c=json.load(open(p)) if os.path.exists(p) else {}
        c["ASTRO_ARCHIVE_MOUNT"]="/Volumes/AstroImageData"
-       c["ASTRO_ARCHIVE_URL"]="smb://astro@SKYLARKPC/AstroImageData"
+       c["ASTRO_ARCHIVE_URL"]="smb://youruser@YOURPC/AstroImageData"
        json.dump(c,open(p,"w"),indent=2); print("config updated")
        PY
 
