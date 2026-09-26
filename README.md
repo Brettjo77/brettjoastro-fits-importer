@@ -30,6 +30,7 @@ Smart telescopes fill up fast, and hand-copying folders leaves you guessing. Mos
 **The control panel**
 
 - One-page app layout: the page never scrolls; the target list, activity log, and report panes scroll inside their own cards, with camera storage as a live meter in the header
+- **A status line in the header** (1.5.3): **Everything is safe**, or **N frames only on the Mac** ("only on this PC" on Windows). The count is frames already cleared from a camera whose only verified copy is on this computer, until the PC's sweep checks the archive copy; hover over it for that in a sentence. A new machine says "Nothing imported yet", and a ledger it can't read gives "Status unknown": it never says safe when it can't tell
 - **Calibration pairings up front**: the scan runs the real matching gates and shows which bias/dark/flat *sets* pair with which target — each pairing pre-ticked, untickable, so the import runs without interrupting you; only genuinely questionable pairings still ask (and the question names the set, its date and rotation versus your lights')
 - **"Where files will land"**: a live destination tree showing the exact Day folders and calibration links the import will create — computed by the same code the import uses, updating as you tick and untick
 - Targets and the backed-up inventory in date order, newest first, with last-shot dates
@@ -173,9 +174,10 @@ a differing file on the archive is reported and left alone. Set
 
 - The ASIAir is never modified (apart from optional "done" Finder tags). The Seestar is only ever cleared by the SAFE clear — every file proven backed up and verified, checked again at the moment of deletion, after your explicit Yes — or by a discard you asked for and confirmed by typing DISCARD, which fingerprints every file into the ledger first. Nothing is ever deleted from your Mac or the archive by an import
 - An empty scan never clears ledger flags (a half-mounted drive can't fake "files vanished"), and each camera's scan can only ever touch its own entries
-- A concurrency lock (atomically created, with stale-PID detection) stops two imports colliding — the panel's Report takes the same lock, so a report save can never race an import
+- A concurrency lock (atomically created, with stale-PID detection) stops two imports colliding — the panel's Report takes the same lock, so a report save can never race an import. Whatever finds it held says what is busy, in the same words on the command line and the panel: "Another import is already running", "The twice-daily ship to the PC is running right now" or "The panel is busy right now"
 - The panel server answers **only** its own page: a non-local Host, any Origin other than exactly `http://127.0.0.1:<its port>` (another localhost port included), non-JSON bodies and requests without the per-launch token the page carries are all refused; it can't be framed by another site; and every answer names the question it answers — the first answer wins, so neither a stale click nor a double click can land on the wrong card
 - The ledger is plain JSON written with fsync-then-atomic-rename (and recovered loudly from its `.bak` if it is ever unreadable), history is an append-only JSONL log, and a published mirror folder keeps browsable copies of both plus the dashboard and last report — **point the mirror at an iCloud folder** (one line in config.json) and the tool's memory survives a full machine rebuild
+- An older copy of the importer never works on a ledger a newer one wrote (1.5.3): it stops before anything is copied, cleared, shipped or restored, changes nothing, and says to update
 
 ## CLI reference
 
@@ -185,6 +187,7 @@ The panel covers day-to-day use; everything is also scriptable:
 |---|---|
 | `--scan-only` | Read-only scan, machine-readable tagged output (used by the watcher) |
 | `--report` | The backup report: safe-to-clear / unverified / new, per camera |
+| `--status [--json]` | The status line: everything safe, or how many frames are only on this computer (no lock, no camera needed) |
 | `--baseline` | Mark everything currently on the camera(s) as imported, without copying |
 | `--reconcile` | Upgrade baseline entries to *verified* by SHA-comparing camera ↔ disk |
 | `--verify [--deep]` | Re-check imported files on disk (size, or full re-hash with `--deep`) |
@@ -212,6 +215,8 @@ python3 test_app.py    # 120 panel checks (boots the real HTTP server)
 # on Windows:  py -3 -X utf8 selftest.py   then the two suites above with  py -3 -X utf8
 ```
 
+The suites run in test mode (`ASTRO_TEST_ROOT`, from 1.5.2): everything they make stays inside one temporary folder, and dialogs, notifications, ejects and share mounts are logged instead of done, so a run can't touch your real ledger, archive, cameras or panel. Suites from before 1.5.2 have no test mode: never run them on a computer that holds real frames. On Windows the engine total is a little lower: a few Mac-only checks print SKIP there, and two Windows-only ones run instead.
+
 ## Project layout
 
 ```
@@ -220,6 +225,7 @@ INSTALL.md                           installing and updating, step by step
 PC-SYNC.md                           optional: shipping to an archive on another computer
 PARITY.md                            how the Mac and Windows editions stay identical
 CHANGELOG.md                         what changed, release by release
+CLAUDE.md                            working rules for Claude Code, which builds this
 Install … .command                   double-click installer (the no-terminal route)
 astro-import.py                      the engine (all cameras, ledger, report, dashboard)
 astro-app.py                         the control panel (localhost:8765)

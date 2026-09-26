@@ -24,7 +24,7 @@ and `astropy`.
    release zip) and double-click it in Downloads to unpack it.
 5. In Terminal, paste (use the folder name you actually got):
 
-       cd ~/Downloads/importer-1.5.1 && bash install-scripts.sh
+       cd ~/Downloads/importer-1.5.3 && bash install-scripts.sh
 
    It copies the engine, panel and camera watcher into `~/bin`, installs the
    app wrapper and a **Restart FITS Importer** button on your Desktop, and
@@ -53,7 +53,7 @@ this tool.
 1. Quit the panel if it is running (or just carry on — the installer stops it).
 2. Download and unpack the new zip in Downloads, then in Terminal:
 
-       cd ~/Downloads/importer-1.5.1 && bash install-scripts.sh
+       cd ~/Downloads/importer-1.5.3 && bash install-scripts.sh
 
 3. Start the panel again: double-click **Restart FITS Importer** on your
    Desktop, or plug a camera in.

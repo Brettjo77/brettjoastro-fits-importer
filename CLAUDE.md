@@ -16,6 +16,8 @@ commands he can paste, and go one step at a time.
   - Windows: `install-windows.ps1`, launched by `Install on Windows.cmd`.
   - Plus the `BrettjoAstro FITS Importer.app` wrapper and the LaunchAgent plists.
 - `selftest.py`: the install check on both platforms. `INSTALLED` lists what each installer puts beside it.
+- `app-takeover.json` in the state folder (1.5.3): the owner record. Only the desktop app (FITs Importer App, a separate repo built on this one) writes it, while it's in charge, and only a record naming the app by an absolute `appPath` counts. While it's there, the web watchers, Restart buttons and installers stand aside. `--app-owner` gives every script the same answer, and a web install that finds the app gone renames the record aside, never deletes it.
+- For the app, 1.5.3 added `NOTIFY_FN` (engine), `make_server`/`serve`, `STATUS_CMD` and `POST /api/quit` (panel), and made `astro-watch.py` importable (`poll_once`, on the Mac too). The app relies on them: keep them working and tested.
 - `pc/sweep.ps1`: runs on the archive PC. It re-hashes shipped frames and is the only writer of `_verify/verified.jsonl`.
 - `PARITY.md`: the Mac/Windows contract. Read it before touching anything platform-related.
 - `HOW-IT-WORKS.md`, `INSTALL.md`, `PC-SYNC.md`, `README.md`, `CHANGELOG.md`: the user docs. Keep them true.
@@ -46,10 +48,10 @@ commands he can paste, and go one step at a time.
   - the engine, panel, watcher and self-test refuse any path outside the root, and never use port 8765;
   - dialogs, notifications, ejects, mounts and "open" are written to `<root>/os-calls.jsonl` instead of happening. Check them with `teh.os_calls()`.
 
-  The 1.5.1 suites, run on the real Mac on 25 Sep 2026, shipped fake frames into the real archive before this existed.
-- Tests never run the installers, the `.command`/`.cmd` files or `astro-watch.sh`. They never mount disks or create drive letters: simulate cameras with folders inside the root (`*_VOLUME`, `ASTRO_DRIVE_ROOTS`). Brett's real watcher and panel would otherwise pick them up.
+  The 1.5.1 suites, run on the real Mac on 25 Sep 2026, shipped fake frames into the real archive before this existed. Never run a suite from before 1.5.2 on a real Mac or PC.
+- Tests never run the installers, the `.command`/`.cmd` files or `astro-watch.sh` whole. Chain U1 runs only each script's marked `app-owner check` block, copied into the test root, with a fake engine and stub commands. Tests never mount disks or create drive letters: simulate cameras with folders inside the root (`*_VOLUME`, `ASTRO_DRIVE_ROOTS`). Brett's real watcher and panel would otherwise pick them up.
 - On the Mac, while changing the engine, it's worth also running the suites under `sandbox-exec` with a profile that refuses writes outside the temp folders and the repo, and refuses `osascript`/`open`/`diskutil`. Then a new leak fails loudly instead of touching real data.
-- Windows: `py -3 -X utf8 selftest.py`, then `py -3 -X utf8 test_v2.py` and `py -3 -X utf8 test_app.py`.
+- Windows: `py -3 -X utf8 selftest.py`, then `py -3 -X utf8 test_v2.py` and `py -3 -X utf8 test_app.py`. The engine total is a little lower there than on the Mac: the checks that need bash or shell scripts print SKIP on Windows, and the two Windows-only owner checks run instead.
 - Chain W1 in `test_v2.py` simulates the Windows drive-letter layer on any OS (`ASTRO_DRIVE_ROOTS`).
 - Every fix gets a test that fails without the fix. Both suites must be fully green before anything is delivered.
 - Test an installer or the self-test from an *installed* layout, not only from the source folder. 1.5.1 fixed a bug that slipped through this way.
@@ -58,7 +60,7 @@ commands he can paste, and go one step at a time.
 
 ## Releasing
 
-1. Bump `VERSION`. Add a CHANGELOG entry with a "Mac / Windows" line. Update the check counts in README and CHANGELOG, and update PARITY.md if needed.
+1. Bump `VERSION`. Add a CHANGELOG entry with a "Mac / Windows" line. Update the check counts in README, CHANGELOG and the Testing section above, and update PARITY.md if needed.
 2. Both suites green. Then commit.
 3. Build the zip from the commit: `git archive --prefix=importer-X.Y.Z/ HEAD`, remove `.gitignore`, keep the executable bits on `.command`, `.sh`, `.py` and the app's `launcher`, then zip.
 4. Push only when Brett says yes.

@@ -57,7 +57,7 @@ From here on you do nothing on the Mac: every import ships by itself when the PC
 
    Wait a minute, then look in `E:\Astro Image Data\_verify`: `verified.jsonl` lists every file the PC has re-hashed and confirmed, `problems.jsonl` should not exist or be empty, `status.json` is the summary.
 
-4. Back on the Mac, the next ship (09:00, 21:00, or `python3 ~/bin/astro-import.py --ship`) reads `verified.jsonl` and stamps the ledger. The "not yet PC-verified" number is the one to watch; zero means the PC holds everything the Mac does.
+4. Back on the Mac, the next ship (09:00, 21:00, or `python3 ~/bin/astro-import.py --ship`) reads `verified.jsonl` and stamps the ledger. The "not yet PC-verified" number is the one to watch; zero means the PC holds everything the Mac does. From 1.5.3 the panel's header shows the same number ("N frames only on the Mac"), and says "Everything is safe" at zero.
 
 ## If the PC runs the importer too (1.5.0)
 

@@ -210,7 +210,8 @@ and the Terminal dialogs.
 W1 that simulates the Windows drive-letter layer. The PowerShell scripts parse
 under PowerShell 7 and the sweep was run against a test archive. Not yet run on
 real Windows: `selftest.py` and both suites on the PC are the first step
-after installing there.
+after installing there. (Since 1.5.2: never run the 1.5.0 or 1.5.1 suites
+on a real Mac or PC. They have no test mode; run 1.5.2's or later.)
 
 ## 1.4.3 — 2026-09-24
 

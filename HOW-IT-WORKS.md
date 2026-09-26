@@ -164,6 +164,22 @@ In the author's setup the PC holds the archive (E:) and does the stacking on
 its fast C: drive, so a Windows import lands on C: like the Mac's does in
 Documents, and is then filed into the archive on E: and verified there.
 
+## The line at the top of the panel
+
+The top of the panel answers one question: are you safe? **Everything is
+safe** means every frame you have cleared off a camera also has a checked
+copy in the archive. Otherwise it counts the ones that don't yet: **N
+frames only on the Mac** (*only on this PC* on Windows) are frames already
+cleared from a camera whose one verified copy is still on this computer.
+They drop out of the count once the PC's sweep has re-checked their copy in
+the archive. Without an archive on another computer they stay in it,
+because their only copy really is here. Hover over the count to read this
+in a sentence.
+
+A new computer says *Nothing imported yet*. And if the tool can't read its
+own ledger, the line says *Status unknown* rather than guess: it never says
+safe when it can't tell.
+
 ## When things go wrong
 
 Interruptions are expected, not exceptional. A copy that dies mid-file leaves

@@ -26,12 +26,16 @@ way. Every release updates it.
    - `test_v2.py` and `test_app.py` run on the build machine. Chain W1
      simulates the Windows drive-letter layer, so it runs everywhere.
    - On the Windows PC: `selftest.py`, then the same two suites
-     (`py -3 -X utf8 test_v2.py`, `py -3 -X utf8 test_app.py`).
+     (`py -3 -X utf8 test_v2.py`, `py -3 -X utf8 test_app.py`). The engine
+     total is a little lower there: a few Mac-only checks print SKIP, and two
+     Windows-only ones run instead.
    - The release zip is one package with both installers, built from one commit.
    - Every test runs in test mode (`test_env_helper.make_env`), so it can't
      touch the real archive, state, cameras, installs or the panel on 8765.
      On Windows the proof that nothing ran is the `os-calls.jsonl` records;
      the Mac additionally has the `EXECUTED` stand-ins and `sandbox-exec`.
+     Suites from before 1.5.2 have no test mode: never run them on a real
+     Mac or PC.
 5. **Each computer keeps its own ledger.** Ledgers are never shared, and no
    file is ever written by both machines (see "Per-machine data").
 
@@ -62,6 +66,7 @@ way. Every release updates it.
 | Quit the panel from another program (`POST /api/quit`: token, JSON and origin rules; 409 `busy` while an operation runs or a question card is up) | ✓ | ✓ | panel |
 | Stands aside while the desktop app is in charge (`app-takeover.json`, with an absolute `appPath`; `--app-owner`) | ✓ watcher, Restart, installer, app wrapper | ✓ watcher, Restart, installer | engine + installers |
 | Test mode (`ASTRO_TEST_ROOT`): everything stays inside one folder, and dialogs, notifications, ejects, mounts and "open" are logged, not done | ✓ | ✓ | engine, panel, watcher, self-test |
+| Refuses a ledger written by a newer importer: changes nothing, before any copy, clear, discard, ship or restore | ✓ | ✓ | engine |
 
 ## Settings (config.json)
 
@@ -129,4 +134,4 @@ the scope table, and the non-path keys.
 3. Run `test_v2.py` and `test_app.py` on the build machine.
 4. On the PC, run `selftest.py` and both suites.
 5. Build one zip from one commit, containing both installers.
-6. Push to GitHub.
+6. Push to GitHub, once Brett says yes.
