@@ -180,6 +180,18 @@ A new computer says *Nothing imported yet*. And if the tool can't read its
 own ledger, the line says *Status unknown* rather than guess: it never says
 safe when it can't tell.
 
+## What you can delete from the Mac
+
+The Dashboard tab has a section called **Space on this Mac**. It shows which folders the importer filed on this computer you can now delete. A frame counts as safe to delete only when the PC's sweep has re-hashed its copy in the archive and it matched.
+
+Everything else is kept:
+- frames shipped but not yet re-checked
+- frames that aren't in the archive
+- frames that have changed since import
+- anything in those folders the importer didn't file, such as your processing work
+
+A folder is only ever called safe as a whole when everything in it is safe; otherwise the view names the Day folders that are. The importer never deletes anything from your Mac. You delete the green folders yourself.
+
 ## When things go wrong
 
 Interruptions are expected, not exceptional. A copy that dies mid-file leaves

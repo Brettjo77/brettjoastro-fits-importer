@@ -3635,6 +3635,108 @@ check("AP the install check loads astropy the engine's way: the real reason (a R
       and st_says(st["RuntimeError"], f"RuntimeError: {RT_WHY}"),
       json.dumps({k: v[-600:] for k, v in st.items()})[:1500])
 
+# ═══════════════ CHAIN SP: space on this Mac (1.5.5) ════════════════════════
+print("\n── Chain SP: what on this computer is safe to delete, read-only (1.5.5) ──")
+# Brett asked for a picture of what he can delete off the Mac. "Safe" means the
+# PC's sweep re-hashed the archive copy (archiveVerifiedAt). Shipped-but-unchecked,
+# never-shipped, edited-here and Brett's own files are always kept.
+SP = teh.Env("SP", asiair=False, seestar=False)
+os.makedirs(SP.state)
+SP_ROWS = {}
+
+def sp_file(root, target, day, name, size=2880, **kw):
+    """A frame on disk plus its ledger row (kw can change what the ledger says)."""
+    d = os.path.join(root, target, day) if day else os.path.join(root, target)
+    os.makedirs(d, exist_ok=True)
+    if kw.pop("on_disk", True):
+        with open(os.path.join(d, name), "wb") as f:
+            f.write(b"\0" * kw.pop("disk_size", size))
+    kw.pop("disk_size", None)
+    e = {"target": target, "displayName": target, "filename": name, "dest": kw.pop("dest", d),
+         "device": "asiair", "camera": "ZWO ASI585MC Air", "origin": "import", "size": size,
+         "verifiedAtImport": True}
+    e.update(kw)
+    SP_ROWS[f"{target}/{day}/{name}"] = e
+
+VER = {"archiveLocation": "x", "archiveVerifiedAt": "2026-09-27T033000"}
+sp_file(SP.dest, "M 31", "M 31 Day 1", "a1.fit", **VER)
+sp_file(SP.dest, "M 31", "M 31 Day 1", "a2.fit", **VER)
+sp_file(SP.dest, "M 31", "M 31 Day 1", "gone.fit", on_disk=False, **VER)     # already deleted
+sp_file(SP.dest, "M 31", "M 31 Day 2", "b1.fit", **VER)
+sp_file(SP.dest, "M 31", "M 31 Day 2", "b2.fit", archiveLocation="x")          # not yet re-checked
+os.makedirs(os.path.join(SP.dest, "M 31", "WBPP"))
+with open(os.path.join(SP.dest, "M 31", "WBPP", "master.xisf"), "wb") as f:   # Brett's own work
+    f.write(b"\0" * 5000)
+sp_file(SP.dest, "M 81", "M 81 Day 1", "c1.fit", **VER)
+sp_file(SP.dest, "M 81", "M 81 Day 1", "c2.fit", **VER)
+with open(os.path.join(SP.dest, "M 81", "M 81 Day 1", ".DS_Store"), "wb") as f:
+    f.write(b"\0" * 10)                                                         # Finder's, not Brett's
+# a frame gathered by hand into lights/ (Collect Lights) is still found, and still safe
+sp_file(SP.dest, "M 81", "lights", "c3.fit", dest=os.path.join(SP.dest, "M 81", "M 81 Day 1"), **VER)
+sp_file(SP.sdest30, "M 42", "M 42 Day 1", "d1.fit", device="seestar",
+        camera="ZWO Seestar S30 Pro")                                           # never shipped
+sp_file(SP.sdest30, "M 42", "M 42 Day 1", "d2.fit", device="seestar", camera="ZWO Seestar S30 Pro",
+        disk_size=3000, **VER)                                                  # edited here
+sp_file(SP.sdest30, "M 42", "M 42 Day 1", "d3.jpg", device="seestar", camera="ZWO Seestar S30 Pro",
+        sourceType="sub-jpg", **VER)                                            # a rider never ships
+sp_file(SP.dest, "M 45", "M 45 Day 1", "e1.fit", origin="backfill", archivePath="x", **VER)
+with open(os.path.join(SP.state, "ledger.json"), "w", encoding="utf-8") as f:
+    json.dump({"version": 1, "files": SP_ROWS, "calibration": {}}, f)
+
+def sp_snapshot():
+    """Every file on the workbench (both camera trees), with size and time."""
+    out = {}
+    for root, _d, fns in os.walk(os.path.join(SP.root, "dest")):
+        for n in fns:
+            p = os.path.join(root, n)
+            out[p] = (os.path.getsize(p), os.path.getmtime(p))
+    return out
+
+before = sp_snapshot()
+got = probe(SP.env, "sp = m.mac_space(m.State()); print(json.dumps(sp))")
+tot = got.get("totals") or {}
+fold = {os.path.basename(f["path"]): f for f in got.get("folders", [])} if isinstance(got, dict) else {}
+check("SP totals: 6 frames safe (the PC re-checked them, one gathered into lights/), 1 waiting, "
+      "2 only here (never shipped, and a preview rider), 1 edited here, 1 of Brett's own; "
+      "Finder's .DS_Store, a back-catalogue row and a frame already gone don't count as here",
+      [tot.get(k, {}).get("files") for k in ("safe", "waiting", "onlyHere", "changed", "yours")]
+      == [6, 1, 2, 1, 1] and tot["safe"]["bytes"] == 6 * 2880 and tot["yours"]["bytes"] == 5000
+      and got.get("gone") == 1 and got.get("unknown") is None, json.dumps(got)[:600])
+check("SP M 81: every file checked on the archive, so the whole folder is safe; M 31: only Day 1 "
+      "is safe on its own (Day 2 has an unchecked frame, WBPP is Brett's); M 42: nothing safe",
+      fold.get("M 81", {}).get("wholeSafe") is True and fold["M 81"]["safeDays"] == []
+      and fold.get("M 31", {}).get("wholeSafe") is False
+      and [d["name"] for d in fold["M 31"]["safeDays"]] == ["M 31 Day 1"]
+      and fold["M 31"]["safeDays"][0]["bytes"] == 2 * 2880
+      and fold.get("M 42", {}).get("wholeSafe") is False and fold["M 42"]["safeDays"] == []
+      and "M 45" not in fold, json.dumps(fold)[:600])
+check("SP folders come most-safe-first (M 81 and M 31 before M 42)",
+      [os.path.basename(f["path"]) for f in got.get("folders", [])][-1] == "M 42", str(list(fold)))
+r = SP.run("--space")
+check("SP --space says the importer never deletes, then lists the whole folder and the Day "
+      "folder that are safe, with their paths; exit 0",
+      r.returncode == 0 and "never deletes" in r.stdout
+      and "Whole folders safe to delete:" in r.stdout
+      and os.path.join(SP.dest, "M 81") in r.stdout
+      and os.path.join(SP.dest, "M 31", "M 31 Day 1") in r.stdout
+      and os.path.join(SP.sdest30, "M 42") not in r.stdout, (r.stdout + r.stderr)[-600:])
+got_d = probe(SP.env, "p = m.generate_dashboard(m.State()); print(json.dumps(open(p, encoding='utf-8').read()))")
+check("SP the dashboard carries the same figures and draws the Space card",
+      isinstance(got_d, str) and '"wholeSafe": true' in got_d and 'id="spaceCard"' in got_d
+      and "Safe to delete" in got_d, str(got_d)[:300])
+calls = teh.os_calls(SP.root) if hasattr(teh, "os_calls") else []
+check("SP read-only: no file under the workbench changed or vanished, and no OS call was made",
+      sp_snapshot() == before and not calls, str(calls)[:300])
+with open(os.path.join(SP.state, "ledger.json"), "w", encoding="utf-8") as f:
+    f.write("{not json")
+got = probe(SP.env, "sp = m.mac_space(m.State()); print(json.dumps(sp))")
+r = SP.run("--space")
+check("SP an unreadable ledger (no .bak): 'can't tell', nothing marked safe, in the view and in --space",
+      isinstance(got, dict) and got.get("unknown") == "the ledger can't be read"
+      and got.get("folders") == [] and got["totals"]["safe"]["files"] == 0
+      and "Can't tell what is safe to delete" in r.stdout and "Whole folders" not in r.stdout,
+      json.dumps(got)[:300] + " | " + r.stdout[-200:])
+
 # ═══════════════ Summary ═════════════════════════════════════════════════════
 print("\n═══════════════════════════════════════════════════")
 print(f"  {PASS} passed, {FAIL} failed")

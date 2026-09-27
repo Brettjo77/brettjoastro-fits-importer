@@ -1,5 +1,33 @@
 # Changelog
 
+## 1.5.5 — 2026-09-27 — what you can delete from the Mac
+
+- **Space on this Mac.** The dashboard (the Dashboard tab in the panel) has a new section at the top.
+  - **What it shows:** how much of what the importer filed on this computer you can delete.
+  - **Why it's safe:** a frame counts as **safe to delete** only when the PC's sweep has re-hashed its copy in the archive and it matched. That is the same proof that takes a frame out of the "only on the Mac" count.
+  - **Everything else:**
+    - Shipped but not yet re-checked: **waiting**.
+    - Not in the archive: **only on this Mac**.
+    - A different size from the one imported: **changed here**.
+    - Anything in those folders that the importer didn't file, such as WBPP or PixInsight work, notes or a leftover `.partial`: **your other files**.
+
+    All of these are always kept.
+  - **Each target folder gets:**
+    - a coloured bar
+    - its path
+    - one verdict: the whole folder is safe to delete, or which Day folders are safe on their own, or keep
+
+    A folder that holds anything not safe is never called safe as a whole.
+- **`--space`** prints the same thing as text, with the paths of the safe folders.
+- **Read-only.** The importer never deletes anything from this computer. You delete green folders yourself in Finder or File Explorer.
+- **When it can't tell,** for example because the ledger can't be read, it says so and marks nothing safe.
+- **Moved frames are still counted.** Frames gathered into a `lights/` folder by hand or by Collect Lights are found as the ship finds them.
+- **Other rows don't count as here.** Back-catalogue rows, and frames already gone from the Mac, are left out of the view.
+
+**Mac / Windows:** the same on both ("this PC" and File Explorer on Windows).
+
+519 end-to-end checks (392 engine + 127 panel). The 7 new engine checks and the panel suite passed in test mode on Linux. On Linux the two installer checks that only apply on a Mac or PC can't pass, as before this change. Run both suites on the Mac before releasing.
+
 ## 1.5.4 — 2026-09-27 — clearer astropy errors, and a quicker panel start
 
 A few small fixes. Normal use is unchanged.

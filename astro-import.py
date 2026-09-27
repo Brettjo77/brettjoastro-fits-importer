@@ -50,7 +50,7 @@ from collections import defaultdict
 from datetime import datetime, timedelta
 
 # One version for every platform (1.5.0: the Windows 11 edition joins the Mac).
-VERSION = "1.5.4"
+VERSION = "1.5.5"
 IS_WINDOWS = os.name == "nt"
 IS_MAC = sys.platform == "darwin"
 PLATFORM = "windows" if IS_WINDOWS else ("mac" if IS_MAC else "linux")
@@ -3319,6 +3319,166 @@ def status_summary(state):
     return {"safe": n == 0, "onlyHere": n, "text": text,
             "machine": "PC" if IS_WINDOWS else "Mac"}
 
+# Names the operating system leaves in folders; never counted as Brett's files.
+_SPACE_JUNK = {".DS_Store", "Icon\r", "Thumbs.db", "desktop.ini"}
+
+def _space_target_folder(dest):
+    """The target folder above a Day, lights or panels folder."""
+    d = os.path.normpath(dest)
+    for _ in range(3):
+        base = os.path.basename(d)
+        if base in ("lights", "panels") or _MAC_DAY_RE.match(base):
+            d = os.path.dirname(d)
+        else:
+            break
+    return d
+
+def mac_space(state):
+    """What this computer's copies are worth keeping (1.5.5): the 'Space on this
+    Mac' view. Read-only: it lists and measures, and never moves or deletes a
+    file (Brett deletes files on his own disks himself).
+
+    Every frame the ledger filed here that is still here counts as one of:
+      safe      the PC's sweep re-hashed its archive copy and it matched
+                (archiveVerifiedAt), so this copy can go
+      waiting   shipped to the archive, not yet re-checked by the sweep
+      onlyHere  not in the archive (not shipped yet, or never shipped: sub-JPEG riders)
+      changed   no longer the size it was imported at: edited here, never "safe"
+    Files in the same target folders that the ledger never filed (processing
+    work, notes, a .partial) are 'yours': the archive doesn't have them, so a
+    folder holding any is never safe as a whole. Grouped by target folder, with
+    the Day folders that are safe on their own. Like the status line, it says
+    nothing is safe when it can't read the ledger."""
+    machine = "PC" if IS_WINDOWS else "Mac"
+    kinds = ("safe", "waiting", "onlyHere", "changed", "yours")
+    empty = lambda: {k: {"files": 0, "bytes": 0} for k in kinds}
+    out = {"machine": machine, "checkedAt": now_stamp(), "totals": empty(),
+           "gone": 0, "folders": [], "unknown": None}
+    if getattr(state, "ledger_corrupt", False):
+        out["unknown"] = "the ledger can't be read"
+        return out
+    if state.ledger and (state.ledger.get("version") or 0) > LEDGER_VERSION:
+        out["unknown"] = "the ledger is from a newer version of the importer"
+        return out
+    if not state.ledger:
+        return out
+    benches = [os.path.normpath(r) for r in (DEST_DIR, SEESTAR_DEST_S30, SEESTAR_DEST_S30_ORIG,
+                                             SEESTAR_DEST_S50, SEESTAR_DEST_S50PRO) if r]
+    on_bench = lambda d: any(d == b or d.startswith(b + os.sep) for b in benches)
+    tree_index = {}
+    folders = {}          # target folder -> summary
+    verdict = {}          # absolute path of a ledger file found here -> kind
+    for e in state.ledger["files"].values():
+        dest, fn = e.get("dest"), e.get("filename")
+        if not dest or not fn or e.get("tidiedAt"):
+            continue
+        if e.get("origin") == "backfill" or e.get("archivePath"):
+            continue      # back-catalogue rows live in the archive, not here
+        if not on_bench(os.path.normpath(dest)):
+            continue      # only this computer's workbench (never the archive or a library)
+        path = os.path.join(dest, fn)
+        if not os.path.isfile(path):
+            path = _find_moved_file(dest, fn, e.get("size"), tree_index)
+        if not path:
+            out["gone"] += 1          # already off this computer
+            continue
+        try:
+            size = os.path.getsize(path)
+        except OSError:
+            continue
+        if e.get("size") is not None and size != e.get("size"):
+            kind = "changed"
+        elif e.get("archiveVerifiedAt") and not _is_unshipped_rider(e):
+            kind = "safe"
+        elif e.get("archiveLocation") and not _is_unshipped_rider(e):
+            kind = "waiting"
+        else:
+            kind = "onlyHere"
+        verdict[os.path.normpath(path)] = (kind, size)
+        top = _space_target_folder(dest)
+        if top in benches or not on_bench(top):
+            top = os.path.normpath(dest)     # never a whole camera tree as one "target"
+        folders.setdefault(top, {
+            "display": e.get("displayName") or e.get("target") or os.path.basename(top),
+            "camera": e.get("camera") or "", "path": top, "totals": empty()})
+
+    for top, f in folders.items():
+        _confine(top, "the space view")
+        t = f["totals"]
+        days = {}         # folder directly under the target folder -> [bytes, all safe]
+        for root, _dirs, fns in os.walk(top):
+            rel = os.path.relpath(root, top)
+            day = None if rel == os.curdir else os.path.join(top, rel.split(os.sep)[0])
+            for fn in fns:
+                if fn in _SPACE_JUNK:
+                    continue
+                p = os.path.normpath(os.path.join(root, fn))
+                kind, size = verdict.get(p, (None, None))
+                if kind is None:
+                    kind = "yours"
+                    try:
+                        size = os.path.getsize(p)
+                    except OSError:
+                        size = 0
+                t[kind]["files"] += 1
+                t[kind]["bytes"] += size
+                if day:
+                    d = days.setdefault(day, [0, True])
+                    d[0] += size
+                    d[1] = d[1] and kind == "safe"
+        f["wholeSafe"] = t["safe"]["files"] > 0 and all(
+            t[k]["files"] == 0 for k in kinds if k != "safe")
+        f["safeDays"] = [] if f["wholeSafe"] else [
+            {"name": os.path.basename(d), "path": d, "bytes": v[0]}
+            for d, v in sorted(days.items()) if v[1] and v[0]]
+        for k in kinds:
+            out["totals"][k]["files"] += t[k]["files"]
+            out["totals"][k]["bytes"] += t[k]["bytes"]
+        out["folders"].append(f)
+    out["folders"].sort(key=lambda f: (-f["totals"]["safe"]["bytes"], f["display"].lower()))
+    return out
+
+def _space_or_unknown(state):
+    """mac_space for the dashboard: a failure says 'can't tell', never 'safe'."""
+    try:
+        return mac_space(state)
+    except Exception as e:                   # the dashboard must still render
+        return {"machine": "PC" if IS_WINDOWS else "Mac", "checkedAt": now_stamp(),
+                "totals": None, "gone": 0, "folders": [], "unknown": f"the check failed ({e})"}
+
+def run_space(state):
+    """--space: the 'Space on this Mac' view as text. Read-only."""
+    sp = mac_space(state)
+    here = "this PC" if IS_WINDOWS else "this Mac"
+    gb = lambda b: f"{b / 1073741824:,.1f} GB" if b >= 1073741824 else f"{b / 1048576:,.0f} MB"
+    if sp["unknown"]:
+        print(f"Can't tell what is safe to delete on {here}: {sp['unknown']}. Nothing is marked safe.")
+        return sp
+    t = sp["totals"]
+    print(f"Space on {here} (read-only; the importer never deletes from {here}):")
+    for kind, label in (("safe", "safe to delete (checked on the archive PC)"),
+                        ("waiting", "waiting for the PC's check"),
+                        ("onlyHere", f"only on {here}: keep"),
+                        ("changed", "changed since import: keep"),
+                        ("yours", "your other files in those folders: keep")):
+        if kind == "safe" or t[kind]["files"]:
+            n = t[kind]["files"]
+            print(f"  {gb(t[kind]['bytes']):>10}  {n:>7,} file{'' if n == 1 else 's'}  {label}")
+    whole = [f for f in sp["folders"] if f["wholeSafe"]]
+    part = [f for f in sp["folders"] if not f["wholeSafe"] and f["safeDays"]]
+    if whole:
+        print("\nWhole folders safe to delete:")
+        for f in whole:
+            print(f"  {gb(f['totals']['safe']['bytes']):>10}  {f['path']}")
+    if part:
+        print("\nDay folders safe to delete on their own (the rest of the target folder stays):")
+        for f in part:
+            for d in f["safeDays"]:
+                print(f"  {gb(d['bytes']):>10}  {d['path']}")
+    if not whole and not part:
+        print("\nNothing is safe to delete yet: the PC's sweep hasn't re-checked any of these frames.")
+    return sp
+
 def ship_plan(state, mount):
     """Return (items, notes). items: dict(rel, src, entry, key). rel is the
     archive-relative path with the archive's own separators (\\\\)."""
@@ -5970,11 +6130,24 @@ svg text{font:11px system-ui,-apple-system,"Segoe UI",sans-serif;fill:var(--mute
      border-radius:8px;padding:6px 9px;font-size:12px;color:var(--ink);box-shadow:0 4px 14px rgba(0,0,0,.12);
      display:none;z-index:9}
 .foot{color:var(--muted);font-size:11.5px;margin-top:18px}
+.stack{display:flex;height:12px;border-radius:6px;overflow:hidden;background:var(--grid);margin:5px 0 3px}
+.stack>span{height:100%}
+.fold{padding:10px 0;border-bottom:1px solid var(--grid)}
+.fold:last-child{border-bottom:none}
+.path{font:11.5px ui-monospace,SFMono-Regular,Menlo,Consolas,monospace;color:var(--muted);word-break:break-all}
+.verdict{font-size:12.5px;margin-top:3px;color:var(--ink-2)}
+.verdict b{font-weight:600}
+.legend{display:flex;flex-wrap:wrap;gap:6px 14px;margin:2px 0 6px}
 </style></head>
 <body class="viz-root"><div class="wrap">
 <h1>BrettjoAstro FITS Importer — Status</h1>
 <div class="sub" id="sub"></div>
 <div class="cards" id="tiles"></div>
+<div class="card" id="spaceCard"><h2 id="spaceTitle">Space on this Mac</h2>
+  <div class="note" id="spaceNote"></div>
+  <div class="cards" id="spaceTiles" style="margin:8px 0 10px"></div>
+  <div class="legend" id="spaceLegend"></div>
+  <div id="spaceFolders"></div></div>
 <div class="card" id="storageCard" style="display:none">
   <h2>Camera storage</h2><div class="note" id="storageNote"></div>
   <div class="storage"><div id="storageBar"></div></div>
@@ -6014,6 +6187,42 @@ const tiles=[["Frames imported",DATA.totals.frames.toLocaleString(),DATA.totals.
  ["Verified",DATA.totals.verifiedPct+"%","of ledgered frames"],
  ["Calibration library",DATA.totals.calFrames+" frames",""]];
 $("#tiles").innerHTML = tiles.map(t=>`<div class="tile"><div class="k">${esc(t[0])}</div><div class="v">${esc(t[1])}</div><div class="s">${esc(t[2])}</div></div>`).join("");
+// space on this computer (1.5.5): what can go, what must stay. Read-only.
+(function(){
+  const sp=DATA.space; if(!sp){$("#spaceCard").style.display="none";return;}
+  const here=sp.machine==="PC"?"this PC":"this Mac";
+  const MON=["Jan","Feb","Mar","Apr","May","Jun","Jul","Aug","Sep","Oct","Nov","Dec"];
+  const when=(st)=>{const m=/^(\d{4})-(\d\d)-(\d\d)T(\d\d)(\d\d)/.exec(st||"");
+    return m?`${+m[3]} ${MON[+m[2]-1]} ${m[1]} at ${m[4]}:${m[5]}`:String(st);};
+  const files=(n)=>n.toLocaleString()+(n===1?" file":" files");
+  $("#spaceTitle").textContent="Space on "+here;
+  if(sp.unknown){$("#spaceNote").textContent="Can't tell what is safe to delete: "+sp.unknown+
+    ". Nothing is marked safe.";return;}
+  const K=[["safe","--good","Safe to delete","its archive copy was re-checked by the PC"],
+    ["waiting","--warning","Waiting","shipped, not yet re-checked by the PC"],
+    ["onlyHere","--critical","Only on "+here,"not in the archive yet: keep"],
+    ["changed","--serious","Changed here","edited since import: keep"],
+    ["yours","--muted","Your other files","work the archive doesn't have: keep"]];
+  const T=sp.totals, shown=K.filter(k=>k[0]==="safe"||T[k[0]].files);
+  $("#spaceNote").textContent="Green is safe to delete: the PC has re-checked its copy in the archive, byte for byte. "+
+    "The importer never deletes anything from "+here+"; delete green folders yourself in "+
+    (sp.machine==="PC"?"File Explorer":"Finder")+". Checked "+when(sp.checkedAt)+".";
+  $("#spaceTiles").innerHTML=shown.map(k=>`<div class="tile"><div class="k"><span class="chip"><span class="dot" style="background:var(${k[1]})"></span>${esc(k[2])}</span></div>
+    <div class="v">${fmtGB(T[k[0]].bytes)}</div><div class="s">${files(T[k[0]].files)} · ${esc(k[3])}</div></div>`).join("");
+  $("#spaceLegend").innerHTML=shown.map(k=>`<span class="chip"><span class="dot" style="background:var(${k[1]})"></span>${esc(k[2])}</span>`).join("");
+  const F=sp.folders.filter(f=>K.some(k=>f.totals[k[0]].bytes));
+  if(!F.length){$("#spaceFolders").innerHTML='<div class="note">Nothing the importer filed is still on '+here+'.</div>';return;}
+  $("#spaceFolders").innerHTML=F.map(f=>{
+    const tot=K.reduce((a,k)=>a+f.totals[k[0]].bytes,0)||1;
+    const bar=K.map(k=>f.totals[k[0]].bytes?`<span title="${esc(k[2])}: ${fmtGB(f.totals[k[0]].bytes)}" style="width:${100*f.totals[k[0]].bytes/tot}%;background:var(${k[1]})"></span>`:"").join("");
+    let v;
+    if(f.wholeSafe) v=`<b style="color:var(--good)">✓ The whole folder is safe to delete</b> (${fmtGB(f.totals.safe.bytes)})`;
+    else if(f.safeDays.length) v=`<b>Safe on their own:</b> `+f.safeDays.map(d=>`${esc(d.name)} (${fmtGB(d.bytes)})`).join(", ")+". Keep the rest of the folder.";
+    else if(f.totals.safe.bytes) v=`Some frames are safe, but no Day folder is safe as a whole yet. Keep the folder.`;
+    else v=`Keep: nothing here has been re-checked in the archive yet.`;
+    return `<div class="fold"><div class="rowlab"><b>${esc(f.display)}</b><span>${fmtGB(f.totals.safe.bytes)} safe of ${fmtGB(tot)}</span></div>
+      <div class="stack">${bar}</div><div class="path">${esc(f.path)}</div><div class="verdict">${v}</div></div>`;}).join("");
+})();
 // storage
 if (DATA.camera){$("#storageCard").style.display="block";
   const pct=Math.round(100*DATA.camera.used/DATA.camera.total);
@@ -6179,6 +6388,7 @@ def generate_dashboard(state):
         "events": [{"ts": ev.get("ts", "")[:16].replace("T", " "),
                     "text": _humanize_event(ev)}
                    for ev in reversed(state.history_tail(8))],
+        "space": _space_or_unknown(state),
     }
     # every "<" escaped (not just "</"): a name containing "<!--" once
     # blanked the whole dashboard (1.4.3, V7). JSON reads \u003c as "<".
@@ -6560,6 +6770,9 @@ def main():
                         "(no camera needed; safe to repeat; --dry-run lists only)")
     p.add_argument("--no-ship", action="store_true",
                    help="do not file frames to the archive after this import")
+    p.add_argument("--space", action="store_true",
+                   help="read-only: what on this computer is safe to delete (its archive "
+                        "copy re-checked by the PC), what is waiting, and what to keep")
     p.add_argument("--tidy-stacks", action="store_true",
                    help="list archived Seestar stacks outranked by a higher stack from "
                         "the SAME night and offer to remove them (typed DELETE; "
@@ -6661,6 +6874,9 @@ def main():
         return
     if args.refresh_metadata:
         locked(lambda: run_refresh_metadata(state))
+        return
+    if args.space:
+        run_space(state)
         return
     if args.tidy_stacks:
         if args.dry_run:
