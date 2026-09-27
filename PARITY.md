@@ -67,6 +67,8 @@ way. Every release updates it.
 | Stands aside while the desktop app is in charge (`app-takeover.json`, with an absolute `appPath`; `--app-owner`) | ✓ watcher, Restart, installer, app wrapper | ✓ watcher, Restart, installer | engine + installers |
 | Test mode (`ASTRO_TEST_ROOT`): everything stays inside one folder, and dialogs, notifications, ejects, mounts and "open" are logged, not done | ✓ | ✓ | engine, panel, watcher, self-test |
 | Refuses a ledger written by a newer importer: changes nothing, before any copy, clear, discard, ship or restore | ✓ | ✓ | engine |
+| astropy that won't load: the job stops (`FitsUnavailable`, exit 1 on the command line) with the line that says why (never numpy's page of advice) and the install or repair command for the running Python, said once. An import checks it before it copies anything (ASIAir lights and calibration frames, Seestar). In the panel only that job fails, with a banner, and the panel stays up; the install check gives the same reason and command. In the desktop app (frozen) it says to reinstall the app, and the banner to restart the app (1.5.4) | ✓ `python3 -m pip …` | ✓ a PowerShell line for Terminal, `& "…\python.exe" -m pip install --user …` (python.exe, never the panel's pythonw.exe) | engine + panel + self-test |
+| The panel binds without a reverse DNS lookup (no `socket.getfqdn`), keeping one panel per port (1.5.4) | ✓ no `SO_REUSEPORT` | ✓ `SO_EXCLUSIVEADDRUSE`, no `SO_REUSEADDR` | panel |
 
 ## Settings (config.json)
 

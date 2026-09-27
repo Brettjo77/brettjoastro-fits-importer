@@ -18,6 +18,7 @@ commands he can paste, and go one step at a time.
 - `selftest.py`: the install check on both platforms. `INSTALLED` lists what each installer puts beside it.
 - `app-takeover.json` in the state folder (1.5.3): the owner record. Only the desktop app (FITs Importer App, a separate repo built on this one) writes it, while it's in charge, and only a record naming the app by an absolute `appPath` counts. While it's there, the web watchers, Restart buttons and installers stand aside. `--app-owner` gives every script the same answer, and a web install that finds the app gone renames the record aside, never deletes it.
 - For the app, 1.5.3 added `NOTIFY_FN` (engine), `make_server`/`serve`, `STATUS_CMD` and `POST /api/quit` (panel), and made `astro-watch.py` importable (`poll_once`, on the Mac too). The app relies on them: keep them working and tested.
+- 1.5.4: the panel binds without `socket.getfqdn` (U12: it stalled the packaged app's start for 35 s). When astropy won't load, `get_fits()` raises `FitsUnavailable`, a `SystemExit` so the `except Exception` guards around header reads can't swallow it; it says why once per process (`.why`, the line under numpy's advice page) and how to fix it (`.how`: a PowerShell `& "…\python.exe"` line on Windows; reinstall the app when `sys.frozen`). `run_import` and `run_seestar_import` call it before any copy, and `selftest.py` uses it too. The panel's `_run` catches it, and any other `SystemExit`, and fails only that job. Tests read the version from the engine's `VERSION`, so a release changes only that line.
 - `pc/sweep.ps1`: runs on the archive PC. It re-hashes shipped frames and is the only writer of `_verify/verified.jsonl`.
 - `PARITY.md`: the Mac/Windows contract. Read it before touching anything platform-related.
 - `HOW-IT-WORKS.md`, `INSTALL.md`, `PC-SYNC.md`, `README.md`, `CHANGELOG.md`: the user docs. Keep them true.
@@ -43,7 +44,7 @@ commands he can paste, and go one step at a time.
 
 ## Testing
 
-- Mac: `/usr/local/bin/python3 test_v2.py` (engine, 375 checks) and `/usr/local/bin/python3 test_app.py` (panel, 120 checks). Use python.org's Python, which has astropy; Apple's `python3` may not.
+- Mac: `/usr/local/bin/python3 test_v2.py` (engine, 385 checks) and `/usr/local/bin/python3 test_app.py` (panel, 127 checks). Use python.org's Python, which has astropy; Apple's `python3` may not.
 - **Tests run in test mode, always** (1.5.2). Build every environment a test starts with `test_env_helper.make_env(root)`. Call `teh.isolate_runner()` at the top of a test file, before it loads the engine in-process. With `ASTRO_TEST_ROOT` set:
   - the engine, panel, watcher and self-test refuse any path outside the root, and never use port 8765;
   - dialogs, notifications, ejects, mounts and "open" are written to `<root>/os-calls.jsonl` instead of happening. Check them with `teh.os_calls()`.

@@ -178,6 +178,7 @@ a differing file on the archive is reported and left alone. Set
 - The panel server answers **only** its own page: a non-local Host, any Origin other than exactly `http://127.0.0.1:<its port>` (another localhost port included), non-JSON bodies and requests without the per-launch token the page carries are all refused; it can't be framed by another site; and every answer names the question it answers — the first answer wins, so neither a stale click nor a double click can land on the wrong card
 - The ledger is plain JSON written with fsync-then-atomic-rename (and recovered loudly from its `.bak` if it is ever unreadable), history is an append-only JSONL log, and a published mirror folder keeps browsable copies of both plus the dashboard and last report — **point the mirror at an iCloud folder** (one line in config.json) and the tool's memory survives a full machine rebuild
 - An older copy of the importer never works on a ledger a newer one wrote (1.5.3): it stops before anything is copied, cleared, shipped or restored, changes nothing, and says to update
+- If astropy (the FITS header reader) can't be loaded, the job stops rather than carry on without headers (a Seestar is never named from its folder names alone). It says the real reason once, with the command that installs or repairs astropy for the Python that's running (on Windows, a line for Terminal's PowerShell). An import checks astropy before it copies anything, so a broken one never leaves half an import behind (1.5.4). In the panel only that job fails: the banner says why, and the panel stays up
 
 ## CLI reference
 
@@ -207,11 +208,11 @@ The panel covers day-to-day use; everything is also scriptable:
 
 ## Testing
 
-495 end-to-end checks run the real engine and the real panel against simulated cameras (hand-built minimal FITS files, every device layout, crash/rename/mosaic/Milky-Way/cleanup/consent/interruption/multi-Seestar scenarios — including that the destination preview must equal the folders the import then actually creates, that a folder holding any unproven file is never offered as SAFE, and that the panel refuses foreign-origin requests):
+512 end-to-end checks run the real engine and the real panel against simulated cameras (hand-built minimal FITS files, every device layout, crash/rename/mosaic/Milky-Way/cleanup/consent/interruption/multi-Seestar scenarios — including that the destination preview must equal the folders the import then actually creates, that a folder holding any unproven file is never offered as SAFE, and that the panel refuses foreign-origin requests):
 
 ```bash
-python3 test_v2.py     # 375 engine checks (chain W1 simulates the Windows drive layer)
-python3 test_app.py    # 120 panel checks (boots the real HTTP server)
+python3 test_v2.py     # 385 engine checks (chain W1 simulates the Windows drive layer)
+python3 test_app.py    # 127 panel checks (boots the real HTTP server)
 # on Windows:  py -3 -X utf8 selftest.py   then the two suites above with  py -3 -X utf8
 ```
 

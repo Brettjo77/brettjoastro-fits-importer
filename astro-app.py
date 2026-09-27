@@ -23,6 +23,7 @@ import json
 import os
 import re
 import secrets
+import socketserver
 import subprocess
 import sys
 import threading
@@ -192,6 +193,23 @@ class App:
                                 + ". Let it finish, then try again.")
                             return
                     fn()
+            except eng.FitsUnavailable as e:
+                # astropy would not load: only this job stops, and the panel
+                # stays up. The engine said why in the log, once; the banner
+                # says it after every job, adding no red lines (1.5.4). In the
+                # app (frozen) there is no pip command and no panel to restart
+                if getattr(sys, "frozen", False):
+                    fix = "Reinstall FITs Importer App, then restart the app."
+                else:
+                    fix = "Install or repair it (the log shows the command), then restart the panel."
+                self.last_result = f"{label} failed: astropy could not be loaded ({e.why}). {fix}"
+            except SystemExit as e:
+                # the engine ended the job the CLI way. Uncaught, that ends
+                # this thread silently with an empty banner (1.5.4)
+                code = 0 if e.code is None else e.code
+                why = code if isinstance(code, str) else f"exit code {code}"
+                self.logline(f"✗ {label} stopped by the engine ({why})")
+                self.last_result = f"{label} failed: the engine stopped it ({why}). The log says why."
             except Exception as e:
                 self.logline(f"✗ {label} failed: {e}")
                 self.last_result = f"{label} failed: {e}"
@@ -1763,8 +1781,11 @@ tick(); setInterval(tick, 1000);
 
 class PanelServer(ThreadingHTTPServer):
     """On Windows, SO_REUSEADDR lets a SECOND process bind the same port —
-    so it is off there, and SO_EXCLUSIVEADDRUSE is on: one panel per port."""
+    so it is off there, and SO_EXCLUSIVEADDRUSE is on: one panel per port.
+    SO_REUSEPORT would do the same on the Mac, so it is off, said here (1.5.4:
+    server_bind below is socketserver's, which sets it when this is true)."""
     allow_reuse_address = not eng.IS_WINDOWS
+    allow_reuse_port = False
     daemon_threads = True
 
     def server_bind(self):
@@ -1773,7 +1794,12 @@ class PanelServer(ThreadingHTTPServer):
             opt = getattr(_s, "SO_EXCLUSIVEADDRUSE", None)
             if opt is not None:
                 self.socket.setsockopt(_s.SOL_SOCKET, opt, 1)
-        super().server_bind()
+        # socketserver's bind (the same reuse rules), not http.server's: that
+        # one also asks socket.getfqdn() for a host name nothing here uses, a
+        # reverse DNS lookup that held the packaged app's panel start for
+        # 35 s on the Mac (U12, 1.5.4)
+        socketserver.TCPServer.server_bind(self)
+        self.server_name, self.server_port = self.server_address[:2]
 
 
 def make_server(port):

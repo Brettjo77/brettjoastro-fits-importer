@@ -1,5 +1,61 @@
 # Changelog
 
+## 1.5.4 — 2026-09-27 — clearer astropy errors, and a quicker panel start
+
+A few small fixes. Normal use is unchanged.
+
+- **When astropy won't load, the importer says why.** astropy is the
+  library that reads FITS headers. If it can't be loaded, the message now
+  gives the real error (a missing library file, say), not just "astropy
+  not installed". When numpy is what fails (on Windows, usually "DLL load
+  failed"), that's the line you see, not the first line of numpy's page of
+  advice. It also gives the right command for the Python that's running:
+  install astropy if it's missing, or reinstall it if it's there but broken.
+  - On Windows the command is a line to paste into Terminal (PowerShell),
+    `& "…\python.exe" -m pip install --user …`. It names python.exe even
+    though the panel runs under pythonw.exe, which shows no pip output.
+    Before, the command started with the quoted path alone, which
+    PowerShell refuses. The installer's own hint has the same fix.
+  - The install check (`selftest.py`) now checks astropy the same way and
+    gives the same reason and command. Before, it said "pip install" for an
+    astropy that was there but broken, and stopped with an error on any
+    failure other than a missing module, skipping its other checks.
+- **Nothing is copied until astropy loads.** An import now checks astropy
+  before it copies anything, ASIAir and Seestar alike. Before, an ASIAir
+  import copied the calibration frames into the Library first and then
+  stopped at the first header, leaving them unrecorded; the next import
+  took them over without checking their bytes.
+- **Only that job fails; the panel stays up.** Before, a scan or import
+  that hit this stopped with an empty banner, and the page's automatic
+  rescan printed the same red lines again every second. Now:
+  - the banner says what happened, for example "scanning failed: astropy
+    could not be loaded (…). Install or repair it (the log shows the
+    command), then restart the panel.";
+  - the log explains once, and later jobs add no more red lines;
+  - any other job the engine stops early also gets a banner that says so,
+    instead of a blank one.
+
+  On the command line the importer still stops with exit code 1, now with
+  the real reason. In the coming desktop app there's no pip command to
+  give: it says to reinstall the app, and the banner says to restart the
+  app rather than the panel.
+- **The panel starts without a network lookup.** Python's built-in web
+  server looks up the computer's network name as it starts. The panel never
+  uses that name, and in the coming desktop app on the Mac nothing answered
+  the lookup, so the panel started 35 seconds late. The panel now skips it.
+  How it listens is unchanged: this computer only, one panel per port. The
+  Mac's setting that would let a second panel share the port now stays off
+  by name, and the tests check it.
+
+**Mac / Windows:** the same on both, except the form of the repair command:
+a Terminal command on the Mac, a PowerShell line on Windows (checked on the
+Mac by simulating Windows; paste-test it on the PC). The quicker start
+matters most for the desktop app on the Mac. On Windows the panel keeps its
+one-panel-per-port setting; the Windows half of the new check for that runs
+on the PC.
+
+512 end-to-end checks (385 engine + 127 panel), all green on the Mac.
+
 ## 1.5.3 — 2026-09-26 — ready for the desktop app, and a status line
 
 The web version carries on as it is. This release adds what the coming

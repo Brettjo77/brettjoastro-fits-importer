@@ -14,7 +14,9 @@ Checks that belong to the other platform are skipped.
 """
 
 import argparse
+import contextlib
 import importlib.util
+import io
 import json
 import os
 import re
@@ -71,12 +73,17 @@ def main():
         if f not in ("astro-import.py", "selftest.py"):
             check(f"{f} present", os.path.isfile(os.path.join(HERE, f)))
 
+    # astropy, loaded the engine's own way (1.5.4): any failure, not only an
+    # ImportError, with the real reason and the engine's command, which
+    # reinstalls a broken astropy rather than "install" one that is there
     try:
-        from astropy.io import fits  # noqa: F401
-        check("astropy installed (reads FITS headers)", True)
-    except ImportError:
-        check("astropy installed (reads FITS headers)", False,
-              f'"{sys.executable}" -m pip install --user astropy')
+        with contextlib.redirect_stderr(io.StringIO()):   # its ✗ lines: said here instead
+            eng.get_fits()
+        check("astropy loads (reads FITS headers)", True)
+    except eng.FitsUnavailable as e:
+        check("astropy loads (reads FITS headers)", False, e.why)
+        for ln in e.how:
+            print(f"        {ln}")
 
     # state, config, identity
     check("state folder", os.path.isdir(eng.STATE_DIR) or not os.path.exists(eng.STATE_DIR),

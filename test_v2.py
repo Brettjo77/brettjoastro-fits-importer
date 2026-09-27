@@ -19,6 +19,10 @@ import test_env_helper as teh  # noqa: E402
 teh.isolate_runner()   # test mode for this process too, before any in-process engine load
 
 SCRIPT = os.path.join(os.path.dirname(os.path.abspath(__file__)), "astro-import.py")
+# the one shared version, read from the engine: a release changes only its
+# VERSION line, never these checks (1.5.4)
+with open(SCRIPT, encoding="utf-8") as _f:
+    VERSION = re.search(r'^VERSION = "(\d+\.\d+\.\d+)"$', _f.read(), re.M).group(1)
 PASS, FAIL = 0, 0
 FAILURES = []
 
@@ -1709,7 +1713,8 @@ def wrun(*args, stdin="", script=SCRIPT, extra=None):
                           capture_output=True, text=True, encoding="utf-8",
                           errors="replace", timeout=120)
 r = wrun("--version")
-check("W1 --version names the one shared version", "1.5.3" in r.stdout, r.stdout + r.stderr)
+check("W1 --version names the one shared version", f"FITS Importer {VERSION} (" in r.stdout,
+      r.stdout + r.stderr)
 r = wrun("--once", script=os.path.join(os.path.dirname(SCRIPT), "astro-watch.py"))
 check("W1 the watcher finds the Seestar and the ASIAir by what is on each drive",
       f"ASIAir at {drives['G']}" in r.stdout and f"Seestar at {drives['F']}" in r.stdout,
@@ -1813,6 +1818,10 @@ check("W1 the Mac install check expects only files install-scripts.sh installs",
       set(_st.INSTALLED["mac"]) <= _mac_inst, f"{_st.INSTALLED['mac']} vs {sorted(_mac_inst)}")
 check("W1 the Windows install check expects only files install-windows.ps1 installs",
       set(_st.INSTALLED["windows"]) <= _win_inst, f"{_st.INSTALLED['windows']} vs {sorted(_win_inst)}")
+_pip_hints = [ln.strip() for ln in _ps.splitlines() if "Warn" in ln and "-m pip install" in ln]
+check("W1 the Windows installer's astropy hint pastes into Terminal's PowerShell: & before the "
+      "quoted python.exe (1.5.4)",
+      bool(_pip_hints) and all('& `"$py`" -m pip install' in ln for ln in _pip_hints), str(_pip_hints))
 _bin = os.path.join(W1.root, "installed-bin")
 os.makedirs(_bin, exist_ok=True)
 for _f in _st.INSTALLED.get(engw.PLATFORM, _st.INSTALLED["windows"]):   # what THIS OS installs
@@ -2969,7 +2978,7 @@ check("U3 an import refuses a ledger from a newer version (v2): exit 2, says so,
 rv, rs, ro = U3.run("--version"), U3.run("--status"), U3.run("--app-owner")
 check("U3 ...while --version, --status and --app-owner still answer (status: unknown, "
       "never 'safe', for a newer ledger)",
-      rv.returncode == 0 and "1.5.3" in rv.stdout
+      rv.returncode == 0 and f"FITS Importer {VERSION} (" in rv.stdout
       and (rs.returncode, rs.stdout.strip())
       == (0, "Status unknown: the ledger is from a newer version of the importer")
       and (ro.returncode, ro.stdout.strip()) == (1, "web") and open(u3_ledger, "rb").read() == newer,
@@ -3362,6 +3371,269 @@ print(json.dumps(out))
 check("U11 with sys.frozen set, _platform_bootstrap never re-launches "
       "(Windows forced, UTF-8 mode off; without sys.frozen it does)",
       got == {"utf8": 0, "False": "relaunched", "True": "no relaunch"}, json.dumps(got))
+
+# ═══════════════ CHAIN AP: an astropy that won't load (1.5.4) ═══════════════
+print("\n── Chain AP: an astropy that won't load says why, and stops only the job (1.5.4) ──")
+# Backlog 13. A fake astropy that raises on import comes first on PYTHONPATH.
+# Before 1.5.4 the engine said "astropy not installed", whatever the real
+# reason, and called sys.exit, which in the panel ended the worker thread.
+AP = teh.Env("AP", asiair=False, seestar=True)
+AP.add_seestar_sub("M 42", "20260119-210000")
+AP_WHY = "dlopen(_compiler.so): Library not loaded: libfake.dylib (a fake astropy for the test)"
+ap_site = os.path.join(AP.root, "fake-astropy")
+os.makedirs(os.path.join(ap_site, "astropy"))
+with open(os.path.join(ap_site, "astropy", "__init__.py"), "w", encoding="utf-8") as f:
+    f.write(f"raise ImportError({AP_WHY!r})\n")
+ap_env = dict(AP.env, PYTHONPATH=ap_site)
+
+def ap_command(fix, exe=sys.executable, windows=os.name == "nt"):
+    """The line that installs or repairs astropy, as the engine words it for
+    each platform: on Windows for PowerShell, & before the quoted python.exe."""
+    return (f'  & "{exe}" -m pip install --user {fix}' if windows
+            else f"  {exe} -m pip install {fix}")
+
+AP_REPAIR = "--upgrade --force-reinstall astropy"
+runs = [irun(ap_env, "--scan-only"), irun(ap_env, stdin="n\nn\nn\n")]   # the watcher's scan; an import
+check("AP the CLI says why astropy won't load (the real ImportError) and how to repair it for "
+      "this Python, then exits 1: no traceback, no scan result, nothing copied",
+      all(x.returncode == 1 and f"ImportError: {AP_WHY}" in x.stderr
+          and "To repair it, run" in x.stderr and ap_command(AP_REPAIR) in x.stderr
+          and "Traceback" not in x.stdout + x.stderr
+          and "ASIAIR-SCAN|COUNT" not in x.stdout for x in runs)
+      and not [n for _d, _s, fs in os.walk(AP.sdest30) for n in fs],
+      " | ".join(f"rc={x.returncode} {(x.stdout + x.stderr)[-250:]}" for x in runs))
+AP_CODE = """
+import contextlib, io
+err, out = io.StringIO(), {}
+with contextlib.redirect_stderr(err):
+    for i in range(3):
+        try:
+            m.get_fits()
+            out[str(i)] = 'loaded'
+        except m.FitsUnavailable as e:
+            out[str(i)] = [isinstance(e, SystemExit), e.code, e.why]
+    try:
+        out['model'] = list(m.seestar_model_ex(%r)[:2])
+    except m.FitsUnavailable:
+        out['model'] = 'stopped'
+out['said'] = err.getvalue()
+print(json.dumps(out))
+""" % AP.svol
+got = probe(ap_env, AP_CODE)
+ap_said = str(got.get("said", "")) if isinstance(got, dict) else ""
+check("AP in the engine: every FITS read stops with FitsUnavailable, a SystemExit(1) carrying "
+      "the real reason, said once; the engine's own `except Exception` guards never swallow it "
+      "(a Seestar is never named from its folder names instead)",
+      isinstance(got, dict) and all(got.get(str(i)) == [True, 1, f"ImportError: {AP_WHY}"]
+                                    for i in range(3))
+      and got.get("model") == "stopped" and ap_said.count(AP_WHY) == 1
+      and ap_said.count("-m pip install") == 1, json.dumps(got)[:500])
+# not installed at all: this child can't see any site-packages folder
+NO_SITE = "import sys; sys.path[:] = [p for p in sys.path if 'site-packages' not in p]\n"
+got = probe(AP.env, AP_CODE, before=NO_SITE)
+ap_said = str(got.get("said", "")) if isinstance(got, dict) else ""
+check("AP astropy not installed at all: 'To install it', and the plain pip install for this "
+      "Python (no --force-reinstall), in this platform's form",
+      isinstance(got, dict)
+      and got.get("0") == [True, 1, "ModuleNotFoundError: No module named 'astropy'"]
+      and "To install it, run" in ap_said and ap_command("astropy") in ap_said
+      and "--force-reinstall" not in ap_said, json.dumps(got)[:500])
+
+# The advice as each platform words it, and the app: the platform, sys.frozen
+# and sys.executable forced in-process, one case after another
+AP_AS = """
+import contextlib, io
+out = {}
+for key, win, frozen, exe in %r:
+    m._fits = m._fits_error = None
+    m.IS_WINDOWS, sys.executable = win, exe
+    if frozen:
+        sys.frozen = True
+    elif hasattr(sys, 'frozen'):
+        del sys.frozen
+    err = io.StringIO()
+    with contextlib.redirect_stderr(err):
+        try:
+            m.get_fits()
+            out[key] = 'loaded'
+        except m.FitsUnavailable as e:
+            out[key] = {'how': e.how, 'said': err.getvalue()}
+print(json.dumps(out))
+"""
+PYW = "C:\\Users\\Brett\\AppData\\Local\\Programs\\Python\\Python314\\pythonw.exe"   # the panel's
+PYX = PYW[:-len("pythonw.exe")] + "python.exe"
+MAC_PY = "/usr/local/bin/python3"
+AS_PY = [("pythonw", True, False, PYW), ("python", True, False, PYX), ("mac", False, False, MAC_PY)]
+as_py = {"broken": probe(ap_env, AP_AS % (AS_PY,)),
+         "missing": probe(AP.env, AP_AS % (AS_PY,), before=NO_SITE)}
+
+def ap_how(windows, missing):
+    """The two lines the log and the install check show, for python.exe on
+    Windows (never pythonw.exe) and python.org's python3 on the Mac."""
+    return [("To install it, run" if missing else "To repair it, run")
+            + (" this in Terminal (PowerShell):" if windows else ":"),
+            ap_command("astropy" if missing else AP_REPAIR, PYX if windows else MAC_PY, windows)]
+
+check("AP on Windows (forced in-process) the command pastes into Terminal's PowerShell: "
+      "& \"…\\python.exe\" -m pip install --user …, naming python.exe even when the panel runs "
+      "under pythonw.exe (no pip output there); on the Mac the command is as before",
+      all(isinstance(got, dict) and isinstance(got.get(key), dict)
+          and got[key]["how"] == ap_how(win, kind == "missing")
+          and all(ln in got[key]["said"] for ln in got[key]["how"])
+          for kind, got in as_py.items() for key, win, _frozen, _exe in AS_PY),
+      json.dumps(as_py)[:900])
+APP_MAC = "/Users/brett/Applications/FITs Importer App.app/Contents/MacOS/FITs Importer App"
+APP_WIN = "C:\\Users\\Brett\\AppData\\Local\\FITs Importer App\\FITs Importer App.exe"
+got = probe(ap_env, AP_AS % ([("mac", False, True, APP_MAC), ("windows", True, True, APP_WIN)],))
+AP_REINSTALL = ["The FITS header reader built into this app is missing or damaged: "
+                "reinstall FITs Importer App."]
+check("AP in the app (sys.frozen forced, Mac and Windows) no pip command aimed at the app's "
+      "own executable: the log says to reinstall FITs Importer App",
+      isinstance(got, dict)
+      and all(isinstance(got.get(k), dict) and got[k]["how"] == AP_REINSTALL
+              and AP_REINSTALL[0] in got[k]["said"] and "by this app (" in got[k]["said"]
+              and "pip" not in got[k]["said"] for k in ("mac", "windows")),
+      json.dumps(got)[:600])
+
+# numpy's own failure to load (on Windows, the usual "DLL load failed") wraps
+# the real error in a page of advice; its first line said nothing useful
+NP_CAUSE = "DLL load failed while importing _multiarray_umath: The specified module could not be found."
+NP_MSG = ("\n\nIMPORTANT: PLEASE READ THIS FOR ADVICE ON HOW TO SOLVE THIS ISSUE!\n\n"
+          "Importing the numpy C-extensions failed. This error can happen for\n"
+          "many reasons, often due to issues with your setup or how NumPy was\n"
+          "installed.\n\nWe have compiled some common reasons and troubleshooting tips at:\n\n"
+          "    https://numpy.org/devdocs/user/troubleshooting-importerror.html\n\n"
+          "Please note and check the following:\n\n"
+          '  * The Python version is: Python 3.14 from "C:\\Python314\\pythonw.exe"\n'
+          '  * The NumPy version is: "2.5.2"\n\n'
+          "and make sure that they are the versions you expect.\n\n"
+          f"Original error was: {NP_CAUSE}\n")
+np_site = os.path.join(AP.root, "fake-astropy-numpy")
+os.makedirs(os.path.join(np_site, "astropy"))
+with open(os.path.join(np_site, "astropy", "__init__.py"), "w", encoding="utf-8") as f:
+    f.write("import os\n"
+            f"cause, msg = {NP_CAUSE!r}, {NP_MSG!r}\n"
+            "if os.environ.get('AP_NUMPY_FROM') == '1':\n"
+            "    try:\n"
+            "        raise ImportError(cause)\n"
+            "    except ImportError as exc:\n"
+            "        raise ImportError(msg) from exc     # as numpy/_core/__init__.py does\n"
+            "raise ImportError(msg)                      # the text alone\n")
+got = probe(dict(AP.env, PYTHONPATH=np_site), """
+import contextlib, io
+out = {}
+for style in ('1', '0'):
+    os.environ['AP_NUMPY_FROM'] = style
+    m._fits = m._fits_error = None
+    err = io.StringIO()
+    with contextlib.redirect_stderr(err):
+        try:
+            m.get_fits()
+            out[style] = 'loaded'
+        except m.FitsUnavailable as e:
+            out[style] = [e.why, err.getvalue()]
+print(json.dumps(out))
+""")
+check("AP numpy's page of advice ('IMPORTANT: PLEASE READ THIS…') is skipped: the banner's "
+      "reason and the log give the line that says why (the DLL error), whether it was raised "
+      "`from` that error (as numpy does) or only quotes it",
+      isinstance(got, dict)
+      and all(isinstance(got.get(k), list) and got[k][0] == f"ImportError: {NP_CAUSE}"
+              and f"  ImportError: {NP_CAUSE}" in got[k][1] and "IMPORTANT" not in got[k][1]
+              for k in ("1", "0")), json.dumps(got)[:700])
+
+# An import checks astropy before it copies anything (1.5.4). An ASIAir's
+# calibration frames go to the Library before the first header is read, so a
+# broken astropy stopped the import after copying them, unrecorded (adopted
+# by size alone, unverified, next time). Here a healthy import first, so
+# there's a ledger to keep, then new lights and calibration frames.
+APA = teh.Env("APasiair", asiair=True, seestar=False)
+APA.add_light("Plan", "M 81", "0001", dt="20260501-220100")
+APA.add_cal("Bias", "1.0ms", "20260430-090000")
+r0 = APA.run(stdin="n\nn\nn\nn\n")
+apa_ledger = os.path.join(APA.state, "ledger.json")
+
+def apa_now():
+    """Every file in the workbench and the Calibration Library, and the ledger's bytes."""
+    files = sorted(os.path.relpath(os.path.join(d, n), APA.root)
+                   for top in (APA.dest, APA.lib) for d, _s, fs in os.walk(top) for n in fs)
+    return files, (open(apa_ledger, "rb").read() if os.path.isfile(apa_ledger) else None)
+
+apa_before = apa_now()
+for seq in ("0002", "0003"):
+    APA.add_light("Plan", "M 81", seq, dt=f"20260502-22{seq[-2:]}00")
+APA.add_cal("Bias", "1.0ms", "20260719-090000")
+APA.add_cal("Dark", "300.0s", "20260719-091000")
+APA.add_cal("Flat", "20.0ms", "20260720-090000", filt="LUltimate")
+r = irun(dict(APA.env, PYTHONPATH=ap_site), stdin="n\nn\nn\nn\n")
+apa_after = apa_now()
+check("AP an ASIAir import checks astropy before it copies anything: exit 1 with the reason, no "
+      "new file in the workbench or the Calibration Library (lights and calibration frames), "
+      "and the ledger unchanged",
+      r0.returncode == 0 and apa_before[1] is not None
+      and any(f.startswith(os.path.join("dest", "ASIAir Calibration Library")) for f in apa_before[0])
+      and r.returncode == 1 and f"ImportError: {AP_WHY}" in r.stderr and apa_after == apa_before,
+      f"rc0={r0.returncode} rc={r.returncode} new="
+      f"{sorted(set(apa_after[0]) - set(apa_before[0]))} ledger same: {apa_after[1] == apa_before[1]} "
+      + (r.stdout + r.stderr)[-300:])
+got = probe(AP.env, """
+import argparse
+out = {}
+state = m.State()
+state.new_ledger()
+s = m.scan_seestar(state)                    # astropy loads: the Seestar is known
+out['scanned'] = bool(s)
+m._fits, m._fits_error = None, 'ImportError: gone after the scan (the test)'
+args = argparse.Namespace(dry_run=False, no_checksum=False, loose_cal=False, explain_cal=False,
+                          all=False, clean_source_previews=False, targets=None, verbose=False)
+try:
+    m.run_seestar_import(state, s, args)
+    out['import'] = 'finished'
+except m.FitsUnavailable as e:
+    out['import'] = e.why
+out['copied'] = [n for d, _s, fs in os.walk(%r) for n in fs]
+print(json.dumps(out))
+""" % os.path.join(AP.root, "dest"))
+check("AP ...and so does a Seestar import (astropy gone after the scan): stopped before its first "
+      "copy, nothing copied",
+      isinstance(got, dict) and got.get("scanned") is True
+      and got.get("import") == "ImportError: gone after the scan (the test)"
+      and got.get("copied") == [], json.dumps(got)[:500])
+
+# The install check loads astropy the engine's way (1.5.4). Before, it caught
+# only an ImportError (anything else ended it with a traceback, skipping every
+# later check), and said "pip install" for an astropy that was there but broken
+APS = teh.Env("APself", asiair=False, seestar=False)
+RT_WHY = "module compiled against ABI version 0x1000009 but this version of numpy is 0x2000000"
+rt_site = os.path.join(APS.root, "fake-astropy")
+os.makedirs(os.path.join(rt_site, "astropy"))
+with open(os.path.join(rt_site, "astropy", "__init__.py"), "w", encoding="utf-8") as f:
+    f.write(f"raise RuntimeError({RT_WHY!r})\n")
+st = {}
+for key, env in (("healthy", APS.env), ("ImportError", dict(APS.env, PYTHONPATH=ap_site)),
+                 ("RuntimeError", dict(APS.env, PYTHONPATH=rt_site))):
+    r = irun(env, script=os.path.join(HERE, "selftest.py"))
+    st[key] = r.stdout + r.stderr
+
+def st_says(out, why):
+    """The astropy FAIL line with the real reason, then the engine's two lines;
+    and the checks after it still ran, to the summary."""
+    lines = [ln.strip() for ln in out.splitlines()]
+    i = next((n for n, ln in enumerate(lines) if "astropy loads (reads FITS headers)" in ln), None)
+    return (i is not None
+            and lines[i:i + 3] == [f"FAIL  astropy loads (reads FITS headers)  — {why}",
+                                   ap_how(os.name == "nt", False)[0],   # this platform's words
+                                   ap_command(AP_REPAIR).strip()]       # ...for this Python
+            and "Traceback" not in out and "this computer has an importer identity" in out
+            and re.search(r"\d+ passed, \d+ warnings, \d+ failed", out) is not None)
+
+check("AP the install check loads astropy the engine's way: the real reason (a RuntimeError too, "
+      "which used to end it with a traceback) and the command that reinstalls it; the checks "
+      "after it still run",
+      "PASS  astropy loads (reads FITS headers)" in st["healthy"]
+      and st_says(st["ImportError"], f"ImportError: {AP_WHY}")
+      and st_says(st["RuntimeError"], f"RuntimeError: {RT_WHY}"),
+      json.dumps({k: v[-600:] for k, v in st.items()})[:1500])
 
 # ═══════════════ Summary ═════════════════════════════════════════════════════
 print("\n═══════════════════════════════════════════════════")

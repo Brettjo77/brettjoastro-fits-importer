@@ -50,31 +50,92 @@ from collections import defaultdict
 from datetime import datetime, timedelta
 
 # One version for every platform (1.5.0: the Windows 11 edition joins the Mac).
-VERSION = "1.5.3"
+VERSION = "1.5.4"
 IS_WINDOWS = os.name == "nt"
 IS_MAC = sys.platform == "darwin"
 PLATFORM = "windows" if IS_WINDOWS else ("mac" if IS_MAC else "linux")
 
 # ── Lazy astropy ─────────────────────────────────────────────────────────────
 _fits = None
+_fits_error = None          # why astropy would not load, once it has failed (1.5.4)
+_fits_how = []              # ...and the lines that put it right
+
+class FitsUnavailable(SystemExit):
+    """astropy would not load, so this job stops (1.5.4). It is a SystemExit
+    on purpose: every header read sits in an `except Exception` guard, and a
+    guard that swallowed this would carry on without FITS headers (a Seestar
+    named from its folder names alone). So it stops the job the way
+    sys.exit(1) always did: the CLI exits 1, and the panel catches it by name
+    and fails only that one job. `.why` is the real error, on one line;
+    `.how` the lines that put it right (the install check shows both)."""
+
+    def __init__(self, why, how=()):
+        super().__init__(1)
+        self.why = why
+        self.how = list(how)
+
+def _fits_why(e):
+    """The one line that says why astropy won't load. numpy's own failure to
+    load (on Windows, the usual "DLL load failed") wraps the real error in a
+    page of advice that opens "IMPORTANT: PLEASE READ THIS…" and ends
+    "Original error was: …", raised `from` the real error. So: the innermost
+    cause, its "Original error was:" line if it has one, else its first line."""
+    for _ in range(10):                  # a chain of causes (never a loop)
+        if e.__cause__ is None:
+            break
+        e = e.__cause__
+    lines = [ln.strip() for ln in str(e).splitlines() if ln.strip()]
+    orig = [ln.split(":", 1)[1].strip() for ln in lines if ln.startswith("Original error was:")]
+    line = next((x for x in orig if x), None) or (lines[0] if lines else "(no message)")
+    return f"{type(e).__name__}: {line}"
+
+def _fits_repair(e):
+    """What puts astropy right, as the lines to show: the pip command for
+    the Python that is running (install if it's missing, reinstall if it's
+    there but broken), or in the app, reinstalling the app."""
+    if getattr(sys, "frozen", False):
+        # the app's executable is the app, not a Python, and pip can't
+        # repair what is built into it
+        return ["The FITS header reader built into this app is missing or damaged: "
+                "reinstall FITs Importer App."]
+    missing = isinstance(e, ModuleNotFoundError) and e.name == "astropy"
+    fix = "astropy" if missing else "--upgrade --force-reinstall astropy"
+    # the interpreter that is actually running (the old hint named Apple's
+    # python even when python.org's was in use)
+    exe = sys.executable
+    if IS_WINDOWS:
+        # the panel and the watcher run under pythonw.exe, which shows no
+        # pip output: python.exe beside it. Terminal opens PowerShell, which
+        # runs a quoted path only after & ("Unexpected token '-m'" without)
+        if exe.lower().endswith("pythonw.exe"):
+            exe = exe[:-len("pythonw.exe")] + "python.exe"
+        return [("To install" if missing else "To repair")
+                + " it, run this in Terminal (PowerShell):",
+                f'  & "{exe}" -m pip install --user {fix}']
+    return ["To install it, run:" if missing else "To repair it, run:",
+            f"  {exe} -m pip install {fix}"
+            + (" --break-system-packages" if exe.startswith("/usr/bin/") else "")]
 
 def get_fits():
-    global _fits
-    if _fits is None:
+    global _fits, _fits_error, _fits_how
+    if _fits is not None:
+        return _fits
+    if _fits_error is None:
         try:
             from astropy.io import fits as _f
             _fits = _f
-        except ImportError:
-            # name the interpreter that is actually running (the old hint
-            # named Apple's python even when python.org's was in use)
-            error("astropy not installed for this Python. Run:")
-            if IS_WINDOWS:
-                error(f'  "{sys.executable}" -m pip install --user astropy')
-            else:
-                error(f"  {sys.executable} -m pip install astropy"
-                      + (" --break-system-packages" if sys.executable.startswith("/usr/bin/") else ""))
-            sys.exit(1)
-    return _fits
+            return _fits
+        except Exception as e:           # not only ImportError: any failure to load
+            _fits_error, _fits_how = _fits_why(e), _fits_repair(e)
+            # Say why, once per process: the panel's later jobs fail with
+            # the same reason and add no more red lines. It isn't tried
+            # again until a restart: a half-loaded astropy can't be trusted.
+            what = "this app" if getattr(sys, "frozen", False) else "this Python"
+            error(f"astropy could not be loaded by {what} ({sys.executable}):")
+            error(f"  {_fits_error}")
+            for ln in _fits_how:
+                error(ln)
+    raise FitsUnavailable(_fits_error, _fits_how)
 
 
 # ═══════════════════════════════════════════════════════════════════════════
@@ -2256,6 +2317,11 @@ def continuation_day(dest_target_dir, day_label, candidate_day, incoming_nights)
 # ═══════════════════════════════════════════════════════════════════════════
 
 def run_import(state, args, only_targets=None):
+    # astropy first (1.5.4): the calibration frames go to the Library before
+    # the first header is read, so a broken astropy stopped the import after
+    # copying them, unrecorded (adopted by size alone, unverified, next time).
+    # Now nothing is copied, marked or ledgered unless it loads.
+    get_fits()
     dry_run = args.dry_run
     checksum = not args.no_checksum
     loose = args.loose_cal
@@ -5067,6 +5133,7 @@ def _sub_meta(path):
 
 
 def run_seestar_import(state, scan_s, args, only_targets=None):
+    get_fits()      # astropy first, before anything is copied (1.5.4, as run_import)
     dry_run = args.dry_run
     checksum = not args.no_checksum
     vol, camera, model = scan_s["volume"], scan_s["camera"], scan_s["model"]

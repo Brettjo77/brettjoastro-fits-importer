@@ -64,7 +64,7 @@ Ok "Python: $py"
 if ($LASTEXITCODE -ne 0) {
     Info "Installing astropy (the FITS reader) for this Python..."
     & $py -m pip install --user --disable-pip-version-check astropy
-    if ($LASTEXITCODE -ne 0) { Warn "pip could not install astropy - run:  `"$py`" -m pip install --user astropy"; exit 1 }
+    if ($LASTEXITCODE -ne 0) { Warn "pip could not install astropy - run this in Terminal (PowerShell):  & `"$py`" -m pip install --user astropy"; exit 1 }
 }
 Ok "astropy is installed"
 

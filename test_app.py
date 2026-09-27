@@ -12,6 +12,7 @@ import io
 import json
 import os
 import re
+import socket
 import subprocess
 import threading
 import time
@@ -955,6 +956,71 @@ check("U9 the status line's tooltip, worded for this computer, explains a count 
       f'const STATUS_TIP="{TIP}";' in page4 and "sl.title=sum.onlyHere?STATUS_TIP" in page4,
       re.findall(r"const STATUS_TIP=.*", page4)[:1])
 
+# ── AP (1.5.4, backlog 13): an astropy that won't load fails only the one job ──
+# A fake astropy that raises on import comes first on the panel's PYTHONPATH.
+# Before 1.5.4 the engine's sys.exit ended the worker thread: an empty banner,
+# no reason, and the page's automatic rescan printed the same red lines again
+# every second. Now each job fails with the real reason in the banner, and
+# the log says it once.
+env5 = teh.Env("APP5", asiair=False, seestar=True)
+env5.add_seestar_sub("M 42", "20260119-210000")
+FAKE_WHY = "dlopen(_compiler.so): Library not loaded: libfake.dylib (a fake astropy for the test)"
+fake5 = os.path.join(env5.root, "fake-astropy")
+os.makedirs(os.path.join(fake5, "astropy"))
+with open(os.path.join(fake5, "astropy", "__init__.py"), "w", encoding="utf-8") as f:
+    f.write(f"raise ImportError({FAKE_WHY!r})\n")
+env5.env["PYTHONPATH"] = fake5
+PORT5 = int(env5.env["ASTRO_PANEL_PORT"])
+URL5 = f"http://127.0.0.1:{PORT5}"
+proc5 = start_panel(env5, PORT5)
+ap, page5 = {"jobs": []}, ""
+
+def ap_job(path, body):
+    """One job on panel 5, to the end: what it started, and the state after."""
+    started = api(path, body, url=URL5).get("started")
+    t0, s = time.time(), {}
+    while time.time() - t0 < 60:
+        s = api("/api/state", url=URL5)
+        if s.get("status") == "idle" and time.time() - t0 > 0.5:
+            break
+        time.sleep(0.3)
+    red = [ln for ln in s.get("log") or [] if str(ln).startswith("✗")]
+    ap["jobs"].append({"started": started, "status": s.get("status"),
+                       "lastResult": s.get("lastResult"), "red": len(red)})
+    return s
+
+try:
+    own_panel(URL5, env5, proc5, "AP a panel whose astropy won't load starts, and answers as itself")
+    page5 = load_token(URL5)
+    for path, body in (("/api/scan", {}), ("/api/scan", {}), ("/api/import", {"names": ["M 42"]}),
+                       ("/api/scan", {})):
+        s = ap_job(path, body)
+    ap["log"] = [str(ln) for ln in s.get("log") or []]
+    ap["alive"] = proc5.poll() is None and api("/api/ping", url=URL5).get("ok") is True
+    ap["copied"] = [n for _d, _s, fs in os.walk(env5.sdest30) for n in fs]
+finally:
+    proc5.terminate()
+    proc5.wait(timeout=30)
+with open(os.path.join(env5.root, "panel.log"), encoding="utf-8", errors="replace") as f:
+    ap["traceback"] = "Traceback" in f.read()
+WHY5 = f"ImportError: {FAKE_WHY}"
+jobs = ap["jobs"]
+check("AP each job fails on its own with the real reason in the banner ('scanning failed: "
+      "astropy could not be loaded (ImportError: …)'), and the panel stays up for the next",
+      len(jobs) == 4 and all(j["started"] is True and j["status"] == "idle" for j in jobs)
+      and all(str(j["lastResult"]).startswith(
+          f"{w} failed: astropy could not be loaded ({WHY5}). ")
+          for j, w in zip(jobs, ("scanning", "scanning", "importing", "scanning")))
+      and ap.get("alive") is True and ap.get("copied") == [] and ap.get("traceback") is False,
+      json.dumps(ap)[:700])
+fix5 = [ln for ln in ap.get("log", []) if sys.executable in ln and "-m pip install" in ln]
+check("AP the log says why once, with the command for this Python; later jobs add no red "
+      "lines, and a failed scan stops the page's automatic rescan",
+      sum(FAKE_WHY in ln for ln in ap.get("log", [])) == 1 and len(fix5) == 1
+      and len(jobs) == 4 and jobs[0]["red"] > 0 and len({j["red"] for j in jobs}) == 1
+      and '!(s.lastResult||"").startsWith("scanning failed")' in page5,
+      json.dumps({"jobs": jobs, "log": ap.get("log", [])[-8:]})[:700])
+
 # ── U10 (1.5.3): the app runs the panel in-process — make_server() / serve() ──
 u10, said = {}, io.StringIO()
 computed = []                     # each time the status line is worked out (U9 below)
@@ -1162,6 +1228,109 @@ check("U8 ...and while a question card is pending (no operation holding the lock
       (ip.get("quitCard") or {}).get("_status") == 409 and ip.get("stillUp2") is True
       and (ip.get("quitIdle") or {}).get("ok") is True and ip.get("ended") is True,
       json.dumps(ip)[:600])
+
+# ── AP (1.5.4): a job the engine ends with sys.exit stops only that job ──
+# (the engine's other sys.exit calls, a newer importer's ledger at the save
+# for one, reach the panel's worker thread the same way)
+apx = {}
+try:
+    with contextlib.redirect_stdout(said):
+        apx["started"] = panel.APP._run("testing", lambda: sys.exit(2), need_camera=False)
+        apx["idle"] = ip_idle()
+        apx["said"] = panel.APP.last_result
+        apx["log"] = [ln for ln in list(panel.APP.log)[-3:] if ln.startswith("✗")]
+        apx["next"] = panel.APP._run("testing", lambda: None, need_camera=False)
+        apx["idle2"] = ip_idle()
+except Exception as x:
+    apx["error"] = repr(x)
+check("AP a job the engine ends with sys.exit fails on its own: idle again, the banner and "
+      "one red line say so, and the next job runs",
+      apx.get("started") is True and apx.get("idle") is True
+      and apx.get("said") == "testing failed: the engine stopped it (exit code 2). The log says why."
+      and apx.get("log") == ["✗ testing stopped by the engine (exit code 2)"]
+      and apx.get("next") is True and apx.get("idle2") is True, json.dumps(apx))
+
+# ── AP (1.5.4): in the app the astropy banner fits the app ──
+# The app runs this panel in-process, frozen: there is no pip to run against
+# it, and no panel to restart. sys.frozen is forced here for one job.
+apf, had_frozen = {}, hasattr(sys, "frozen")
+
+def no_astropy():
+    raise panel.eng.FitsUnavailable("ImportError: libfake.dylib (the test)")
+
+try:
+    with contextlib.redirect_stdout(said):
+        for key, frozen in (("web", False), ("app", True)):
+            try:
+                if frozen:
+                    sys.frozen = True
+                apf[key + "Started"] = panel.APP._run("scanning", no_astropy, need_camera=False)
+                apf[key + "Idle"] = ip_idle()
+                apf[key] = panel.APP.last_result
+            finally:
+                if not had_frozen and hasattr(sys, "frozen"):
+                    del sys.frozen
+except Exception as x:
+    apf["error"] = repr(x)
+AP_BANNER = "scanning failed: astropy could not be loaded (ImportError: libfake.dylib (the test)). "
+check("AP in the app (sys.frozen forced) the astropy banner says to reinstall FITs Importer App, "
+      "then restart the app (no pip command, no panel to restart); the web panel's words are "
+      "unchanged",
+      apf.get("web") == AP_BANNER + "Install or repair it (the log shows the command), then "
+                                    "restart the panel."
+      and apf.get("app") == AP_BANNER + "Reinstall FITs Importer App, then restart the app."
+      and all(apf.get(k) is True for k in ("webStarted", "webIdle", "appStarted", "appIdle"))
+      and hasattr(sys, "frozen") == had_frozen, json.dumps(apf))
+
+# ── U12 (1.5.4): the panel binds without a reverse DNS lookup ──
+# http.server's own bind asks socket.getfqdn() for the host's name. In the
+# packaged app on the Mac nothing answered, and the panel started 35 s late.
+# Here the lookup hangs for 3 s and every call is counted.
+u12, asked = {}, []
+real_getfqdn = socket.getfqdn
+
+def hanging_getfqdn(name=""):
+    asked.append(name)
+    time.sleep(3)
+    return name
+
+socket.getfqdn = hanging_getfqdn
+try:
+    with contextlib.redirect_stdout(said):
+        t0 = time.time()
+        srv = panel.make_server(0)
+        u12["secs"] = round(time.time() - t0, 2)
+        t = threading.Thread(target=srv.serve_forever, daemon=True)
+        t.start()
+        url = f"http://127.0.0.1:{srv.server_address[1]}"
+        u12["ping"] = api("/api/ping", url=url)
+        u12["want"] = teh.instance_id(panel.eng.STATE_DIR)
+        u12["name"] = [srv.server_name, srv.server_port, srv.server_address[1], panel.PORT]
+        so = socket.SOL_SOCKET
+        if os.name == "nt":      # one panel per port: exclusive, and no SO_REUSEADDR
+            u12["rules"] = [bool(srv.socket.getsockopt(so, socket.SO_EXCLUSIVEADDRUSE)),
+                            bool(srv.socket.getsockopt(so, socket.SO_REUSEADDR))] == [True, False]
+        else:                    # ...and no SO_REUSEPORT, which lets a second process bind it too
+            u12["rules"] = [bool(srv.socket.getsockopt(so, socket.SO_REUSEADDR)),
+                            bool(srv.socket.getsockopt(so, socket.SO_REUSEPORT))] == [True, False]
+        srv.shutdown()
+        srv.server_close()
+        t.join(10)
+except Exception as x:
+    u12["error"] = repr(x)
+finally:
+    socket.getfqdn = real_getfqdn
+u12["asked"] = asked
+check("U12 make_server never asks socket.getfqdn (made to hang 3 s): it returns in under "
+      "1 s, and the panel answers as itself",
+      u12.get("asked") == [] and u12.get("secs", 99) < 1
+      and (u12.get("ping") or {}).get("ok") is True and u12.get("want")
+      and (u12.get("ping") or {}).get("instance") == u12["want"], json.dumps(u12))
+check("U12 ...with today's bind rules (SO_REUSEADDR and no SO_REUSEPORT on the Mac; "
+      "SO_EXCLUSIVEADDRUSE and no SO_REUSEADDR on Windows: one panel per port), server_name "
+      "the address itself and server_port the port bound",
+      u12.get("rules") is True and u12.get("name", [0])[0] == "127.0.0.1"
+      and len(set(u12.get("name", [0, 1])[1:])) == 1, json.dumps(u12))
 
 if FAIL:
     show_panel_logs()
