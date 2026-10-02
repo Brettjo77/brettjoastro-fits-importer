@@ -17,7 +17,7 @@
 
 **Mac / Windows:** the same on both. On the Mac it works when the archive share is mounted. Windows opens with File Explorer and the file's default app; the Mac uses Finder.
 
-538 end-to-end checks (401 engine + 137 panel). The 9 new engine checks and 10 new panel checks passed in test mode on Linux. On Linux the 2 installer checks and the 2 astropy-install checks that need a Mac or PC as set up for a release didn't pass, and they fail the same way without this change. Run both suites on the Mac before releasing.
+538 end-to-end checks (401 engine + 137 panel), all passed on the Mac on 2 Oct 2026, including the 9 new engine checks and 10 new panel checks.
 
 ## 1.5.5 — 2026-09-27 — what you can delete from the Mac
 
@@ -45,7 +45,7 @@
 
 **Mac / Windows:** the same on both ("this PC" and File Explorer on Windows).
 
-519 end-to-end checks (392 engine + 127 panel). The 7 new engine checks and the panel suite passed in test mode on Linux. On Linux the two installer checks that only apply on a Mac or PC can't pass, as before this change. Run both suites on the Mac before releasing.
+519 end-to-end checks (392 engine + 127 panel), including the 7 new engine checks. Released with 1.6.0, whose full suites passed on the Mac on 2 Oct 2026.
 
 ## 1.5.4 — 2026-09-27 — clearer astropy errors, and a quicker panel start
 
