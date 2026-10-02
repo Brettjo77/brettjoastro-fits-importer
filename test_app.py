@@ -17,6 +17,7 @@ import subprocess
 import threading
 import time
 import urllib.error
+import urllib.parse
 import urllib.request
 
 sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
@@ -1331,6 +1332,108 @@ check("U12 ...with today's bind rules (SO_REUSEADDR and no SO_REUSEPORT on the M
       "the address itself and server_port the port bound",
       u12.get("rules") is True and u12.get("name", [0])[0] == "127.0.0.1"
       and len(set(u12.get("name", [0, 1])[1:])) == 1, json.dumps(u12))
+
+# ── AD (1.6.0): Astro Desk, the Archive tab, opens the archive read-only ──
+# The tab lists what is still to process and opens folders, image files and
+# Siril there. A request without the token, a path outside the archive or a
+# program file is refused; in test mode every open is recorded, never done.
+envd = teh.Env("APPAD", asiair=False, seestar=False)
+ad_arch = envd.archive
+def ad_put(*parts):
+    p = os.path.join(ad_arch, *parts)
+    os.makedirs(os.path.dirname(p), exist_ok=True)
+    with open(p, "wb") as f:
+        f.write(b"\0" * 16)
+ad_wiz = ("ZWO Askar Scopes", "Wizard Nebula (NGC 7380)")
+ad_put(*ad_wiz, "Wizard Nebula Day 1", "Light_001.fit")
+ad_put(*ad_wiz, "WBPP", "masterLight_LUltimate.xisf")
+ad_put(*ad_wiz, "Run me.exe")
+ad_put(*ad_wiz, "shortcut.lnk")
+for r in ("S30P", "S30", "S50", "S50P"):
+    os.makedirs(os.path.join(ad_arch, r), exist_ok=True)
+ad_ds = os.path.join(envd.root, "obs", "dataset.json")
+os.makedirs(os.path.dirname(ad_ds))
+with open(ad_ds, "w", encoding="utf-8") as f:
+    json.dump({"generatedAt": "2026-10-02 08:00", "targets": [{
+        "name": "Wizard Nebula", "codes": ["NGC 7380"], "state": "stacked",
+        "programmes": [{"camera": "ASIAir", "hours": 7.5, "nights": 1,
+                        "path": "D:\\Astro Image Data\\ZWO Askar Scopes\\Wizard Nebula (NGC 7380)"}],
+        "statusCards": [{"camera": "ASIAir", "state": "stacked", "evidence": "1 master"}]}]}, f)
+ad_siril = os.path.join(envd.root, "apps", "siril")
+os.makedirs(os.path.dirname(ad_siril))
+with open(ad_siril, "w") as f:
+    f.write("#!/bin/sh\n")
+envd.env.update({"ASTRO_OBSERVATORY_DATASET": ad_ds, "ASTRO_SIRIL_EXE": ad_siril})
+
+def ad_tree():
+    out = {}
+    for root, dirs, fns in os.walk(ad_arch):
+        for n in dirs + fns:
+            p = os.path.join(root, n)
+            out[p] = (os.path.getsize(p) if os.path.isfile(p) else -1, os.path.getmtime(p))
+    return out
+
+PORTD = int(envd.env["ASTRO_PANEL_PORT"])
+URLD = f"http://127.0.0.1:{PORTD}"
+procd = start_panel(envd, PORTD)
+try:
+    own_panel(URLD, envd, procd, "AD the Astro Desk panel answers with its own instance id")
+    tree0 = ad_tree()
+    page = urllib.request.urlopen(URLD + "/archive?target=Wizard%20Nebula", timeout=10).read().decode()
+    check("AD /archive serves the panel page with its token and the Archive tab",
+          'data-tab="archive"' in page and 'id="tab-archive"' in page
+          and re.search(r'const TOKEN="[^"]{24,}"', page) is not None)
+    load_token(URLD)
+    idx = api("/api/archive/index", url=URLD)
+    wiz = [i for i in idx.get("items", []) if i.get("rel") == "/".join(ad_wiz)]
+    check("AD /api/archive/index joins the dataset (state stacked, 7.5 h) to this archive",
+          idx.get("datasetFound") is True and wiz and wiz[0]["state"] == "stacked"
+          and wiz[0]["hours"] == 7.5 and idx.get("sirilFound") is True, json.dumps(idx)[:400])
+    lst = api("/api/archive/list?rel=" + urllib.parse.quote("/".join(ad_wiz)), url=URLD)
+    check("AD /api/archive/list sorts the folder: 1 night with 1 frame, 1 master",
+          [n["frames"] for n in lst.get("nights", [])] == [1]
+          and [m_["name"] for m_ in lst.get("masters", [])] == ["masterLight_LUltimate.xisf"],
+          json.dumps(lst)[:400])
+    bad_list = api("/api/archive/list?rel=" + urllib.parse.quote("../state"), url=URLD)
+    check("AD listing a path outside the archive is a 404", bad_list.get("_status") == 404, json.dumps(bad_list))
+
+    tok = TOKEN["v"]
+    TOKEN["v"] = ""
+    no_tok = api("/api/archive/open", {"rel": "/".join(ad_wiz)}, url=URLD)
+    TOKEN["v"] = tok
+    check("AD opening without the per-launch token is refused (403) and opens nothing",
+          no_tok.get("_status") == 403 and not teh.os_calls(envd.root, "open"), json.dumps(no_tok))
+    r_folder = api("/api/archive/open", {"rel": "/".join(ad_wiz)}, url=URLD)
+    r_master = api("/api/archive/open", {"rel": "/".join(ad_wiz + ("WBPP", "masterLight_LUltimate.xisf"))}, url=URLD)
+    r_exe = api("/api/archive/open", {"rel": "/".join(ad_wiz + ("Run me.exe",))}, url=URLD)
+    r_lnk = api("/api/archive/open", {"rel": "/".join(ad_wiz + ("shortcut.lnk",))}, url=URLD)
+    r_out = api("/api/archive/open", {"rel": "../state"}, url=URLD)
+    r_abs = api("/api/archive/open", {"rel": envd.state}, url=URLD)
+    opens = teh.os_calls(envd.root, "open")
+    check("AD a folder and a master open (recorded in test mode, inside the archive); a program, "
+          "a shortcut, a path outside and an absolute path are refused and open nothing",
+          r_folder.get("ok") is True and r_master.get("ok") is True
+          and [r.get("_status") for r in (r_exe, r_lnk, r_out, r_abs)] == [400] * 4
+          and len(opens) == 2 and all(o.get("target", "").startswith(ad_arch) for o in opens),
+          json.dumps([r_folder, r_master, r_exe, r_lnk, r_out, r_abs, opens])[:600])
+    r_siril = api("/api/archive/siril", {"rel": "/".join(ad_wiz)}, url=URLD)
+    launches = teh.os_calls(envd.root, "launch")
+    check("AD 'Start Siril here' runs Siril with -d and the target folder (recorded, not started)",
+          r_siril.get("ok") is True and len(launches) == 1
+          and launches[0].get("args") == ["-d", os.path.join(ad_arch, *ad_wiz)],
+          json.dumps([r_siril, launches]))
+    os.rename(ad_siril, ad_siril + ".moved")
+    r_nosiril = api("/api/archive/siril", {"rel": "/".join(ad_wiz)}, url=URLD)
+    r_sfile = api("/api/archive/siril", {"rel": "/".join(ad_wiz + ("WBPP", "masterLight_LUltimate.xisf"))}, url=URLD)
+    check("AD with Siril missing the answer says where to set ASTRO_SIRIL_EXE; Siril only starts in a folder",
+          r_nosiril.get("ok") is False and "ASTRO_SIRIL_EXE" in (r_nosiril.get("error") or "")
+          and r_sfile.get("_status") == 400 and len(teh.os_calls(envd.root, "launch")) == 1,
+          json.dumps([r_nosiril, r_sfile]))
+    check("AD read-only: after all of it the archive is exactly as it was (no _verify probe)",
+          ad_tree() == tree0 and not os.path.exists(os.path.join(ad_arch, "_verify")))
+finally:
+    procd.terminate()
+    procd.wait(timeout=30)
 
 if FAIL:
     show_panel_logs()

@@ -50,7 +50,7 @@ from collections import defaultdict
 from datetime import datetime, timedelta
 
 # One version for every platform (1.5.0: the Windows 11 edition joins the Mac).
-VERSION = "1.5.5"
+VERSION = "1.6.0"
 IS_WINDOWS = os.name == "nt"
 IS_MAC = sys.platform == "darwin"
 PLATFORM = "windows" if IS_WINDOWS else ("mac" if IS_MAC else "linux")
@@ -218,7 +218,8 @@ def _test_root_guard():
              ("SEESTAR_DEST_S30_ORIG", SEESTAR_DEST_S30_ORIG),
              ("SEESTAR_DEST_S50PRO", SEESTAR_DEST_S50PRO),
              ("ASIAIR_EQUIPMENT", EQUIPMENT_JSON), ("ASIAIR_RECEIPTS", RECEIPT_BASE),
-             ("ASIAIR_LEGACY_NAMES", LEGACY_CUSTOM_NAMES)]
+             ("ASIAIR_LEGACY_NAMES", LEGACY_CUSTOM_NAMES),
+             ("ASTRO_SIRIL_EXE", SIRIL_EXE), ("ASTRO_OBSERVATORY_DATASET", OBSERVATORY_DATASET)]
     paths += [("SEESTAR_VOLUME", v) for v in SEESTAR_VOLUMES]
     paths += [("ASTRO_DRIVE_ROOTS", r)
               for r in (os.environ.get("ASTRO_DRIVE_ROOTS") or "").split(os.pathsep)]
@@ -470,6 +471,29 @@ def eject_volume(vol):
         return False
     return False
 
+def launch_app(exe, args=()):
+    """Start a desktop app (Siril, from Astro Desk) with arguments, detached
+    from the panel. False when the program isn't there. Test mode records
+    the launch instead of starting anything."""
+    if not exe or not os.path.exists(exe):
+        return False
+    if TEST_ROOT:
+        _test_record("launch", exe=exe, args=list(args))
+        return True
+    try:
+        if IS_WINDOWS:
+            # DETACHED_PROCESS | CREATE_NEW_PROCESS_GROUP: outlives the panel
+            subprocess.Popen([exe, *args], creationflags=0x00000008 | 0x00000200,
+                             close_fds=True)
+        elif IS_MAC and exe.endswith(".app"):
+            subprocess.Popen(["open", "-a", exe, "--args", *args])
+        else:
+            subprocess.Popen([exe, *args], start_new_session=True,
+                             stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL)
+        return True
+    except OSError:
+        return False
+
 def open_path(target):
     """Open a file or URL with the system's default app."""
     if TEST_ROOT:
@@ -567,6 +591,16 @@ STAMP_RE = re.compile(r"\d{8}-\d{6}")
 EQUIPMENT_JSON = _env_path("ASIAIR_EQUIPMENT", "~/Documents/Astro/equipment.json")
 RECEIPT_BASE  = _env_path("ASIAIR_RECEIPTS", "~/Documents/Astro/astrolog-receipts")
 LEGACY_CUSTOM_NAMES = _env_path("ASIAIR_LEGACY_NAMES", "~/.asiair-custom-names.json")
+# Astro Desk (1.6.0): Siril, started in a target folder from the Archive tab,
+# and the Observatory's dataset (target states and paths), which its refresh
+# writes beside the archive on the PC.
+SIRIL_EXE = _env_path("ASTRO_SIRIL_EXE", "C:\\Program Files\\Siril\\bin\\siril.exe" if IS_WINDOWS
+                      else "/Applications/Siril.app/Contents/MacOS/Siril")
+OBSERVATORY_DATASET = _env_path(
+    "ASTRO_OBSERVATORY_DATASET",
+    os.path.join(os.path.splitdrive(ARCHIVE_MOUNT)[0] + "\\", "Astro Config Data", "Observatory",
+                 "dataset.json") if IS_WINDOWS
+    else os.path.join(_DEF_STATE, "observatory-dataset.json"))
 _test_root_guard()
 
 # One-time migration from the pre-unification state locations (spec §1).
@@ -3478,6 +3512,217 @@ def run_space(state):
     if not whole and not part:
         print("\nNothing is safe to delete yet: the PC's sweep hasn't re-checked any of these frames.")
     return sp
+
+# ═══════════════════════════════════════════════════════════════════════════
+# ASTRO DESK (1.6.0) — the archive, read-only, ready for processing
+# The panel's Archive tab: what each target folder on the archive holds (nights,
+# masters, processed files, finished pictures) and where it is, so a folder or
+# file opens straight in PixInsight, Siril, SyQon or Photoshop. Target states
+# and hours come from the Observatory's dataset when it is there. Nothing here
+# writes, moves or deletes anything on the archive (no write probe either).
+# ═══════════════════════════════════════════════════════════════════════════
+
+DESK_ROOT_LABELS = {"S30P": "Seestar S30 Pro", "S30": "Seestar S30", "S50": "Seestar S50",
+                    "S50P": "Seestar S50 Pro", "ZWO Askar Scopes": "ASIAir (Askar)"}
+# Files the Archive tab may open with their default app. Never programs or
+# shortcuts: os.startfile would run them.
+DESK_OPENABLE = {".fit", ".fits", ".fts", ".xisf", ".tif", ".tiff", ".jpg", ".jpeg",
+                 ".png", ".psd", ".psb", ".xosm"}
+_DESK_FRAME_EXT = {".fit", ".fits", ".fts"}
+_DESK_IMAGE_EXT = {".jpg", ".jpeg", ".png", ".tif", ".tiff", ".psd", ".psb"}
+_DESK_PROCESSED_EXT = {".xisf", ".tif", ".tiff", ".psd", ".psb", ".xosm"}
+_DESK_MASTER_RE = re.compile(r"master|integration|drizzle|_stacked|stacked_|^stack_", re.I)
+_DESK_FINAL_RE = re.compile(r"final|export|print|_v\d+\b|edit", re.I)
+_DESK_FINAL_DIR_RE = re.compile(r"export|final|print|processed|output", re.I)
+DESK_MAX_ENTRIES = 20000      # files looked at per folder listing
+DESK_MAX_LIST = 300           # rows returned per section
+
+def archive_resolve(rel):
+    """Absolute path for a "/"-separated path inside the archive, or None for
+    anything that is absolute, climbs out (..), or resolves outside it."""
+    if not isinstance(rel, str):
+        return None
+    rel = rel.replace("\\", "/")
+    # absolute paths, drive letters and ":" (Windows streams) are refused
+    # outright rather than read as names inside the archive
+    if rel.startswith("/") or ":" in rel or os.path.isabs(rel):
+        return None
+    parts = [p for p in rel.split("/") if p not in ("", ".")]
+    if any(p == ".." for p in parts):
+        return None
+    path = os.path.join(ARCHIVE_MOUNT, *parts)
+    return path if _within(path, ARCHIVE_MOUNT) else None
+
+def _desk_rel(path):
+    return _rel(path, ARCHIVE_MOUNT)
+
+def _desk_remap(dataset_path):
+    """An Observatory path ("D:\\Astro Image Data\\S30P\\Squid Nebula (Sh2-129)")
+    as a path inside this machine's archive: its last two parts, so the drive
+    letter (D: in the snapshot, E: in the importer) never matters."""
+    parts = [p for p in re.split(r"[\\/]+", dataset_path or "") if p]
+    return "/".join(parts[-2:]) if len(parts) >= 2 else None
+
+def load_observatory_dataset(path=None):
+    """The Observatory's dataset (a JSON object with targets[]), or None."""
+    path = path or OBSERVATORY_DATASET
+    try:
+        with open(path, encoding="utf-8") as f:
+            data = json.load(f)
+    except (OSError, ValueError):
+        return None
+    return data if isinstance(data, dict) and isinstance(data.get("targets"), list) else None
+
+def archive_index(dataset=None):
+    """Every target folder on the archive, joined with the Observatory's view
+    of it (state, the evidence behind it, hours, nights, filters) when the
+    dataset is there. Read-only: lists folder names, opens no files."""
+    reachable = archive_reachable(write_test=False)
+    if dataset is None:
+        dataset = load_observatory_dataset()
+    items, seen = [], set()
+    if dataset:
+        for t in dataset.get("targets") or []:
+            cards = {c.get("camera"): c for c in t.get("statusCards") or [] if isinstance(c, dict)}
+            for p in t.get("programmes") or []:
+                rel = _desk_remap(p.get("path"))
+                if not rel or rel in seen:
+                    continue
+                seen.add(rel)
+                card = cards.get(p.get("camera")) or {}
+                path = archive_resolve(rel)
+                items.append({
+                    "target": t.get("name") or rel.split("/")[-1],
+                    "codes": t.get("codes") or [],
+                    "camera": p.get("camera") or "",
+                    "root": DESK_ROOT_LABELS.get(rel.split("/")[0], rel.split("/")[0]),
+                    "rel": rel,
+                    "state": card.get("state") or t.get("state"),
+                    "evidence": card.get("evidence") or "",
+                    "hours": round(float(p.get("hours") or 0), 2),
+                    "lights": int(p.get("lights") or 0),
+                    "nights": int(p.get("nights") or 0),
+                    "lastNight": p.get("lastNight"),
+                    "filters": p.get("filters") or {},
+                    "masters": int(p.get("masters") or 0),
+                    "finals": int(p.get("processedFinals") or 0),
+                    "mosaic": bool(p.get("mosaic")),
+                    "exists": bool(path and os.path.isdir(path)),
+                })
+    if reachable:
+        for root in SHIP_ROOTS.values():
+            base = os.path.join(ARCHIVE_MOUNT, root)
+            try:
+                names = sorted(os.listdir(base))
+            except OSError:
+                continue
+            for name in names:
+                rel = f"{root}/{name}"
+                if name.startswith(("_", ".")) or rel in seen or not os.path.isdir(os.path.join(base, name)):
+                    continue
+                seen.add(rel)
+                items.append({"target": name, "codes": [], "camera": "", "rel": rel,
+                              "root": DESK_ROOT_LABELS.get(root, root), "state": None,
+                              "evidence": "", "hours": 0, "lights": 0, "nights": 0,
+                              "lastNight": None, "filters": {}, "masters": 0, "finals": 0,
+                              "mosaic": name.endswith(" (mosaic)"), "exists": True})
+    return {"archive": ARCHIVE_LABEL, "reachable": reachable,
+            "datasetFound": bool(dataset), "datasetPath": OBSERVATORY_DATASET,
+            "generatedAt": (dataset or {}).get("generatedAt"),
+            "sirilFound": os.path.exists(SIRIL_EXE), "sirilPath": SIRIL_EXE,
+            "items": items}
+
+def _desk_kind(name, parent_rel):
+    stem, ext = os.path.splitext(name)
+    ext = ext.lower()
+    in_final_dir = any(_DESK_FINAL_DIR_RE.search(p) for p in parent_rel.split("/")[2:])
+    if name.startswith("Stacked_") and ext in _DESK_FRAME_EXT | {".jpg", ".jpeg"}:
+        return "autostack"
+    if ext in _DESK_FRAME_EXT | {".xisf"} and _DESK_MASTER_RE.search(stem):
+        return "master"
+    if ext in _DESK_FRAME_EXT:
+        return "frame"
+    if ext in _DESK_IMAGE_EXT and (in_final_dir or _DESK_FINAL_RE.search(stem)) \
+            and ext not in {".psd", ".psb"}:
+        return "final"
+    if ext in _DESK_PROCESSED_EXT or ext in _DESK_IMAGE_EXT:
+        return "processed"
+    return "other"
+
+def archive_folder_listing(rel):
+    """What one target folder holds, sorted for processing: its nights (Day
+    folders and their frame counts), masters, processed files, finished
+    pictures, Seestar autostacks and other folders. Read-only and capped."""
+    path = archive_resolve(rel)
+    if not path or not os.path.isdir(path):
+        return None
+    out = {"rel": _desk_rel(path), "abs": path, "nights": [], "masters": [], "processed": [],
+           "finals": [], "autostacks": 0, "frames": 0, "folders": [], "working": False,
+           "truncated": False}
+    seen = 0
+
+    def file_row(full):
+        try:
+            st = os.stat(full)
+            size, mtime = st.st_size, datetime.fromtimestamp(st.st_mtime).strftime("%Y-%m-%d")
+        except OSError:
+            size, mtime = 0, None
+        return {"name": os.path.basename(full), "rel": _desk_rel(full), "size": size, "date": mtime}
+
+    def walk(folder, depth, night_row):
+        nonlocal seen
+        try:
+            entries = sorted(os.scandir(folder), key=lambda e: e.name.lower())
+        except OSError:
+            return
+        for e in entries:
+            if seen >= DESK_MAX_ENTRIES:
+                out["truncated"] = True
+                return
+            seen += 1
+            if e.name.startswith("."):
+                continue
+            try:
+                is_dir = e.is_dir(follow_symlinks=False)
+            except OSError:
+                continue
+            if is_dir:
+                if e.name == SHIP_WORKING:
+                    out["working"] = True
+                    continue
+                if depth == 0 and _E_DAY_RE.match(e.name):
+                    row = {"name": e.name, "rel": _desk_rel(e.path), "frames": 0}
+                    out["nights"].append(row)
+                    walk(e.path, depth + 1, row)
+                elif depth < 3:
+                    if depth == 0 and night_row is None:
+                        row = {"name": e.name, "rel": _desk_rel(e.path), "frames": 0}
+                        out["folders"].append(row)
+                        walk(e.path, depth + 1, row)
+                    else:
+                        walk(e.path, depth + 1, night_row)
+                continue
+            kind = _desk_kind(e.name, _desk_rel(folder))
+            if kind == "frame":
+                out["frames"] += 1
+                if night_row is not None:
+                    night_row["frames"] += 1
+            elif kind == "autostack":
+                out["autostacks"] += 1
+            elif kind in ("master", "processed", "final"):
+                bucket = out[{"master": "masters", "processed": "processed",
+                              "final": "finals"}[kind]]
+                if len(bucket) < DESK_MAX_LIST:
+                    bucket.append(file_row(e.path))
+                else:
+                    out["truncated"] = True
+
+    walk(path, 0, None)
+    # Day folders in night order (Day 2 before Day 10)
+    out["nights"].sort(key=lambda r: int(_E_DAY_RE.match(r["name"]).group(2)))
+    for key in ("masters", "processed", "finals"):
+        out[key].sort(key=lambda r: r.get("date") or "", reverse=True)
+    return out
 
 def ship_plan(state, mount):
     """Return (items, notes). items: dict(rel, src, entry, key). rel is the

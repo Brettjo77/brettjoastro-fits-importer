@@ -64,6 +64,7 @@ way. Every release updates it.
 | Terminal fallback (`--pick`, naming) | AppleScript dialogs | numbered list / prompt in the console | platform layer |
 | Status line ("Everything is safe" / "N frames only on the Mac" or "…on this PC", with a tooltip; `--status [--json]`, `GET /api/status`, and the `statusSummary` field of `/api/state`). Worked out by `--status --json` in a short-lived child process, only when `ledger.json` changes (`STATUS_CMD` lets the app use its own command; a frozen app works it out in-process) | ✓ | ✓ | engine + panel |
 | Space on this computer (dashboard section and `--space`): read-only; "safe to delete" only for frames whose archive copy the PC has re-hashed; never deletes | ✓ Finder | ✓ File Explorer | engine |
+| Astro Desk, the Archive tab (1.6.0): read-only list of what is still to process, a target's nights, masters and pictures; opens folders and image files inside the archive only (never programs or shortcuts, token required); Start Siril here (`siril -d <folder>`, detached) | ✓ when the share is mounted; Finder, `open` | ✓ local E:; File Explorer, `os.startfile` | engine + panel |
 | Quit the panel from another program (`POST /api/quit`: token, JSON and origin rules; 409 `busy` while an operation runs or a question card is up) | ✓ | ✓ | panel |
 | Stands aside while the desktop app is in charge (`app-takeover.json`, with an absolute `appPath`; `--app-owner`) | ✓ watcher, Restart, installer, app wrapper | ✓ watcher, Restart, installer | engine + installers |
 | Test mode (`ASTRO_TEST_ROOT`): everything stays inside one folder, and dialogs, notifications, ejects, mounts and "open" are logged, not done | ✓ | ✓ | engine, panel, watcher, self-test |
@@ -93,6 +94,8 @@ The same keys on both, in `config.json` next to the ledger:
 | `ASTRO_SHIP_LOG` | this machine's ship log | `shipped.jsonl` | `shipped-pc.jsonl` |
 | `ASIAIR_VOLUME` / `SEESTAR_VOLUME` | pin a camera path by hand | auto | auto (drive letters) |
 | `SEESTAR_IMPORT_SUB_JPEGS` | import per-sub previews | `false` | `false` |
+| `ASTRO_SIRIL_EXE` | Siril, for "Start Siril here" | `/Applications/Siril.app/Contents/MacOS/Siril` | `C:\Program Files\Siril\bin\siril.exe` |
+| `ASTRO_OBSERVATORY_DATASET` | the Observatory's dataset (states, hours) | `~/Library/Application Support/Astro Import/observatory-dataset.json` | `<archive drive>\Astro Config Data\Observatory\dataset.json` |
 
 Paths never cross between machines. `--export-settings` / `--import-settings`
 carry the portable part instead: custom target names, the never-import list,

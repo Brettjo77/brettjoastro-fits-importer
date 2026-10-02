@@ -14,5 +14,8 @@
   "ASTRO_ARCHIVE_LABEL": "E:\\Astro Image Data",
   "//archive": "Optional — only if you keep an archive on another computer (see PC-SYNC.md). Leave the URL empty otherwise — the ship agent is then never installed and no share is ever mounted for you.",
   "ASTRO_ARCHIVE_URL": "",
-  "SEESTAR_IMPORT_SUB_JPEGS": false
+  "SEESTAR_IMPORT_SUB_JPEGS": false,
+  "//desk": "Astro Desk (the panel's Archive tab, 1.6.0). Where Siril is, for Start Siril here, and the Observatory's dataset (target states and hours). On Windows the defaults are C:\\Program Files\\Siril\\bin\\siril.exe and E:\\Astro Config Data\\Observatory\\dataset.json.",
+  "ASTRO_SIRIL_EXE": "/Applications/Siril.app/Contents/MacOS/Siril",
+  "ASTRO_OBSERVATORY_DATASET": "~/Library/Application Support/Astro Import/observatory-dataset.json"
 }

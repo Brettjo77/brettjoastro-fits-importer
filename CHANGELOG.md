@@ -1,5 +1,24 @@
 # Changelog
 
+## 1.6.0 (2026-10-02): Astro Desk, the archive ready to process
+
+- **A new Archive tab in the panel.** It answers "what haven't I processed yet, and where is it?" after weeks of cloud.
+  - **Still to process:** every target folder on the archive that the Observatory last saw as captured, stacked or in processing, biggest first, with a search box. A tick shows every folder, finished ones too.
+  - **Click a target** to see its state and the reason for it, hours, lights, nights and filters (from the Observatory's dataset), then what the folder holds: each night (Day folder) with its frame count, the masters, processed files, finished pictures and the Seestar's own live stacks.
+  - **Buttons:** Open folder (then drag the nights into PixInsight WBPP, SyQon or Lightroom), Open on any master or picture (it opens in its usual app, so a master opens in PixInsight), Start Siril here (Siril starts with that folder as its working folder), and Copy path.
+- **`/archive?target=&code=&scope=`** opens the panel straight on a target. AstroLog's project page links here on the PC.
+- **Read-only.** The Archive tab never writes, moves or deletes anything in the archive. It doesn't even use the ship's write probe.
+- **Safe opening.** Only folders and image files inside the archive open (FITS, XISF, TIFF, JPEG, PNG, PSD, PixInsight projects). Programs and shortcuts never do, and a path that climbs out of the archive, or a link pointing outside it, is refused. Every open needs the panel's per-launch token.
+- **Two new settings** in `config.json`:
+  - `ASTRO_SIRIL_EXE`: where Siril is (default `C:\Program Files\Siril\bin\siril.exe`).
+  - `ASTRO_OBSERVATORY_DATASET`: the Observatory's dataset (default `E:\Astro Config Data\Observatory\dataset.json` on the PC). Its `D:\` paths are matched to this machine's archive by their last two folders, so the drive letter doesn't matter.
+
+  Without the dataset the tab still lists every folder, just without states.
+
+**Mac / Windows:** the same on both. On the Mac it works when the archive share is mounted. Windows opens with File Explorer and the file's default app; the Mac uses Finder.
+
+538 end-to-end checks (401 engine + 137 panel). The 9 new engine checks and 10 new panel checks passed in test mode on Linux. On Linux the 2 installer checks and the 2 astropy-install checks that need a Mac or PC as set up for a release didn't pass, and they fail the same way without this change. Run both suites on the Mac before releasing.
+
 ## 1.5.5 — 2026-09-27 — what you can delete from the Mac
 
 - **Space on this Mac.** The dashboard (the Dashboard tab in the panel) has a new section at the top.

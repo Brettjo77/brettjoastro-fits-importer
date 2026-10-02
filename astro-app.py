@@ -880,6 +880,23 @@ class Handler(BaseHTTPRequestHandler):
             self._json(STATUS.value)
         elif self.path == "/api/report-text":
             self._json({"text": APP.report_text or ""})
+        elif self.path == "/archive" or self.path.startswith("/archive?"):
+            # Astro Desk: the same page, opened on its Archive tab (AstroLog's
+            # "Open in Astro Desk" link lands here with ?target=&code=&scope=)
+            self._html(PAGE.replace("__ASTRO_TOKEN__", TOKEN)
+                       .replace("__STATUS_TIP__", STATUS_TIP))
+        elif self.path == "/api/archive/index":
+            try:
+                self._json(eng.archive_index())
+            except Exception as e:
+                self._json({"error": f"archive unavailable: {e}"}, 500)
+        elif self.path.startswith("/api/archive/list?"):
+            query = urllib.parse.parse_qs(urllib.parse.urlsplit(self.path).query)
+            listing = eng.archive_folder_listing((query.get("rel") or [""])[0])
+            if listing is None:
+                self._json({"error": "not a folder in the archive"}, 404)
+            else:
+                self._json(listing)
         elif self.path == "/dashboard" or self.path.startswith("/dashboard?"):
             try:
                 state = eng.State()
@@ -936,6 +953,29 @@ class Handler(BaseHTTPRequestHandler):
                 self._json({"started": APP.do_clear(name.strip())})
         elif self.path == "/api/eject":
             self._json({"started": APP.do_eject()})
+        elif self.path in ("/api/archive/open", "/api/archive/siril"):
+            # Astro Desk opens folders and image files inside the archive only,
+            # and never runs anything it finds there (no programs or shortcuts)
+            rel = body.get("rel")
+            path = eng.archive_resolve(rel) if isinstance(rel, str) else None
+            if not path or not os.path.exists(path):
+                self._json({"ok": False, "error": "not in the archive"}, 400)
+            elif self.path == "/api/archive/siril":
+                if not os.path.isdir(path):
+                    self._json({"ok": False, "error": "Siril starts in a folder"}, 400)
+                elif eng.launch_app(eng.SIRIL_EXE, ["-d", path]):
+                    self._json({"ok": True})
+                else:
+                    self._json({"ok": False, "error": f"Siril wasn't found at {eng.SIRIL_EXE}. "
+                                "Put the path to siril.exe in config.json as ASTRO_SIRIL_EXE."}, 400)
+            elif os.path.isfile(path) and \
+                    os.path.splitext(path)[1].lower() not in eng.DESK_OPENABLE:
+                self._json({"ok": False, "error": "that kind of file isn't opened from here"}, 400)
+            elif not (os.path.isdir(path) or os.path.isfile(path)):
+                self._json({"ok": False, "error": "not a folder or file"}, 400)
+            else:
+                eng.open_path(path)
+                self._json({"ok": True})
         elif self.path == "/api/answer":
             qid, value = body.get("id"), body.get("value", "")
             if qid is None or not isinstance(value, (str, int, float)):
@@ -1082,6 +1122,44 @@ button.primary:hover:not(:disabled){color:var(--accent-ink);filter:brightness(1.
   #tab-dash iframe{height:100%}
   .foot{margin-top:10px}
 }
+/* ── Archive tab (Astro Desk, 1.6.0) ── */
+.ad-cols{display:grid;grid-template-columns:minmax(340px,4fr) minmax(430px,7fr);gap:18px}
+@media(max-width:1000px){.ad-cols{grid-template-columns:minmax(0,1fr)}}
+@media(min-width:1001px){
+  #tab-archive{flex:1;min-height:0;display:flex;flex-direction:column}
+  .ad-cols{flex:1;min-height:0}
+  .ad-cols>.card{min-height:0;overflow-y:auto}
+}
+.ad-search{width:100%;font:inherit;padding:8px 11px;border-radius:9px;border:1px solid var(--line2);
+  background:var(--surface2);color:var(--ink);margin:6px 0 8px}
+.ad-opt{display:flex;align-items:center;gap:7px;font-size:12.5px;color:var(--ink2);margin-bottom:8px}
+.ad-note{font-size:12px;color:var(--muted);margin-bottom:6px}
+.ad-row{display:flex;align-items:center;gap:10px;padding:9px 10px;border-radius:10px;
+  border:1px solid transparent;cursor:pointer}
+.ad-row:hover{background:var(--surface2);border-color:var(--line)}
+.ad-row.on{background:var(--surface2);border-color:var(--accent)}
+.ad-row .tmain .tname{font-size:14px}
+.ad-state{font-size:11px;font-weight:650;padding:2px 8px;border-radius:999px;color:#fff;white-space:nowrap}
+.ad-state.todo{background:#7a849b}.ad-state.captured{background:#5f4fbe}.ad-state.stacked{background:#8f80ea}
+.ad-state.processing{background:#beb3fa;color:#1d1640}.ad-state.complete{background:#0ca30c}
+.ad-state.none{background:transparent;color:var(--muted);border:1px solid var(--line2)}
+.ad-title{font-size:22px;font-weight:700;letter-spacing:-.01em;margin:2px 0 6px}
+.ad-facts{font-size:13px;color:var(--ink2);margin:8px 0;font-variant-numeric:tabular-nums}
+.ad-path{display:flex;gap:8px;align-items:center;flex-wrap:wrap;margin:10px 0}
+.ad-path code{font:12px ui-monospace,SFMono-Regular,Menlo,Consolas,monospace;background:var(--surface2);
+  border:1px solid var(--line);border-radius:8px;padding:6px 9px;word-break:break-all;flex:1;min-width:220px}
+.ad-btns{display:flex;gap:8px;flex-wrap:wrap;margin:10px 0 4px}
+.ad-hint{font-size:12px;color:var(--muted);margin:6px 0 12px}
+.ad-sec{margin-top:16px}
+.ad-sec .eyebrow{margin-bottom:6px}
+.ad-file{display:flex;align-items:center;gap:10px;padding:6px 8px;border-radius:8px;font-size:13px}
+.ad-file:hover{background:var(--surface2)}
+.ad-file .nm{flex:1;min-width:0;overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
+.ad-file .mt{color:var(--muted);font-size:12px;font-variant-numeric:tabular-nums;white-space:nowrap}
+.ad-file button{padding:4px 11px;font-size:12px;border-radius:8px}
+#deskMsg{min-height:18px;font-size:12.5px;margin-top:6px}
+#deskCount{text-transform:none;letter-spacing:.02em;font-variant-numeric:tabular-nums}
+#deskMsg.bad{color:color-mix(in srgb, var(--serious) 80%, var(--ink))}
 .card{background:var(--surface);border:1px solid var(--line);border-radius:16px;
   padding:18px 20px;box-shadow:var(--shadow)}
 .eyebrow{font-size:11px;font-weight:650;letter-spacing:.09em;text-transform:uppercase;
@@ -1279,6 +1357,7 @@ button.linkbtn:disabled{opacity:.5;cursor:default}
   <button class="on" data-tab="panel">Panel</button>
   <button data-tab="report">Report</button>
   <button data-tab="dash">Dashboard</button>
+  <button data-tab="archive">Archive</button>
 </div>
 
 <div id="qbox" aria-live="assertive"></div>
@@ -1317,6 +1396,21 @@ button.linkbtn:disabled{opacity:.5;cursor:default}
 <div id="tab-dash" style="display:none">
   <iframe id="dashFrame" title="dashboard"></iframe>
 </div>
+<div id="tab-archive" style="display:none">
+  <div class="ad-cols">
+    <div class="card">
+      <div class="eyebrow" style="display:flex;justify-content:space-between"><span id="deskListTitle">Still to process</span><span id="deskCount"></span></div>
+      <div class="ad-note" id="deskNote">Reading the archive…</div>
+      <input class="ad-search" id="deskSearch" type="search" placeholder="Find a target" aria-label="Find a target">
+      <label class="ad-opt"><input type="checkbox" id="deskAll"> Show every folder, finished ones too</label>
+      <div id="deskList"></div>
+    </div>
+    <div class="card" id="deskDetail">
+      <div class="eyebrow">Archive</div>
+      <p class="ad-note">Pick a target on the left to see its nights, masters and finished pictures, and open them for processing.</p>
+    </div>
+  </div>
+</div>
 
 <div class="foot">Engine: astro-import.py (backup-first, ASIAir + Seestar) · the ASIAir is never modified · the Seestar is only cleared with your Yes (SAFE: backed up and verified) or a typed DISCARD ·
 tip: Safari → File → Add to Dock turns this into a Dock app</div>
@@ -1336,9 +1430,10 @@ let busy=false, lastLogSig="", lastScanStamp="", curScan=null;
 document.querySelectorAll(".tabs button").forEach(b=>b.addEventListener("click",()=>{
   document.querySelectorAll(".tabs button").forEach(x=>x.classList.remove("on"));
   b.classList.add("on");
-  ["panel","report","dash"].forEach(t=>$("#tab-"+t).style.display = b.dataset.tab===t?"":"none");
+  ["panel","report","dash","archive"].forEach(t=>$("#tab-"+t).style.display = b.dataset.tab===t?"":"none");
   if(b.dataset.tab==="dash") $("#dashFrame").src="/dashboard?t="+Date.now();
   if(b.dataset.tab==="report") loadReport();
+  if(b.dataset.tab==="archive") loadDesk();
 }));
 
 const TOKEN="__ASTRO_TOKEN__";
@@ -1659,6 +1754,119 @@ function renderLiveBar(lines){
 async function loadReport(){
   const r=await api("/api/report-text");
   if(r.text) $("#reportPre").textContent=r.text;
+}
+
+// ── Archive tab (Astro Desk, 1.6.0): read-only view of the archive, ready
+//    for processing. Opens folders and image files; never changes anything. ──
+let desk=null, deskSel=null, deskWant=null;
+const DESK_TODO=new Set(["captured","stacked","processing"]);
+const deskState=s=>`<span class="ad-state ${esc(s||"none")}">${esc(s?(s==="processing"?"in processing":s):"no state")}</span>`;
+const fmtNight=iso=>{ if(!iso) return ""; const [y,m,d]=iso.split("-"); return `${+d} ${MONTHS[+m-1]} ${y}`; };
+const fmtSize=b=>b>=1073741824?(b/1073741824).toFixed(1)+" GB":b>=1048576?Math.round(b/1048576)+" MB":Math.max(1,Math.round(b/1024))+" KB";
+async function loadDesk(){
+  try{
+    desk=await api("/api/archive/index");
+  }catch(e){ desk={error:String(e)}; }
+  if(desk.error){ $("#deskNote").textContent=desk.error; return; }
+  const note=[];
+  note.push(desk.reachable?`Archive: ${desk.archive}.`:`The archive isn't reachable at ${desk.archive}.`);
+  note.push(desk.datasetFound?`States and hours from the Observatory scan of ${desk.generatedAt||"?"}.`
+    :`No Observatory dataset at ${desk.datasetPath}, so folders are listed without states.`);
+  $("#deskNote").textContent=note.join(" ");
+  if(deskWant===null && location.pathname==="/archive"){
+    const q=new URLSearchParams(location.search);
+    deskWant={target:(q.get("target")||"").toLowerCase(), code:(q.get("code")||"").toLowerCase(),
+              scope:(q.get("scope")||"").toLowerCase()};
+    const hit=deskPick(deskWant);
+    if(hit){ $("#deskAll").checked=!DESK_TODO.has(hit.state); deskOpen(hit.rel); }
+  }
+  renderDeskList();
+}
+function deskPick(w){
+  if(!w||(!w.target&&!w.code)) return null;
+  const items=desk.items||[];
+  const scored=items.map(it=>{
+    let sc=0;
+    const name=(it.target||"").toLowerCase(), rel=it.rel.toLowerCase();
+    if(w.target && name===w.target) sc+=4; else if(w.target && rel.includes(w.target)) sc+=2;
+    if(w.code && ((it.codes||[]).some(c=>c.toLowerCase()===w.code) || rel.includes(w.code))) sc+=3;
+    if(w.scope && (((it.camera||"")+" "+(it.root||"")).toLowerCase().includes(w.scope.replace("seestar ","")))) sc+=1;
+    return [sc,it];
+  }).filter(([sc])=>sc>=2).sort((a,b)=>b[0]-a[0]);
+  return scored.length?scored[0][1]:null;
+}
+function renderDeskList(){
+  if(!desk||!desk.items) return;
+  const all=$("#deskAll").checked, q=$("#deskSearch").value.trim().toLowerCase();
+  let rows=desk.items.filter(it=>all||DESK_TODO.has(it.state));
+  if(q) rows=rows.filter(it=>(it.target+" "+(it.codes||[]).join(" ")+" "+it.rel).toLowerCase().includes(q));
+  rows.sort((a,b)=>(b.hours||0)-(a.hours||0)||a.target.localeCompare(b.target));
+  $("#deskListTitle").textContent=all?"Every folder":"Still to process";
+  const hours=rows.reduce((n,it)=>n+(it.hours||0),0);
+  $("#deskCount").textContent=`${rows.length} · ${hours.toFixed(1)} h`;
+  $("#deskList").innerHTML=rows.length?rows.map(it=>`<div class="ad-row${deskSel===it.rel?" on":""}" data-rel="${esc(it.rel)}" tabindex="0" role="button">
+      <div class="tmain"><div class="tname">${esc(it.target)}</div>
+        <div class="tmeta"><span class="chip plain">${esc(it.root)}</span>${deskState(it.state)}${it.exists===false?'<span class="chip plain">folder missing</span>':""}</div></div>
+      <div class="tstats"><div class="big">${it.hours?it.hours.toFixed(1)+" h":""}</div><div class="small">${it.nights?it.nights+" night"+(it.nights===1?"":"s"):""}</div></div>
+    </div>`).join("")
+    :`<p class="ad-note">${all?"No target folders found.":"Nothing waiting to process. Tick “Show every folder” to see the rest."}</p>`;
+  document.querySelectorAll("#deskList .ad-row").forEach(r=>{
+    r.addEventListener("click",()=>deskOpen(r.dataset.rel));
+    r.addEventListener("keydown",e=>{ if(e.key==="Enter") deskOpen(r.dataset.rel); });
+  });
+}
+async function deskOpen(rel){
+  deskSel=rel; renderDeskList();
+  const it=(desk.items||[]).find(x=>x.rel===rel)||{target:rel.split("/").pop(),rel};
+  const box=$("#deskDetail");
+  box.innerHTML=`<div class="eyebrow">${esc(it.root||"Archive")}</div><div class="ad-title">${esc(it.target)}</div><p class="ad-note">Reading the folder…</p>`;
+  const r=await fetch("/api/archive/list?rel="+encodeURIComponent(rel)).then(x=>x.json()).catch(e=>({error:String(e)}));
+  if(r.error){ box.innerHTML+=`<p class="ad-note">${esc(r.error)}</p>`; return; }
+  const filters=Object.entries(it.filters||{}).map(([k,v])=>`${esc(k)} ${v}`).join(", ");
+  const facts=[it.hours?it.hours.toFixed(1)+" h":"", it.lights?it.lights.toLocaleString()+" lights":"",
+    it.nights?it.nights+" night"+(it.nights===1?"":"s"):"", it.lastNight?"last "+fmtNight(it.lastNight):"", filters].filter(Boolean).join(" · ");
+  const fileRows=(list,label)=>list.length?`<div class="ad-sec"><div class="eyebrow">${label} · ${list.length}</div>`+
+    list.map(f=>`<div class="ad-file"><span class="nm" title="${esc(f.name)}">${esc(f.name)}</span><span class="mt">${esc(f.date||"")} · ${fmtSize(f.size||0)}</span><button data-open="${esc(f.rel)}">Open</button></div>`).join("")+`</div>`:"";
+  const folderRows=(list,label)=>list.length?`<div class="ad-sec"><div class="eyebrow">${label} · ${list.length}</div>`+
+    list.map(f=>`<div class="ad-file"><span class="nm">${esc(f.name)}</span><span class="mt">${f.frames} frame${f.frames===1?"":"s"}</span><button data-open="${esc(f.rel)}">Open</button></div>`).join("")+`</div>`:"";
+  box.innerHTML=`<div class="eyebrow">${esc(it.root||"Archive")}</div>
+    <div class="ad-title">${esc(it.target)}</div>
+    <div class="tmeta">${deskState(it.state)}${it.evidence?`<span>${esc(it.evidence)}</span>`:""}</div>
+    ${facts?`<div class="ad-facts">${facts}</div>`:""}
+    <div class="ad-path"><code id="deskPath">${esc(r.abs)}</code><button id="deskCopy">Copy path</button></div>
+    <div class="ad-btns"><button class="primary" data-open="${esc(r.rel)}">Open folder</button>
+      <button id="deskSiril"${desk.sirilFound?"":` title="Siril not found at ${esc(desk.sirilPath)}"`}>Start Siril here</button></div>
+    <div id="deskMsg" aria-live="polite"></div>
+    <p class="ad-hint">For PixInsight WBPP, SyQon or Lightroom: open the folder and drag the nights in. A master opens in PixInsight and a finished picture in its usual app, from the lists below.</p>
+    ${folderRows(r.nights,"Nights")}
+    ${fileRows(r.masters,"Masters")}
+    ${fileRows(r.processed,"Processed files")}
+    ${fileRows(r.finals,"Finished pictures")}
+    ${r.autostacks?`<div class="ad-sec"><div class="eyebrow">Seestar autostacks</div><p class="ad-note">${r.autostacks} in this folder (the scope's own live stacks).</p></div>`:""}
+    ${folderRows(r.folders,"Other folders")}
+    ${r.working?`<p class="ad-note">Also here: ${esc("_Working Files")} (regenerable, safe to delete by hand).</p>`:""}
+    ${r.truncated?`<p class="ad-note">This folder is very large; the lists stop after the first few hundred items.</p>`:""}
+    ${r.frames===0&&!r.nights.length?`<p class="ad-note">No light frames found in this folder.</p>`:""}`;
+  const msg=(t,bad)=>{ const m=$("#deskMsg"); m.textContent=t; m.className=bad?"bad":""; };
+  box.querySelectorAll("[data-open]").forEach(b=>b.addEventListener("click",async()=>{
+    const res=await api("/api/archive/open",{rel:b.dataset.open});
+    msg(res.ok?"Opened.":(res.error||"Couldn't open that."),!res.ok);
+  }));
+  $("#deskSiril").addEventListener("click",async()=>{
+    const res=await api("/api/archive/siril",{rel:r.rel});
+    msg(res.ok?"Siril is starting in this folder.":(res.error||"Couldn't start Siril."),!res.ok);
+  });
+  $("#deskCopy").addEventListener("click",async()=>{
+    try{ await navigator.clipboard.writeText(r.abs); msg("Path copied."); }
+    catch(e){ const sel=window.getSelection(), rg=document.createRange(); rg.selectNodeContents($("#deskPath"));
+      sel.removeAllRanges(); sel.addRange(rg); msg("Path selected: press Ctrl+C (⌘C on a Mac)."); }
+  });
+}
+$("#deskSearch").addEventListener("input",renderDeskList);
+$("#deskAll").addEventListener("change",renderDeskList);
+if(location.pathname==="/archive"){
+  const b=document.querySelector('.tabs button[data-tab="archive"]');
+  if(b) b.click();
 }
 
 async function tick(){

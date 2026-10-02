@@ -57,6 +57,7 @@ Smart telescopes fill up fast, and hand-copying folders leaves you guessing. Mos
 - Full MyWorks semantics: `_sub` light frames into Day folders (one Day per observing night), one `Stacked_N` kept per stacking *session* — a later, higher stack of the same exposure and filter continues an earlier one; a filter change or a restarted stack is its own keeper — never pruned, `_mosaic_pt` panels into `panels/`, `(mosaic)` display suffixes
 - Simultaneous **Milky Way captures auto-pair** to the DSO session shot at the same moment, renamed and filed under the DSO's display name
 - S50-family (S50 / S50 Pro) Lunar / Solar / Planetary / Scenery photo and video import
+- **Astro Desk, the Archive tab** (1.6.0): what is still to process on the archive (captured, stacked or in processing, from the Observatory's dataset), biggest first. Click a target for its nights, masters, processed files and finished pictures, with **Open folder**, **Open** (a master opens in PixInsight, a picture in its usual app), **Start Siril here** and **Copy path**. Read-only: it never writes to the archive, and it only opens folders and image files inside it. `/archive?target=…` opens it on one target (AstroLog links there)
 - **Space on this Mac** (1.5.5): the dashboard shows what on this computer is safe to delete. That means frames whose archive copy the PC's sweep has re-hashed and matched, which are grouped by target folder with a coloured bar and a verdict: the whole folder, which Day folders, or keep. Anything not yet checked, not in the archive, edited, or not filed by the importer (your processing) is kept, and a folder holding any of it is never called safe. `--space` prints it as text. The importer never deletes from your Mac: you delete green folders yourself in Finder
 - SAFE-aware cleanup: after an import — or any time, from **clear…** on a row the panel shows as backed up — it offers to clear source folders **only** when every single file in them is ledger-verified *for that camera* and unchanged since import — *every* file (the one exception: a JPEG preview whose FIT twin is proven) — with No as the default. After your Yes it checks the camera and every file **again** and deletes only what passed; clearing flags only that camera's own ledger entries. Each Seestar's ledger rows are its own, so two units shooting the same target in the same second never share one
 
@@ -210,11 +211,11 @@ The panel covers day-to-day use; everything is also scriptable:
 
 ## Testing
 
-519 end-to-end checks run the real engine and the real panel against simulated cameras (hand-built minimal FITS files, every device layout, crash/rename/mosaic/Milky-Way/cleanup/consent/interruption/multi-Seestar scenarios — including that the destination preview must equal the folders the import then actually creates, that a folder holding any unproven file is never offered as SAFE, and that the panel refuses foreign-origin requests):
+538 end-to-end checks run the real engine and the real panel against simulated cameras (hand-built minimal FITS files, every device layout, crash/rename/mosaic/Milky-Way/cleanup/consent/interruption/multi-Seestar scenarios — including that the destination preview must equal the folders the import then actually creates, that a folder holding any unproven file is never offered as SAFE, and that the panel refuses foreign-origin requests):
 
 ```bash
-python3 test_v2.py     # 392 engine checks (chain W1 simulates the Windows drive layer)
-python3 test_app.py    # 127 panel checks (boots the real HTTP server)
+python3 test_v2.py     # 401 engine checks (chain W1 simulates the Windows drive layer)
+python3 test_app.py    # 137 panel checks (boots the real HTTP server)
 # on Windows:  py -3 -X utf8 selftest.py   then the two suites above with  py -3 -X utf8
 ```
 

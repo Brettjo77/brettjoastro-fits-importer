@@ -3737,6 +3737,122 @@ check("SP an unreadable ledger (no .bak): 'can't tell', nothing marked safe, in 
       and "Can't tell what is safe to delete" in r.stdout and "Whole folders" not in r.stdout,
       json.dumps(got)[:300] + " | " + r.stdout[-200:])
 
+# ═══════════════ CHAIN AD: Astro Desk, the archive read-only (1.6.0) ═══════════
+print("\n── Chain AD: Astro Desk lists the archive for processing, read-only (1.6.0) ──")
+# Brett forgets, after weeks of cloud, what is still to process on the PC and
+# where it is. The Archive tab joins the Observatory's states with the archive's
+# own folders and opens them; it must never write to the archive.
+AD = teh.Env("AD", asiair=False, seestar=False)
+AD_ARCH = AD.archive
+
+def ad_file(*parts, size=16):
+    p = os.path.join(AD_ARCH, *parts)
+    os.makedirs(os.path.dirname(p), exist_ok=True)
+    with open(p, "wb") as f:
+        f.write(b"\0" * size)
+
+AD_WIZ = ("ZWO Askar Scopes", "Wizard Nebula (NGC 7380)")
+for _d in (1, 2, 3, 10):
+    for _i in range(_d + 3 if _d < 10 else 1):
+        ad_file(*AD_WIZ, f"Wizard Nebula Day {_d}", f"Light_Wizard_{_d}_{_i:03d}.fit")
+ad_file(*AD_WIZ, "WBPP", "master", "masterLight_BIN-1_FILTER-LUltimate.xisf")
+ad_file(*AD_WIZ, "Wizard_Nebula_Final_V2.jpg")
+ad_file(*AD_WIZ, "Wizard.psd")
+ad_file(*AD_WIZ, "Wizard.xosm")
+ad_file(*AD_WIZ, "notes.txt")
+ad_file(*AD_WIZ, "Run me.exe")
+ad_file(*AD_WIZ, "_Working Files (regenerable - safe to delete)", "registered", "r_0001.xisf")
+ad_file("S30P", "Iris Nebula (NGC 7023)", "NGC 7023_sub Day 1", "Light_NGC 7023_10.0s_IRCUT_20260920-220000.fit")
+ad_file("S30P", "Iris Nebula (NGC 7023)", "Stacked_540_NGC 7023_10.0s_IRCUT_20260920-235959.fit")
+ad_file("S30P", "_Quarantine", "odd.fit")
+ad_file("S50", "Helix Nebula (NGC 7293)", "Exports", "Helix.jpg")
+for _r in ("S30", "S50P"):
+    os.makedirs(os.path.join(AD_ARCH, _r), exist_ok=True)
+AD_DS = os.path.join(AD.root, "obs", "dataset.json")
+os.makedirs(os.path.dirname(AD_DS))
+with open(AD_DS, "w", encoding="utf-8") as f:
+    json.dump({"generatedAt": "2026-10-02 08:00", "targets": [
+        {"name": "Wizard Nebula", "codes": ["NGC 7380"], "state": "stacked",
+         "programmes": [{"camera": "ASIAir", "hours": 7.5, "lights": 15, "nights": 3,
+                         "lastNight": "2026-09-11", "filters": {"LUltimate": 15}, "masters": 1,
+                         "path": "D:\\Astro Image Data\\ZWO Askar Scopes\\Wizard Nebula (NGC 7380)"}],
+         "statusCards": [{"camera": "ASIAir", "state": "stacked", "evidence": "1 master, no final"}]},
+        {"name": "Gone Nebula", "codes": [], "state": "captured",
+         "programmes": [{"camera": "Seestar S50", "hours": 1, "path": "D:\\Astro Image Data\\S50\\Gone Nebula"}],
+         "statusCards": []}]}, f)
+AD_SIRIL = os.path.join(AD.root, "apps", "siril")
+os.makedirs(os.path.dirname(AD_SIRIL))
+with open(AD_SIRIL, "w") as f:
+    f.write("#!/bin/sh\n")
+AD.env.update({"ASTRO_OBSERVATORY_DATASET": AD_DS, "ASTRO_SIRIL_EXE": AD_SIRIL})
+
+def ad_snapshot():
+    out = {}
+    for root, dirs, fns in os.walk(AD_ARCH):
+        for n in dirs + fns:
+            p = os.path.join(root, n)
+            out[p] = (os.path.isdir(p), os.path.getsize(p) if os.path.isfile(p) else 0,
+                      os.path.getmtime(p))
+    return out
+
+ad_before = ad_snapshot()
+idx = probe(AD.env, "print(json.dumps(m.archive_index()))")
+items = {i["rel"]: i for i in idx.get("items", [])} if isinstance(idx, dict) else {}
+wiz = items.get("ZWO Askar Scopes/Wizard Nebula (NGC 7380)", {})
+check("AD the index joins the Observatory's view to this archive: a D:\\ path lands on this "
+      "machine's mount, with its state, evidence and hours; a folder the dataset no longer finds "
+      "is flagged missing",
+      idx.get("datasetFound") is True and idx.get("generatedAt") == "2026-10-02 08:00"
+      and wiz.get("state") == "stacked" and wiz.get("evidence") == "1 master, no final"
+      and wiz.get("hours") == 7.5 and wiz.get("exists") is True and wiz.get("root") == "ASIAir (Askar)"
+      and items.get("S50/Gone Nebula", {}).get("exists") is False, json.dumps(idx)[:700])
+check("AD folders the dataset doesn't know are listed from the archive itself (no state); "
+      "_Quarantine and other '_' shelves are not targets",
+      items.get("S30P/Iris Nebula (NGC 7023)", {}).get("state") is None
+      and "S50/Helix Nebula (NGC 7293)" in items
+      and not any("/_" in r for r in items), str(sorted(items)))
+lst = probe(AD.env, "print(json.dumps(m.archive_folder_listing('ZWO Askar Scopes/Wizard Nebula (NGC 7380)')))")
+names = lambda k: [x["name"] for x in lst.get(k, [])] if isinstance(lst, dict) else []
+check("AD a target folder is sorted for processing: its nights in order (Day 10 last) with "
+      "frame counts, the master, processed files, the finished picture, the working folder noted",
+      [(n["name"], n["frames"]) for n in lst.get("nights", [])]
+      == [("Wizard Nebula Day 1", 4), ("Wizard Nebula Day 2", 5), ("Wizard Nebula Day 3", 6),
+          ("Wizard Nebula Day 10", 1)]
+      and lst.get("frames") == 16 and names("masters") == ["masterLight_BIN-1_FILTER-LUltimate.xisf"]
+      and sorted(names("processed")) == ["Wizard.psd", "Wizard.xosm"]
+      and names("finals") == ["Wizard_Nebula_Final_V2.jpg"] and lst.get("working") is True
+      and "Run me.exe" not in json.dumps(lst), json.dumps(lst)[:700])
+other = probe(AD.env, "print(json.dumps([m.archive_folder_listing('S30P/Iris Nebula (NGC 7023)')['autostacks'], "
+                      "[f['name'] for f in m.archive_folder_listing('S50/Helix Nebula (NGC 7293)')['finals']]]))")
+check("AD a Seestar's own live stacks are counted as autostacks; a picture in an Exports folder "
+      "is a finished one", other == [1, ["Helix.jpg"]], str(other))
+bad = probe(AD.env, "print(json.dumps([m.archive_resolve(x) for x in "
+                    "['../x', '/etc', 'C:/Windows', 'S30P/../../state', 'S30P/a:b', 7, None]] "
+                    "+ [m.archive_folder_listing('../state'), m.archive_folder_listing('S30P/nope')]))")
+check("AD only paths inside the archive resolve: climbing out, absolute paths, drive letters, "
+      "':' streams and non-text are refused; an unknown folder lists as nothing",
+      bad == [None] * 9, str(bad))
+check("AD read-only: listing the archive changed nothing in it (no _verify probe either) and "
+      "made no OS call",
+      ad_snapshot() == ad_before and not os.path.exists(os.path.join(AD_ARCH, "_verify"))
+      and not teh.os_calls(AD.root), str(teh.os_calls(AD.root))[:300])
+if os.name != "nt":
+    os.symlink(AD.state, os.path.join(AD_ARCH, "S30", "escape"))
+    esc_ = probe(AD.env, "print(json.dumps([m.archive_resolve('S30/escape'), "
+                         "m.archive_folder_listing('S30/escape')]))")
+    os.remove(os.path.join(AD_ARCH, "S30", "escape"))
+    check("AD a link inside the archive that points outside it is refused", esc_ == [None, None], str(esc_))
+la = probe(AD.env, "print(json.dumps([m.launch_app(os.path.join(os.path.dirname(m.SIRIL_EXE), 'nope'), ['-d', 'x']), "
+                   "m.launch_app(m.SIRIL_EXE, ['-d', m.ARCHIVE_MOUNT])]))")
+launches = teh.os_calls(AD.root, "launch")
+check("AD launch_app: a missing program is False and starts nothing; Siril is recorded (test "
+      "mode) with -d and the folder, never started",
+      la == [False, True] and len(launches) == 1 and launches[0].get("args") == ["-d", AD_ARCH]
+      and inside(launches[0].get("exe", ""), AD.root), str(la) + str(launches))
+r = AD.run("--help", extra_env={"ASTRO_SIRIL_EXE": os.path.join(tempfile.gettempdir(), "not-in-root", "siril")})
+check("AD test mode refuses a Siril path outside the test root before anything runs",
+      r.returncode == 3 and "ASTRO_SIRIL_EXE is outside the test root" in r.stderr, r.stderr[-300:])
+
 # ═══════════════ Summary ═════════════════════════════════════════════════════
 print("\n═══════════════════════════════════════════════════")
 print(f"  {PASS} passed, {FAIL} failed")

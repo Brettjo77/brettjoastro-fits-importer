@@ -192,6 +192,23 @@ Everything else is kept:
 
 A folder is only ever called safe as a whole when everything in it is safe; otherwise the view names the Day folders that are. The importer never deletes anything from your Mac. You delete the green folders yourself.
 
+## Astro Desk: what is still to process
+
+The panel's **Archive** tab lists what on the archive still needs processing. It uses the states from the Observatory's last scan: captured, stacked, or in processing. The biggest come first.
+
+Click a target to see:
+- its state and the reason for it
+- its hours, nights and filters
+- what the folder holds: each night with its frames, the masters, processed files and finished pictures
+
+From there:
+- **Open folder:** opens it in File Explorer (Finder on a Mac), ready to drag the nights into PixInsight, SyQon or Lightroom.
+- **Open** next to a master or picture: opens it in its usual app, so a master opens in PixInsight.
+- **Start Siril here:** starts Siril with that folder as its working folder.
+- **Copy path:** copies where the folder is.
+
+The tab only reads. It never changes anything in the archive. It only opens folders and pictures that are inside the archive, never programs.
+
 ## When things go wrong
 
 Interruptions are expected, not exceptional. A copy that dies mid-file leaves
