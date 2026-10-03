@@ -154,22 +154,31 @@ and the archive of record lives on a Windows PC (`E:\Astro Image Data`), shared
 over SMB and mounted on the Mac at `/Volumes/AstroImageData`. Three things keep
 the two in step, none of which you run by hand:
 
-1. **After every import** the engine ships what just arrived to the archive if
-   the share is mounted (`--no-ship` to skip). `--ship` on its own does the same
-   for anything waiting; `--ship --dry-run` shows the plan.
+1. **After every import** the engine ships what just arrived to the archive
+   (`--no-ship` to skip): a Terminal import connects the share first, a panel
+   import (1.7.0) ships when the share is already connected. `--ship` on its
+   own does the same for anything waiting; `--ship --dry-run` shows the plan.
 2. **Twice a day** (09:00 and 21:00) the `com.brettjohnson.astro-ship` LaunchAgent
    runs `--ship`. With `ASTRO_ARCHIVE_URL` set in `config.json` the engine asks
    Finder to mount the share on demand, using the password saved in the keychain,
    so no permanent connection is needed.
-3. **On the PC**, `pc\sweep.ps1` (a scheduled task from `pc\install_sweep.ps1`)
-   re-hashes every shipped file in a fresh process and writes
-   `_verify\verified.jsonl`. The Mac reads it on the next ship and stamps
-   `archiveVerifiedAt`. Only that stamp means a frame is safe in two places.
+3. **On the PC** (1.7.0), the same engine's sweep (`--sweep`, a scheduled task
+   the Windows installer sets up) re-reads every shipped file from the PC's own
+   disk, bypassing Windows' cache, and writes `_verify\pc\verified.jsonl`. The
+   Mac reads it on the next ship and stamps `archiveVerifiedAt`. Only that
+   stamp means a frame is safe in two places.
+
+From 1.7.0 the ship never deletes, renames or writes over anything on the
+archive, so the share's user can be denied Delete there (PC-SYNC.md, Part C):
+each frame is created under its final name only if that name is free, and is
+"shipped" only after its read-back. A copy cut off half-way is set aside by
+the PC into `_Quarantine\ship-incomplete` and sent again.
 
 The archive's naming and Day numbering always win: existing targets are
 reused, a night that already has a Day folder is merged into it, a new night
 takes the next number. Nothing is ever deleted or overwritten on either side;
-a differing file on the archive is reported and left alone. Set
+a differing file on the archive is reported and left alone (the PC's sweep
+moving an unfinished copy aside is the one move a tool makes there). Set
 `ASTRO_ARCHIVE_MOUNT` in `config.json` if the share mounts somewhere else.
 
 ## Safety model
@@ -196,7 +205,12 @@ The panel covers day-to-day use; everything is also scriptable:
 | `--verify [--deep]` | Re-check imported files on disk (size, or full re-hash with `--deep`) |
 | `--pick` | Native picker dialog for choosing targets (Terminal fallback flow) |
 | `--dashboard` | Regenerate and open the HTML status dashboard |
-| `--ship [--dry-run]` | File verified frames into the PC archive over the mounted share; quiet when it is not mounted |
+| `--ship [--dry-run]` | File verified frames (calibration frames too, from 1.7.0) into the PC archive over the mounted share; when it can't be reached it says why |
+| `--request sweep\|inventory` | Mac: ask the archive PC for a sweep or an inventory (1.7.0) |
+| `--check-share-rights` | Mac: try what this computer may and may not do on the share, in the PC's test folder `_rights-check` (1.7.0) |
+| `--sweep [--move-old-partials]` | Archive PC: check every shipped frame from its own disk; set aside copies a ship never finished (1.7.0) |
+| `--inventory [--root DIR]` / `--hash [--root DIR] [--max-minutes N] [--rolling]` | List, or hash, every file under a folder: the archive on the PC (into `_verify\pc`), or your own frame folders (into the state folder) (1.7.0) |
+| `--pc-tick` / `--pc-nightly` | Archive PC's scheduled work: the heartbeat and the Mac's requests every 5 minutes; sweep, inventory and hash at logon and 03:30 (1.7.0) |
 | `--space` | Read-only: what on this computer is safe to delete (archive copy re-checked by the PC), what is waiting, and what to keep, with the paths of safe folders |
 | `--tidy-stacks [--dry-run]` | List archived Seestar stacks that a later stack of the same session continues, and offer removal (typed DELETE) |
 | `--refresh-metadata` | Back-fill ledger metadata after parser improvements (safe, repeatable) |
@@ -211,11 +225,11 @@ The panel covers day-to-day use; everything is also scriptable:
 
 ## Testing
 
-538 end-to-end checks run the real engine and the real panel against simulated cameras (hand-built minimal FITS files, every device layout, crash/rename/mosaic/Milky-Way/cleanup/consent/interruption/multi-Seestar scenarios — including that the destination preview must equal the folders the import then actually creates, that a folder holding any unproven file is never offered as SAFE, and that the panel refuses foreign-origin requests):
+622 end-to-end checks run the real engine and the real panel against simulated cameras (hand-built minimal FITS files, every device layout, crash/rename/mosaic/Milky-Way/cleanup/consent/interruption/multi-Seestar scenarios — including that the destination preview must equal the folders the import then actually creates, that a folder holding any unproven file is never offered as SAFE, and that the panel refuses foreign-origin requests):
 
 ```bash
-python3 test_v2.py     # 401 engine checks (chain W1 simulates the Windows drive layer)
-python3 test_app.py    # 137 panel checks (boots the real HTTP server)
+python3 test_v2.py     # 483 engine checks (chain W1 simulates the Windows drive layer)
+python3 test_app.py    # 139 panel checks (boots the real HTTP server)
 # on Windows:  py -3 -X utf8 selftest.py   then the two suites above with  py -3 -X utf8
 ```
 

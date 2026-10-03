@@ -164,6 +164,29 @@ In the author's setup the PC holds the archive (E:) and does the stacking on
 its fast C: drive, so a Windows import lands on C: like the Mac's does in
 Documents, and is then filed into the archive on E: and verified there.
 
+## Filing into the archive
+
+If you keep an archive on another computer (PC-SYNC.md), the Mac files its
+verified frames into it after an import and twice a day. Calibration frames
+go with their lights, into the night's `calibration` folder. The archive's
+own names and Day numbers always win.
+
+From 1.7.0 the Mac never deletes, renames or writes over anything on the
+archive. It creates each frame under its final name, only if that name is
+free, then reads it back. Its log on the archive says "started" before each
+frame and "shipped" only after the read-back matched. Because nothing needs
+deleting, the share can be set up so that it *can't* delete anything there.
+
+Then the PC checks. It re-reads every shipped frame from its own disk,
+bypassing Windows' cache, and only that check makes a frame count as safe in
+two places. Every night it also lists the archive and hashes new files, so
+the Sync tab still to come can tell what is where. Every five minutes it does
+what the Mac asked for and leaves a heartbeat, so the Mac can tell it's awake.
+
+Only one computer files into the archive at a time. The one doing it holds a
+lock and renews it every minute, so a lock left by a crash goes stale after
+ten minutes instead of blocking the archive for hours.
+
 ## The line at the top of the panel
 
 The top of the panel answers one question: are you safe? **Everything is
@@ -220,6 +243,13 @@ the whole library against the ledger — the same audit you can run any time
 for reassurance:
 
 *"5,126 files checked, zero problems"* is what a healthy library says.
+
+A copy into the archive that is cut off half-way (the PC sleeps, the network
+drops) stays "started" in the log and is never counted. The PC moves that
+copy, and only it, into `_Quarantine\ship-incomplete`, and the Mac sends the
+frame again to the same place. If every byte got there after all, the copy
+stays and the Mac's next ship simply records it. The PC never moves anything
+else on its own.
 
 ## What can never happen
 

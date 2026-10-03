@@ -13,7 +13,9 @@
 #   4. starts the camera watcher now and at every logon (Startup folder)
 #   5. puts "Restart FITS Importer" on your Desktop
 #   6. schedules the twice-daily ship (09:30, 21:30) when an archive is set
-#   7. points the archive sweep task at the new sweep.ps1, if you have one
+#   7. on the archive PC (1.7.0): the archive's _verify\pc, _verify\mac and
+#      _verify\lock folders, the sweep at logon and 03:30, and every five
+#      minutes the answer to what the Mac asks for - all in Python, as you
 # Your ledger, config and backed-up frames are never touched.
 # While the FITs Importer App is in charge here (1.5.3), only the files are
 # updated: no watcher, Restart button or panel start (4, 5 and the start).
@@ -78,9 +80,14 @@ foreach ($f in @('astro-import.py', 'astro-app.py', 'astro-watch.py', 'selftest.
     if (-not (Test-Path -LiteralPath $src)) { Warn "Missing from the package: $f"; exit 1 }
     Copy-Item -LiteralPath $src -Destination $bin -Force -ErrorAction Stop
 }
-foreach ($f in @('sweep.ps1', 'install_sweep.ps1')) {
+foreach ($f in @('set-archive-rights.ps1')) {
     $src = Join-Path $here "pc\$f"
     if (Test-Path -LiteralPath $src) { Copy-Item -LiteralPath $src -Destination (Join-Path $bin 'pc') -Force }
+}
+# sweep.ps1 retired in 1.7.0: the sweep is Python now (--sweep)
+foreach ($f in @('sweep.ps1', 'install_sweep.ps1')) {
+    $old = Join-Path $bin "pc\$f"
+    if (Test-Path -LiteralPath $old) { Rename-Item -LiteralPath $old -NewName "$f.retired" -Force -ErrorAction SilentlyContinue }
 }
 Ok "Engine, panel and watcher copied to $bin"
 
@@ -195,34 +202,46 @@ if ($archiveSet) {
     Info "No archive folder configured - skipping the ship schedule (optional; see PC-SYNC.md)."
 }
 
-# ── 7. Archive sweep: the new sweep reads EVERY machine's ship log ───────────
-# An older sweep.ps1 at the place PC-SYNC.md suggested is replaced in place
-# (kept as .bak), so whichever task runs it — even one registered elevated,
-# which this non-admin installer can't see — picks up the new version.
-$legacySweep = Join-Path $archive 'Claude outputs\pc\sweep.ps1'
-if ($archiveSet -and (Test-Path -LiteralPath $legacySweep)) {
-    try {
-        Copy-Item -LiteralPath $legacySweep -Destination ($legacySweep + '.bak') -Force -ErrorAction Stop
-        Copy-Item -LiteralPath (Join-Path $bin 'pc\sweep.ps1') -Destination $legacySweep -Force -ErrorAction Stop
-        Ok "Updated the archive sweep at $legacySweep (old copy kept as .bak)"
-    } catch {
-        Warn "Could not update $legacySweep ($($_.Exception.Message)) - copy $bin\pc\sweep.ps1 over it by hand."
+# ── 7. The archive PC's own jobs (1.7.0): Python, as you ────────────────────
+# "Astro archive sweep" (logon and 03:30) checks every shipped frame from this
+# disk, sets aside copies a ship never finished, lists the archive and hashes
+# new files. "Astro sync requests" (every 5 minutes) answers what the Mac asks
+# for and keeps the heartbeat that tells it this PC is awake. Registering the
+# sweep under its old name replaces the old sweep.ps1 task; the old script
+# files are left where they are (they are yours to delete).
+if ($archiveSet) {
+    foreach ($d in @('_verify\pc', '_verify\mac\requests', '_verify\lock', '_Quarantine\ship-incomplete')) {
+        try { New-Item -ItemType Directory -Force -Path (Join-Path $archive $d) -ErrorAction Stop | Out-Null }
+        catch { Warn "Could not create $archive\$d ($($_.Exception.Message))" }
     }
-}
-$sweepTask = Get-ScheduledTask -TaskName 'Astro archive sweep' -ErrorAction SilentlyContinue
-if ($sweepTask) {
+    Ok "The archive's _verify\pc, _verify\mac and _verify\lock folders are in place"
+    $me = "$env:USERDOMAIN\$env:USERNAME"
+    $pri = New-ScheduledTaskPrincipal -UserId $me -LogonType Interactive -RunLevel Limited
     try {
-        $sweep = Join-Path $bin 'pc\sweep.ps1'
-        $act = New-ScheduledTaskAction -Execute 'powershell.exe' -Argument "-NoProfile -ExecutionPolicy Bypass -WindowStyle Hidden -File `"$sweep`" -Root `"$archive`""
-        Set-ScheduledTask -TaskName 'Astro archive sweep' -Action $act -ErrorAction Stop | Out-Null
-        Ok "Archive sweep now uses $sweep (it reads every machine's ship log)"
+        $act = New-ScheduledTaskAction -Execute $pyw -Argument "-X utf8 `"$bin\astro-import.py`" --pc-nightly" -WorkingDirectory $bin
+        $t1 = New-ScheduledTaskTrigger -AtLogOn -User $me
+        $t2 = New-ScheduledTaskTrigger -Daily -At 03:30
+        $set = New-ScheduledTaskSettingsSet -StartWhenAvailable -ExecutionTimeLimit (New-TimeSpan -Hours 8) -MultipleInstances IgnoreNew
+        Register-ScheduledTask -TaskName 'Astro archive sweep' -Action $act -Trigger @($t1, $t2) -Settings $set -Principal $pri -Force -ErrorAction Stop | Out-Null
+        Ok "Archive sweep at logon and 03:30 (Python: sweep, list the archive, hash new files)"
     } catch {
-        Warn "Could not update the 'Astro archive sweep' task. As administrator, run: $bin\pc\install_sweep.ps1"
+        Warn "Could not set up the 'Astro archive sweep' task ($($_.Exception.Message))."
+        Warn "If an older one was set up from an administrator prompt, open PowerShell as administrator, run:"
+        Warn "  Unregister-ScheduledTask -TaskName 'Astro archive sweep' -Confirm:`$false"
+        Warn "then run this installer again."
     }
-} elseif ($archiveSet -and -not (Test-Path -LiteralPath $legacySweep)) {
-    Info "No archive sweep task found for you. If one was registered from an administrator"
-    Info "prompt it may just be invisible here. Otherwise, to verify shipped frames, run:"
-    Info "  powershell -ExecutionPolicy Bypass -File `"$bin\pc\install_sweep.ps1`""
+    try {
+        $act = New-ScheduledTaskAction -Execute $pyw -Argument "-X utf8 `"$bin\astro-import.py`" --pc-tick" -WorkingDirectory $bin
+        # every 5 minutes, all day, every day: a daily trigger that repeats
+        $t = New-ScheduledTaskTrigger -Daily -At 00:00
+        $t.Repetition = (New-ScheduledTaskTrigger -Once -At 00:00 -RepetitionInterval (New-TimeSpan -Minutes 5) -RepetitionDuration (New-TimeSpan -Days 1)).Repetition
+        $t1 = New-ScheduledTaskTrigger -AtLogOn -User $me
+        $set = New-ScheduledTaskSettingsSet -StartWhenAvailable -ExecutionTimeLimit (New-TimeSpan -Hours 2) -MultipleInstances IgnoreNew
+        Register-ScheduledTask -TaskName 'Astro sync requests' -Action $act -Trigger @($t, $t1) -Settings $set -Principal $pri -Force -ErrorAction Stop | Out-Null
+        Ok "Sync requests answered every 5 minutes (the Mac sees this PC is awake)"
+    } catch {
+        Warn "Could not set up the 'Astro sync requests' task ($($_.Exception.Message))."
+    }
 }
 
 # ── 8. Start ─────────────────────────────────────────────────────────────────

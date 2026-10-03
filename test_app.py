@@ -767,6 +767,7 @@ env2.add_seestar_sub("M 33", "20260924-213000")
 env2.add_seestar_sub("M 33", "20260924-213100")
 PORT2 = int(env2.env["ASTRO_PANEL_PORT"])
 URL2 = f"http://127.0.0.1:{PORT2}"
+env2.env["ASTRO_ARCHIVE_URL"] = "smb://astro@TESTPC/AstroImageData"   # test mode only records a mount
 proc2 = start_panel(env2, PORT2)
 try:
     own_panel(URL2, env2, proc2, "T14 the second panel answers with its own instance id")
@@ -796,6 +797,47 @@ try:
           len(copied) == 2 and any(os.path.isdir(os.path.join(env2.sdest30, d))
                                    for d in os.listdir(env2.sdest30)),
           json.dumps(s.get("lastResult")))
+
+    # ── fix c (1.7.0): the panel's import ships straight away when the share
+    #    is already up, as a Terminal import does; it never asks Finder to connect ──
+    log1 = [str(x) for x in s.get("log") or []]
+    check("T14 with the share down the panel's import says nothing about the archive and "
+          "doesn't ask Finder to connect (1.7.0)",
+          not any(w in x for x in log1 for w in ("not reachable", "Finder", "Shipped"))
+          and not teh.os_calls(env2.root, "mount"),
+          json.dumps(log1[-4:]) + json.dumps(teh.os_calls(env2.root))[:300])
+    os.makedirs(os.path.join(env2.archive, "S30P"))
+    env2.add_seestar_sub("M 33", "20260925-213000")
+    api("/api/scan", {}, url=URL2)
+    t0 = time.time()
+    while time.time() - t0 < 60:
+        s = api("/api/state", url=URL2)
+        if s["status"] == "idle" and s["scan"]:
+            break
+        time.sleep(0.3)
+    api("/api/import", {"names": ["M 33"]}, url=URL2)
+    t0 = time.time()
+    while time.time() - t0 < 90:
+        s = api("/api/state", url=URL2)
+        if s.get("question"):
+            api("/api/answer", {"id": s["question"]["id"], "value": "n"}, url=URL2)
+        elif s["status"] == "idle" and time.time() - t0 > 1:
+            break
+        time.sleep(0.3)
+    ship_log = os.path.join(env2.archive, "_verify", *(("pc", "shipped-pc.jsonl") if os.name == "nt"
+                                                      else ("mac", "shipped.jsonl")))
+    try:
+        with open(ship_log, encoding="utf-8") as f:
+            shipped = [r for r in (json.loads(x) for x in f if x.strip()) if r.get("state") == "shipped"]
+    except OSError:
+        shipped = []
+    on_e = [f for _dp, _dn, fs in os.walk(os.path.join(env2.archive, "S30P")) for f in fs]
+    check("T14 with the share up the panel's import files every frame not yet shipped into the "
+          "archive straight away, and says so (fix c, 1.7.0)",
+          len(shipped) == 3 and len(on_e) == 3
+          and any("Shipped 3 file(s)" in str(x) for x in s.get("log") or [])
+          and not teh.os_calls(env2.root, "mount"),
+          json.dumps([str(x) for x in s.get("log") or []][-6:]) + str(on_e))
 finally:
     proc2.terminate()
     proc2.wait(timeout=30)

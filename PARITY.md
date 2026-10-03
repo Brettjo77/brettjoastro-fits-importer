@@ -49,7 +49,14 @@ way. Every release updates it.
 | SAFE clear (checked again at deletion) | ✓ | ✓ | engine |
 | Discard (typed DISCARD, recorded first) | ✓ | ✓ | engine |
 | JPEG preview rules, one stack per session, Day per night | ✓ | ✓ | engine |
-| Ship to the archive + PC verification sweep | ✓ over SMB | ✓ local E: | engine (+ `pc/sweep.ps1`) |
+| Ship to the archive: each frame created under its final name only if that name is free, read back, never deleted, renamed or written over there; "started" and "shipped" rows in the machine's own log (1.7.0, D7) | ✓ over SMB | ✓ local E: | engine |
+| Calibration frames ship with their lights, into the Day's `calibration\{biases,darks,flats}`; Collect Lights copies (`lights/lights`, prefixed names) are found by name, size and ledger hash (1.7.0) | ✓ | ✓ | engine |
+| A panel import ships straight away when the share is up (1.7.0) | ✓ (a mounted share; never asks Finder to connect) | ✓ local E: | panel + engine |
+| "Not reachable" says why (not mounted, no camera folders, `_verify` folder not writable) | ✓ | ✓ ("the folder isn't there") | engine |
+| The archive PC's own jobs: `--sweep` (re-reads shipped frames unbuffered, sets aside copies a ship never finished), `--inventory` and `--hash` of the archive, `--pc-tick`, `--pc-nightly` (1.7.0) | — asks with `--request` (see below) | ✓ Scheduled Tasks "Astro archive sweep" (logon, 03:30) and "Astro sync requests" (every 5 min) | engine + installer |
+| Inventory and hash cache of this computer's own frame folders (`--inventory --root`, `--hash --root`) | ✓ | ✓ | engine |
+| Short name and label for the computer (`ASTRO_MACHINE_ID`, `ASTRO_MACHINE_LABEL`), checked before anything is written | ✓ | ✓ | engine |
+| The share's rights for D7: tried with `--check-share-rights`, set with `pc\set-archive-rights.ps1` | ✓ tries them | ✓ sets them | engine + PC script |
 | Control panel (localhost:8765, token, same UI) | ✓ | ✓ | panel |
 | Report, dashboard, mirror | ✓ | ✓ | engine |
 | Camera detection | `/Volumes/…` | drive letters, by what's on them (`Autorun\` / `MyWorks\`) | platform layer |
@@ -91,7 +98,12 @@ The same keys on both, in `config.json` next to the ledger:
 | `ASTRO_ARCHIVE_MOUNT` | the archive | `/Volumes/AstroImageData` | `E:\Astro Image Data` |
 | `ASTRO_ARCHIVE_URL` | share to mount on demand | empty (set for SMB) | not used (the archive is local) |
 | `ASTRO_ARCHIVE_LABEL` | how the archive is named in messages | `E:\Astro Image Data` | same |
-| `ASTRO_SHIP_LOG` | this machine's ship log | `shipped.jsonl` | `shipped-pc.jsonl` |
+| `ASTRO_SHIP_LOG` | this machine's ship log, in its folder under `_verify` | `shipped.jsonl` | `shipped-pc.jsonl` |
+| `ASTRO_SHIP_FOLDER` | that folder (1.7.0) | `mac` | `pc` |
+| `ASTRO_MACHINE_ID` | the computer's short name (a to z, 0 to 9 and -, at most 32), in log rows and request names | `mac` | `pc` |
+| `ASTRO_MACHINE_LABEL` | the name people read | `Mac` | `PC` |
+| `ASTRO_ARCHIVE_MIN_FREE_GB` | a ship that would leave less free on the archive sends nothing | `10` | `10` |
+| `ASTRO_PC_HASH_MINUTES` | the nightly hash stops at a file after this long | not used | `360` |
 | `ASIAIR_VOLUME` / `SEESTAR_VOLUME` | pin a camera path by hand | auto | auto (drive letters) |
 | `SEESTAR_IMPORT_SUB_JPEGS` | import per-sub previews | `false` | `false` |
 | `ASTRO_SIRIL_EXE` | Siril, for "Start Siril here" | `/Applications/Siril.app/Contents/MacOS/Siril` | `C:\Program Files\Siril\bin\siril.exe` |
@@ -109,15 +121,25 @@ the scope table, and the non-path keys.
   (`mirror-owner.json`). It refuses to publish into another computer's. It
   refuses to restore another computer's ledger as its own, unless you confirm
   that it is the same computer, rebuilt.
-- **Archive ship logs:** the Mac appends to `_verify\shipped.jsonl`, the PC
-  to `_verify\shipped-pc.jsonl`. The sweep reads every `shipped*.jsonl`
-  (shared reads, UTF-8, skipping malformed rows) and is the only writer of
-  `verified.jsonl`, `problems.jsonl` and `status.json`.
-- **Shipping into one archive:** only one computer ships at a time. A
-  lock on the archive (`_verify\ship.lock`, stale after 6 hours) makes the
-  other wait until its next run. Each machine also names its partial copies
-  after itself (`….mac.partial` / `….pc.partial`), and the two schedules are
-  half an hour apart.
+- **Archive ship logs (1.7.0):** each machine writes only in its own folder
+  under `_verify`: the Mac `_verify\mac\shipped.jsonl` (and its requests in
+  `_verify\mac\requests`), the PC `_verify\pc\shipped-pc.jsonl`. The old
+  logs in `_verify` are history: read, never written again.
+- **What the PC writes:** everything in `_verify\pc` (the share's user may
+  only read there): `verified.jsonl`, `problems.jsonl`, `status.json`,
+  `quarantine.jsonl`, the sweep logs, the inventory generations and
+  `inventory-E.status.json`, `pc-heartbeat.json` and `responses\`. The
+  PC's sweep is the only writer of `verified.jsonl`. It still reads the old
+  `_verify\verified.jsonl` and `problems.jsonl`, for one release.
+- **Shipping into one archive:** only one computer ships at a time. The lock
+  is `_verify\lock\ship.lock`: the holder renews it every minute, and
+  another computer may break it after ten minutes without renewal, noting
+  that in its own log. A 1.6 lock (`_verify\ship.lock`) still stops a ship
+  for 6 hours. There are no partial copies any more: a frame is created
+  under its final name, and an unfinished one is set aside by the PC. The
+  two schedules are half an hour apart.
+- **Hash cache and inventory of a computer's own frames:** in its own state
+  folder (`hash-cache.jsonl`, `inventory-<short name>.jsonl`).
 - **Receipts:** the PC's carry `-pc` in the name, so one receipts folder can
   take both machines' receipts without a clash.
 
@@ -131,6 +153,22 @@ the scope table, and the non-path keys.
   Windows equivalent, and Windows needs none of it.
 - **The Terminal fallback dialogs** are AppleScript on the Mac and plain
   console prompts on Windows. The panel is the main route on both.
+- **The archive PC's jobs** (the sweep, the archive's inventory and hashing,
+  the heartbeat, answering requests) run only on the PC: only its own reads
+  of its own disk count as proof that a frame is safe (spec P1). The Mac asks
+  for a sweep or an inventory with `--request`, and never reads the archive
+  to prove anything.
+- **Unbuffered reads and background disk priority** are Windows-only, for
+  those jobs. Elsewhere a read is ordinary and is recorded as "buffered".
+- **The owner check on the PC's own files** is Windows-only: file owners
+  don't travel over SMB (decision 10).
+- **A sweep request after a ship leaves an unfinished copy** is the Mac's:
+  the PC's own unfinished copies wait for its next sweep (logon, 03:30).
+- **`--check-share-rights`** runs on the Mac, because it tests the share
+  from the Mac's side; the PC sets the rights (`pc\set-archive-rights.ps1`).
+- **Connecting the share:** a Terminal import asks Finder to connect it
+  first; a panel import ships only if it is already connected. On the PC
+  the archive is a local disk.
 
 ## Release checklist
 

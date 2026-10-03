@@ -19,7 +19,8 @@ commands he can paste, and go one step at a time.
 - `app-takeover.json` in the state folder (1.5.3): the owner record. Only the desktop app (FITs Importer App, a separate repo built on this one) writes it, while it's in charge, and only a record naming the app by an absolute `appPath` counts. While it's there, the web watchers, Restart buttons and installers stand aside. `--app-owner` gives every script the same answer, and a web install that finds the app gone renames the record aside, never deletes it.
 - For the app, 1.5.3 added `NOTIFY_FN` (engine), `make_server`/`serve`, `STATUS_CMD` and `POST /api/quit` (panel), and made `astro-watch.py` importable (`poll_once`, on the Mac too). The app relies on them: keep them working and tested.
 - 1.5.4: the panel binds without `socket.getfqdn` (U12: it stalled the packaged app's start for 35 s). When astropy won't load, `get_fits()` raises `FitsUnavailable`, a `SystemExit` so the `except Exception` guards around header reads can't swallow it; it says why once per process (`.why`, the line under numpy's advice page) and how to fix it (`.how`: a PowerShell `& "…\python.exe"` line on Windows; reinstall the app when `sys.frozen`). `run_import` and `run_seestar_import` call it before any copy, and `selftest.py` uses it too. The panel's `_run` catches it, and any other `SystemExit`, and fails only that job. Tests read the version from the engine's `VERSION`, so a release changes only that line.
-- `pc/sweep.ps1`: runs on the archive PC. It re-hashes shipped frames and is the only writer of `_verify/verified.jsonl`.
+- 1.7.0 (decision D7, phase 0 of the Sync View plan): the ship creates each archive file under its final name with exclusive create, reads it back, and never deletes, renames or overwrites on the archive. Each computer writes only in its own `_verify` folder: the Mac `_verify/mac/` (`shipped.jsonl` with started / shipped / failed / not-created rows, and `requests/`), the PC `_verify/pc/`. The ship lock is `_verify/lock/ship.lock`, renewed every 60 s and breakable after 10 min; a 1.6 `_verify/ship.lock` still counts for 6 h.
+- The PC's side is the engine, in Python (`pc/sweep.ps1` is retired): `--sweep` (unbuffered re-reads into `_verify/pc/verified.jsonl`, of which it is the only writer; sets aside "started, never shipped" copies), `--inventory`, `--hash`, `--pc-tick` (every 5 min: heartbeat and the Mac's requests) and `--pc-nightly`. The Mac has `--request` and `--check-share-rights`. `pc/set-archive-rights.ps1` sets the share's rights (dry run unless `-Apply`). Platform pieces: `hash_file_unbuffered`, `background_io`, `file_created_at`, `owner_trusted`.
 - `PARITY.md`: the Mac/Windows contract. Read it before touching anything platform-related.
 - `HOW-IT-WORKS.md`, `INSTALL.md`, `PC-SYNC.md`, `README.md`, `CHANGELOG.md`: the user docs. Keep them true.
 
@@ -31,7 +32,7 @@ commands he can paste, and go one step at a time.
 4. **Ledger rows are never removed,** only marked. Every command that writes the ledger takes the lock.
 5. **Nothing on the archive is ever overwritten.** The archive's naming and Day numbering win, and Day = night (noon-to-noon).
 6. **Each computer keeps its own ledger. No file is ever written by two machines.** This covers per-machine ship logs, partial files and receipts, and there's a lock on the archive while shipping.
-7. **Brett deletes files on his own disks himself.** At most, suggest `mv … ~/.Trash/`.
+7. **Brett deletes files on his own disks himself.** At most, suggest `mv … ~/.Trash/`. One named exception (agreed 3 Oct 2026, decision 18): the PC's sweep moves a copy that a ship started and never finished into `_Quarantine\ship-incomplete\`, and only those. `--move-old-partials` moves 1.6 partials only when Brett runs it. Nothing is deleted either way.
 8. **Never handle credentials.** Brett signs in to GitHub and everything else himself. No tokens in files, commits or command lines.
 9. **Ask Brett before any push to GitHub, and before anything irreversible.**
 
@@ -44,7 +45,7 @@ commands he can paste, and go one step at a time.
 
 ## Testing
 
-- Mac: `/usr/local/bin/python3 test_v2.py` (engine, 401 checks) and `/usr/local/bin/python3 test_app.py` (panel, 137 checks). Use python.org's Python, which has astropy; Apple's `python3` may not.
+- Mac: `/usr/local/bin/python3 test_v2.py` (engine, 483 checks) and `/usr/local/bin/python3 test_app.py` (panel, 139 checks). Use python.org's Python, which has astropy; Apple's `python3` may not.
 - **Tests run in test mode, always** (1.5.2). Build every environment a test starts with `test_env_helper.make_env(root)`. Call `teh.isolate_runner()` at the top of a test file, before it loads the engine in-process. With `ASTRO_TEST_ROOT` set:
   - the engine, panel, watcher and self-test refuse any path outside the root, and never use port 8765;
   - dialogs, notifications, ejects, mounts and "open" are written to `<root>/os-calls.jsonl` instead of happening. Check them with `teh.os_calls()`.
@@ -54,6 +55,7 @@ commands he can paste, and go one step at a time.
 - On the Mac, while changing the engine, it's worth also running the suites under `sandbox-exec` with a profile that refuses writes outside the temp folders and the repo, and refuses `osascript`/`open`/`diskutil`. Then a new leak fails loudly instead of touching real data.
 - Windows: `py -3 -X utf8 selftest.py`, then `py -3 -X utf8 test_v2.py` and `py -3 -X utf8 test_app.py`. The engine total is a little lower there than on the Mac: the checks that need bash or shell scripts print SKIP on Windows, and the two Windows-only owner checks run instead.
 - Chain W1 in `test_v2.py` simulates the Windows drive-letter layer on any OS (`ASTRO_DRIVE_ROOTS`).
+- Chains D7 and PC simulate the archive share's D7 rights with `teh.no_delete_env(root, archive)`: a `sitecustomize` on `PYTHONPATH` refuses deletes, renames and writes outside the allow-list and records each refusal in `<root>/denied.jsonl` (`teh.denied`). The D7 checks run as the Mac on every OS (`ASTRO_SHIP_FOLDER=mac`); the PC's jobs run in test mode on any OS.
 - Every fix gets a test that fails without the fix. Both suites must be fully green before anything is delivered.
 - Test an installer or the self-test from an *installed* layout, not only from the source folder. 1.5.1 fixed a bug that slipped through this way.
 - `.ps1` files are UTF-8 with a BOM, and CRLF. Parse-check them with `pwsh` if it's installed; otherwise check on the PC.

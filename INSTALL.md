@@ -88,8 +88,12 @@ No administrator rights are needed.
    - It puts **Restart FITS Importer** on your Desktop.
    - When `E:\Astro Image Data` exists, it schedules the ship to it at 09:30
      and 21:30, half an hour after the Mac's.
-   - When the PC already runs the archive sweep, it points the sweep at the
-     new version, which reads the Mac's and the PC's ship logs.
+   - With that archive, it also sets up the PC's own jobs (1.7.0), in Python,
+     as you: **Astro archive sweep** at logon and 03:30 (checks every shipped
+     frame, lists the archive, hashes new files) and **Astro sync requests**
+     every 5 minutes (answers what the Mac asks for). An older sweep task
+     under that name is replaced; see PC-SYNC.md if one set up as
+     administrator can't be.
 4. **Plug in the Seestar or ASIAir.** A notification appears and the panel
    opens (`http://127.0.0.1:8765`). Tick what you want and press **Import**.
    The first import starts this PC's own ledger.

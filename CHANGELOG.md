@@ -1,5 +1,47 @@
 # Changelog
 
+## 1.7.0 (2026-10-03): shipping without Delete, and the PC's own jobs in Python
+
+Phase 0 of the Sync View plan. The share's user can now be denied Delete on the archive (decision D7) without breaking anything, and the PC's side runs in the same Python engine as the Mac's.
+
+- **The ship never deletes, renames or writes over anything on the archive.**
+  - Each frame is created under its final name, and only if that name is free. Its bytes are read back before it counts as shipped. There are no more `.partial` or `.BAD` files.
+  - The frame on this computer is checked against the ledger before anything is sent. A frame that changed since import is not sent at all.
+  - Each computer's ship log now lives in its own folder: `_verify\mac\shipped.jsonl` on the Mac, `_verify\pc\shipped-pc.jsonl` on the PC. It has a "started" row before each frame and a "shipped" row after its read-back.
+  - The old logs in `_verify` stay as history. They are read, never written.
+- **A copy cut off half-way is set aside, not left as if it were the frame.**
+  - It stays "started", never "shipped", so the frame isn't counted, and the Mac asks the PC for a sweep straight away.
+  - The PC moves that copy, and only it, into `_Quarantine\ship-incomplete`, once no ship is running and ten minutes have passed. The Mac's next ship sends the frame again, to the same path and Day.
+  - A copy that turns out whole and correct (only the row, or the read-back over the share, failed) stays where it is, and the Mac's next ship records it without sending it again.
+  - A shipped frame the PC can't read just now (in use, or a read error) is read again by the next sweep, not written down as a problem.
+  - Frames copied by hand, processing files and anything that doesn't look like that ship's copy are never moved: they become a line in `problems.jsonl` instead. Moving those copies aside is the one thing the PC moves by itself (agreed 3 Oct).
+- **One ship at a time, with a lock that can't get stuck.** The lock is `_verify\lock\ship.lock`. The computer holding it renews it every minute. Another may break it after ten minutes without renewal, and notes that in its own log. A 1.6 importer's lock still counts. The ship also used to ship without the lock when it had to connect the share first; that's fixed.
+- **Why the 865 ZWO frames never reached the archive, fixed.**
+  - Calibration frames now ship with their lights, into the Day's `calibration\{biases,darks,flats}` (mosaics into the target's `calibration`). Before, the ship never sent calibration frames at all.
+  - Frames that Collect Lights renamed into `lights/lights` are found by their original name at the end of the new one, with the same size and the ledger's bytes, and filed under the original name. Before, they were "missing on Mac".
+- **A panel import ships straight away** when the share is already connected, as a Terminal import does. It never asks Finder to connect from the panel.
+- **"Not reachable" says why:** the share isn't mounted, the folder has no camera folders, or `_verify\mac` can't be written (with a hint when macOS's Privacy & Security is the cause).
+- **A ship that would leave the archive with less than 10 GB free sends nothing** and says so (`ASTRO_ARCHIVE_MIN_FREE_GB`).
+- **The PC's sweep is Python now** (`--sweep`). `pc\sweep.ps1` and `pc\install_sweep.ps1` are retired.
+  - It re-reads every shipped frame from the PC's own disk, bypassing Windows' cache (`FILE_FLAG_NO_BUFFERING`), from every computer's log.
+  - It writes only in `_verify\pc`: `verified.jsonl`, `problems.jsonl`, `status.json` (the same fields as before, plus new ones), `quarantine.jsonl` and its log.
+  - Copies a 1.6 ship left (`.partial`, `.BAD`) are listed, and moved into `_Quarantine\old-partials` only with `--sweep --move-old-partials`.
+- **The PC's other jobs, for the Sync tab to come:**
+  - `--inventory` lists the archive in generations (`_verify\pc\inventory-E-<time>.jsonl`, then `inventory-E.status.json`).
+  - `--hash` keeps a hash cache, low priority and unbuffered, with a nightly re-read of a 30th of it to catch bit rot.
+  - `--pc-tick`, every 5 minutes, writes a heartbeat and does what the Mac asked for. On the Mac, `--request sweep` or `--request inventory` asks.
+  - `--pc-nightly` runs the sweep, the inventory and the hash.
+- **The Windows installer** sets up "Astro archive sweep" (logon and 03:30, `--pc-nightly`) and "Astro sync requests" (every 5 minutes, `--pc-tick`), both Python, as you. It also makes the new folders under `_verify`.
+- **The share's rights:**
+  - On the PC, `pc\set-archive-rights.ps1` sets them. It only shows what it would do unless you add `-Apply`, saves today's rights first, and has `-Scratch` (a test folder only) and `-Undo`.
+  - On the Mac, `--check-share-rights` tries each allowed and refused operation in that test folder.
+  - See PC-SYNC.md, Part C. Leave the rights as they are until both computers run 1.7.0.
+- **Each computer has a short name and a label** (`ASTRO_MACHINE_ID`, `ASTRO_MACHINE_LABEL`) beside its id. A short name that breaks the rule (a to z, 0 to 9 and -, at most 32) stops anything that would write it.
+
+**Mac / Windows:** the ship, the calibration and Collect Lights fixes, the panel ship and the inventory of your own frames are the same on both. The PC's jobs (sweep, the archive's inventory and hashing, answering requests) run only on the archive PC, because only its own reads of its own disk count as proof. The Mac asks with `--request` and tries the share's rights with `--check-share-rights`. PARITY.md lists each difference and why.
+
+622 end-to-end checks (483 engine + 139 panel), including 82 new engine checks and 2 new panel checks. On Linux every one runs except the real-ACL check (a Mac or the PC only), and all pass except the same two self-test lines that only pass on a Mac or a PC. Still to run on the Mac and the PC.
+
 ## 1.6.0 (2026-10-02): Astro Desk, the archive ready to process
 
 - **A new Archive tab in the panel.** It answers "what haven't I processed yet, and where is it?" after weeks of cloud.

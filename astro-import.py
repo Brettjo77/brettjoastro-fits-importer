@@ -34,23 +34,27 @@ capabilities (see PARITY.md). Requires: Python 3.9+ and astropy.
 
 import argparse
 import contextlib
+import errno
 import hashlib
 import json
 import math
 import os
 import re
+import secrets
 import shutil
 import socket
+import stat
 import subprocess
 import sys
 import threading
+import unicodedata
 import uuid
 import time
 from collections import defaultdict
-from datetime import datetime, timedelta
+from datetime import datetime, timedelta, timezone
 
 # One version for every platform (1.5.0: the Windows 11 edition joins the Mac).
-VERSION = "1.6.0"
+VERSION = "1.7.0"
 IS_WINDOWS = os.name == "nt"
 IS_MAC = sys.platform == "darwin"
 PLATFORM = "windows" if IS_WINDOWS else ("mac" if IS_MAC else "linux")
@@ -213,7 +217,7 @@ def _test_root_guard():
              ("ASIAIR_DEST", DEST_DIR), ("ASIAIR_CAL_LIBRARY", LIBRARY_DIR),
              ("ASIAIR_STATE", STATE_DIR), ("ASIAIR_MIRROR", MIRROR_DIR),
              ("ASTRO_ARCHIVE_MOUNT", ARCHIVE_MOUNT),
-             ("ASTRO_SHIP_LOG", os.path.join(ARCHIVE_MOUNT, "_verify", SHIP_LOG_NAME)),
+             ("ASTRO_SHIP_LOG", os.path.join(ARCHIVE_MOUNT, "_verify", SHIP_FOLDER, SHIP_LOG_NAME)),
              ("SEESTAR_DEST_S30", SEESTAR_DEST_S30), ("SEESTAR_DEST_S50", SEESTAR_DEST_S50),
              ("SEESTAR_DEST_S30_ORIG", SEESTAR_DEST_S30_ORIG),
              ("SEESTAR_DEST_S50PRO", SEESTAR_DEST_S50PRO),
@@ -282,6 +286,16 @@ ARCHIVE_URL = os.environ.get("ASTRO_ARCHIVE_URL") or _CONFIG.get("ASTRO_ARCHIVE_
 # shipped*.jsonl. No file on the archive is ever appended to by two machines.
 SHIP_LOG_NAME = os.environ.get("ASTRO_SHIP_LOG") or _CONFIG.get("ASTRO_SHIP_LOG") \
     or ("shipped-pc.jsonl" if IS_WINDOWS else "shipped.jsonl")
+# ...kept in this machine's own folder under _verify\ (1.7.0, decision D7):
+# "mac" for the Mac, "pc" for the archive PC. The share user may change files
+# only there and in _verify\lock\; everything the PC writes lives in pc\.
+SHIP_FOLDER = os.environ.get("ASTRO_SHIP_FOLDER") or _CONFIG.get("ASTRO_SHIP_FOLDER") \
+    or ("pc" if IS_WINDOWS else "mac")
+if not re.fullmatch(r"[a-z0-9-]{1,32}", SHIP_FOLDER) or SHIP_FOLDER == "lock":
+    SHIP_FOLDER = "pc" if IS_WINDOWS else "mac"      # a typo never sends rows elsewhere
+# This computer's short name and display name for the Sync view (1.7.0, spec
+# section 2): `ASTRO_MACHINE_ID` is a slug such as "mac" or "chillblast"
+MACHINE_SLUG_RE = re.compile(r"^[a-z0-9-]{1,32}$")
 
 # ── Seestar (S30 Pro / S50) ─────────────────────────────────────────────────
 SEESTAR_VOLUME_ENV = os.environ.get("SEESTAR_VOLUME") or _CONFIG.get("SEESTAR_VOLUME")
@@ -509,6 +523,174 @@ def open_path(target):
     except Exception:
         pass
 
+def hash_file_unbuffered(path, chunk=1 << 20):
+    """(sha256, size, read) of a file on THIS computer's own disk (1.7.0).
+    On Windows the read bypasses the system cache (FILE_FLAG_NO_BUFFERING,
+    spec P1), so a file that was only just written is read from the disk,
+    and `read` is "unbuffered". Elsewhere, or on a volume that refuses
+    unbuffered reads, it is an ordinary read and `read` is "buffered"."""
+    if IS_WINDOWS:
+        try:
+            got = _win_hash_unbuffered(path, chunk)
+            if got is not None:
+                return got
+        except OSError:
+            raise
+        except Exception:
+            pass
+    h, size = hashlib.sha256(), 0
+    with open(path, "rb") as f:
+        for block in iter(lambda: f.read(chunk), b""):
+            h.update(block)
+            size += len(block)
+    return h.hexdigest(), size, "buffered"
+
+def _win_hash_unbuffered(path, chunk):
+    """Windows: CreateFileW with FILE_FLAG_NO_BUFFERING into a page-aligned
+    buffer (VirtualAlloc) read in whole multiples of the sector size; the
+    read at the end of the file returns what is left. None when the volume
+    won't do unbuffered reads (the caller then reads it the ordinary way)."""
+    import ctypes
+    from ctypes import wintypes
+    k32 = ctypes.WinDLL("kernel32", use_last_error=True)
+    k32.CreateFileW.restype = wintypes.HANDLE
+    k32.CreateFileW.argtypes = (wintypes.LPCWSTR, wintypes.DWORD, wintypes.DWORD, wintypes.LPVOID,
+                                wintypes.DWORD, wintypes.DWORD, wintypes.HANDLE)
+    k32.ReadFile.argtypes = (wintypes.HANDLE, wintypes.LPVOID, wintypes.DWORD,
+                             ctypes.POINTER(wintypes.DWORD), wintypes.LPVOID)
+    k32.CloseHandle.argtypes = (wintypes.HANDLE,)
+    k32.VirtualAlloc.restype = wintypes.LPVOID
+    k32.VirtualAlloc.argtypes = (wintypes.LPVOID, ctypes.c_size_t, wintypes.DWORD, wintypes.DWORD)
+    k32.VirtualFree.argtypes = (wintypes.LPVOID, ctypes.c_size_t, wintypes.DWORD)
+    full = os.path.abspath(path)
+    if not full.startswith("\\\\"):
+        full = "\\\\?\\" + full                     # long paths too
+    # shared as Python's own open() shares: a file another program still has
+    # open is read, not refused (the caller re-checks size and time after)
+    GENERIC_READ, SHARE_ALL, OPEN_EXISTING = 0x80000000, 0x7, 3
+    NO_BUFFERING, SEQUENTIAL = 0x20000000, 0x08000000
+    handle = k32.CreateFileW(full, GENERIC_READ, SHARE_ALL, None, OPEN_EXISTING,
+                             NO_BUFFERING | SEQUENTIAL, None)
+    if handle in (None, wintypes.HANDLE(-1).value):
+        err = ctypes.get_last_error()
+        if err == 87:                               # the volume refuses unbuffered reads
+            return None
+        raise OSError({2: errno.ENOENT, 3: errno.ENOENT, 5: errno.EACCES}.get(err, errno.EIO),
+                      ctypes.FormatError(err).strip(), path)
+    buf = k32.VirtualAlloc(None, chunk, 0x3000, 0x04)   # MEM_COMMIT|MEM_RESERVE, READWRITE
+    if not buf:
+        k32.CloseHandle(handle)
+        return None
+    h, size, got = hashlib.sha256(), 0, wintypes.DWORD()
+    try:
+        while True:
+            if not k32.ReadFile(handle, buf, chunk, ctypes.byref(got), None):
+                err = ctypes.get_last_error()
+                if err == 87 and size == 0:
+                    return None
+                raise OSError(errno.EIO, ctypes.FormatError(err).strip(), path)
+            if got.value == 0:
+                break
+            h.update(ctypes.string_at(buf, got.value))
+            size += got.value
+    finally:
+        k32.VirtualFree(buf, 0, 0x8000)                  # MEM_RELEASE
+        k32.CloseHandle(handle)
+    return h.hexdigest(), size, "unbuffered"
+
+def background_io():
+    """Long background reads (the PC's hashing) give way to whatever Brett is
+    doing (1.7.0): Windows' background mode lowers this process's disk and
+    memory priority. A no-op elsewhere, and in test mode."""
+    if not IS_WINDOWS or TEST_ROOT:
+        return False
+    try:
+        import ctypes
+        from ctypes import wintypes
+        k32 = ctypes.WinDLL("kernel32", use_last_error=True)
+        k32.GetCurrentProcess.restype = wintypes.HANDLE
+        k32.SetPriorityClass.argtypes = (wintypes.HANDLE, wintypes.DWORD)
+        return bool(k32.SetPriorityClass(k32.GetCurrentProcess(), 0x00100000))
+    except Exception:
+        return False
+
+def file_created_at(st):
+    """When a file was created, as a POSIX time, from its os.stat result: the
+    real creation time on Windows (and a Mac). Test mode on Linux has none,
+    so it uses the modification time, which a test can set (1.7.0)."""
+    t = getattr(st, "st_birthtime", None)
+    if t:
+        return t
+    if IS_WINDOWS:
+        return st.st_ctime                          # Windows: creation time
+    return st.st_mtime
+
+def owner_trusted(path):
+    """Windows: is `path` owned by an account the archive share's user can't
+    act as: the account this runs as, Administrators (what Windows makes the
+    owner of a file written from an administrator window) or SYSTEM? The PC
+    trusts its own files in _verify\\pc only then (spec P6: the share user
+    must never be able to plant one). True elsewhere, where owners don't
+    travel over SMB (decision 10); None when Windows can't say."""
+    if not IS_WINDOWS:
+        return True
+    try:
+        import ctypes
+        from ctypes import wintypes
+        adv = ctypes.WinDLL("advapi32", use_last_error=True)
+        k32 = ctypes.WinDLL("kernel32", use_last_error=True)
+        PDWORD = ctypes.POINTER(wintypes.DWORD)
+        adv.GetFileSecurityW.argtypes = (wintypes.LPCWSTR, wintypes.DWORD, wintypes.LPVOID,
+                                         wintypes.DWORD, PDWORD)
+        adv.GetSecurityDescriptorOwner.argtypes = (wintypes.LPVOID, ctypes.POINTER(ctypes.c_void_p),
+                                                   ctypes.POINTER(wintypes.BOOL))
+        adv.OpenProcessToken.argtypes = (wintypes.HANDLE, wintypes.DWORD,
+                                         ctypes.POINTER(wintypes.HANDLE))
+        adv.GetTokenInformation.argtypes = (wintypes.HANDLE, ctypes.c_int, wintypes.LPVOID,
+                                            wintypes.DWORD, PDWORD)
+        adv.ConvertSidToStringSidW.argtypes = (ctypes.c_void_p, ctypes.POINTER(wintypes.LPWSTR))
+        k32.GetCurrentProcess.restype = wintypes.HANDLE
+        k32.CloseHandle.argtypes = (wintypes.HANDLE,)
+        k32.LocalFree.argtypes = (wintypes.HLOCAL,)
+
+        def sid_text(sid):
+            out = wintypes.LPWSTR()
+            if not adv.ConvertSidToStringSidW(sid, ctypes.byref(out)):
+                return None
+            try:
+                return out.value
+            finally:
+                k32.LocalFree(ctypes.cast(out, wintypes.HLOCAL))
+
+        OWNER = 0x1
+        need = wintypes.DWORD()
+        adv.GetFileSecurityW(path, OWNER, None, 0, ctypes.byref(need))
+        if not need.value:
+            return None
+        sd = ctypes.create_string_buffer(need.value)
+        if not adv.GetFileSecurityW(path, OWNER, sd, need, ctypes.byref(need)):
+            return None
+        owner, defaulted = ctypes.c_void_p(), wintypes.BOOL()
+        if not adv.GetSecurityDescriptorOwner(sd, ctypes.byref(owner), ctypes.byref(defaulted)):
+            return None
+        token = wintypes.HANDLE()
+        if not adv.OpenProcessToken(k32.GetCurrentProcess(), 0x0008, ctypes.byref(token)):
+            return None
+        try:
+            adv.GetTokenInformation(token, 1, None, 0, ctypes.byref(need))   # TokenUser
+            info = ctypes.create_string_buffer(need.value)
+            if not adv.GetTokenInformation(token, 1, info, need, ctypes.byref(need)):
+                return None
+            me = sid_text(ctypes.c_void_p.from_buffer(info).value)        # TOKEN_USER.User.Sid
+        finally:
+            k32.CloseHandle(token)
+        who = sid_text(owner)
+        if not me or not who:
+            return None
+        return who in (me, "S-1-5-32-544", "S-1-5-18")
+    except Exception:
+        return None
+
 def machine_id():
     """A stable id for THIS computer's importer (created once, kept in the
     state folder). Hostnames drift on a Mac; this doesn't."""
@@ -527,6 +709,36 @@ def machine_id():
     except OSError:
         pass
     return rec["id"]
+
+_IDENTITY = {}
+
+def machine_identity():
+    """This computer's names (1.7.0). `id`: the stable id the mirror and the
+    archive lock have always used (unchanged, or the mirror would look like
+    another computer's). `slug`: the short name in file names and requests,
+    ^[a-z0-9-]{1,32}$, such as "mac" or "chillblast" (ASTRO_MACHINE_ID in
+    config.json, or "slug" in machine.json). `label`: the name people read
+    (ASTRO_MACHINE_LABEL, or "label"). `slugValid` is False for a slug that
+    breaks the rule; anything that names files with it refuses to run."""
+    if _IDENTITY:
+        return dict(_IDENTITY)
+    rec = {}
+    try:
+        with open(os.path.join(STATE_DIR, "machine.json"), encoding="utf-8") as f:
+            rec = json.load(f)
+    except (OSError, ValueError):
+        pass
+    if not isinstance(rec, dict):
+        rec = {}
+    default_slug = "mac" if IS_MAC else ("pc" if IS_WINDOWS else PLATFORM)
+    default_label = "Mac" if IS_MAC else ("PC" if IS_WINDOWS else PLATFORM.title())
+    slug = str(os.environ.get("ASTRO_MACHINE_ID") or _CONFIG.get("ASTRO_MACHINE_ID")
+               or rec.get("slug") or default_slug)
+    label = str(os.environ.get("ASTRO_MACHINE_LABEL") or _CONFIG.get("ASTRO_MACHINE_LABEL")
+                or rec.get("label") or default_label)
+    _IDENTITY.update({"id": machine_id(), "slug": slug, "label": label,
+                      "slugValid": bool(MACHINE_SLUG_RE.match(slug))})
+    return dict(_IDENTITY)
 
 def mirror_owner_ok(mirror_dir, claim=False):
     """Each machine publishes to its OWN mirror folder. Two ledgers in one
@@ -3160,11 +3372,13 @@ def run_reconcile(state, deep=True):
 # Ledger-driven: every entry that is verified here and not yet verified on the
 # archive is a candidate. The archive's own folder names and Day numbers win;
 # a night that already exists there is merged into its Day folder, a new night
-# takes the next free number. Copies go through a .partial name, are read back
-# from the share and compared to the ledger hash, then the entry is stamped
-# archiveLocation + archiveShippedAt. The PC sweep re-hashes on its side and
-# appends _verify\verified.jsonl; the next --ship reads that and stamps
-# archiveVerifiedAt. Nothing here deletes, overwrites, or touches the camera.
+# takes the next free number. From 1.7.0 (D7) each file is created under its
+# final name only if that name is free, read back from the share and compared
+# to the ledger hash, then the entry is stamped archiveLocation +
+# archiveShippedAt. The PC's sweep re-reads it on its own disk and appends
+# _verify\pc\verified.jsonl; the next --ship reads that and stamps
+# archiveVerifiedAt. Nothing here deletes, renames, overwrites, or touches
+# the camera.
 
 SHIP_ROOTS = {"ZWO Seestar S30 Pro": "S30P", "ZWO Seestar S30": "S30",
               "ZWO Seestar S50": "S50", "ZWO Seestar S50 Pro": "S50P",
@@ -3176,26 +3390,56 @@ _DISPLAY_RE = re.compile(r"^(.+?)\s+-\s+(.+?)(\s+\(mosaic\))?$")
 _MAC_DAY_RE = re.compile(r"^(.*?)(?:_sub)? Day (\d+)$")
 _E_DAY_RE = re.compile(r"^(.*?)(?:_sub)? Day (\d+)$")
 
-def archive_reachable(mount=None, write_test=True):
-    """True when the archive is mounted AND alive. After a PC reboot or power
-    cut a stale SMB mount can still list directories from cache while refusing
-    every write (seen 19 Sep 2026, PermissionError on makedirs), so the check
-    also touches a scratch file under _verify."""
+def _verify_path(mount, *parts):
+    """A path under the archive's _verify folder."""
+    return os.path.join(mount, "_verify", *parts)
+
+def ship_log_path(mount=None):
+    """This machine's own ship log: _verify\\mac\\shipped.jsonl on the Mac,
+    _verify\\pc\\shipped-pc.jsonl on the PC (1.7.0)."""
+    return _verify_path(mount or ARCHIVE_MOUNT, SHIP_FOLDER, SHIP_LOG_NAME)
+
+def _os_reason(e):
+    """Why an archive operation failed, in words that point at the fix."""
+    why = e.strerror or str(e)
+    if IS_MAC and e.errno == errno.EPERM:
+        why += "; macOS may be keeping this program away from the share (Privacy & Security)"
+    elif e.errno in (errno.EACCES, errno.EPERM):
+        why += "; the share's rights may need the PC setup (PC-SYNC.md)"
+    return why
+
+def archive_check(mount=None, write_test=True):
+    """(True, "") when the archive is mounted AND alive, else (False, why).
+    After a PC reboot or power cut a stale SMB mount can still list directories
+    from cache while refusing every write (seen 19 Sep 2026), so the check also
+    writes and removes a scratch file, in this machine's own _verify folder:
+    the one place on the archive the share user may delete (1.7.0). The reason
+    is said, because "not mounted", "the PC is asleep" and "macOS keeps this
+    program out" all used to read "not reachable" (1.7.0, fix d)."""
     mount = mount or ARCHIVE_MOUNT
     try:
-        if not os.path.isdir(mount) or not any(os.path.isdir(os.path.join(mount, r)) for r in SHIP_ROOTS.values()):
-            return False
-        if write_test:
-            vdir = os.path.join(mount, "_verify")
-            _confine(vdir, "the archive probe")
-            os.makedirs(vdir, exist_ok=True)
-            probe = os.path.join(vdir, f".ship-probe-{os.getpid()}")
+        if not os.path.isdir(mount):
+            return False, ("the folder isn't there" if IS_WINDOWS else "the share isn't mounted")
+        if not any(os.path.isdir(os.path.join(mount, r)) for r in SHIP_ROOTS.values()):
+            return False, "none of S30P, S30, S50, S50P or 'ZWO Askar Scopes' is in it"
+    except OSError as e:
+        return False, _os_reason(e)
+    if write_test:
+        own = _verify_path(mount, SHIP_FOLDER)
+        _confine(own, "the archive probe")
+        try:
+            os.makedirs(own, exist_ok=True)
+            probe = os.path.join(own, f".ship-probe-{os.getpid()}")
             with open(probe, "w") as f:
                 f.write(now_stamp())
             os.remove(probe)
-        return True
-    except OSError:
-        return False
+        except OSError as e:
+            return False, f"can't write in _verify{os.sep}{SHIP_FOLDER} ({_os_reason(e)})"
+    return True, ""
+
+def archive_reachable(mount=None, write_test=True):
+    """True when the archive is mounted AND alive (archive_check says why not)."""
+    return archive_check(mount, write_test)[0]
 
 def _ship_target_folder(root_dir, display, mosaic):
     """Archive folder for a Mac display name. Prefer a folder that already
@@ -3242,8 +3486,11 @@ def _file_night_any(filename):
     return _seestar_file_night(filename)   # both camera families stamp yyyymmdd-hhmmss
 
 class _DayMap:
-    """Night -> Day number for one archive target folder (or mosaic panel folder)."""
-    def __init__(self, folder, seestar):
+    """Night -> Day number for one archive target folder (or mosaic panel folder).
+    `seed` adds nights this machine's ship already started into a Day folder
+    (its own log): a copy the PC set aside leaves that Day empty, and the
+    retry must go back into it, not open the next Day (1.7.0)."""
+    def __init__(self, folder, seestar, seed=None):
         self.folder, self.seestar = folder, seestar
         self.nights, self.max_n, self.token = {}, 0, None
         try:
@@ -3266,6 +3513,9 @@ class _DayMap:
                 pass
         if toks:
             self.token = max(toks, key=toks.get)
+        for nt, n in (seed or {}).items():
+            self.nights.setdefault(nt, n)
+            self.max_n = max(self.max_n, n)
     def day_for(self, night):
         if night in self.nights:
             return self.nights[night]
@@ -3277,12 +3527,19 @@ class _DayMap:
             return f"{self.token or mac_token}_sub Day {n}"
         return f"{target_name} Day {n}"
 
-def _find_moved_file(dest, filename, size, index):
+_FITS_EXT = (".fit", ".fits", ".fts")
+
+def _find_moved_file(dest, filename, size, index, allow_prefixed=False):
     """A frame the ledger placed in a Day folder may since have been gathered
     into a flat lights/ folder (Collect Lights, or by hand). Look for it by
     name and size anywhere under the target folder, walking up from the Day
     folder to the first folder that is not a Day/lights/panels level. One
-    directory walk per target folder, cached in `index`."""
+    directory walk per target folder, cached in `index`.
+    allow_prefixed (the ship only, 1.7.0, fix b): also a copy renamed
+    "<session folder>_<original name>", as Collect Lights names them in
+    lights/lights. Same size isn't proof, so only a caller that checks the
+    bytes against the ledger's hash may ask for it (the ship does, before it
+    writes anything); the Space view never does."""
     d = os.path.normpath(dest)
     for _ in range(3):
         parent = os.path.dirname(d)
@@ -3300,7 +3557,18 @@ def _find_moved_file(dest, filename, size, index):
                     for fn in fns:
                         idx.setdefault(fn, []).append(os.path.join(root, fn))
             index[d] = idx
-        for cand in index[d].get(filename, []):
+        cands = list(index[d].get(filename, []))
+        if allow_prefixed and filename.lower().endswith(_FITS_EXT):
+            pkey = ("prefixed", d)
+            if pkey not in index:
+                pidx = {}
+                for fn, paths in index[d].items():
+                    for i, ch in enumerate(fn):
+                        if ch == "_" and fn[i + 1:].lower().endswith(_FITS_EXT):
+                            pidx.setdefault(fn[i + 1:], []).extend(paths)
+                index[pkey] = pidx
+            cands += index[pkey].get(filename, [])
+        for cand in cands:
             try:
                 if size is None or os.path.getsize(cand) == size:
                     return cand
@@ -3724,12 +3992,33 @@ def archive_folder_listing(rel):
         out[key].sort(key=lambda r: r.get("date") or "", reverse=True)
     return out
 
-def ship_plan(state, mount):
-    """Return (items, notes). items: dict(rel, src, entry, key). rel is the
-    archive-relative path with the archive's own separators (\\\\)."""
+def _ship_seeds(own_rows, mount):
+    """Day folders this machine's own ship log has started frames in: archive
+    target folder -> {night: Day number}, for _DayMap's seed (1.7.0)."""
+    seeds = {}
+    for r in (own_rows or {}).values():
+        rel = r.get("relpath")
+        if not isinstance(rel, str):
+            continue
+        parts = [p for p in re.split(r"[\\/]", rel) if p]
+        if len(parts) < 3:
+            continue
+        m = _E_DAY_RE.match(parts[-2])
+        nt = _file_night_any(parts[-1])
+        if m and nt:
+            tdir = os.path.normcase(os.path.normpath(os.path.join(mount, *parts[:-2])))
+            seeds.setdefault(tdir, {}).setdefault(nt, int(m.group(2)))
+    return seeds
+
+def ship_plan(state, mount, own_rows=None):
+    """Return (items, notes). items: dict(rel, src, entry, key, kind[, link]):
+    kind "frame" for a ledger frame, "cal" for one calibration frame's copy in
+    one Day folder (1.7.0). rel is the archive-relative path with the archive's
+    own separators (\\\\)."""
     items, notes = [], []
     daymaps = {}
     _tree_index = {}
+    seeds = _ship_seeds(own_rows, mount)
     home = os.path.expanduser("~")
     for key, e in state.ledger["files"].items():
         if not e.get("verifiedAtImport") or e.get("archiveVerifiedAt") or e.get("tidiedAt"):
@@ -3745,7 +4034,10 @@ def ship_plan(state, mount):
             continue   # 1.4.2: per-sub JPEG previews are not shipped to the archive
         src = os.path.join(dest, e["filename"])
         if not os.path.isfile(src):
-            src = _find_moved_file(dest, e["filename"], e.get("size"), _tree_index)
+            # moved into a lights/ folder, perhaps renamed by Collect Lights:
+            # the ship checks the bytes against the ledger before sending
+            src = _find_moved_file(dest, e["filename"], e.get("size"), _tree_index,
+                                   allow_prefixed=True)
             if not src:
                 if dest.startswith(home):
                     notes.append(("missing on Mac", key))
@@ -3762,14 +4054,15 @@ def ship_plan(state, mount):
         # non-DSO modes live at the root by mode name
         if seestar and base in {n for _, n in SEESTAR_NON_DSO_MAP}:
             rel = os.path.join(root, base, e["filename"])
-            items.append({"rel": rel, "src": src, "entry": e, "key": key}); continue
+            items.append({"rel": rel, "src": src, "entry": e, "key": key, "kind": "frame"}); continue
         tfolder = _ship_target_folder(root_dir, display, mosaic)
         tdir = os.path.join(root_dir, tfolder)
         if panel:
             tdir = os.path.join(tdir, panel)
         dm_key = tdir
         if dm_key not in daymaps:
-            daymaps[dm_key] = _DayMap(tdir, seestar)
+            daymaps[dm_key] = _DayMap(tdir, seestar,
+                                      seed=seeds.get(os.path.normcase(os.path.normpath(tdir))))
         dm = daymaps[dm_key]
         m = _MAC_DAY_RE.match(base)
         if m and st in ("sub", "sub-jpg", "mw", "Plan", "Live", "panel-day"):
@@ -3791,36 +4084,144 @@ def ship_plan(state, mount):
                   else os.path.join(root, "_UNPLACED", tfolder, e["filename"])
         else:
             rel = os.path.join(SHIP_WORKING, root, tfolder, base, e["filename"])
-        items.append({"rel": rel, "src": src, "entry": e, "key": key})
+        items.append({"rel": rel, "src": src, "entry": e, "key": key, "kind": "frame"})
+    _plan_calibration(state, items, notes)
     return items, notes
 
+def _plan_calibration(state, items, notes):
+    """Calibration frames go to the archive with the lights they were linked
+    to (1.7.0, fix a): into the archive Day folder that the Mac Day folder's
+    lights went to, under calibration\\{biases,darks,flats}\\ as on the Mac
+    (and as the 3 Oct copy filed Bubble's). A mosaic's shared calibration
+    goes to its target folder's calibration\\. Only frames verified at import
+    are sent, and only once their lights have a place on the archive. A frame
+    linked into three nights is sent three times, once per Day folder."""
+    day_dirs = defaultdict(lambda: defaultdict(int))
+
+    def note_light(mac_dir, rel):
+        parts = [p for p in re.split(r"[\\/]", rel) if p]
+        if len(parts) >= 2:
+            day_dirs[os.path.normcase(os.path.normpath(mac_dir))]["\\".join(parts[:-1])] += 1
+
+    for e in state.ledger["files"].values():
+        if e.get("archiveLocation") and e.get("dest"):
+            note_light(e["dest"], e["archiveLocation"])
+    for i in items:
+        if i["kind"] == "frame" and i["entry"].get("dest") and not i["entry"].get("archiveLocation"):
+            note_light(i["entry"]["dest"], i["rel"])
+
+    def archive_dir_for(mac_dir, target_level):
+        norm = os.path.normcase(os.path.normpath(mac_dir))
+        if not target_level:
+            got = day_dirs.get(norm)
+            return max(got, key=got.get) if got else None
+        tally = defaultdict(int)          # a mosaic: the target folder above the panels
+        for d, counts in day_dirs.items():
+            if d.startswith(norm + os.sep):
+                for a, n in counts.items():
+                    parts = a.split("\\")
+                    if len(parts) >= 2:
+                        tally["\\".join(parts[:2])] += n
+        return max(tally, key=tally.get) if tally else None
+
+    for ckey, c in (state.ledger.get("calibration") or {}).items():
+        kind_dir = LIB_SUBDIR.get(c.get("frameType"))
+        links = c.get("linkedInto") or []
+        if not kind_dir or not links or not c.get("filename"):
+            continue
+        if not c.get("sha256") or not c.get("verifiedAtImport"):
+            continue                      # adopted by size alone, never proven: not sent
+        copies = c.get("archive") or {}
+        for link in links:
+            if (copies.get(link) or {}).get("verifiedAt"):
+                continue
+            mac_dir = os.path.join(DEST_DIR, link)
+            src = os.path.join(mac_dir, "calibration", kind_dir, c["filename"])
+            if not os.path.isfile(src):
+                lib = os.path.join(LIBRARY_DIR, c["libraryPath"]) if c.get("libraryPath") else None
+                src = lib if lib and os.path.isfile(lib) else None
+            if not src:
+                notes.append(("calibration missing on this computer", ckey))
+                continue
+            target_level = not _MAC_DAY_RE.match(os.path.basename(os.path.normpath(mac_dir)))
+            adir = archive_dir_for(mac_dir, target_level)
+            if not adir:
+                continue                  # its lights aren't on the archive yet: next time
+            rel = "\\".join([adir, "calibration", kind_dir, c["filename"]])
+            items.append({"rel": rel, "src": src, "entry": c, "key": ckey, "kind": "cal",
+                          "link": link})
+
+def _item_shipped(i):
+    """Has this item already been shipped (and is waiting for the PC's check)?"""
+    if i.get("kind") == "cal":
+        return bool(((i["entry"].get("archive") or {}).get(i["link"]) or {}).get("shippedAt"))
+    return bool(i["entry"].get("archiveShippedAt"))
+
+def _read_jsonl_rows(path):
+    """Every JSON object in a .jsonl file; a malformed line never stops a reader."""
+    rows = []
+    try:
+        with open(path, encoding="utf-8", errors="replace") as f:
+            for line in f:
+                line = line.strip()
+                if not line:
+                    continue
+                try:
+                    r = json.loads(line)
+                except ValueError:
+                    continue
+                if isinstance(r, dict):
+                    rows.append(r)
+    except OSError:
+        pass
+    return rows
+
+def _relkey(rel):
+    """One spelling of an archive path for comparing: backslashes, any case
+    (NTFS ignores case)."""
+    return str(rel).replace("/", "\\").lower()
+
+def own_ship_rows(mount=None):
+    """This machine's ship log, folded per archive path: the last row for each
+    path, whose "state" says where it stands (started / shipped / failed /
+    not-created; 1.7.0)."""
+    last = {}
+    for r in _read_jsonl_rows(ship_log_path(mount)):
+        rel = r.get("relpath")
+        if isinstance(rel, str) and rel and r.get("state"):
+            last[_relkey(rel)] = r
+    return last
+
 def _ship_apply_verified(state, mount):
-    """Read the PC's verified.jsonl and stamp archiveVerifiedAt on matching entries."""
-    vpath = os.path.join(mount, "_verify", "verified.jsonl")
-    if not os.path.isfile(vpath):
-        return 0
+    """Stamp archiveVerifiedAt from the PC's verified rows: _verify\\pc\\
+    verified.jsonl (1.7.0) and the old _verify\\verified.jsonl, still read
+    for one release. Calibration copies are stamped per Day folder."""
     by_loc = {}
-    for k, e in state.ledger["files"].items():
+    for _k, e in state.ledger["files"].items():
         loc = e.get("archiveLocation")
         if loc and not e.get("archiveVerifiedAt"):
-            by_loc[loc.replace("/", "\\").lower()] = e
+            by_loc[_relkey(loc)] = (e, e)
+    for _k, c in (state.ledger.get("calibration") or {}).items():
+        for copy in (c.get("archive") or {}).values():
+            if copy.get("location") and not copy.get("verifiedAt"):
+                by_loc[_relkey(copy["location"])] = (c, copy)
     n = 0
-    with open(vpath, encoding="utf-8", errors="replace") as f:
-        for line in f:
-            try:
-                r = json.loads(line)
-            except ValueError:
-                continue
-            if not isinstance(r, dict):
-                continue                     # a stray line never stops a ship
+    for vpath in (_verify_path(mount, "pc", "verified.jsonl"), _verify_path(mount, "verified.jsonl")):
+        for r in _read_jsonl_rows(vpath):
             try:
                 rsize = int(r.get("size"))
             except (TypeError, ValueError):
                 continue
-            e = by_loc.get(str(r.get("relpath", "")).replace("/", "\\").lower())
-            if e and (e.get("sha256") in (None, r.get("sha256"))) and e.get("size") == rsize:
-                e["archiveVerifiedAt"] = r.get("verifiedAt") or now_stamp()
-                state._dirty = True; n += 1
+            hit = by_loc.get(_relkey(r.get("relpath", "")))
+            if not hit:
+                continue
+            e, stamp_into = hit
+            if e.get("sha256") in (None, r.get("sha256")) and e.get("size") == rsize:
+                key = "archiveVerifiedAt" if stamp_into is e else "verifiedAt"
+                if not stamp_into.get(key):
+                    stamp_into[key] = r.get("verifiedAt") or now_stamp()
+                    state._dirty = True
+                    n += 1
     return n
 
 def _try_mount_archive(mount, url, wait=20):
@@ -3842,79 +4243,377 @@ def _try_mount_archive(mount, url, wait=20):
     return False
 
 MACHINE_LABEL = "Mac" if IS_MAC else ("PC" if IS_WINDOWS else PLATFORM)
-SHIP_LOCK_STALE_S = 6 * 3600
+SHIP_ROW_SCHEMA = "ship-row/1"
+SHIP_LOCK_SCHEMA = "ship-lock/1"
+SHIP_LOCK_RENEW_S = 60               # the holder renews its lock this often (spec 11)
+SHIP_LOCK_BREAK_S = 10 * 60          # ...and it may be broken after this long without
+LEGACY_SHIP_LOCK_STALE_S = 6 * 3600  # a 1.6 lock (_verify\ship.lock) counts this long
 
-def _archive_ship_lock(mount):
-    """One computer ships into the archive at a time (1.5.0). The lock lives
-    ON the archive (_verify/ship.lock), so the Mac and the PC see the same one.
-    Returns the lock path, or None when another run holds it."""
-    path = os.path.join(mount, "_verify", "ship.lock")
-    _confine(path, "the archive ship lock")
-    me = {"machine": machine_id(), "host": socket.gethostname(), "platform": PLATFORM,
-          "pid": os.getpid(), "at": now_stamp()}
-    for _ in range(2):
+def _utc_now():
+    return datetime.now(timezone.utc)
+
+def _utc_iso(dt=None):
+    return (dt or _utc_now()).isoformat(timespec="seconds")
+
+def _parse_utc(text):
+    """A timestamp from a lock or log row (ISO 8601, UTC); None if unreadable."""
+    try:
+        dt = datetime.fromisoformat(str(text))
+    except (TypeError, ValueError):
+        return None
+    return dt if dt.tzinfo else dt.replace(tzinfo=timezone.utc)
+
+class _ShipLock:
+    """The archive's ship lock while this run holds it (1.7.0, spec 11): kept
+    fresh every SHIP_LOCK_RENEW_S by a thread, so a long ship is never taken
+    for a dead one. `lost` turns True if someone broke it; the ship stops at
+    the next file then. Released only if it is still ours."""
+
+    def __init__(self, path, rec, legacy=None):
+        self.path, self.rec, self.legacy, self.lost = path, rec, legacy, False
+        self._stop = threading.Event()
+        self._thread = threading.Thread(target=self._loop, daemon=True)
+        self._thread.start()
+
+    def _ours(self):
         try:
-            fd = os.open(path, os.O_CREAT | os.O_EXCL | os.O_WRONLY)
-            with os.fdopen(fd, "w") as f:
-                json.dump(me, f)
-            return path
-        except FileExistsError:
-            try:
-                with open(path) as f:
-                    held = json.load(f)
-            except (OSError, ValueError):
-                held = {}
-            try:
-                age = time.time() - os.path.getmtime(path)
-            except OSError:
-                continue
-            mine_dead = held.get("machine") == me["machine"] and not pid_alive(held.get("pid"))
-            if age > SHIP_LOCK_STALE_S or mine_dead:
-                warn(f"Clearing a stale archive ship lock ({held.get('host', '?')}, "
-                     f"{held.get('at', '?')}).")
+            with open(self.path, encoding="utf-8") as f:
+                held = json.load(f)
+        except (OSError, ValueError):
+            return False
+        return isinstance(held, dict) and held.get("machine") == self.rec["machine"] \
+            and held.get("pid") == self.rec["pid"] and held.get("startedAt") == self.rec["startedAt"]
+
+    def renew(self):
+        """Write a new renewedAt into the lock; False (and `lost`) if it isn't ours now."""
+        if not self._ours():
+            self.lost = True
+            return False
+        self.rec["renewedAt"] = _utc_iso()
+        try:
+            with open(self.path, "r+", encoding="utf-8") as f:
+                f.seek(0)
+                f.truncate()
+                json.dump(self.rec, f)
+                f.flush()
+        except OSError:
+            self.lost = True
+            return False
+        return True
+
+    def _loop(self):
+        while not self._stop.wait(SHIP_LOCK_RENEW_S):
+            if not self.renew():
+                return
+
+    def release(self):
+        self._stop.set()
+        for path, mine in ((self.legacy, True), (self.path, self._ours())):
+            if path and mine:
                 try:
                     os.remove(path)
                 except OSError:
+                    pass
+
+def _archive_ship_lock(mount, op="ship"):
+    """One computer ships into the archive at a time (1.5.0). The lock lives ON
+    the archive, so the Mac and the PC see the same one: from 1.7.0 in
+    _verify\\lock\\ship.lock, the one folder besides its own where the share
+    user may delete. The holder renews it every minute; a lock not renewed for
+    ten minutes is broken, and that is written in this machine's ship log.
+    While a 1.6 importer may still run somewhere, its _verify\\ship.lock is
+    honoured too, and taken alongside where the rights still allow it.
+    Returns a _ShipLock, or None when another run holds it."""
+    ident = machine_identity()
+    lockdir = _verify_path(mount, "lock")
+    path = os.path.join(lockdir, "ship.lock")
+    legacy = _verify_path(mount, "ship.lock")
+    _confine(path, "the archive ship lock")
+    now = _utc_iso()
+    me = {"schema": SHIP_LOCK_SCHEMA, "machineId": ident["slug"], "machine": ident["id"],
+          "host": socket.gethostname(), "platform": PLATFORM, "pid": os.getpid(), "op": op,
+          "startedAt": now, "renewedAt": now}
+    try:
+        os.makedirs(lockdir, exist_ok=True)
+    except OSError as e:
+        warn(f"Could not take the archive ship lock: {_os_reason(e)}")
+        return None
+    for _ in range(2):
+        try:
+            fd = os.open(path, os.O_CREAT | os.O_EXCL | os.O_WRONLY)
+        except FileExistsError:
+            try:
+                with open(path, encoding="utf-8") as f:
+                    held = json.load(f)
+            except (OSError, ValueError):
+                held = {}
+            if not isinstance(held, dict):
+                held = {}
+            renewed = _parse_utc(held.get("renewedAt"))
+            if renewed is None:
+                try:
+                    renewed = datetime.fromtimestamp(os.path.getmtime(path), timezone.utc)
+                except OSError:
+                    continue                      # gone this instant: try again
+            age = (_utc_now() - renewed).total_seconds()
+            mine_dead = held.get("machine") == ident["id"] and not pid_alive(held.get("pid"))
+            if age > SHIP_LOCK_BREAK_S or mine_dead:
+                warn(f"Breaking a stale archive ship lock ({held.get('host', '?')}, "
+                     f"last renewed {held.get('renewedAt', '?')}).")
+                try:
+                    os.remove(path)
+                except OSError as e:
+                    warn(f"Could not break it: {_os_reason(e)}")
                     return None
+                try:
+                    _ship_row(ship_log_path(mount), "lock-broken", None, None, None, None,
+                              held={k: held.get(k) for k in ("machineId", "host", "pid", "op",
+                                                             "startedAt", "renewedAt")})
+                except OSError:
+                    pass
                 continue
             info(f"{held.get('host', 'Another computer')} is shipping into the archive right "
-                 f"now (since {held.get('at', '?')}) — nothing shipped; will try next time.")
+                 f"now (since {held.get('startedAt', '?')}) — nothing shipped; will try next time.")
             return None
         except OSError as e:
-            warn(f"Could not take the archive ship lock: {e}")
+            warn(f"Could not take the archive ship lock: {_os_reason(e)}")
             return None
+        with os.fdopen(fd, "w", encoding="utf-8") as f:
+            json.dump(me, f)
+        took_legacy = _take_legacy_ship_lock(legacy, me)
+        if took_legacy is False:
+            try:
+                os.remove(path)
+            except OSError:
+                pass
+            return None
+        return _ShipLock(path, me, legacy=legacy if took_legacy else None)
     return None
+
+def _take_legacy_ship_lock(legacy, me):
+    """A 1.6 importer only knows _verify\\ship.lock: while one may still be in
+    use, hold that too. True: taken; None: not possible here (the share's
+    rights no longer allow it, so no 1.6 ship can run either); False: a 1.6
+    run holds it, so this one waits."""
+    try:
+        fd = os.open(legacy, os.O_CREAT | os.O_EXCL | os.O_WRONLY)
+    except FileExistsError:
+        try:
+            age = time.time() - os.path.getmtime(legacy)
+        except OSError:
+            return None
+        if age < LEGACY_SHIP_LOCK_STALE_S:
+            try:
+                with open(legacy, encoding="utf-8") as f:
+                    held = json.load(f)
+            except (OSError, ValueError):
+                held = {}
+            host = held.get("host", "Another computer") if isinstance(held, dict) else "Another computer"
+            info(f"{host} (an older importer) is shipping into the archive right now — "
+                 f"nothing shipped; will try next time.")
+            return False
+        return None                               # stale, and an old run's to clear
+    except OSError:
+        return None
+    with os.fdopen(fd, "w", encoding="utf-8") as f:
+        json.dump({"machine": me["machine"], "host": me["host"], "platform": me["platform"],
+                   "pid": me["pid"], "at": now_stamp()}, f)
+    return True
+
+def _ship_row(log, state, loc, size, sha, ship_id, **extra):
+    """Append one row to this machine's ship log, flushed to the archive's disk
+    before anything else happens (1.7.0). "started" before a file is created,
+    "shipped" after its read-back matches, "failed" when it doesn't,
+    "not-created" when the name turned out to be taken."""
+    row = {"schema": SHIP_ROW_SCHEMA, "state": state, "relpath": loc, "size": size,
+           "sha256": sha, "machine": MACHINE_LABEL, "machineId": machine_identity()["slug"],
+           "shipId": ship_id, "at": _utc_iso()}
+    row.update(extra)
+    _confine(log, "the ship log")
+    with open(log, "a", encoding="utf-8") as f:
+        f.write(json.dumps(row) + "\n")
+        f.flush()
+        os.fsync(f.fileno())
+
+def _ship_existing(dst, loc, expect_sha, expect_size, last, log, ship_id, stamp, checksum):
+    """The archive already holds a file at this frame's path, and it isn't an
+    unfinished copy of ours: adopt it only when it holds these bytes (a lead
+    for the PC's check), never write over it. (status, sha, problem)."""
+    size = os.path.getsize(dst)
+    if expect_size is not None and size != expect_size:
+        return "problem", None, "exists on the archive with a different size; left untouched"
+    if last and last.get("state") == "shipped" and last.get("sha256") \
+            and last.get("sha256") == expect_sha:
+        return "already there", expect_sha, None     # logged before; only the stamp was lost
+    h = _hash_dest_uncached(dst) if checksum else None
+    if h is not None and expect_sha not in (None, h):
+        return "problem", None, "exists on the archive with different content; left untouched"
+    sha = h or expect_sha
+    _ship_row(log, "shipped", loc, size, sha, ship_id, shippedAt=stamp, adopted=True)
+    return "already there", sha, None
+
+def _ship_one(src, dst, loc, expect_sha, expect_size, rows, log, ship_id, stamp, checksum):
+    """Copy one file into the archive without ever deleting, renaming or
+    writing over anything there (1.7.0, D7): the Mac file is proven against
+    the ledger first, a "started" row goes into this machine's log, the file
+    is created under its final name only if that name is free, its bytes are
+    read back, and only then is it "shipped". Returns (status, sha, problem);
+    status is shipped / already there / waiting / problem."""
+    last = rows.get(_relkey(loc))
+    if os.path.lexists(dst):
+        if last and last.get("state") in ("started", "failed"):
+            if checksum and expect_sha and os.path.getsize(dst) == expect_size \
+                    and _hash_dest_uncached(dst) == expect_sha:
+                # every byte arrived: only the "shipped" row was lost (a crash
+                # between the two), or the read-back was what failed. The PC
+                # leaves such a copy where it is, so record it now
+                _ship_row(log, "shipped", loc, expect_size, expect_sha, ship_id,
+                          shippedAt=stamp, adopted=True)
+                return "already there", expect_sha, None
+            # our own unfinished copy: the PC's sweep sets it aside, then the
+            # name is free and this frame goes again, to this same path
+            return "waiting", None, None
+        return _ship_existing(dst, loc, expect_sha, expect_size, last, log, ship_id, stamp,
+                              checksum)
+    sha_src = sha256_of(src) if checksum else None
+    if sha_src and expect_sha and sha_src != expect_sha:
+        return "problem", None, ("the copy on this computer no longer matches the ledger "
+                                 "(changed since import); not sent")
+    size_src = os.path.getsize(src)
+    if expect_size is not None and size_src != expect_size:
+        return "problem", None, "the copy on this computer changed size since import; not sent"
+    with open(src, "rb") as fin:
+        _ship_row(log, "started", loc, size_src, expect_sha or sha_src, ship_id)
+        try:
+            fd = os.open(dst, os.O_WRONLY | os.O_CREAT | os.O_EXCL | getattr(os, "O_BINARY", 0),
+                         0o644)
+        except FileExistsError:
+            # taken between the look and the create: never ours to finish
+            _ship_row(log, "not-created", loc, size_src, expect_sha or sha_src, ship_id)
+            return _ship_existing(dst, loc, expect_sha, expect_size, None, log, ship_id, stamp,
+                                  checksum)
+        sent = hashlib.sha256()
+        try:
+            with os.fdopen(fd, "wb") as fout:
+                for chunk in iter(lambda: fin.read(1024 * 1024), b""):
+                    fout.write(chunk)
+                    sent.update(chunk)
+                fout.flush()
+                os.fsync(fout.fileno())
+        except OSError as ex:
+            try:                                  # the share may be gone already
+                _ship_row(log, "failed", loc, size_src, expect_sha or sha_src, ship_id,
+                          why=f"cut off mid-copy: {ex.strerror or ex}")
+            except OSError:
+                pass
+            raise
+    sha_sent = sent.hexdigest()
+    if checksum and sha_sent != sha_src:
+        _ship_row(log, "failed", loc, size_src, sha_src, ship_id,
+                  why="the file changed on this computer during the copy")
+        return "problem", None, ("the file changed while it was being sent; "
+                                 "left for the PC to set aside")
+    if os.path.getsize(dst) != size_src:
+        _ship_row(log, "failed", loc, size_src, sha_src, ship_id, why="short on the archive")
+        return "problem", None, "the archive copy is short; left for the PC to set aside"
+    if checksum:
+        back = _hash_dest_uncached(dst)
+        if back != sha_sent:
+            _ship_row(log, "failed", loc, size_src, sha_sent, ship_id,
+                      why="read back differs from what was sent", found=back)
+            return "problem", None, ("read back differs from what was sent; "
+                                     "left for the PC to set aside")
+    sha = sha_sent if checksum else expect_sha
+    # the frame's own dates only on a whole, read-back copy: a copy left
+    # unfinished keeps the time it was written, which the PC's sweep checks
+    # against its "started" row before it ever sets one aside
+    try:
+        st = os.stat(src)
+        os.utime(dst, (st.st_atime, st.st_mtime))
+    except OSError:
+        pass
+    _ship_row(log, "shipped", loc, size_src, sha, ship_id, shippedAt=stamp)
+    preserve_creation_time(src, dst)
+    return "shipped", sha, None
+
+def _ship_mount(mount):
+    """(True, "") once the archive is reachable, mounting the share first when
+    a URL is set (the Mac); else (False, why)."""
+    ok, why = archive_check(mount)
+    if not ok and ARCHIVE_URL:
+        info(f"Archive not mounted; asking Finder to connect to {ARCHIVE_URL} ...")
+        _try_mount_archive(mount, ARCHIVE_URL)
+        ok, why = archive_check(mount)
+    return ok, why
+
+def slug_problem():
+    """Why this computer's short name can't go into a log row or a file name
+    (checked before anything is written, spec 2), or "" when it's fine."""
+    ident = machine_identity()
+    if ident["slugValid"]:
+        return ""
+    return (f"this computer's short name {ident['slug']!r} breaks the rule (a to z, 0 to 9 "
+            f"and -, at most 32): change ASTRO_MACHINE_ID in config.json")
 
 def run_ship(state, dry_run=False, mount=None, checksum=True):
     mount = mount or ARCHIVE_MOUNT
-    if not dry_run and archive_reachable(mount):
-        lock = _archive_ship_lock(mount)
-        if lock is None:
-            emit("ship", reachable=True, shipped=0, problems=0, busy=True)
-            return False
-        try:
-            return _run_ship(state, dry_run=dry_run, mount=mount, checksum=checksum)
-        finally:
-            try:
-                os.remove(lock)
-            except OSError:
-                pass
-    return _run_ship(state, dry_run=dry_run, mount=mount, checksum=checksum)
-
-def _run_ship(state, dry_run=False, mount=None, checksum=True):
-    mount = mount or ARCHIVE_MOUNT
-    if not archive_reachable(mount) and ARCHIVE_URL:
-        info(f"Archive not mounted; asking Finder to connect to {ARCHIVE_URL} ...")
-        _try_mount_archive(mount, ARCHIVE_URL)
-    if not archive_reachable(mount):
-        info(f"Archive not reachable at {mount} ({ARCHIVE_LABEL}). Nothing shipped; will try next time.")
-        emit("ship", reachable=False)
+    bad = slug_problem()
+    if bad:
+        warn(f"Nothing shipped: {bad}.")
+        emit("ship", reachable=None, refused=bad)
         return False
+    ok, why = _ship_mount(mount)
+    if not ok:
+        info(f"Archive not reachable at {mount} ({ARCHIVE_LABEL}): {why}. "
+             f"Nothing shipped; will try next time.")
+        emit("ship", reachable=False, why=why)
+        return False
+    if dry_run:
+        return _run_ship(state, dry_run=True, mount=mount, checksum=checksum)
+    lock = _archive_ship_lock(mount)
+    if lock is None:
+        emit("ship", reachable=True, shipped=0, problems=0, busy=True)
+        return False
+    try:
+        return _run_ship(state, dry_run=False, mount=mount, checksum=checksum, lock=lock)
+    finally:
+        lock.release()
+
+def ship_after_import(state, checksum=True, mount_share=True):
+    """File what an import just brought into the archive while its lock is still
+    held: the command line since 1.4.0, the panel from 1.7.0 (fix c). Quiet when
+    the share can't be reached; the twice-daily ship catches up. The command
+    line first asks Finder to connect, without a word, as it always has; the
+    panel (mount_share=False) ships only when the share is already up."""
+    try:
+        ok, _why = archive_check(ARCHIVE_MOUNT)
+        if not ok and mount_share and ARCHIVE_URL:
+            _try_mount_archive(ARCHIVE_MOUNT, ARCHIVE_URL)
+            ok, _why = archive_check(ARCHIVE_MOUNT)
+        if ok:
+            print()
+            run_ship(state, checksum=checksum)
+    except Exception as e:
+        warn(f"Ship after import failed (frames are safe on this computer): {e}")
+
+def _archive_free_margin():
+    """Bytes the archive keeps free after a ship (ASTRO_ARCHIVE_MIN_FREE_GB,
+    default 10; none in test mode, whose archive is a temp folder)."""
+    v = os.environ.get("ASTRO_ARCHIVE_MIN_FREE_GB") or _CONFIG.get("ASTRO_ARCHIVE_MIN_FREE_GB")
+    try:
+        gb = float(v) if v not in (None, "") else (0.0 if TEST_ROOT else 10.0)
+    except (TypeError, ValueError):
+        gb = 10.0
+    return int(max(gb, 0.0) * 1024 ** 3)
+
+def _run_ship(state, dry_run=False, mount=None, checksum=True, lock=None):
+    mount = mount or ARCHIVE_MOUNT
     stamped = _ship_apply_verified(state, mount)
     if stamped:
         success(f"{stamped} frame(s) confirmed verified by the PC sweep")
-    items, notes = ship_plan(state, mount)
-    todo = [i for i in items if not i["entry"].get("archiveShippedAt")]
+    rows = own_ship_rows(mount)
+    items, notes = ship_plan(state, mount, own_rows=rows)
+    todo = [i for i in items if not _item_shipped(i)]
     waiting = len(items) - len(todo)
     total = sum(i["entry"].get("size") or 0 for i in todo)
     info(f"Ship: {len(todo)} file(s), {human_size(total)} to {ARCHIVE_LABEL}; "
@@ -3930,16 +4629,36 @@ def _run_ship(state, dry_run=False, mount=None, checksum=True):
         by_target["/".join(parts[:2])][0] += 1; by_target["/".join(parts[:2])][1] += i["entry"].get("size") or 0
     for t, (n, b) in sorted(by_target.items()):
         log(f"  {t.replace('/', chr(92))}: {n} file(s), {human_size(b)}")
+    cal = [i for i in todo if i["kind"] == "cal"]
+    if cal:
+        log(f"  of which calibration frames: {len(cal)} file(s), "
+            f"{human_size(sum(i['entry'].get('size') or 0 for i in cal))}")
     if dry_run:
         info("[dry-run] Nothing copied.")
         return True
-    vdir = os.path.join(mount, "_verify"); os.makedirs(vdir, exist_ok=True)
-    shipped_log = os.path.join(vdir, SHIP_LOG_NAME)   # this machine's own log
+    if todo:
+        try:
+            free = shutil.disk_usage(mount).free
+        except OSError:
+            free = None
+        if free is not None and free - total < _archive_free_margin():
+            warn(f"The archive has {human_size(free)} free; sending {human_size(total)} would "
+                 f"leave less than {human_size(_archive_free_margin())}. Nothing shipped: free "
+                 f"up space on the archive first.")
+            emit("ship", reachable=True, shipped=0, problems=0, full=True)
+            return False
+    shipped_log = ship_log_path(mount)
     _confine(shipped_log, "the ship log")
-    shipped, problems, frames = 0, [], []
+    os.makedirs(os.path.dirname(shipped_log), exist_ok=True)
+    ship_id = uuid.uuid4().hex[:12]
+    shipped, problems, frames, held_back = 0, [], [], 0
     stamp = now_stamp()
     real_mount = _prefix(os.path.realpath(mount))
     for n, i in enumerate(todo, 1):
+        if lock is not None and lock.lost:
+            warn("The archive ship lock was taken over; stopping this run. What shipped is "
+                 "recorded; the rest waits for next time.")
+            break
         e, rel = i["entry"], i["rel"].replace("\\", "/")
         dst = os.path.join(mount, rel)
         if ".." in rel.split("/") or os.path.isabs(rel) \
@@ -3947,50 +4666,42 @@ def _run_ship(state, dry_run=False, mount=None, checksum=True):
             # a folder name must never walk a copy out of the archive (V3)
             problems.append((rel, "path leaves the archive folder; not shipped"))
             continue
-        _confine(dst, "the ship")        # its folder, .partial and .BAD sit beside it
+        _confine(dst, "the ship")
+        loc = rel.replace("/", "\\")
         try:
             os.makedirs(os.path.dirname(dst), exist_ok=True)
-            if os.path.isfile(dst):
-                if os.path.getsize(dst) == e.get("size"):
-                    h = sha256_of(dst) if checksum else None
-                    if h is None or e.get("sha256") in (None, h):
-                        sha = h or e.get("sha256")
-                        status = "already there"
-                    else:
-                        problems.append((rel, "exists on the archive with different content; left untouched")); continue
-                else:
-                    problems.append((rel, "exists on the archive with a different size; left untouched")); continue
+            status, sha, problem = _ship_one(i["src"], dst, loc, e.get("sha256"), e.get("size"),
+                                             rows, shipped_log, ship_id, stamp, checksum)
+            if status == "waiting":
+                held_back += 1
+            elif status == "problem":
+                problems.append((rel, problem))
             else:
-                sha, _sz = copy_file_verified(i["src"], dst, checksum=checksum,
-                                              partial_suffix=f".{MACHINE_LABEL.lower()}.partial")
-                if checksum and e.get("sha256") and sha != e["sha256"]:
-                    os.replace(dst, dst + ".BAD")
-                    problems.append((rel, "read-back hash differs from the ledger; renamed .BAD")); continue
-                status = "shipped"
-            loc = rel.replace("/", "\\")
-            # the log row FIRST: a frame stamped as shipped but never logged
-            # would never be swept, so never verified (1.5.0 review W6)
-            with open(shipped_log, "a", encoding="utf-8") as f:
-                f.write(json.dumps({"sha256": sha, "size": e.get("size"), "relpath": loc,
-                                    "shippedAt": stamp, "machine": MACHINE_LABEL}) + "\n")
-            e["archiveLocation"] = loc; e["archiveShippedAt"] = stamp
-            if e.get("sha256") is None and sha:
-                e["sha256"] = sha
-            state._dirty = True
-            frames.append({"sha256": sha, "size": e.get("size"), "filename": e["filename"],
-                           "location": loc, "status": status})
-            shipped += 1
+                if i["kind"] == "cal":
+                    copy = e.setdefault("archive", {}).setdefault(i["link"], {})
+                    copy["location"] = loc
+                    copy["shippedAt"] = stamp
+                else:
+                    e["archiveLocation"] = loc; e["archiveShippedAt"] = stamp
+                    if e.get("sha256") is None and sha:
+                        e["sha256"] = sha
+                state._dirty = True
+                frames.append({"sha256": sha, "size": e.get("size"), "filename": e["filename"],
+                               "location": loc, "status": status})
+                shipped += 1
         except OSError as ex:
             problems.append((rel, str(ex)))
-            if not archive_reachable(mount):
-                warn("Archive stopped responding; stopping this ship run. What shipped is recorded; the rest waits for next time.")
+            ok, why = archive_check(mount)
+            if not ok:
+                warn(f"Archive stopped responding ({why}); stopping this ship run. What shipped "
+                     f"is recorded; the rest waits for next time.")
                 break
         except Exception as ex:
             problems.append((rel, str(ex)))
         if n % 50 == 0 or n == len(todo):
             show_progress(n, len(todo))
             state.save_ledger()
-    state.history_event("ship", shipped=shipped, problems=len(problems))
+    state.history_event("ship", shipped=shipped, problems=len(problems), waiting=held_back)
     state.save_ledger()
     if frames:
         rdir = os.path.join(RECEIPT_BASE, "_ship"); os.makedirs(rdir, exist_ok=True)
@@ -4002,11 +4713,1314 @@ def _run_ship(state, dry_run=False, mount=None, checksum=True):
     only_mac = only_on_this_machine(state)
     success(f"Shipped {shipped} file(s). Problems: {len(problems)}. "
             f"Frames cleared from a camera and not yet PC-verified: {only_mac}.")
+    if held_back:
+        info(f"{held_back} file(s) wait for the PC to set aside an unfinished copy; "
+             f"they go again after that.")
+    unfinished = held_back + sum(1 for r in own_ship_rows(mount).values()
+                                 if r.get("shipId") == ship_id
+                                 and r.get("state") in ("started", "failed"))
+    if unfinished and SHIP_FOLDER != "pc":
+        # an awake PC then sets them aside within minutes, not at its next
+        # nightly sweep (the PC's own unfinished copies wait for that)
+        rid = file_request("sweep", mount=mount, quiet=True)
+        if rid:
+            info(f"Asked the PC to set the unfinished copies aside ({rid}).")
     for rel, why in problems[:20]:
         warn(f"  {rel}: {why}")
-    emit("ship", reachable=True, shipped=shipped, problems=len(problems), onlyMac=only_mac)
+    emit("ship", reachable=True, shipped=shipped, problems=len(problems), onlyMac=only_mac,
+         waiting=held_back)
     state.publish_mirror()
     return True
+
+
+# ═══════════════════════════════════════════════════════════════════════════
+# THE ARCHIVE PC (1.7.0): sweep, inventory, hash cache, heartbeat, requests
+# ═══════════════════════════════════════════════════════════════════════════
+# The PC runs this same engine (Sync View spec, section 2): its scheduled
+# tasks only start Python. Everything it writes on the archive goes into
+# _verify\pc\, where the share user may only read (P6). The Mac asks for work
+# by dropping a request in _verify\mac\requests\ and never moves anything on
+# the archive; the PC never deletes a request.
+
+PC_SWEEP_WAIT_S = SHIP_LOCK_BREAK_S # an unfinished copy is set aside only this long after its ship
+PC_CREATED_SLACK_S = 10 * 60        # ...and only if it was made by that ship (clocks drift)
+PC_HEARTBEAT_EVERY_S = 60           # while a job runs (spec 10.1); the 5-minute task when idle
+PC_KEEP_GENERATION_S = 24 * 3600    # the previous inventory stays readable this long
+PC_REQUEST_EXPIRE_S = 24 * 3600
+PC_JOB_STALE_S = 24 * 3600          # a job lock older than this is a leftover
+PC_HASH_MINUTES = 360               # the nightly hash stops at a file after this long
+PC_ROLLING_SHARE = 30               # P7: a 1/30th of the cached files is re-read each night
+REQUEST_KINDS = ("sweep", "inventory", "hash", "preclear")
+REQUEST_KINDS_HANDLED = ("sweep", "inventory")      # hash and preclear come in phase 2
+REQUEST_MAX_BYTES = {"sweep": 4096, "inventory": 4096, "hash": 2 << 20, "preclear": 2 << 20}
+REQUEST_RE = re.compile(r"^(sweep|inventory|hash|preclear)-(\d{8}T\d{6}Z)-([a-z0-9-]{1,32})"
+                        r"-([0-9a-f]{8})\.json$")
+RESPONSE_FINAL = ("done", "failed", "expired", "rejected")
+INVENTORY_SKIP = ("_verify", "_index", "_quarantine", "_rights-check")   # top level (7.1, decision 17)
+# what a failed check of a shipped frame writes; such a path isn't checked again by itself
+_VERIFY_PROBLEMS = ("missing", "hash", "outside archive")
+INVENTORY_NOISE = ("thumbs.db", "desktop.ini")     # and every hidden dot-file
+_FIT_EXTS = (".fit", ".fits", ".fts")
+_RESERVED_NAMES = ({"con", "prn", "aux", "nul", "conin$", "conout$"}
+                   | {f"{d}{n}" for d in ("com", "lpt") for n in "123456789¹²³"})
+
+def safe_relpath(rel, root=None):
+    """A path read from a file, as section 12 of the spec wants it before it is
+    ever opened: '/'-separated and NFC, or None when it is absolute, has a
+    drive letter or is UNC, has '..', a control character or ':', a part
+    ending in a dot or a space, is over 260 characters, uses a Windows
+    reserved name (NUL.txt, COM1, CONIN$, LPT¹ ...), or leaves `root`."""
+    if not isinstance(rel, str):
+        return None
+    rel = unicodedata.normalize("NFC", rel.replace("\\", "/"))
+    if not rel or len(rel) > 260 or rel.startswith("/") or ":" in rel:
+        return None
+    if any(ord(c) < 32 or ord(c) == 127 for c in rel):
+        return None
+    for part in rel.split("/"):
+        if part in ("", ".", "..") or part[-1] in ". ":
+            return None
+        if part.split(".", 1)[0].lower() in _RESERVED_NAMES:
+            return None
+    if root is not None and not _within(os.path.join(root, *rel.split("/")), root):
+        return None
+    return rel
+
+def _is_reparse(st):
+    return stat.S_ISLNK(st.st_mode) or bool(getattr(st, "st_file_attributes", 0) & 0x400)
+
+def _has_reparse(root, rel):
+    """Is any folder or file on the way to rel a link or a junction?"""
+    p = root
+    for part in rel.split("/"):
+        p = os.path.join(p, part)
+        try:
+            if _is_reparse(os.lstat(p)):
+                return True
+        except OSError:
+            return False
+    return False
+
+def _pc_path(mount, *parts):
+    return _verify_path(mount, "pc", *parts)
+
+def _read_json_file(path):
+    try:
+        with open(path, encoding="utf-8") as f:
+            d = json.load(f)
+        return d if isinstance(d, dict) else {}
+    except (OSError, ValueError):
+        return {}
+
+def _append_rows(path, rows):
+    """Append rows to a .jsonl the PC owns, flushed to the disk."""
+    if not rows:
+        return
+    _confine(path, "a PC log")
+    os.makedirs(os.path.dirname(path), exist_ok=True)
+    with open(path, "a", encoding="utf-8") as f:
+        for r in rows:
+            f.write(json.dumps(r, ensure_ascii=False) + "\n")
+        f.flush()
+        os.fsync(f.fileno())
+
+def _write_json_file(path, data):
+    _confine(path, "a status file")
+    os.makedirs(os.path.dirname(path), exist_ok=True)
+    _atomic_write_json(path, data)
+
+def _pc_role(what):
+    """The PC's jobs read the archive from its own disk: Windows only (and test
+    mode, which simulates it). The machine's short name must be valid too."""
+    if not (IS_WINDOWS or TEST_ROOT):
+        error(f"{what} runs on the archive PC (Windows), where the archive is its own disk. "
+              f"On this computer, --request asks the PC for it.")
+        sys.exit(2)
+    bad = slug_problem()
+    if bad:
+        error(f"Nothing done: {bad}.")
+        sys.exit(2)
+
+def _pc_trusts(path):
+    """A file in _verify\\pc counts only when this account owns it (P6). None
+    or a missing file: trusted (Windows can't say, or there's nothing yet)."""
+    if not os.path.exists(path):
+        return True
+    ok = owner_trusted(path)
+    if ok is False:
+        warn(f"Not trusted (its owner isn't this account, Administrators or SYSTEM): {path}")
+        return False
+    return True
+
+class _JobLock:
+    """One sweep, one inventory and one hash at a time on this computer: a
+    lock file in the state folder naming the process. One left behind by a
+    process that has gone (or older than a day) is taken over."""
+
+    def __init__(self, name):
+        self.name, self.path, self.held = name, os.path.join(STATE_DIR, f"{name}.lock"), False
+
+    def __enter__(self):
+        os.makedirs(STATE_DIR, exist_ok=True)
+        for _ in range(2):
+            try:
+                fd = os.open(self.path, os.O_CREAT | os.O_EXCL | os.O_WRONLY)
+            except FileExistsError:
+                if job_running(self.name):
+                    return self
+                try:
+                    os.remove(self.path)
+                except OSError:
+                    return self
+                continue
+            with os.fdopen(fd, "w", encoding="utf-8") as f:
+                json.dump({"pid": os.getpid(), "since": _utc_iso()}, f)
+            self.held = True
+            return self
+        return self
+
+    def __exit__(self, *exc):
+        if self.held:
+            try:
+                os.remove(self.path)
+            except OSError:
+                pass
+            self.held = False
+        return False
+
+def job_running(name):
+    """Is this computer's sweep / inventory / hash running right now?"""
+    path = os.path.join(STATE_DIR, f"{name}.lock")
+    held = _read_json_file(path)
+    if not held:
+        return os.path.exists(path) and time.time() - _mtime(path) < 60   # being written
+    since = _parse_utc(held.get("since"))
+    if since and (_utc_now() - since).total_seconds() > PC_JOB_STALE_S:
+        return False
+    return pid_alive(held.get("pid"))
+
+def _mtime(path):
+    try:
+        return os.path.getmtime(path)
+    except OSError:
+        return 0.0
+
+def _hash_progress_path():
+    return os.path.join(STATE_DIR, "hash-progress.json")
+
+def write_heartbeat(mount, job=None, progress=None):
+    """_verify\\pc\\pc-heartbeat.json (spec 10.1): what the PC is doing, so the
+    Mac can tell asleep from busy. Every minute while a job runs and every five
+    minutes when idle; a failed write never stops a job."""
+    ident = machine_identity()
+    hashing = job_running("hash")
+    rec = {"schema": "pc-heartbeat/1", "generatedAt": _utc_iso(),
+           "job": job or ("hash" if hashing else "idle"), "progress": progress,
+           "sweepRunning": job_running("sweep"), "inventoryRunning": job_running("inventory"),
+           "hashProgress": _read_json_file(_hash_progress_path()) if hashing else None,
+           "machineId": ident["slug"], "machineLabel": ident["label"], "version": VERSION}
+    try:
+        _write_json_file(_pc_path(mount, "pc-heartbeat.json"), rec)
+    except OSError:
+        pass
+    return rec
+
+class _Beat:
+    """A job's heartbeat: at most once a minute unless forced."""
+
+    def __init__(self, mount, job):
+        self.mount, self.job, self.last = mount, job, 0.0
+
+    def __call__(self, progress=None, force=False):
+        if force or time.monotonic() - self.last >= PC_HEARTBEAT_EVERY_S:
+            self.last = time.monotonic()
+            write_heartbeat(self.mount, self.job, progress)
+
+def ship_lock_live(mount):
+    """Is someone shipping into the archive right now (a lock renewed in the
+    last ten minutes, or a 1.6 lock under six hours old)?"""
+    held = _read_json_file(_verify_path(mount, "lock", "ship.lock"))
+    if held:
+        renewed = _parse_utc(held.get("renewedAt"))
+        if renewed and (_utc_now() - renewed).total_seconds() <= SHIP_LOCK_BREAK_S:
+            return True
+    elif os.path.exists(_verify_path(mount, "lock", "ship.lock")):
+        return True                                  # being written this instant
+    legacy = _verify_path(mount, "ship.lock")
+    return os.path.exists(legacy) and time.time() - _mtime(legacy) < LEGACY_SHIP_LOCK_STALE_S
+
+def _ship_log_files(mount):
+    """Every computer's ship log: the 1.6 ones in _verify\\ and, from 1.7.0,
+    each one in its computer's own folder (_verify\\mac\\, _verify\\pc\\)."""
+    v = _verify_path(mount)
+    out = []
+    try:
+        folders = [v] + sorted(os.path.join(v, n) for n in os.listdir(v)
+                               if n != "lock" and os.path.isdir(os.path.join(v, n)))
+    except OSError:
+        return out
+    for d in folders:
+        try:
+            names = sorted(os.listdir(d))
+        except OSError:
+            continue
+        out += [os.path.join(d, n) for n in names
+                if n.lower().startswith("shipped") and n.lower().endswith(".jsonl")
+                and os.path.isfile(os.path.join(d, n))]
+    return out
+
+def _verified_rows(mount):
+    rows = []
+    for p in (_pc_path(mount, "verified.jsonl"), _verify_path(mount, "verified.jsonl")):
+        if _pc_trusts(p):
+            rows += _read_jsonl_rows(p)
+    return rows
+
+def _problem_rows(mount):
+    rows = []
+    for p in (_pc_path(mount, "problems.jsonl"), _verify_path(mount, "problems.jsonl")):
+        if _pc_trusts(p):
+            rows += _read_jsonl_rows(p)
+    return rows
+
+def _int(v):
+    try:
+        return int(v)
+    except (TypeError, ValueError):
+        return None
+
+def _problem_row(relpath, problem, sha=None, size=None, **extra):
+    return {"schema": "problem-row/1", "relpath": relpath, "sha256": sha, "size": size,
+            "problem": problem, "at": now_stamp(), "atUtc": _utc_iso(),
+            "machineId": machine_identity()["slug"], **extra}
+
+def _quarantine_dest(root, rel, folder="ship-incomplete"):
+    """Where an unfinished copy goes, never over anything already set aside."""
+    base = os.path.join(root, "_Quarantine", folder, *rel.split("/"))
+    dest, n = base, 2
+    stem, ext = os.path.splitext(base)
+    while os.path.lexists(dest):
+        dest = f"{stem} ({n}){ext}"
+        n += 1
+    return dest
+
+def _old_partials(root):
+    """Files a 1.6 ship left behind: <name>.partial (also .mac.partial and
+    .pc.partial) and <name>.BAD. Listed by every sweep; moved only when Brett
+    says so (--move-old-partials)."""
+    out = []
+    for dp, dns, fns in os.walk(root):
+        if dp == root:
+            dns[:] = [d for d in dns if d.lower() not in INVENTORY_SKIP + ("_to_delete",)]
+        for fn in fns:
+            low = fn.lower()
+            if low.endswith(".partial") or low.endswith(".bad"):
+                p = os.path.join(dp, fn)
+                try:
+                    st = os.lstat(p)
+                except OSError:
+                    continue
+                if stat.S_ISREG(st.st_mode):
+                    out.append((os.path.relpath(p, root).replace(os.sep, "/"), st.st_size))
+    return sorted(out)
+
+def run_sweep(mount=None, move_old_partials=False, beat=None):
+    """The PC's check of what was shipped (spec P1, replacing sweep.ps1): every
+    frame a ship log calls shipped is re-read from the PC's own disk,
+    unbuffered, and a match is written to _verify\\pc\\verified.jsonl, which
+    the Mac reads to stamp archiveVerifiedAt. A mismatch or a missing file goes
+    to problems.jsonl and is never retried by itself. A copy a ship started
+    and never finished is set aside into _Quarantine\\ship-incomplete\\ (the
+    one thing the PC moves by itself, decision 18), so the Mac can send it
+    again to the same path. Nothing is deleted. Returns a summary dict."""
+    mount = mount or ARCHIVE_MOUNT
+    if not os.path.isdir(mount):
+        warn(f"The archive isn't there: {mount}. Nothing swept.")
+        return {"ok": False, "why": "archive missing"}
+    beat = beat or _Beat(mount, "sweep")
+    with _JobLock("sweep") as lock:
+        if not lock.held:
+            info("A sweep is already running on this computer; this one stops here.")
+            return {"ok": False, "why": "busy"}
+        beat(force=True)
+        return _sweep(mount, move_old_partials, beat)
+
+def _sweep(mount, move_old_partials, beat):
+    pc = _pc_path(mount)
+    os.makedirs(pc, exist_ok=True)
+    started_at = time.time()
+    stamp, ident = now_stamp(), machine_identity()
+    verified_rows, problem_rows = _verified_rows(mount), _problem_rows(mount)
+    done = {(_relkey(r.get("relpath", "")), r.get("sha256")) for r in verified_rows}
+    ever_verified = {_relkey(r.get("relpath", "")) for r in verified_rows}
+    bad = {_relkey(r.get("relpath", "")) for r in problem_rows
+           if str(r.get("problem")) in _VERIFY_PROBLEMS or str(r.get("problem")).startswith("size ")}
+    bad_kind = {(_relkey(r.get("relpath", "")), r.get("problem")) for r in problem_rows}
+    # every log's rows, folded per archive path
+    pending, seen, last = [], set(), {}
+    for logf in _ship_log_files(mount):
+        per_last, per_started = {}, {}
+        for r in _read_jsonl_rows(logf):
+            rel = r.get("relpath")
+            if not isinstance(rel, str) or not rel:
+                continue
+            state_ = r.get("state", "shipped")             # 1.6 rows: always shipped
+            k = _relkey(rel)
+            if state_ == "shipped":
+                pair = (k, r.get("sha256"))
+                if _int(r.get("size")) is not None and pair not in done and k not in bad \
+                        and pair not in seen:
+                    seen.add(pair)
+                    pending.append(r)
+            if state_ in ("started", "shipped", "failed", "not-created"):
+                per_last[k] = r
+                if state_ == "started":
+                    per_started[k] = r
+        for k, r in per_last.items():
+            last.setdefault(k, []).append((r, per_started.get(k)))
+    lines = [f"sweep {stamp}  root={mount}  pending={len(pending)}  machine={ident['slug']}"]
+    new_verified, new_problems, quarantined, waiting, soon = [], [], [], [], 0
+    unreadable = []
+    ok_n = fail_n = missing_n = 0
+    read_kinds = set()
+    info(f"Sweep: {len(pending)} shipped file(s) to check on {ARCHIVE_LABEL}")
+    for n, r in enumerate(pending, 1):
+        beat(progress=f"{n}/{len(pending)}")
+        rel_raw, want_sha, want_size = r["relpath"], r.get("sha256"), _int(r.get("size"))
+        rel = safe_relpath(rel_raw, mount)
+        if rel is None:
+            fail_n += 1
+            new_problems.append(_problem_row(rel_raw, "outside archive", want_sha, want_size))
+            lines.append(f"OUTSIDE  {rel_raw}")
+            continue
+        p = os.path.join(mount, *rel.split("/"))
+        try:
+            st = os.stat(p)
+        except OSError:
+            missing_n += 1
+            new_problems.append(_problem_row(rel_raw, "missing", want_sha, want_size))
+            lines.append(f"MISSING  {rel_raw}")
+            continue
+        if st.st_size != want_size:
+            fail_n += 1
+            new_problems.append(_problem_row(rel_raw, f"size {st.st_size}", want_sha, want_size))
+            lines.append(f"BADSIZE  {rel_raw}")
+            continue
+        try:
+            got, _size, read = hash_file_unbuffered(p)
+        except OSError as e:
+            # in use, or a read error: not a verdict on the frame, so no
+            # problem row; the next sweep reads it again
+            unreadable.append(rel_raw)
+            lines.append(f"UNREADABLE  {rel_raw}  ({e.strerror or e}; tried again next time)")
+            continue
+        read_kinds.add(read)
+        if want_sha and got != want_sha:
+            fail_n += 1
+            new_problems.append(_problem_row(rel_raw, "hash", want_sha, want_size, found=got))
+            lines.append(f"BADHASH  {rel_raw}")
+            continue
+        ok_n += 1
+        new_verified.append({"schema": "verified-row/1", "relpath": rel_raw, "sha256": got,
+                             "size": want_size, "verifiedAt": now_stamp(), "read": read,
+                             "hashedBy": ident["slug"]})
+        if len(new_verified) >= 200:             # a long sweep keeps what it proved
+            _append_rows(_pc_path(mount, "verified.jsonl"), new_verified)
+            new_verified = []
+        if n % 200 == 0:
+            print(f"  {n} / {len(pending)}")
+    _append_rows(_pc_path(mount, "verified.jsonl"), new_verified)
+    # copies a ship started and never finished (decision 1: only these)
+    shipping = ship_lock_live(mount)
+    now = _utc_now()
+    for k, entries in sorted(last.items()):
+        if any(r.get("state") in ("shipped", "not-created") for r, _s in entries):
+            continue
+        rows_ = [r for r, _s in entries]
+        starts = [s for _r, s in entries if s] or rows_
+        lastrow = max(rows_, key=lambda x: _parse_utc(x.get("at")) or now)
+        rel_raw = lastrow["relpath"]
+        rel = safe_relpath(rel_raw, mount)
+        if rel is None:
+            continue
+        p = os.path.join(mount, *rel.split("/"))
+        try:
+            st = os.lstat(p)
+        except OSError:
+            continue                              # set aside already, or never created
+        if not stat.S_ISREG(st.st_mode):
+            continue
+        began = max((_parse_utc(s.get("at")) for s in starts if _parse_utc(s.get("at"))),
+                    default=None)
+        latest = max((_parse_utc(r.get("at")) for r in rows_ if _parse_utc(r.get("at"))),
+                     default=None)
+        if began is None or latest is None:
+            continue
+        why_not = None
+        if shipping:
+            why_not = "a ship is running"
+        elif (now - latest).total_seconds() < PC_SWEEP_WAIT_S:
+            why_not = "its ship ended less than ten minutes ago"
+        elif k in ever_verified:
+            why_not = "the PC verified this path once"
+        elif file_created_at(st) < began.timestamp() - PC_CREATED_SLACK_S:
+            why_not = "the file is older than the ship that started it"
+        elif _int(lastrow.get("size")) is not None and st.st_size > _int(lastrow.get("size")):
+            why_not = "the file is bigger than the frame that was being sent"
+        if why_not:
+            waiting.append((rel_raw, why_not))
+            soon += why_not in ("a ship is running", "its ship ended less than ten minutes ago")
+            lines.append(f"LEFT  {rel_raw}  ({why_not})")
+            if why_not.startswith("the file is") or why_not.startswith("the PC verified"):
+                problem = f"unfinished copy left where it is: {why_not}"
+                if (k, problem) not in bad_kind:
+                    bad_kind.add((k, problem))
+                    new_problems.append(_problem_row(rel_raw, problem, lastrow.get("sha256"),
+                                                     _int(lastrow.get("size"))))
+            continue
+        want_sha, want_size = lastrow.get("sha256"), _int(lastrow.get("size"))
+        if want_sha and want_size == st.st_size:
+            # every byte may be there after all (only the row, or the
+            # read-back, failed): a whole, correct copy stays, and the next
+            # ship of the computer that started it records it
+            try:
+                whole = hash_file_unbuffered(p)[0] == want_sha
+            except OSError:
+                waiting.append((rel_raw, "couldn't be read just now"))
+                lines.append(f"LEFT  {rel_raw}  (couldn't be read just now)")
+                continue
+            if whole:
+                waiting.append((rel_raw, "whole and correct: its computer's next ship records it"))
+                lines.append(f"LEFT  {rel_raw}  (whole and correct; the next ship records it)")
+                continue
+        dest = _quarantine_dest(mount, rel)
+        _confine(dest, "the sweep")
+        try:
+            os.makedirs(os.path.dirname(dest), exist_ok=True)
+            os.rename(p, dest)
+        except OSError as e:
+            waiting.append((rel_raw, f"couldn't move it: {e.strerror or e}"))
+            lines.append(f"STUCK  {rel_raw}  ({e})")
+            continue
+        q = {"schema": "quarantine-row/1", "relpath": rel_raw,
+             "movedTo": os.path.relpath(dest, mount).replace(os.sep, "/"), "size": st.st_size,
+             "expectedSize": _int(lastrow.get("size")), "sha256": lastrow.get("sha256"),
+             "state": lastrow.get("state"), "why": lastrow.get("why"),
+             "startedAt": _utc_iso(began), "shipId": lastrow.get("shipId"),
+             "shippedBy": lastrow.get("machineId"), "movedAt": now_stamp(),
+             "movedAtUtc": _utc_iso(), "machineId": ident["slug"]}
+        _append_rows(_pc_path(mount, "quarantine.jsonl"), [q])
+        quarantined.append(rel_raw)
+        lines.append(f"SETASIDE  {rel_raw}  -> {q['movedTo']}")
+    _append_rows(_pc_path(mount, "problems.jsonl"), new_problems)
+    # what a 1.6 ship left behind: listed, moved only on Brett's word
+    partials = _old_partials(mount)
+    moved_partials = 0
+    if partials and move_old_partials:
+        if shipping:
+            warn("A ship is running, so the old partial copies stay where they are this time.")
+        else:
+            for rel, size in partials:
+                p = os.path.join(mount, *rel.split("/"))
+                dest = _quarantine_dest(mount, rel, "old-partials")
+                _confine(dest, "the sweep")
+                try:
+                    os.makedirs(os.path.dirname(dest), exist_ok=True)
+                    os.rename(p, dest)
+                except OSError as e:
+                    lines.append(f"STUCK  {rel}  ({e})")
+                    continue
+                moved_partials += 1
+                _append_rows(_pc_path(mount, "quarantine.jsonl"), [{
+                    "schema": "quarantine-row/1", "relpath": rel, "size": size,
+                    "movedTo": os.path.relpath(dest, mount).replace(os.sep, "/"),
+                    "why": "a partial copy a 1.6 ship left behind", "movedAt": now_stamp(),
+                    "movedAtUtc": _utc_iso(), "machineId": ident["slug"]}])
+                lines.append(f"OLDPARTIAL moved  {rel}")
+    for rel, size in partials[:200]:
+        if not move_old_partials:
+            lines.append(f"OLDPARTIAL  {rel}  ({human_size(size)})")
+    left_partials = partials if not move_old_partials or shipping else \
+        _old_partials(mount)
+    total_verified = len(_verified_rows(mount))
+    total_problems = len(_problem_rows(mount))
+    status = {"schema": "sweep-status/1", "sweptAt": stamp, "sweptAtUtc": _utc_iso(),
+              "verifiedThisRun": ok_n, "failedThisRun": fail_n, "missingThisRun": missing_n,
+              "quarantinedThisRun": len(quarantined), "waitingThisRun": len(waiting),
+              "unreadableThisRun": len(unreadable),
+              "pendingBefore": len(pending), "totalVerified": total_verified,
+              "totalProblems": total_problems,
+              "oldPartials": {"count": len(left_partials),
+                              "bytes": sum(s for _r, s in left_partials),
+                              "movedThisRun": moved_partials},
+              "read": "unbuffered" if read_kinds == {"unbuffered"} else
+                      ("buffered" if read_kinds else None),
+              "durationS": round(time.time() - started_at, 1),
+              "machineId": ident["slug"], "machineLabel": ident["label"], "version": VERSION}
+    _write_json_file(_pc_path(mount, "status.json"), status)
+    summary = (f"verified {ok_n}   failed {fail_n}   missing {missing_n}   set aside "
+               f"{len(quarantined)}   total verified {total_verified}   total problems "
+               f"{total_problems}")
+    lines.append(summary)
+    logp = _pc_path(mount, f"sweep_{datetime.now().strftime('%Y%m%d_%H%M%S')}.log")
+    try:
+        _confine(logp, "the sweep log")
+        with open(logp, "a", encoding="utf-8") as f:
+            f.write("\n".join(lines) + "\n")
+    except OSError:
+        pass
+    success(f"Sweep: {summary}")
+    if quarantined:
+        info(f"{len(quarantined)} unfinished copy(ies) set aside into _Quarantine\\ship-incomplete; "
+             f"the computer that started them sends them again on its next ship.")
+    for rel, why in waiting[:10]:
+        log(f"left in place: {rel} ({why})")
+    if left_partials:
+        info(f"{len(left_partials)} old partial copy(ies) from before 1.7.0 "
+             f"({human_size(sum(s for _r, s in left_partials))}) are listed in {logp}. "
+             f"To move them into _Quarantine\\old-partials: --sweep --move-old-partials")
+    if unreadable:
+        warn(f"{len(unreadable)} shipped frame(s) couldn't be read just now (in use, or a read "
+             f"error); the next sweep reads them again. They are listed in {logp}.")
+    if fail_n or missing_n:
+        warn(f"ATTENTION: see {_pc_path(mount, 'problems.jsonl')}")
+    beat(force=True)
+    return {"ok": True, "verified": ok_n, "failed": fail_n, "missing": missing_n,
+            "setAside": len(quarantined), "waiting": len(waiting), "waitingSoon": soon,
+            "unreadable": len(unreadable),
+            "oldPartials": len(left_partials), "problems": total_problems}
+
+# ── Inventory (spec 7.1) ─────────────────────────────────────────────────────
+
+def _walk_files(root, archive):
+    """(relpath, stat, path) for every file under root: the relpath
+    '/'-separated and NFC, the path as it is on the disk (a name stored
+    decomposed is opened as stored, never by its NFC spelling). Skips
+    _verify, _Index, _Quarantine and _rights-check at the top of the archive,
+    links and junctions, and hidden bookkeeping (Finder's .DS_Store, the
+    importer's .imported_files, Explorer's Thumbs.db). Unsafe names come back
+    with stat None."""
+    out = []
+    stack = [root]
+    while stack:
+        d = stack.pop()
+        try:
+            with os.scandir(d) as it:
+                entries = list(it)
+        except OSError:
+            continue
+        for e in entries:
+            try:
+                st = e.stat(follow_symlinks=False)
+            except OSError:
+                continue
+            if _is_reparse(st):
+                continue
+            rel = os.path.relpath(e.path, root).replace(os.sep, "/")
+            if e.is_dir(follow_symlinks=False):
+                if archive and d == root and e.name.lower() in INVENTORY_SKIP:
+                    continue
+                stack.append(e.path)
+                continue
+            if not stat.S_ISREG(st.st_mode):
+                continue
+            low = e.name.lower()
+            if low in INVENTORY_NOISE or low.startswith("."):
+                continue
+            safe = safe_relpath(rel)
+            out.append((safe or rel, st if safe else None, e.path))
+    out.sort(key=lambda x: x[0])
+    return out
+
+_DAY_RE = re.compile(r"\bDay (\d+)$")
+_KIND_FOLDERS = {"biases": "bias", "bias": "bias", "darks": "dark", "dark": "dark",
+                 "flats": "flat", "flat": "flat", "darkflats": "darkflat", "dark flats": "darkflat"}
+
+def _inventory_row(rel, st, cached):
+    parts = rel.split("/")
+    name = parts[-1]
+    low = name.lower()
+    retired = parts[0].lower() == "_to_delete"
+    where = parts[1:] if retired else parts
+    kind = next((_KIND_FOLDERS[p.lower()] for p in reversed(parts[:-1])
+                 if p.lower() in _KIND_FOLDERS), None)
+    if kind is None:
+        prefix = low.split("_", 1)[0]
+        if prefix in ("light", "bias", "dark", "flat"):
+            kind = prefix
+        elif low.startswith("stacked_"):
+            kind = "stack"
+        elif low.endswith(_FIT_EXTS):
+            kind = "light"
+        else:
+            kind = "other"
+    day = None
+    for p in reversed(parts[:-1]):
+        m = _DAY_RE.search(p)
+        if m:
+            day = int(m.group(1))
+            break
+    night = _seestar_file_night(name)
+    hit = cached if cached and cached.get("size") == st.st_size \
+        and cached.get("mtimeNs") == st.st_mtime_ns else None
+    return {"schema": "inventory-row/1", "relpath": rel, "size": st.st_size,
+            "mtimeNs": st.st_mtime_ns,
+            "camera": where[0] if len(where) > 1 else None, "rig": None,
+            "target": where[1] if len(where) > 2 else None,
+            "night": night, "nightSource": "filename" if night else None, "day": day,
+            "kind": kind, "retired": retired,
+            "sha256": hit.get("sha256") if hit else None,
+            "hashedBy": hit.get("hashedBy") if hit else None,
+            "read": hit.get("read") if hit else None,
+            "hashedAt": hit.get("hashedAt") if hit else None}
+
+def workbench_root():
+    """This computer's frame folders' common parent (the Mac's workbench)."""
+    try:
+        return os.path.commonpath([DEST_DIR, SEESTAR_DEST_S30, SEESTAR_DEST_S50,
+                                   SEESTAR_DEST_S30_ORIG, SEESTAR_DEST_S50PRO])
+    except ValueError:
+        return os.path.dirname(SEESTAR_DEST_S50PRO)
+
+def _is_archive_root(root):
+    try:
+        return os.path.normcase(os.path.realpath(root)) == \
+            os.path.normcase(os.path.realpath(ARCHIVE_MOUNT))
+    except OSError:
+        return False
+
+def run_inventory(root=None, beat=None):
+    """List every file under root with its size, time and what the path says
+    about it (spec 7.1). On the PC, for the archive: a new generation file in
+    _verify\\pc\\ each run, then inventory-E.status.json naming it, written
+    last; the previous generation stays for a day. Elsewhere (the Mac's
+    workbench): inventory-<short name>.jsonl in the state folder. Hashes come
+    from this computer's hash cache, never from reading here."""
+    archive = root is None and IS_WINDOWS or (root is not None and _is_archive_root(root))
+    root = root or (ARCHIVE_MOUNT if archive else workbench_root())
+    if archive:
+        _pc_role("--inventory of the archive")
+    elif slug_problem():
+        error(f"Nothing done: {slug_problem()}.")
+        sys.exit(2)
+    if not os.path.isdir(root):
+        warn(f"Nothing to list: {root} isn't there.")
+        return {"ok": False, "why": "root missing"}
+    beat = beat or (_Beat(root, "inventory") if archive else (lambda *a, **k: None))
+    with _JobLock("inventory") as lock:
+        if not lock.held:
+            info("An inventory is already running on this computer; this one stops here.")
+            return {"ok": False, "why": "busy"}
+        beat(force=True)
+        return _inventory(root, archive, beat)
+
+def _inventory(root, archive, beat):
+    t0 = time.time()
+    ident = machine_identity()
+    shipping = archive and ship_lock_live(root)
+    generated = _utc_now()
+    cache = load_hash_cache("E" if archive else "workbench")
+    files = _walk_files(root, archive)
+    beat(progress=f"listed {len(files)}")
+    skipped = [rel for rel, st, _p in files if st is None]
+    rows = [_inventory_row(rel, st, cache.get(_relkey(rel))) for rel, st, _p in files
+            if st is not None]
+    shipping = shipping or (archive and ship_lock_live(root))
+    gen = generated.strftime("%Y%m%dT%H%M%SZ")
+    if archive:
+        folder = _pc_path(root)
+        out = os.path.join(folder, f"inventory-E-{gen}.jsonl")
+        while os.path.exists(out):                        # twice in one second
+            time.sleep(1.0)
+            generated = _utc_now()
+            gen = generated.strftime("%Y%m%dT%H%M%SZ")
+            out = os.path.join(folder, f"inventory-E-{gen}.jsonl")
+        status_path = os.path.join(folder, "inventory-E.status.json")
+    else:
+        folder = STATE_DIR
+        out = os.path.join(folder, f"inventory-{ident['slug']}.jsonl.tmp{os.getpid()}")
+        status_path = os.path.join(folder, f"inventory-{ident['slug']}.status.json")
+    _confine(out, "the inventory")
+    os.makedirs(folder, exist_ok=True)
+    h = hashlib.sha256()
+    with open(out, "wb") as f:
+        for r in rows:
+            line = (json.dumps(r, ensure_ascii=False) + "\n").encode("utf-8")
+            h.update(line)
+            f.write(line)
+        f.flush()
+        os.fsync(f.fileno())
+    if not archive:
+        final = os.path.join(folder, f"inventory-{ident['slug']}.jsonl")
+        os.replace(out, final)
+        out = final
+    previous = _read_json_file(status_path)
+    status = {"schema": "inventory-status/1", "generation": gen,
+              "generatedAt": _utc_iso(generated), "rows": len(rows),
+              "sha256OfJsonl": h.hexdigest(), "shipInProgress": bool(shipping),
+              "durationS": round(time.time() - t0, 1), "skippedRows": len(skipped),
+              "root": "E" if archive else "workbench", "file": os.path.basename(out),
+              "machineId": ident["slug"], "version": VERSION}
+    _write_json_file(status_path, status)
+    if archive:
+        if skipped:
+            known = {(_relkey(r.get("relpath", "")), r.get("problem")) for r in _problem_rows(root)}
+            _append_rows(_pc_path(root, "problems.jsonl"),
+                         [_problem_row(rel, "unsafe name: not listed, never opened")
+                          for rel in skipped
+                          if (_relkey(rel), "unsafe name: not listed, never opened") not in known])
+        _prune_generations(folder, gen, previous.get("generation"))
+    success(f"Inventory: {len(rows)} file(s) under {root}"
+            + (f"; {len(skipped)} with a name that can't be used were left out" if skipped else "")
+            + (" (a ship was running: files newer than this list may be missing from it)"
+               if shipping else ""))
+    beat(force=True)
+    return {"ok": True, "rows": len(rows), "generation": gen, "skipped": len(skipped),
+            "shipInProgress": bool(shipping)}
+
+def _prune_generations(folder, current, previous):
+    """Keep this generation and, for a day, the one before it; older
+    generation files are this program's own and are removed."""
+    for fn in os.listdir(folder):
+        m = re.match(r"^inventory-E-(\d{8}T\d{6}Z)\.jsonl$", fn)
+        if not m or m.group(1) == current:
+            continue
+        if m.group(1) == previous:
+            try:
+                born = datetime.strptime(previous, "%Y%m%dT%H%M%SZ").replace(tzinfo=timezone.utc)
+            except ValueError:
+                born = None
+            if born and (_utc_now() - born).total_seconds() < PC_KEEP_GENERATION_S:
+                continue
+        try:
+            os.remove(os.path.join(folder, fn))
+        except OSError:
+            pass
+
+# ── Hash cache (spec 7.1, P7) ────────────────────────────────────────────────
+
+def _hash_cache_path():
+    return os.path.join(STATE_DIR, "hash-cache.jsonl")
+
+def load_hash_cache(label):
+    """This computer's hash cache for one root ("E" or "workbench"): the last
+    row per path wins."""
+    out = {}
+    for r in _read_jsonl_rows(_hash_cache_path()):
+        if r.get("root") == label and isinstance(r.get("relpath"), str) and r.get("sha256"):
+            out[_relkey(r["relpath"])] = r
+    return out
+
+def _local_stamp_utc(text):
+    """A now_stamp() time ("2026-09-26T120000", this computer's clock) as UTC
+    ISO 8601, or None."""
+    try:
+        return _utc_iso(datetime.strptime(str(text), "%Y-%m-%dT%H%M%S").astimezone(timezone.utc))
+    except ValueError:
+        return None
+
+def _seed_hash_cache(root, cache):
+    """The PC's cache starts from verified.jsonl where the file's size still
+    matches, taking its current time (7.1). Those were read buffered by the
+    old sweep (decision 9): the first full hash reads them again. A verified
+    frame whose size has changed since is a problem (P7). Returns (rows,
+    problems)."""
+    rows, problems = [], []
+    for r in _verified_rows(root):
+        rel = safe_relpath(r.get("relpath"), root)
+        if not rel or _relkey(rel) in cache or not r.get("sha256"):
+            continue
+        try:
+            st = os.stat(os.path.join(root, *rel.split("/")))
+        except OSError:
+            continue
+        if st.st_size != _int(r.get("size")):
+            problems.append(_problem_row(r.get("relpath"), "changed since it was verified",
+                                         r.get("sha256"), _int(r.get("size")),
+                                         found={"size": st.st_size}))
+            continue
+        row = {"schema": "hash-row/1", "root": "E", "relpath": rel, "size": st.st_size,
+               "mtimeNs": st.st_mtime_ns, "sha256": r["sha256"],
+               "hashedBy": r.get("hashedBy") or "pc-sweep", "read": r.get("read") or "buffered",
+               "hashedAt": _local_stamp_utc(r.get("verifiedAt")), "checkedAt": _utc_iso(),
+               "source": "verified.jsonl"}
+        cache[_relkey(rel)] = row
+        rows.append(row)
+    return rows, problems
+
+def run_hash(root=None, max_minutes=None, rolling=False, beat=None):
+    """Hash what isn't in this computer's hash cache yet, newest first (spec
+    7.3). On the PC, for the archive: read unbuffered at low disk priority,
+    pausing at a file while a sweep runs; a hashed file whose size or time
+    has changed is a problem (P7), and `rolling` re-reads the 1/30th checked
+    longest ago. Stops at a file after max_minutes; the next run carries on."""
+    archive = root is None and IS_WINDOWS or (root is not None and _is_archive_root(root))
+    root = root or (ARCHIVE_MOUNT if archive else workbench_root())
+    if archive:
+        _pc_role("--hash of the archive")
+    elif slug_problem():
+        error(f"Nothing done: {slug_problem()}.")
+        sys.exit(2)
+    if not os.path.isdir(root):
+        warn(f"Nothing to hash: {root} isn't there.")
+        return {"ok": False, "why": "root missing"}
+    beat = beat or (_Beat(root, "hash") if archive else (lambda *a, **k: None))
+    with _JobLock("hash") as lock:
+        if not lock.held:
+            info("Hashing is already running on this computer; this one stops here.")
+            return {"ok": False, "why": "busy"}
+        try:
+            return _hash_run(root, archive, max_minutes, rolling, beat)
+        finally:
+            try:
+                os.remove(_hash_progress_path())
+            except OSError:
+                pass
+
+def _hash_run(root, archive, max_minutes, rolling, beat):
+    background_io()
+    t0 = time.time()
+    label = "E" if archive else "workbench"
+    ident = machine_identity()
+    cache = load_hash_cache(label)
+    new_rows, problems = _seed_hash_cache(root, cache) if archive else ([], [])
+    files = [(rel, st, path) for rel, st, path in _walk_files(root, archive) if st is not None]
+    present = {_relkey(rel) for rel, _st, _p in files}
+    unbuffered_here = archive and IS_WINDOWS
+    todo = []
+    for rel, st, path in files:
+        c = cache.get(_relkey(rel))
+        if c is None:
+            todo.append((0, -st.st_mtime_ns, rel, st, path, "new"))
+        elif c.get("size") != st.st_size or c.get("mtimeNs") != st.st_mtime_ns:
+            if archive:
+                problems.append(_problem_row(
+                    rel, "changed since it was hashed", c.get("sha256"), c.get("size"),
+                    found={"size": st.st_size, "mtimeNs": st.st_mtime_ns}))
+            todo.append((1, -st.st_mtime_ns, rel, st, path, "changed"))
+        elif unbuffered_here and c.get("read") != "unbuffered":
+            todo.append((2, -st.st_mtime_ns, rel, st, path, "re-read"))
+    if rolling and archive:
+        queued = {_relkey(t[2]) for t in todo}
+        cached = sorted((c.get("checkedAt") or c.get("hashedAt") or "", k) for k, c in cache.items()
+                        if k in present and k not in queued)
+        share = math.ceil(len(cached) / PC_ROLLING_SHARE) if cached else 0
+        by_key = {_relkey(rel): (rel, st, path) for rel, st, path in files}
+        for _when, k in cached[:share]:
+            rel, st, path = by_key[k]
+            todo.append((3, 0, rel, st, path, "rolling"))
+    todo.sort(key=lambda t: (t[0], t[1], t[2]))
+    total_b = sum(t[3].st_size for t in todo)
+    info(f"Hash: {len(todo)} file(s), {human_size(total_b)} under {root}")
+    done_n = done_b = unreadable = 0
+    stopped = False
+    deadline = t0 + max_minutes * 60 if max_minutes is not None else None
+
+    def progress():
+        p = {"done": done_n, "total": len(todo), "bytesDone": done_b, "bytesTotal": total_b}
+        try:
+            _atomic_write_json(_hash_progress_path(), p)
+        except OSError:
+            pass
+        return p
+
+    for _prio, _neg, rel, st, p, why in todo:
+        if deadline and time.time() > deadline:
+            stopped = True
+            break
+        waited = time.time()
+        while archive and job_running("sweep") and time.time() - waited < 2 * 3600:
+            beat(progress="waiting for the sweep")
+            time.sleep(5)
+        beat(progress=progress())
+        try:
+            sha, size, read = hash_file_unbuffered(p)
+            st2 = os.stat(p)
+        except OSError:
+            unreadable += 1                           # in use or a read error: next time
+            continue
+        if size != st2.st_size or st2.st_mtime_ns != st.st_mtime_ns:
+            continue                                  # changing under us: next time
+        old = cache.get(_relkey(rel))
+        if archive and old and old.get("sha256") != sha and why in ("rolling", "re-read"):
+            problems.append(_problem_row(rel, "content changed since it was hashed",
+                                         old.get("sha256"), old.get("size"), found=sha))
+        row = {"schema": "hash-row/1", "root": label, "relpath": rel, "size": size,
+               "mtimeNs": st2.st_mtime_ns, "sha256": sha, "hashedBy": ident["slug"],
+               "read": read, "hashedAt": _utc_iso(), "checkedAt": _utc_iso()}
+        cache[_relkey(rel)] = row
+        new_rows.append(row)
+        done_n += 1
+        done_b += size
+        if len(new_rows) >= 200:
+            _cache_append(new_rows)
+            new_rows = []
+    _cache_append(new_rows)
+    if archive:
+        known = {(_relkey(r.get("relpath", "")), r.get("problem"), r.get("sha256"))
+                 for r in _problem_rows(root)}
+        _append_rows(_pc_path(root, "problems.jsonl"),
+                     [r for r in problems
+                      if (_relkey(r["relpath"]), r["problem"], r.get("sha256")) not in known])
+    _compact_hash_cache()
+    left = len(todo) - done_n
+    success(f"Hashed {done_n} file(s), {human_size(done_b)}"
+            + (f"; {len(problems)} problem(s), see {_pc_path(root, 'problems.jsonl')}"
+               if archive and problems else "")
+            + (f"; {left} left for next time" if stopped and left else "")
+            + (f"; {unreadable} couldn't be read just now (next time)" if unreadable else ""))
+    beat(force=True)
+    return {"ok": True, "hashed": done_n, "bytes": done_b, "left": left if stopped else 0,
+            "problems": len(problems), "unreadable": unreadable}
+
+def _cache_append(rows):
+    if not rows:
+        return
+    path = _hash_cache_path()
+    _confine(path, "the hash cache")
+    os.makedirs(os.path.dirname(path), exist_ok=True)
+    with open(path, "a", encoding="utf-8") as f:
+        for r in rows:
+            f.write(json.dumps(r, ensure_ascii=False) + "\n")
+        f.flush()
+        os.fsync(f.fileno())
+
+def _compact_hash_cache():
+    """Keep the cache file near its live size: rewrite it with the last row
+    per path once it holds more than twice that (this computer's own file)."""
+    path = _hash_cache_path()
+    rows = _read_jsonl_rows(path)
+    live = {}
+    for r in rows:
+        live[(r.get("root"), _relkey(r.get("relpath", "")))] = r
+    if len(rows) <= 2 * len(live) + 1000:
+        return
+    tmp = f"{path}.{os.getpid()}.tmp"
+    with open(tmp, "w", encoding="utf-8") as f:
+        for r in live.values():
+            f.write(json.dumps(r, ensure_ascii=False) + "\n")
+        f.flush()
+        os.fsync(f.fileno())
+    os.replace(tmp, path)
+
+# ── Requests (spec 10.2) and the PC's scheduled work ─────────────────────────
+
+def _request_dir(mount, folder="mac"):
+    return _verify_path(mount, folder, "requests")
+
+def _response_path(mount, rid):
+    return _pc_path(mount, "responses", f"{rid}.json")
+
+def _request_time(stamp):
+    try:
+        return datetime.strptime(stamp, "%Y%m%dT%H%M%SZ").replace(tzinfo=timezone.utc)
+    except ValueError:
+        return None
+
+def _respond(mount, rid, kind, status, **fields):
+    rec = {"schema": "response/1", "id": rid, "kind": kind, "status": status,
+           "at": _utc_iso(), "machineId": machine_identity()["slug"], **fields}
+    try:
+        _write_json_file(_response_path(mount, rid), rec)
+    except OSError as e:
+        warn(f"Could not answer request {rid}: {e}")
+    return rec
+
+def run_pc_tick(mount=None):
+    """Every five minutes on the PC ("Astro sync requests"): the heartbeat,
+    then any sweep or inventory the Mac asked for. Idle, it reads one folder
+    and writes only the heartbeat. Same-kind requests share one run, and each
+    gets its own answer; the PC never moves or deletes a request."""
+    mount = mount or ARCHIVE_MOUNT
+    _pc_role("--pc-tick")
+    if not os.path.isdir(mount):
+        return {"ok": False, "why": "archive missing"}
+    write_heartbeat(mount)
+    want = {}
+    try:
+        names = sorted(os.listdir(_request_dir(mount)))
+    except OSError:
+        names = []
+    for fn in names:
+        m = REQUEST_RE.match(fn)
+        if not m:
+            continue
+        rid, kind = fn[:-len(".json")], m.group(1)
+        if _read_json_file(_response_path(mount, rid)).get("status") in RESPONSE_FINAL:
+            continue
+        path = os.path.join(_request_dir(mount), fn)
+        made = _request_time(m.group(2))
+        try:
+            st = os.lstat(path)
+        except OSError:
+            continue
+        if not stat.S_ISREG(st.st_mode) or st.st_size > REQUEST_MAX_BYTES[kind]:
+            _respond(mount, rid, kind, "rejected", why="not a request file, or too big")
+            continue
+        try:
+            with open(path, encoding="utf-8") as f:
+                body = json.load(f)
+        except (OSError, ValueError):
+            _respond(mount, rid, kind, "rejected", why="not readable JSON")
+            continue
+        if not isinstance(body, dict):
+            _respond(mount, rid, kind, "rejected", why="not a JSON object")
+            continue
+        if made is None or (_utc_now() - made).total_seconds() > PC_REQUEST_EXPIRE_S:
+            _respond(mount, rid, kind, "expired", why="older than a day")
+            continue
+        if kind not in REQUEST_KINDS_HANDLED:
+            _respond(mount, rid, kind, "rejected",
+                     why=f"{kind} requests are handled from a later version")
+            continue
+        want.setdefault(kind, []).append(rid)
+    results = {}
+    for kind in REQUEST_KINDS_HANDLED:
+        rids = want.get(kind)
+        if not rids:
+            continue
+        if job_running(kind):
+            for rid in rids:
+                _respond(mount, rid, kind, "queued", why=f"a {kind} is running; next time")
+            continue
+        began = _utc_iso()
+        for rid in rids:
+            _respond(mount, rid, kind, "started", startedAt=began)
+        try:
+            res = run_sweep(mount) if kind == "sweep" else run_inventory(mount)
+        except Exception as e:
+            res = {"ok": False, "why": f"{type(e).__name__}: {e}"}
+        if not res.get("ok") and res.get("why") == "busy":
+            final, extra = "queued", {"why": f"a {kind} is running; next time"}
+        elif kind == "sweep" and res.get("waitingSoon"):
+            # copies wait only for time or for a ship that is running: go
+            # again at the next tick, so they're set aside within minutes
+            final, extra = "queued", {"result": res, "why": "unfinished copies are still "
+                                      "too new to set aside; next time"}
+        else:
+            final = "done" if res.get("ok") else "failed"
+            extra = {"result": res}
+        for rid in rids:
+            _respond(mount, rid, kind, final, startedAt=began, finishedAt=_utc_iso(), **extra)
+        results[kind] = res
+    write_heartbeat(mount)
+    return {"ok": True, "handled": {k: len(v) for k, v in want.items()}, "results": results}
+
+def run_pc_nightly(mount=None, max_minutes=None):
+    """The PC's nightly work, and at logon (spec 7.1, 7.3): sweep, then the
+    inventory, then hash new files (and the P7 rolling re-read), then the
+    inventory again when hashing found anything, so its rows carry the hashes."""
+    mount = mount or ARCHIVE_MOUNT
+    _pc_role("--pc-nightly")
+    if not os.path.isdir(mount):
+        warn(f"The archive isn't there: {mount}. Nothing done.")
+        return {"ok": False}
+    out = {"sweep": run_sweep(mount), "inventory": run_inventory(mount)}
+    minutes = max_minutes if max_minutes is not None else \
+        (_int(os.environ.get("ASTRO_PC_HASH_MINUTES") or _CONFIG.get("ASTRO_PC_HASH_MINUTES"))
+         or PC_HASH_MINUTES)
+    out["hash"] = run_hash(mount, max_minutes=minutes, rolling=True)
+    if out["hash"].get("hashed"):
+        out["inventory2"] = run_inventory(mount)
+    write_heartbeat(mount)
+    return {"ok": True, **out}
+
+def own_requests(mount=None):
+    """This computer's requests on the archive, with the PC's answers."""
+    mount = mount or ARCHIVE_MOUNT
+    slug = machine_identity()["slug"]
+    out = []
+    try:
+        names = sorted(os.listdir(_request_dir(mount, SHIP_FOLDER)))
+    except OSError:
+        return out
+    for fn in names:
+        m = REQUEST_RE.match(fn)
+        if m and m.group(3) == slug:
+            rid = fn[:-len(".json")]
+            out.append({"id": rid, "kind": m.group(1),
+                        "path": os.path.join(_request_dir(mount, SHIP_FOLDER), fn),
+                        "response": _read_json_file(_response_path(mount, rid))})
+    return out
+
+def file_request(kind, mount=None, quiet=False):
+    """Ask the PC for a sweep or an inventory (spec 10.2): a small file in
+    _verify\\mac\\requests\\ named <kind>-<UTC time>-<short name>-<nonce>.json.
+    Requests the PC has finished answering are tidied away first, and a
+    request of the same kind still waiting is reused. Returns its id, or
+    None when it couldn't be filed."""
+    mount = mount or ARCHIVE_MOUNT
+    bad = slug_problem()
+    if bad:
+        if not quiet:
+            error(f"Nothing filed: {bad}.")
+        return None
+    if SHIP_FOLDER == "pc":
+        if not quiet:
+            error("The PC doesn't send itself requests: run --sweep or --inventory on it.")
+        return None
+    reqdir = _request_dir(mount, SHIP_FOLDER)
+    _confine(reqdir, "a request")
+    for r in own_requests(mount):
+        if r["response"].get("status") in RESPONSE_FINAL:
+            try:
+                os.remove(r["path"])
+            except OSError:
+                pass
+        elif r["kind"] == kind:
+            if not quiet:
+                info(f"A {kind} request is already waiting for the PC: {r['id']}")
+            return r["id"]
+    rid = f"{kind}-{_utc_now().strftime('%Y%m%dT%H%M%SZ')}-{machine_identity()['slug']}-" \
+          f"{secrets.token_hex(4)}"
+    try:
+        os.makedirs(reqdir, exist_ok=True)
+        fd = os.open(os.path.join(reqdir, rid + ".json"), os.O_CREAT | os.O_EXCL | os.O_WRONLY)
+        with os.fdopen(fd, "w", encoding="utf-8") as f:
+            json.dump({"schema": "request/1", "id": rid, "kind": kind,
+                       "machineId": machine_identity()["slug"], "createdAt": _utc_iso()}, f)
+    except OSError as e:
+        if not quiet:
+            warn(f"Could not file the request: {_os_reason(e)}")
+        return None
+    if not quiet:
+        success(f"Asked the PC for {'an' if kind[0] in 'aeiou' else 'a'} {kind}: {rid}. "
+                f"An awake PC picks it up within five minutes.")
+    return rid
+
+def run_request(kind):
+    if kind not in REQUEST_KINDS_HANDLED:
+        error(f"--request takes one of: {', '.join(REQUEST_KINDS_HANDLED)}.")
+        sys.exit(2)
+    ok, why = _ship_mount(ARCHIVE_MOUNT)
+    if not ok:
+        error(f"Archive not reachable at {ARCHIVE_MOUNT} ({ARCHIVE_LABEL}): {why}. Nothing filed.")
+        sys.exit(1)
+    rid = file_request(kind)
+    sys.exit(0 if rid else 1)
+
+# ── The share's rights, tried from the Mac (decision D7) ─────────────────────
+
+RIGHTS_CHECK_DIR = "_rights-check"
+
+def run_check_share_rights(mount=None):
+    """Try, from this computer, each thing the share user may and may not do
+    under D7, on the test folder the PC's set-archive-rights.ps1 -Scratch
+    made (_rights-check, laid out like the archive). It never touches a frame.
+    Allowed: create a new file and write it, set its time, make a folder;
+    write, and delete, in _verify\\mac and _verify\\lock. Refused: delete or
+    rename anything in the tree, create or write in _verify itself or in
+    _verify\\pc. Returns True when every answer is the right one."""
+    mount = mount or ARCHIVE_MOUNT
+    ok, why = _ship_mount(mount)
+    base = os.path.join(mount, RIGHTS_CHECK_DIR)
+    if not os.path.isdir(base):
+        error(f"No rights-check folder at {base}"
+              + ("" if ok else f" ({why})")
+              + ". On the PC, run pc\\set-archive-rights.ps1 -Scratch first.")
+        return False
+    _confine(base, "the rights check")
+    tag = f"{machine_identity()['slug']}-{_utc_now().strftime('%Y%m%dT%H%M%SZ')}-" \
+          f"{secrets.token_hex(2)}"
+    tree, v = os.path.join(base, "tree"), os.path.join(base, "_verify")
+    results = []
+
+    def attempt(label, want_ok, fn):
+        try:
+            fn()
+            got_ok, detail = True, ""
+        except FileNotFoundError:
+            got_ok, detail = None, "couldn't try: the file wasn't there"
+        except OSError as e:
+            got_ok, detail = False, _os_reason(e) if not isinstance(e, FileExistsError) \
+                else "that name is taken"
+        results.append((label, want_ok, got_ok, detail))
+        if got_ok is None:
+            note = f"  ({detail})"
+        elif got_ok == want_ok:
+            note = ""
+        else:
+            note = f"  (should work, but: {detail})" if want_ok else "  (should be refused, but worked)"
+        print(("  PASS  " if got_ok == want_ok else "  FAIL  ") + label + note)
+        return got_ok
+
+    def rename_away(path, other):
+        """A rename that should be refused; if it isn't, it is put back, so the
+        next try still finds the file under its own name."""
+        os.rename(path, other)
+        try:
+            os.rename(other, path)
+        except OSError:
+            pass
+
+    def create(path, data=b"rights check\n"):
+        fd = os.open(path, os.O_WRONLY | os.O_CREAT | os.O_EXCL | getattr(os, "O_BINARY", 0), 0o644)
+        with os.fdopen(fd, "wb") as f:
+            f.write(data)
+            f.flush()
+            os.fsync(f.fileno())
+
+    def append(path):
+        with open(path, "ab") as f:
+            f.write(b"\n")
+
+    def read(path):
+        with open(path, "rb") as f:
+            f.read(1)
+
+    new = os.path.join(tree, f"rights-{tag}.fit")
+    newdir = os.path.join(tree, f"Day {tag}")
+    canary = os.path.join(tree, "canary.fit")
+    print(f"▸ Rights check in {base}")
+    made = attempt("the archive tree: create a new file under its final name", True,
+                   lambda: create(new, os.urandom(64 * 1024)))
+    if made:
+        attempt("...read it back", True, lambda: read(new))
+        attempt("...set its date", True, lambda: os.utime(new, (time.time() - 86400,) * 2))
+        attempt("...rename it", False, lambda: rename_away(new, new + ".renamed"))
+        attempt("...delete it", False, lambda: os.remove(new))
+    if attempt("the archive tree: make a new folder (a Day)", True, lambda: os.mkdir(newdir)):
+        attempt("...rename that folder", False, lambda: rename_away(newdir, newdir + " renamed"))
+        attempt("...remove that folder", False, lambda: os.rmdir(newdir))
+    if os.path.exists(canary):
+        attempt("the PC's file in the tree: read it", True, lambda: read(canary))
+        attempt("...create a file with its name", False, lambda: create(canary))
+        attempt("...rename it", False, lambda: rename_away(canary, canary + ".renamed"))
+        attempt("...delete it", False, lambda: os.remove(canary))
+    attempt("_verify itself: create a file", False,
+            lambda: create(os.path.join(v, f"rights-{tag}.txt")))
+    if os.path.exists(os.path.join(v, "canary.jsonl")):
+        attempt("_verify itself: add to the PC's log there", False,
+                lambda: append(os.path.join(v, "canary.jsonl")))
+    for sub in ("mac", "lock"):
+        p = os.path.join(v, sub, f"rights-{tag}.txt")
+        if attempt(f"_verify\\{sub}: create a file", True, lambda p=p: create(p)):
+            attempt("...add to it", True, lambda p=p: append(p))
+            attempt("...delete it", True, lambda p=p: os.remove(p))
+    pcdir = os.path.join(v, "pc")
+    attempt("_verify\\pc: create a file", False,
+            lambda: create(os.path.join(pcdir, f"rights-{tag}.txt")))
+    if os.path.exists(os.path.join(pcdir, "canary.json")):
+        attempt("_verify\\pc: read the PC's file", True,
+                lambda: read(os.path.join(pcdir, "canary.json")))
+        attempt("...add to it", False, lambda: append(os.path.join(pcdir, "canary.json")))
+        attempt("...delete it", False, lambda: os.remove(os.path.join(pcdir, "canary.json")))
+    wrong = [r for r in results if r[1] != r[2]]
+    if not wrong:
+        success("The share's rights are what D7 needs: this computer can add frames and "
+                "write its own logs, and can't delete or rename anything on the archive.")
+        info(f"The test files it made stay in {tree} (the share can't delete them, which is "
+             f"the point). Delete {base} on the PC when you're done.")
+        return True
+    first = results[0]
+    if first[1] and not first[2]:
+        error("This computer can't create a file on the share under these rights, so the "
+              "ship can't work with them. Leave the archive's rights as they are and tell "
+              "Claude what the line above says.")
+    else:
+        error(f"{len(wrong)} answer(s) were wrong (marked FAIL above). Don't apply these "
+              f"rights to the archive yet.")
+    return False
 
 
 _EXPOSURE_TOKEN = re.compile(r"_(\d+(?:\.\d+)?)s_")
@@ -7048,6 +9062,32 @@ def main():
     p.add_argument("--dry-run", action="store_true")
     p.add_argument("--verbose", action="store_true")
     p.add_argument("--all", action="store_true")
+    # 1.7.0: the archive PC's own jobs, and the Mac's side of them
+    p.add_argument("--sweep", action="store_true",
+                   help="archive PC: re-read every shipped frame from its own disk into "
+                        "_verify\\pc\\verified.jsonl, and set aside copies a ship never finished")
+    p.add_argument("--move-old-partials", action="store_true",
+                   help="with --sweep: also move the .partial and .BAD files a 1.6 ship left "
+                        "into _Quarantine\\old-partials")
+    p.add_argument("--inventory", action="store_true",
+                   help="list every file under --root (the archive, on the PC; else this "
+                        "computer's frame folders) with what its path says about it")
+    p.add_argument("--hash", action="store_true",
+                   help="hash the files under --root that this computer's hash cache lacks")
+    p.add_argument("--root", metavar="DIR")
+    p.add_argument("--max-minutes", type=int, metavar="N",
+                   help="with --hash: stop at a file after N minutes")
+    p.add_argument("--rolling", action="store_true",
+                   help="with --hash on the PC: also re-read the 1/30th checked longest ago")
+    p.add_argument("--pc-tick", action="store_true",
+                   help="archive PC, every 5 minutes: the heartbeat, then the Mac's requests")
+    p.add_argument("--pc-nightly", action="store_true",
+                   help="archive PC, at logon and 03:30: sweep, inventory, hash")
+    p.add_argument("--request", metavar="KIND", choices=list(REQUEST_KINDS_HANDLED),
+                   help="ask the archive PC for a sweep or an inventory")
+    p.add_argument("--check-share-rights", action="store_true",
+                   help="try what this computer may and may not do on the archive share, in "
+                        "the test folder the PC set up (_rights-check)")
     args = p.parse_args()
     VERBOSE = args.verbose
 
@@ -7069,6 +9109,27 @@ def main():
         s = status_summary(st)
         print(json.dumps(s) if args.json else s["text"])
         sys.exit(0)
+
+    # The archive PC's jobs and the Mac's side of them (1.7.0): they read the
+    # archive, its logs and this computer's caches, never the ledger
+    if args.sweep:
+        _pc_role("--sweep")
+        sys.exit(0 if run_sweep(move_old_partials=args.move_old_partials).get("ok") else 1)
+    if args.inventory:
+        sys.exit(0 if run_inventory(args.root).get("ok") else 1)
+    if args.hash:
+        sys.exit(0 if run_hash(args.root, max_minutes=args.max_minutes,
+                               rolling=args.rolling).get("ok") else 1)
+    if args.pc_tick:
+        run_pc_tick()
+        sys.exit(0)
+    if args.pc_nightly:
+        run_pc_nightly(max_minutes=args.max_minutes)
+        sys.exit(0)
+    if args.request:
+        run_request(args.request)
+    if args.check_share_rights:
+        sys.exit(0 if run_check_share_rights() else 1)
 
     refresh_camera_volumes(force=True)
 
@@ -7307,14 +9368,7 @@ def main():
         # File what just arrived into the archive on the PC while the lock is
         # still held (1.4.0). Quiet no-op when the share is not mounted.
         if not args.dry_run and not args.no_ship:
-            try:
-                if not archive_reachable() and ARCHIVE_URL:
-                    _try_mount_archive(ARCHIVE_MOUNT, ARCHIVE_URL)
-                if archive_reachable():
-                    print()
-                    run_ship(state, checksum=not args.no_checksum)
-            except Exception as e:
-                warn(f"Ship after import failed (frames are safe on this Mac): {e}")
+            ship_after_import(state, checksum=not args.no_checksum)
         offer_eject(args)
     finally:
         release_lock()

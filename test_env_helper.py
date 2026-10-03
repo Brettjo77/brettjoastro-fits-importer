@@ -4,6 +4,7 @@ Everything a test starts runs in TEST MODE (1.5.2): ASTRO_TEST_ROOT names a
 temp folder; the engine, panel, watcher and self-test refuse any path outside
 it and record (never perform) dialogs, notifications, ejects, mounts and
 "open" in <root>/os-calls.jsonl. make_env() builds every launched env."""
+import contextlib
 import hashlib
 import json
 import os
@@ -12,6 +13,7 @@ import socket
 import subprocess
 import sys
 import tempfile
+import time
 
 BUILD = os.path.dirname(os.path.abspath(__file__))
 SCRIPT = os.path.join(BUILD, "astro-import.py")
@@ -91,6 +93,220 @@ def isolate_runner():
     os.environ.clear()
     os.environ.update(env)
     return root
+
+NO_DELETE_SITE = r'''
+# Test only (1.7.0): the archive share user's rights from decision D7 (spec
+# P6, P8, 10.1), for a child Python started with teh.no_delete_env(). In
+# the archive tree: create, never delete, rename or write over an existing
+# file. In _verify: nothing, except inside mac/ and lock/ (Modify). pc/ is
+# read only. Every refused attempt is written to <root>/denied.jsonl.
+import errno, json, os, shutil, builtins
+_ARCH = os.environ.get("ASTRO_TEST_NO_DELETE")
+if _ARCH:
+    _ARCH = os.path.normcase(os.path.realpath(_ARCH))
+    _LOG = os.path.join(os.environ["ASTRO_TEST_ROOT"], "denied.jsonl")
+    _orig = {"open": builtins.open, "os_open": os.open, "fdopen": os.fdopen,
+             "mkdir": os.mkdir, "utime": os.utime}
+    def _rel(p):
+        try:
+            p = os.path.normcase(os.path.realpath(os.fspath(p)))
+        except (TypeError, ValueError):
+            return None
+        if p == _ARCH:
+            return []
+        if not p.startswith(_ARCH + os.sep):
+            return None
+        return p[len(_ARCH) + 1:].split(os.sep)
+    def _zone(p):
+        parts = _rel(p)
+        if parts is None:
+            return None
+        if parts[:1] == ["_verify"]:
+            if len(parts) >= 3 and parts[1] in ("mac", "lock"):
+                return "modify"
+            return "verify"               # _verify itself, its files, pc/, mac and lock as folders
+        return "tree"
+    def _deny(op, p):
+        with _orig["open"](_LOG, "a", encoding="utf-8") as f:
+            f.write(json.dumps({"op": op, "path": os.fspath(p)}) + "\n")
+        raise PermissionError(errno.EACCES, "Permission denied (test: the share user's rights)", os.fspath(p))
+    def _guard_change(op, *paths):
+        for p in paths:
+            z = _zone(p)
+            if z is not None and z != "modify":
+                _deny(op, p)
+    def _wrap(mod, name, n):
+        orig = getattr(mod, name)
+        def w(*a, **k):
+            _guard_change(name, *a[:n])
+            return orig(*a, **k)
+        setattr(mod, name, w)
+    for _name in ("remove", "unlink", "rmdir"):
+        _wrap(os, _name, 1)
+    _wrap(os, "rename", 2); _wrap(os, "replace", 2)
+    _wrap(shutil, "move", 2); _wrap(shutil, "rmtree", 1)
+    def _guard_write(p, creating):
+        """creating: an exclusive create, which fails by itself on a taken name."""
+        z = _zone(p)
+        if z is None or z == "modify":
+            return
+        exists = os.path.lexists(p)
+        if exists and creating:
+            return
+        if z == "verify":
+            _deny("write", p)
+        if exists:
+            _deny("overwrite", p)
+    def _open(file, mode="r", *a, **k):
+        if isinstance(file, (str, bytes, os.PathLike)) and any(c in mode for c in "wax+"):
+            _guard_write(file, creating="x" in mode)
+        return _orig["open"](file, mode, *a, **k)
+    builtins.open = _open
+    _CUT = int(os.environ.get("ASTRO_TEST_CUT_SHIP") or 0)
+    _made, _cut_fds = [0], set()
+    def _os_open(path, flags, mode=0o777, *a, **k):
+        if flags & (os.O_WRONLY | os.O_RDWR | os.O_CREAT | os.O_TRUNC | os.O_APPEND):
+            _guard_write(path, creating=bool(flags & os.O_EXCL))
+        fd = _orig["os_open"](path, flags, mode, *a, **k)
+        if _CUT and _zone(path) == "tree" and flags & os.O_EXCL:
+            _made[0] += 1
+            if _made[0] == _CUT:
+                _cut_fds.add(fd)
+        return fd
+    os.open = _os_open
+    class _CutFile:
+        """The share goes away mid-copy: half the bytes land, then EIO."""
+        def __init__(self, f):
+            self.f = f
+        def write(self, b):
+            self.f.write(b[:max(1, len(b) // 2)])
+            self.f.flush()
+            raise OSError(errno.EIO, "test: the share went away mid-copy")
+        def __getattr__(self, n):
+            return getattr(self.f, n)
+        def __enter__(self):
+            return self
+        def __exit__(self, *a):
+            self.f.close()
+            return False
+    def _fdopen(fd, *a, **k):
+        f = _orig["fdopen"](fd, *a, **k)
+        if fd in _cut_fds:
+            _cut_fds.discard(fd)          # numbers are reused once closed
+            return _CutFile(f)
+        return f
+    os.fdopen = _fdopen
+    def _mkdir(path, *a, **k):
+        if os.path.lexists(path):
+            raise FileExistsError(errno.EEXIST, "File exists", os.fspath(path))
+        if _zone(path) == "verify":
+            _deny("mkdir", path)
+        return _orig["mkdir"](path, *a, **k)
+    os.mkdir = _mkdir
+    def _utime(path, *a, **k):
+        if _zone(path) == "verify":
+            _deny("utime", path)
+        return _orig["utime"](path, *a, **k)
+    os.utime = _utime
+# A file that can't be read just now (ASTRO_TEST_UNREADABLE, os.pathsep
+# separated): opening it to read fails as a disk error would.
+_UNREAD = {os.path.normcase(os.path.realpath(p))
+           for p in (os.environ.get("ASTRO_TEST_UNREADABLE") or "").split(os.pathsep) if p}
+if _UNREAD:
+    _open_before = builtins.open
+    def _open_unread(file, mode="r", *a, **k):
+        if isinstance(file, (str, os.PathLike)) and \
+                os.path.normcase(os.path.realpath(os.fspath(file))) in _UNREAD:
+            raise OSError(errno.EIO, "test: a read error", os.fspath(file))
+        return _open_before(file, mode, *a, **k)
+    builtins.open = _open_unread
+'''
+
+def no_delete_env(root, archive, cut_ship=0):
+    """Env additions that run a child Python with the archive share user's
+    rights from 1.7.0 simulated on `archive` (see NO_DELETE_SITE): the PC
+    setup's folders _verify/mac, _verify/lock and _verify/pc are made first,
+    as the PC does. cut_ship=N cuts the N-th new archive file off mid-copy."""
+    for d in ("mac", "lock", "pc"):
+        os.makedirs(os.path.join(archive, "_verify", d), exist_ok=True)
+    site = os.path.join(root, "no-delete-site")
+    os.makedirs(site, exist_ok=True)
+    with open(os.path.join(site, "sitecustomize.py"), "w", encoding="utf-8") as f:
+        f.write(NO_DELETE_SITE)
+    env = {"PYTHONPATH": site, "ASTRO_TEST_NO_DELETE": archive}
+    if cut_ship:
+        env["ASTRO_TEST_CUT_SHIP"] = str(cut_ship)
+    return env
+
+def backdate(path, seconds):
+    """Make a file look `seconds` older: its modification time everywhere and,
+    on Windows, its creation time too (the PC's sweep reads that there; on a
+    Mac an earlier modification time pulls the creation time back with it)."""
+    t = time.time() - seconds
+    os.utime(path, (t, t))
+    if os.name == "nt":
+        import ctypes
+        from ctypes import wintypes
+        k32 = ctypes.WinDLL("kernel32", use_last_error=True)
+        k32.CreateFileW.restype = wintypes.HANDLE
+        k32.CreateFileW.argtypes = (wintypes.LPCWSTR, wintypes.DWORD, wintypes.DWORD,
+                                    wintypes.LPVOID, wintypes.DWORD, wintypes.DWORD,
+                                    wintypes.HANDLE)
+        k32.SetFileTime.argtypes = (wintypes.HANDLE, ctypes.POINTER(wintypes.FILETIME),
+                                    ctypes.POINTER(wintypes.FILETIME),
+                                    ctypes.POINTER(wintypes.FILETIME))
+        k32.CloseHandle.argtypes = (wintypes.HANDLE,)
+        # FILE_WRITE_ATTRIBUTES, any sharing, OPEN_EXISTING, BACKUP_SEMANTICS (folders too)
+        h = k32.CreateFileW(os.path.abspath(path), 0x100, 0x7, None, 3, 0x02000000, None)
+        ft = int((t + 11644473600) * 10 ** 7)
+        when = wintypes.FILETIME(ft & 0xFFFFFFFF, ft >> 32)
+        k32.SetFileTime(h, ctypes.byref(when), None, ctypes.byref(when))
+        k32.CloseHandle(h)
+
+def read_error_env(root, paths):
+    """Env additions under which a child Python can't read `paths` (a disk
+    error on open). On Windows the engine reads through CreateFileW, so a
+    test also holds the file with held_exclusively()."""
+    site = os.path.join(root, "no-delete-site")
+    os.makedirs(site, exist_ok=True)
+    with open(os.path.join(site, "sitecustomize.py"), "w", encoding="utf-8") as f:
+        f.write(NO_DELETE_SITE)
+    return {"PYTHONPATH": site, "ASTRO_TEST_UNREADABLE": os.pathsep.join(paths)}
+
+@contextlib.contextmanager
+def held_exclusively(path):
+    """Windows: hold `path` open with no sharing, so no other process can
+    open it until the block ends. Elsewhere it does nothing."""
+    if os.name != "nt":
+        yield
+        return
+    import ctypes
+    from ctypes import wintypes
+    k32 = ctypes.WinDLL("kernel32", use_last_error=True)
+    k32.CreateFileW.restype = wintypes.HANDLE
+    k32.CreateFileW.argtypes = (wintypes.LPCWSTR, wintypes.DWORD, wintypes.DWORD,
+                                wintypes.LPVOID, wintypes.DWORD, wintypes.DWORD,
+                                wintypes.HANDLE)
+    k32.CloseHandle.argtypes = (wintypes.HANDLE,)
+    h = k32.CreateFileW(os.path.abspath(path), 0x80000000, 0, None, 3, 0, None)
+    try:
+        yield
+    finally:
+        k32.CloseHandle(h)
+
+def denied(root):
+    """What the simulated share rights refused (<root>/denied.jsonl)."""
+    out = []
+    try:
+        with open(os.path.join(root, "denied.jsonl"), encoding="utf-8") as f:
+            for ln in f:
+                try:
+                    out.append(json.loads(ln))
+                except ValueError:
+                    pass
+    except OSError:
+        pass
+    return out
 
 def instance_id(state_dir):
     """The "instance" /api/ping reports for a panel keeping its ledger in

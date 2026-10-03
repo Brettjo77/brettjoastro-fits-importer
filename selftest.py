@@ -168,9 +168,9 @@ def main():
             check(f"{label} is writable", False, f"{parent}: {e}")
     print(f"  ----  frames go under {os.path.dirname(eng.SEESTAR_DEST_S50PRO)}")
     if os.path.isdir(eng.ARCHIVE_MOUNT):
-        check(f"archive reachable ({eng.ARCHIVE_MOUNT})", eng.archive_reachable(eng.ARCHIVE_MOUNT),
-              "needs one of S30P, S30, S50, S50P, 'ZWO Askar Scopes' and a writable _verify")
-        print(f"  ----  this machine's ship log: {os.path.join(eng.ARCHIVE_MOUNT, '_verify', eng.SHIP_LOG_NAME)}")
+        ok, why = eng.archive_check(eng.ARCHIVE_MOUNT)
+        check(f"archive reachable ({eng.ARCHIVE_MOUNT})", ok, why)
+        print(f"  ----  this machine's ship log: {eng.ship_log_path(eng.ARCHIVE_MOUNT)}")
     else:
         line("SKIP", "archive", f"{eng.ARCHIVE_MOUNT} not present (shipping is optional)")
 

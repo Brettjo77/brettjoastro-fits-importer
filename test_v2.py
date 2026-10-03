@@ -1750,26 +1750,32 @@ r = wrun("--restore-ledger", stdin="n\n", extra={"ASIAIR_STATE": W2state, "ASTRO
 check("W1 ...and won't restore another machine's ledger as its own without being told",
       "Not restored" in r.stdout + r.stderr and not os.path.isfile(os.path.join(W2state, "ledger.json")),
       (r.stdout + r.stderr)[-300:])
-# per-machine ship log on a local archive (the PC case: E:\Astro Image Data)
+# per-machine ship log on a local archive (the PC case: E:\Astro Image Data),
+# in the PC's own _verify folder from 1.7.0 (decision D7)
 arch = os.path.join(W1.root, "E-archive")
 os.makedirs(os.path.join(arch, "S50P")); os.makedirs(os.path.join(arch, "_verify"))
-r = wrun("--ship", extra={"ASTRO_ARCHIVE_MOUNT": arch, "ASTRO_SHIP_LOG": "shipped-pc.jsonl"})
+PC_SHIP = {"ASTRO_ARCHIVE_MOUNT": arch, "ASTRO_SHIP_LOG": "shipped-pc.jsonl", "ASTRO_SHIP_FOLDER": "pc"}
+r = wrun("--ship", extra=PC_SHIP)
 vfiles = sorted(os.listdir(os.path.join(arch, "_verify")))
+pcfiles = sorted(os.listdir(os.path.join(arch, "_verify", "pc"))) \
+    if os.path.isdir(os.path.join(arch, "_verify", "pc")) else []
 check("W1 the PC ships into a local archive and writes its OWN ship log",
-      "shipped-pc.jsonl" in vfiles and "shipped.jsonl" not in vfiles
+      "shipped-pc.jsonl" in pcfiles and not any(f.startswith("shipped") for f in vfiles)
+      and "mac" not in vfiles
       and any(f.endswith(".fit") for _dp, _d, fs in os.walk(os.path.join(arch, "S50P")) for f in fs),
-      str(vfiles) + r.stdout[-300:])
+      str(vfiles) + str(pcfiles) + r.stdout[-300:])
 # the sweep's verified.jsonl stamps the PC's ledger too — a stray line or a
-# size written as text never stops a ship
-_rows = [json.loads(l) for l in open(os.path.join(arch, "_verify", "shipped-pc.jsonl"),
-                                      encoding="utf-8") if l.strip()]
+# size written as text never stops a ship (the 1.6 place, still read)
+_rows = [x for x in (json.loads(l) for l in open(os.path.join(arch, "_verify", "pc", "shipped-pc.jsonl"),
+                                                encoding="utf-8") if l.strip())
+         if x.get("state") == "shipped"]
 with open(os.path.join(arch, "_verify", "verified.jsonl"), "w", encoding="utf-8") as vf:
     vf.write("[1, 2]\nnot json\n")
     for i, x in enumerate(_rows):
         vf.write(json.dumps({"relpath": x["relpath"], "sha256": x.get("sha256"),
                              "size": str(x["size"]) if i == 0 else x["size"],
                              "verifiedAt": "2026-09-24T210000"}) + "\n")
-r = wrun("--ship", extra={"ASTRO_ARCHIVE_MOUNT": arch, "ASTRO_SHIP_LOG": "shipped-pc.jsonl"})
+r = wrun("--ship", extra=PC_SHIP)
 _led = json.load(open(os.path.join(W1.state, "ledger.json"), encoding="utf-8"))["files"]
 _shipped = [e for e in _led.values() if e.get("archiveLocation")]
 check("W1 the sweep's verified.jsonl stamps the PC's ledger (stray lines and text sizes tolerated)",
@@ -1822,6 +1828,38 @@ _pip_hints = [ln.strip() for ln in _ps.splitlines() if "Warn" in ln and "-m pip 
 check("W1 the Windows installer's astropy hint pastes into Terminal's PowerShell: & before the "
       "quoted python.exe (1.5.4)",
       bool(_pip_hints) and all('& `"$py`" -m pip install' in ln for ln in _pip_hints), str(_pip_hints))
+# 1.7.0: the PC's jobs are Python, started by two tasks (read, never run here)
+_s7 = _ps[_ps.index("# ── 7. The archive PC's own jobs"):_ps.index("# ── 8. Start")] \
+    if "# ── 7. The archive PC's own jobs" in _ps else ""
+check("W1 the Windows installer schedules the PC's jobs in Python, as Brett: 'Astro archive "
+      "sweep' runs --pc-nightly at logon and 03:30, 'Astro sync requests' runs --pc-tick every "
+      "5 minutes, neither twice at once; it makes _verify\\pc, _verify\\mac\\requests, "
+      "_verify\\lock and _Quarantine\\ship-incomplete; sweep.ps1 is gone",
+      "--pc-nightly" in _s7 and "--pc-tick" in _s7 and "'Astro archive sweep'" in _s7
+      and "'Astro sync requests'" in _s7 and "-At 03:30" in _s7 and "-AtLogOn" in _s7
+      and "New-TimeSpan -Minutes 5" in _s7 and _s7.count("-MultipleInstances IgnoreNew") == 2
+      and "-RunLevel Limited" in _s7 and "powershell.exe" not in _s7
+      and all(d in _s7 for d in ("'_verify\\pc'", "'_verify\\mac\\requests'", "'_verify\\lock'",
+                                 "'_Quarantine\\ship-incomplete'"))
+      and not os.path.exists(os.path.join(_here, "pc", "sweep.ps1"))
+      and not os.path.exists(os.path.join(_here, "pc", "install_sweep.ps1")), _s7[:300])
+with open(os.path.join(_here, "pc", "set-archive-rights.ps1"), "rb") as _f:
+    _rraw = _f.read()
+_rights = _rraw.decode("utf-8-sig")
+_body = _rights[_rights.index("param("):]
+_gate = _body.index("if (-not $Apply)")
+_changes = [m.start() for m in re.finditer(r"& icacls\.exe \$s\.Path", _body)]
+_saves = [m.start() for m in re.finditer(r"/save", _body)]
+check("W1 set-archive-rights.ps1 changes nothing without -Apply, saves today's rights before its "
+      "first change, names the share's user by SID (no password anywhere), and refuses Brett's "
+      "own account, a group or an administrator (UTF-8 with a BOM, CRLF)",
+      _rraw.startswith(b"\xef\xbb\xbf") and b"\n" not in _rraw.replace(b"\r\n", b"")
+      and _changes and _saves and all(c > _gate for c in _changes + _saves)
+      and max(_saves) < min(_changes) and "Translate([System.Security.Principal.SecurityIdentifier])" in _body
+      and '$u = "*$sid"' in _body and "password" not in _body.lower().replace("never a password", "")
+      and "is the account you are signed in with" in _body and "not a local user account" in _body
+      and "is an administrator on this PC" in _body and "/deny" in _body and "(DE,DC)" in _body,
+      f"gate {_gate} saves {_saves} changes {_changes}")
 _bin = os.path.join(W1.root, "installed-bin")
 os.makedirs(_bin, exist_ok=True)
 for _f in _st.INSTALLED.get(engw.PLATFORM, _st.INSTALLED["windows"]):   # what THIS OS installs
@@ -1865,8 +1903,9 @@ shipped = [e for e in led["files"].values() if e.get("archiveShippedAt")]
 check("P1 ledger entries stamped with archiveLocation and archiveShippedAt, not yet verified",
       len(shipped) == 3 and all(e.get("archiveLocation", "").startswith("S30P\\") for e in shipped)
       and not any(e.get("archiveVerifiedAt") for e in shipped), str([e.get("archiveLocation") for e in shipped]))
-sl = os.path.join(arch, "_verify", "shipped.jsonl")
-lines = [json.loads(x) for x in open(sl)] if os.path.isfile(sl) else []
+sl = os.path.join(arch, "_verify", "mac", "shipped.jsonl")      # this machine's own folder (1.7.0)
+lines = [x for x in (json.loads(y) for y in open(sl)) if x.get("state") == "shipped"] \
+    if os.path.isfile(sl) else []
 check("P1 shipped.jsonl written for the PC sweep, one line per file with sha and size",
       len(lines) == 3 and all(l["sha256"] and l["size"] and l["relpath"] for l in lines), str(lines[:1]))
 rdir = os.path.join(P1.receipts, "_ship")
@@ -1939,6 +1978,950 @@ check("P4 a target whose camera token differs joins the archive's existing folde
       and count_fits(os.path.join(tE4, "Sh2-155_sub Day 2")) == 2
       and not os.path.isdir(os.path.join(P4.archive, "S30P", "Cave Nebula (C 9)")),
       str(os.listdir(os.path.join(P4.archive, "S30P"))))
+
+# ═══════════════ CHAIN D7: shipping without Delete rights (1.7.0) ════════════
+print("\n── Chain D7: shipping without Delete rights (1.7.0, decision D7) ──")
+# From 1.7.0 the archive's share user may create and write in the archive tree
+# but never delete or rename there (spec P8), and in _verify only mac/ and
+# lock/ are its own (10.1). teh.no_delete_env runs the real engine with those
+# rights simulated, recording every refused attempt. 1.6.0 fails every check
+# here: its probe, its .partial rename and its lock release all need Delete.
+import hashlib
+from datetime import datetime as _dt, timedelta as _td, timezone as _tz
+
+def d7_tree(root):
+    """Every file (size, mtime) and folder under root, '/'-separated."""
+    out = {}
+    for dp, dns, fns in os.walk(root):
+        for d in dns:
+            out[os.path.relpath(os.path.join(dp, d), root).replace(os.sep, "/") + "/"] = "dir"
+        for fn in fns:
+            p = os.path.join(dp, fn)
+            st = os.stat(p)
+            out[os.path.relpath(p, root).replace(os.sep, "/")] = (st.st_size, st.st_mtime_ns)
+    return out
+
+def d7_rows(path, state=None):
+    try:
+        with open(path, encoding="utf-8") as f:
+            rows = [json.loads(x) for x in f if x.strip()]
+    except OSError:
+        return []
+    return [x for x in rows if state is None or x.get("state") == state]
+
+def d7_bad(root):
+    """Refused attempts, except the harmless try at taking the 1.6 lock in _verify."""
+    return [d for d in teh.denied(root)
+            if not (d["op"] == "write" and d["path"].replace(os.sep, "/").endswith("_verify/ship.lock"))]
+
+def d7_sha(path):
+    with open(path, "rb") as f:
+        return hashlib.sha256(f.read()).hexdigest()
+
+# These checks are the Mac's ship over the share, run on any computer: the
+# PC's own log lives in _verify/pc, which the share user may only read.
+D7_MAC = {"ASTRO_SHIP_FOLDER": "mac", "ASTRO_SHIP_LOG": "shipped.jsonl"}
+
+def d7_at(arch, rel):
+    return os.path.join(arch, *rel.split("\\"))
+
+def d7_probe(env, code):
+    """Load the engine in a child (as m), run `code`; the JSON it printed last."""
+    head = ("import importlib.util, json, os, sys\n"
+            "s = importlib.util.spec_from_file_location('eng', sys.argv[1])\n"
+            "m = importlib.util.module_from_spec(s); s.loader.exec_module(m)\n")
+    r = subprocess.run([sys.executable, "-c", head + code, SCRIPT], env=env, input="",
+                       capture_output=True, text=True, encoding="utf-8", errors="replace",
+                       timeout=120)
+    try:
+        return json.loads(r.stdout.strip().splitlines()[-1])
+    except (ValueError, IndexError):
+        return {"error": (r.stdout + r.stderr)[-300:]}
+
+D7 = teh.Env("D7", asiair=False, seestar=True)
+D7.env.update(D7_MAC)
+d7a = D7.archive
+os.makedirs(os.path.join(d7a, "S30P")); os.makedirs(os.path.join(d7a, "_verify"))
+with open(os.path.join(d7a, "_verify", "shipped.jsonl"), "w", encoding="utf-8") as f:
+    # the 1.6 Mac's ship log: history now, never written again
+    f.write(json.dumps({"relpath": "S30P\\old.fit", "size": 1, "sha256": "0" * 64}) + "\n")
+for st in ("20260910-224402", "20260910-225402", "20260911-224402"):
+    D7.add_seestar_sub("M 27", st)
+D7.run("--no-ship")
+ND = teh.no_delete_env(D7.root, d7a)
+d7_before = d7_tree(d7a)
+r = D7.run("--ship", extra_env=ND)
+d7_after = d7_tree(d7a)
+mlog = os.path.join(d7a, "_verify", "mac", "shipped.jsonl")
+d7_started, d7_shipped = d7_rows(mlog, "started"), d7_rows(mlog, "shipped")
+check("D7 without Delete rights the ship still files every frame under its final name",
+      "Shipped 3 file(s)" in r.stdout and len(d7_shipped) == 3
+      and all(os.path.isfile(d7_at(d7a, x["relpath"])) for x in d7_shipped),
+      r.stdout[-500:] + r.stderr[-300:])
+check("D7 ...and never tries to delete, rename or write over anything on the archive "
+      "(its one refused try is the 1.6 lock in _verify)",
+      d7_bad(D7.root) == [], str(teh.denied(D7.root))[:400])
+_new = sorted(set(d7_after) - set(d7_before))
+_changed = sorted(k for k in d7_before if k in d7_after and d7_before[k] != d7_after[k])
+_gone = sorted(set(d7_before) - set(d7_after))
+check("D7 all it writes is on the spec's allow-list: frames in the archive tree, its log in "
+      "_verify/mac, its lock in _verify/lock; no .partial anywhere (10.1)",
+      _new and not _gone and not _changed
+      and all(p.startswith(("S30P/", "_verify/mac/", "_verify/lock/")) for p in _new)
+      and not any(".partial" in p for p in d7_after),
+      f"new={_new} changed={_changed} gone={_gone}")
+check("D7 the 1.6 ship log in _verify is left exactly as it was",
+      "_verify/shipped.jsonl" in d7_after
+      and d7_before["_verify/shipped.jsonl"] == d7_after["_verify/shipped.jsonl"])
+check("D7 a 'started' row before each frame and a 'shipped' row after its read-back, "
+      "with the schema, size and hash",
+      len(d7_started) == 3 and {x["relpath"] for x in d7_started} == {x["relpath"] for x in d7_shipped}
+      and all(x.get("schema") == "ship-row/1" and x.get("sha256") and x.get("size")
+              for x in d7_started + d7_shipped), str(d7_rows(mlog))[:400])
+check("D7 the archive lock lives in _verify/lock and is released afterwards",
+      not os.path.exists(os.path.join(d7a, "_verify", "lock", "ship.lock"))
+      and not os.path.exists(os.path.join(d7a, "_verify", "ship.lock")))
+
+# a copy cut off mid-file (the share went away), the PC sets it aside, the retry
+D7b = teh.Env("D7b", asiair=False, seestar=True)
+D7b.env.update(D7_MAC)
+b_arch = D7b.archive
+os.makedirs(os.path.join(b_arch, "S30P"))
+for st in ("20260910-224402", "20260910-225402", "20260911-224402"):
+    D7b.add_seestar_sub("M 27", st)
+D7b.run("--no-ship")
+r = D7b.run("--ship", extra_env=teh.no_delete_env(D7b.root, b_arch, cut_ship=3))
+blog = os.path.join(b_arch, "_verify", "mac", "shipped.jsonl")
+_failed = d7_rows(blog, "failed")
+cut_rel = _failed[0]["relpath"] if _failed else "missing"
+cut_path = d7_at(b_arch, cut_rel)
+check("D7 a copy cut off mid-file stays under its final name, logged 'failed'; nothing is "
+      "renamed or deleted",
+      "Shipped 2 file(s)" in r.stdout and len(_failed) == 1 and "cut off" in _failed[0].get("why", "")
+      and os.path.isfile(cut_path) and os.path.getsize(cut_path) < _failed[0]["size"]
+      and d7_bad(D7b.root) == [], r.stdout[-400:] + str(_failed))
+check("D7 ...and that frame is not stamped shipped in the ledger",
+      sum(1 for e in D7b.ledger()["files"].values() if e.get("archiveShippedAt")) == 2)
+D7b.add_seestar_sub("M 27", "20260912-224402")          # a new night meanwhile
+D7b.run("--no-ship")
+_size_cut = os.path.getsize(cut_path) if os.path.isfile(cut_path) else -1
+r = D7b.run("--ship", extra_env=teh.no_delete_env(D7b.root, b_arch))
+check("D7 the next ship leaves the unfinished copy alone for the PC and says so; the new "
+      "night still ships",
+      "1 file(s) wait for the PC to set aside an unfinished copy" in r.stdout
+      and "Shipped 1 file(s)" in r.stdout and os.path.getsize(cut_path) == _size_cut
+      and len(d7_rows(blog, "started")) == 4, r.stdout[-500:])
+# the PC's sweep sets it aside (the PC may move files on the archive; the Mac may not)
+_q = os.path.join(b_arch, "_Quarantine", "ship-incomplete", *cut_rel.split("\\"))
+os.makedirs(os.path.dirname(_q), exist_ok=True)
+shutil.move(cut_path, _q)
+r = D7b.run("--ship", extra_env=teh.no_delete_env(D7b.root, b_arch))
+_again = [x for x in d7_rows(blog, "shipped") if x["relpath"] == cut_rel]
+check("D7 once the PC has set it aside, the frame goes again to the same path",
+      "Shipped 1 file(s)" in r.stdout and len(_again) == 1 and os.path.isfile(cut_path)
+      and d7_sha(cut_path) == _again[0]["sha256"] and d7_bad(D7b.root) == [], r.stdout[-400:])
+_days = {}
+for x in d7_rows(blog, "shipped"):
+    _days.setdefault(x["relpath"].split("\\")[-2], set()).add(
+        re.search(r"(\d{8})-\d{6}", x["relpath"]).group(1))
+check("D7 ...so its night keeps its Day folder, and the new night took the next Day",
+      len(_days) == 3 and all(len(v) == 1 for v in _days.values()), str(_days))
+
+# every byte arrived but the "shipped" row (and the ledger stamp) didn't
+D7.add_seestar_sub("M 27", "20260913-224402")
+D7.run("--no-ship")
+D7.run("--ship", extra_env=ND)
+_rows = d7_rows(mlog)
+_last = [x for x in _rows if x.get("state") == "shipped"][-1]["relpath"]
+with open(mlog, "w", encoding="utf-8") as f:
+    for x in _rows:
+        if not (x.get("state") == "shipped" and x["relpath"] == _last):
+            f.write(json.dumps(x) + "\n")
+_ledp = os.path.join(D7.state, "ledger.json")
+_led = json.load(open(_ledp, encoding="utf-8"))
+for e in _led["files"].values():
+    if e.get("archiveLocation") == _last:
+        e.pop("archiveLocation"); e.pop("archiveShippedAt")
+json.dump(_led, open(_ledp, "w", encoding="utf-8"))
+r = D7.run("--ship", extra_env=ND)
+_adopted = [x for x in d7_rows(mlog, "shipped") if x["relpath"] == _last]
+check("D7 a complete copy whose 'shipped' row was lost is recognised by its hash, not left waiting",
+      "Shipped 1 file(s)" in r.stdout and len(_adopted) == 1 and _adopted[0].get("adopted") is True
+      and any(e.get("archiveLocation") == _last for e in D7.ledger()["files"].values()),
+      r.stdout[-400:])
+
+# the Mac's copy changed since import: nothing is started for it
+D7.add_seestar_sub("M 27", "20260914-224402")
+D7.run("--no-ship")
+_e14 = [e for e in D7.ledger()["files"].values() if e["filename"] == "20260914-224402.fit"][0]
+_p14 = os.path.join(_e14["dest"], _e14["filename"])
+_b = bytearray(open(_p14, "rb").read()); _b[-10] ^= 0xFF
+open(_p14, "wb").write(bytes(_b))
+_n_started = len(d7_rows(mlog, "started"))
+r = D7.run("--ship", extra_env=ND)
+check("D7 a frame changed on this computer since import is not sent, and nothing is started "
+      "for it on the archive (1.6 renamed such a copy .BAD after writing it)",
+      "no longer matches the ledger" in r.stdout and len(d7_rows(mlog, "started")) == _n_started
+      and not any("20260914-224402" in p for p in d7_tree(d7a)), r.stdout[-400:])
+open(_p14, "wb").write(bytes(_b[:-10]) + bytes([_b[-10] ^ 0xFF]) + bytes(_b[-9:]))  # put it back
+
+# the archive lock (spec 11): live, stale, and a 1.6 machine's
+_lockp = os.path.join(d7a, "_verify", "lock", "ship.lock")
+def d7_put_lock(minutes_ago):
+    t = (_dt.now(_tz.utc) - _td(minutes=minutes_ago)).isoformat(timespec="seconds")
+    with open(_lockp, "w", encoding="utf-8") as f:
+        json.dump({"schema": "ship-lock/1", "machineId": "chillblast", "machine": "the-pc",
+                   "host": "CHILLBLAST", "pid": 4242, "op": "ship", "startedAt": t,
+                   "renewedAt": t}, f)
+d7_put_lock(1)
+r = D7.run("--ship", extra_env=ND)
+check("D7 another computer's live lock (renewed a minute ago): nothing shipped, its lock left alone",
+      "CHILLBLAST is shipping into the archive right now" in r.stdout and "Shipped" not in r.stdout
+      and json.load(open(_lockp, encoding="utf-8"))["host"] == "CHILLBLAST", r.stdout[-300:])
+d7_put_lock(11)
+r = D7.run("--ship", extra_env=ND)
+check("D7 a lock not renewed for ten minutes is broken, that is written in the ship log, and "
+      "the ship goes ahead",
+      "Breaking a stale archive ship lock" in r.stdout and "Shipped 1 file(s)" in r.stdout
+      and any(x.get("state") == "lock-broken" and (x.get("held") or {}).get("host") == "CHILLBLAST"
+              for x in d7_rows(mlog)) and not os.path.exists(_lockp), r.stdout[-400:])
+_legacy = os.path.join(d7a, "_verify", "ship.lock")
+with open(_legacy, "w", encoding="utf-8") as f:
+    json.dump({"machine": "old-mac", "host": "OLDMAC", "pid": 1, "at": "2026-10-03T090000"}, f)
+D7.add_seestar_sub("M 27", "20260916-224402")
+D7.run("--no-ship")
+r = D7.run("--ship", extra_env=ND)
+check("D7 a 1.6 importer's fresh _verify/ship.lock still stops this ship",
+      "OLDMAC (an older importer) is shipping" in r.stdout and "Shipped" not in r.stdout
+      and not os.path.exists(_lockp), r.stdout[-300:])
+_old = time.time() - 7 * 3600
+os.utime(_legacy, (_old, _old))
+r = D7.run("--ship", extra_env=ND)
+check("D7 ...but not once it is six hours old; the old lock file is left where it is",
+      "Shipped 1 file(s)" in r.stdout and os.path.isfile(_legacy), r.stdout[-300:])
+os.remove(_legacy)
+got = d7_probe(D7.env, "\n".join([
+    "p = os.path.join(m.ARCHIVE_MOUNT, '_verify', 'lock', 'ship.lock')",
+    "L = m._archive_ship_lock(m.ARCHIVE_MOUNT)",
+    "L.rec['renewedAt'] = '2000-01-01T00:00:00+00:00'",
+    "ok1 = L.renew()",
+    "fresh = json.load(open(p))['renewedAt'] != '2000-01-01T00:00:00+00:00'",
+    "json.dump(dict(json.load(open(p)), pid=999999, host='OTHER'), open(p, 'w'))",
+    "ok2 = L.renew()",
+    "lost = L.lost",
+    "L.release()",
+    "print(json.dumps({'ok1': ok1, 'fresh': fresh, 'ok2': ok2, 'lost': lost,",
+    "                  'kept': json.load(open(p))['host'] == 'OTHER'}))"]))
+check("D7 the holder renews its lock, notices when another run has taken it over, and then "
+      "leaves that run's lock alone",
+      got == {"ok1": True, "fresh": True, "ok2": False, "lost": True, "kept": True}, str(got))
+if os.path.exists(_lockp):
+    os.remove(_lockp)
+
+# why the archive isn't reachable (fix d)
+D7d = teh.Env("D7d", asiair=False, seestar=True)
+D7d.env.update(D7_MAC)
+D7d.add_seestar_sub("M 27", "20260910-224402")
+D7d.run("--no-ship")
+r1 = D7d.run("--ship")
+os.makedirs(D7d.archive)
+r2 = D7d.run("--ship")
+os.makedirs(os.path.join(D7d.archive, "S30P")); os.makedirs(os.path.join(D7d.archive, "_verify"))
+open(os.path.join(D7d.archive, "_verify", "mac"), "w").close()       # can't be a folder now
+r3 = D7d.run("--ship")
+check("D7 'not reachable' says why: not mounted, no camera folders, or _verify/mac can't be "
+      "written (fix d)",
+      ("the folder isn't there" if os.name == "nt" else "the share isn't mounted") in r1.stdout
+      and "none of S30P" in r2.stdout and "can't write in _verify" in r3.stdout
+      and all(x.returncode == 0 and "not reachable" in x.stdout for x in (r1, r2, r3)),
+      r1.stdout[-200:] + r2.stdout[-200:] + r3.stdout[-200:])
+D7d.add_seestar_sub("M 27", "20260911-224402")
+shutil.rmtree(D7d.archive)
+r = D7d.run(extra_env={"ASTRO_ARCHIVE_URL": "smb://astro@TESTPC/AstroImageData"})
+check("D7 a Terminal import with the share down still asks Finder to connect without a word, "
+      "as 1.6 did",
+      [c.get("url") for c in teh.os_calls(D7d.root, "mount")] == ["smb://astro@TESTPC/AstroImageData"]
+      and "Finder" not in r.stdout and "not reachable" not in r.stdout and "Shipped" not in r.stdout,
+      r.stdout[-300:])
+
+# the archive's free space, and the PC's verified rows in _verify/pc
+D7.add_seestar_sub("M 27", "20260917-224402")
+D7.run("--no-ship")
+_n_started = len(d7_rows(mlog, "started"))
+r = D7.run("--ship", extra_env=dict(ND, ASTRO_ARCHIVE_MIN_FREE_GB="100000000"))
+check("D7 a ship that would leave the archive short of space sends nothing and says so",
+      "Nothing shipped: free up space on the archive" in r.stdout
+      and len(d7_rows(mlog, "started")) == _n_started, r.stdout[-300:])
+_ship_rows = d7_rows(mlog, "shipped")
+with open(os.path.join(d7a, "_verify", "pc", "verified.jsonl"), "w", encoding="utf-8") as f:
+    for x in _ship_rows[:2]:
+        f.write(json.dumps({"schema": "verified-row/1", "relpath": x["relpath"], "sha256": x["sha256"],
+                            "size": x["size"], "verifiedAt": "2026-10-04T033000"}) + "\n")
+r = D7.run("--ship", extra_env=ND)
+_ver = [e for e in D7.ledger()["files"].values() if e.get("archiveVerifiedAt") == "2026-10-04T033000"]
+check("D7 the PC's verified rows, now in _verify/pc, stamp archiveVerifiedAt",
+      len(_ver) == 2 and "2 frame(s) confirmed verified" in r.stdout, r.stdout[-300:])
+
+# this computer's names (spec section 2)
+_mid = json.load(open(os.path.join(D7.state, "machine.json"), encoding="utf-8"))["id"]
+_idcode = "print(json.dumps(m.machine_identity()))"
+g1 = d7_probe(D7.env, _idcode)
+g2 = d7_probe(dict(D7.env, ASTRO_MACHINE_ID="Chill Blast"), _idcode)
+g3 = d7_probe(dict(D7.env, ASTRO_MACHINE_ID="chillblast", ASTRO_MACHINE_LABEL="Chillblast"), _idcode)
+_slug = "mac" if sys.platform == "darwin" else ("pc" if os.name == "nt" else "linux")
+check("D7 each computer has a short name and a label beside its unchanged id; a name that "
+      "breaks the rule is flagged",
+      g1.get("id") == _mid and g1.get("slug") == _slug and g1.get("slugValid") is True
+      and g2.get("slugValid") is False and g3.get("slug") == "chillblast"
+      and g3.get("label") == "Chillblast" and g3.get("slugValid") is True and g3.get("id") == _mid,
+      f"{g1} {g2} {g3}")
+D7.add_seestar_sub("M 27", "20260918-224402")
+D7.run("--no-ship")
+_n_rows = len(d7_rows(mlog))
+r = D7.run("--ship", extra_env=dict(ND, ASTRO_MACHINE_ID="Chill Blast"))
+check("D7 ...and with such a name the ship writes nothing and says what to change",
+      "Nothing shipped: this computer's short name 'Chill Blast' breaks the rule" in r.stdout
+      and "ASTRO_MACHINE_ID" in r.stdout and len(d7_rows(mlog)) == _n_rows
+      and not os.path.exists(_lockp), r.stdout[-300:])
+r = D7.run("--ship", extra_env=dict(ND, ASTRO_MACHINE_ID="chillblast"))
+_last = d7_rows(mlog, "shipped")[-1:]
+check("D7 ...while a good one goes into each row it writes",
+      "Shipped 1 file(s)" in r.stdout and _last and _last[0].get("machineId") == "chillblast",
+      r.stdout[-300:])
+
+# Collect Lights copies (fix b)
+D7e = teh.Env("D7e", asiair=False, seestar=True)
+D7e.env.update(D7_MAC)
+os.makedirs(os.path.join(D7e.archive, "S30P"))
+for st in ("20260910-224402", "20260910-225402", "20260910-230402"):
+    D7e.add_seestar_sub("C 9", st)
+D7e.run("--no-ship")
+_tmac = os.path.join(D7e.sdest30, "C 9 - Cave Nebula")
+_day = [d for d in os.listdir(_tmac) if d.endswith("Day 1")][0]
+os.makedirs(os.path.join(_tmac, "lights", "lights"))
+for fn in sorted(os.listdir(os.path.join(_tmac, _day))):
+    _dst = os.path.join(_tmac, "lights", "lights", f"{_day.replace(' ', '_')}_{fn}")
+    shutil.move(os.path.join(_tmac, _day, fn), _dst)
+    if fn.startswith("20260910-230402"):          # same size, other bytes: not the frame
+        _b = bytearray(open(_dst, "rb").read()); _b[-5] ^= 0xFF
+        open(_dst, "wb").write(bytes(_b))
+r = D7e.run("--ship", extra_env=teh.no_delete_env(D7e.root, D7e.archive))
+_on_e = sorted(f for _dp, _d, fs in os.walk(os.path.join(D7e.archive, "S30P")) for f in fs)
+check("D7 a frame Collect Lights renamed into lights/lights is found and filed under its own "
+      "name (fix b)",
+      "Shipped 2 file(s)" in r.stdout and "missing on Mac" not in r.stdout
+      and _on_e == ["20260910-224402.fit", "20260910-225402.fit"], r.stdout[-400:] + str(_on_e))
+check("D7 ...but a renamed file of the same size with other bytes is not taken for the frame",
+      "no longer matches the ledger" in r.stdout and d7_bad(D7e.root) == [], r.stdout[-300:])
+
+# calibration frames go with their lights (fix a)
+D7c = teh.Env("D7c")
+D7c.env.update(D7_MAC)
+os.makedirs(os.path.join(D7c.archive, "ZWO Askar Scopes"))
+D7c.add_light("Plan", "M 27", "0001", dt="20260721-010000")
+D7c.add_light("Plan", "M 27", "0002", dt="20260721-011000")
+D7c.add_cal("Bias", "1.0ms", "20260719-090000")
+D7c.add_cal("Dark", "300.0s", "20260719-091000")
+D7c.add_cal("Flat", "20.0ms", "20260720-090000", filt="LUltimate")
+D7c.run("--no-ship", stdin="n\n")
+r = D7c.run("--ship", "--dry-run")
+check("D7 a dry run lists the calibration frames that would go, on their own line",
+      "of which calibration frames: 3 file(s)" in r.stdout, r.stdout[-400:])
+r = D7c.run("--ship", extra_env=teh.no_delete_env(D7c.root, D7c.archive))
+_tE = os.path.join(D7c.archive, "ZWO Askar Scopes", "Dumbbell Nebula (M 27)", "Dumbbell Nebula (M 27) Day 1")
+_cal_on_e = {k: os.listdir(os.path.join(_tE, "calibration", k))
+             for k in ("biases", "darks", "flats") if os.path.isdir(os.path.join(_tE, "calibration", k))}
+_cled = D7c.ledger()["calibration"]
+check("D7 calibration frames now go with their lights, into the archive Day folder's "
+      "calibration/biases, darks and flats (fix a)",
+      "Shipped 5 file(s)" in r.stdout and sorted(_cal_on_e) == ["biases", "darks", "flats"]
+      and all(len(v) == 1 for v in _cal_on_e.values()) and d7_bad(D7c.root) == []
+      and all(len(c.get("archive") or {}) == 1 and all(x.get("shippedAt") and "\\calibration\\" in x["location"]
+                                                       for x in c["archive"].values())
+              for c in _cled.values()),
+      r.stdout[-400:] + str(_cal_on_e))
+_crows = [x for x in d7_rows(os.path.join(D7c.archive, "_verify", "mac", "shipped.jsonl"), "shipped")
+          if "\\calibration\\" in x["relpath"]]
+with open(os.path.join(D7c.archive, "_verify", "pc", "verified.jsonl"), "w", encoding="utf-8") as f:
+    for x in _crows:
+        f.write(json.dumps({"relpath": x["relpath"], "sha256": x["sha256"], "size": x["size"],
+                            "verifiedAt": "2026-10-04T033000"}) + "\n")
+r = D7c.run("--ship", extra_env=teh.no_delete_env(D7c.root, D7c.archive))
+check("D7 ...the PC's check stamps each calibration copy, and nothing is sent twice",
+      len(_crows) == 3 and "Ship: 0 file(s)" in r.stdout
+      and all(x.get("verifiedAt") == "2026-10-04T033000"
+              for c in D7c.ledger()["calibration"].values() for x in c["archive"].values()),
+      r.stdout[-300:])
+
+# The same under the operating system's own rights (plan, phase 0): a camera
+# folder whose Delete is refused by an ACL (a Mac) or icacls (the PC), so a
+# delete or rename anywhere in the ship would fail for real. Not on Linux
+# (no such ACLs, and a test there may run as root, which ignores them).
+D7r = teh.Env("D7r", asiair=False, seestar=True)
+D7r.env.update(D7_MAC)
+_rcam = os.path.join(D7r.archive, "S30P")
+os.makedirs(_rcam); os.makedirs(os.path.join(D7r.archive, "_verify", "mac"))
+for st in ("20260910-224402", "20260911-224402"):
+    D7r.add_seestar_sub("M 27", st)
+D7r.run("--no-ship")
+_me = (os.environ.get("USERDOMAIN", "") + "\\" if os.environ.get("USERDOMAIN") else "") \
+    + os.environ.get("USERNAME", "")
+if sys.platform == "darwin":
+    _deny = ["chmod", "+a", "everyone deny delete,delete_child,file_inherit,directory_inherit", _rcam]
+    _undo = ["chmod", "-R", "-N", _rcam]
+elif os.name == "nt":
+    _deny = ["icacls", _rcam, "/deny", f"{_me}:(OI)(CI)(DE,DC)"]
+    _undo = ["icacls", _rcam, "/remove:d", _me, "/t", "/c", "/q"]
+else:
+    _deny = _undo = None
+if _deny:
+    _dr = subprocess.run(_deny, capture_output=True, text=True)
+    try:
+        r = D7r.run("--ship")
+        _shipped = [os.path.join(dp, f) for dp, _d, fs in os.walk(_rcam) for f in fs]
+        try:
+            os.remove(_shipped[0])
+            _refused = False
+        except (OSError, IndexError):
+            _refused = bool(_shipped)
+        check("D7 under a real no-Delete rule from the operating system (an ACL on a Mac, icacls "
+              "on the PC) the ship still files every frame, and a delete there is refused",
+              _dr.returncode == 0 and "Shipped 2 file(s)" in r.stdout and len(_shipped) == 2
+              and _refused, _dr.stderr[-200:] + r.stdout[-300:])
+    finally:
+        subprocess.run(_undo, capture_output=True, text=True)
+else:
+    print("  SKIP  D7 a real no-Delete folder from the operating system (a Mac or the PC only)")
+
+# ═══════════════ CHAIN PC: the archive PC's own jobs (1.7.0, phase 0) ════════
+print("\n── Chain PC: the PC's sweep, inventory, hash cache and requests (1.7.0) ──")
+# The PC runs this same engine (Sync View spec, section 2): --sweep replaces
+# sweep.ps1 and writes only in _verify/pc; it sets aside only copies a ship
+# started and never finished (decision 1), never the hand-copied ones. Test
+# mode stands in for the PC on any computer.
+import glob as _glob
+PCX = {"ASTRO_SHIP_FOLDER": "pc", "ASTRO_SHIP_LOG": "shipped-pc.jsonl",
+       "ASTRO_MACHINE_ID": "chillblast", "ASTRO_MACHINE_LABEL": "Chillblast"}
+_READ = "unbuffered" if os.name == "nt" else "buffered"
+
+def pc_rows(arch, name, **match):
+    return [r for r in d7_rows(os.path.join(arch, "_verify", "pc", name))
+            if all(r.get(k) == v for k, v in match.items())]
+
+def pc_json(arch, *parts):
+    try:
+        with open(os.path.join(arch, "_verify", "pc", *parts), encoding="utf-8") as f:
+            return json.load(f)
+    except (OSError, ValueError):
+        return {}
+
+def pc_file(arch, rel, data):
+    p = os.path.join(arch, *rel.replace("\\", "/").split("/"))
+    os.makedirs(os.path.dirname(p), exist_ok=True)
+    with open(p, "wb") as f:
+        f.write(data)
+    return p
+
+def pc_sha(b):
+    return hashlib.sha256(b).hexdigest()
+
+def pc_utc(minutes_ago=0):
+    return (_dt.now(_tz.utc) - _td(minutes=minutes_ago)).isoformat(timespec="seconds")
+
+def pc_put_rows(path, rows, mode="a"):
+    os.makedirs(os.path.dirname(path), exist_ok=True)
+    with open(path, mode, encoding="utf-8") as f:
+        for x in rows:
+            f.write(json.dumps(x) + "\n")
+
+# the Mac ships four frames into the archive (D7 rights) ...
+PCS = teh.Env("PCS", asiair=False, seestar=True)
+PCS.env.update(D7_MAC)
+pa = PCS.archive
+os.makedirs(os.path.join(pa, "S30P"))
+for st in ("20260910-224402", "20260910-225402", "20260911-224402", "20260911-225402"):
+    PCS.add_seestar_sub("M 27", st)
+PCS.run("--no-ship")
+ND_S = teh.no_delete_env(PCS.root, pa)
+r = PCS.run("--ship", extra_env=ND_S)
+assert "Shipped 4 file(s)" in r.stdout, r.stdout[-400:]
+# ... beside the 1.6 logs, now history, and the PC's own 1.7 log
+_old_dir = "S30P\\Old (X 1)\\X 1_sub Day 1\\"
+pc_file(pa, _old_dir + "old.fit", b"old frame")
+pc_file(pa, _old_dir + "done.fit", b"done")
+pc_file(pa, _old_dir + "bad.fit", b"wrong bytes")
+pc_file(pa, _old_dir + "short.fit", b"12345")
+_zwo = "ZWO Askar Scopes\\T (T 1)\\T (T 1) Day 1\\Light_T_1.fit"
+pc_file(pa, _zwo, b"PC frame")
+pc_put_rows(os.path.join(pa, "_verify", "shipped.jsonl"), [
+    {"relpath": _old_dir + "old.fit", "size": 9, "sha256": pc_sha(b"old frame"), "machine": "Mac"},
+    {"relpath": _old_dir + "done.fit", "size": 4, "sha256": pc_sha(b"done"), "machine": "Mac"},
+    {"relpath": _old_dir + "bad.fit", "size": 11, "sha256": pc_sha(b"right bytes"), "machine": "Mac"},
+    {"relpath": _old_dir + "short.fit", "size": 9, "sha256": pc_sha(b"123456789"), "machine": "Mac"},
+    {"relpath": _old_dir + "gone.fit", "size": 3, "sha256": pc_sha(b"abc"), "machine": "Mac"},
+    {"relpath": "..\\..\\outside.fit", "size": 3, "sha256": pc_sha(b"abc"), "machine": "Mac"}], "w")
+pc_put_rows(os.path.join(pa, "_verify", "verified.jsonl"), [
+    {"relpath": _old_dir + "done.fit", "sha256": pc_sha(b"done"), "size": 4,
+     "verifiedAt": "2026-09-27T033000"}], "w")
+pc_put_rows(os.path.join(pa, "_verify", "pc", "shipped-pc.jsonl"), [
+    {"schema": "ship-row/1", "state": s_, "relpath": _zwo, "size": 8, "sha256": pc_sha(b"PC frame"),
+     "machine": "PC", "machineId": "chillblast", "shipId": "p1", "at": pc_utc(90)}
+    for s_ in ("started", "shipped")], "w")
+_leg = {n: d7_sha(os.path.join(pa, "_verify", n)) for n in ("shipped.jsonl", "verified.jsonl")}
+r = PCS.run("--sweep", extra_env=PCX)
+_ver = pc_rows(pa, "verified.jsonl")
+_prob = pc_rows(pa, "problems.jsonl")
+_st = pc_json(pa, "status.json")
+_mac_rels = {x["relpath"] for x in d7_rows(os.path.join(pa, "_verify", "mac", "shipped.jsonl"), "shipped")}
+check("PC the sweep re-reads every frame each computer's log calls shipped (the 1.6 Mac's in "
+      "_verify, the Mac's in _verify/mac, the PC's own in _verify/pc) from the PC's disk, and "
+      "records each match in _verify/pc/verified.jsonl: schema, how it was read, by whom",
+      r.returncode == 0 and {x["relpath"] for x in _ver} == _mac_rels | {_old_dir + "old.fit", _zwo}
+      and len(_ver) == 6
+      and all(x.get("schema") == "verified-row/1" and x.get("read") == _READ
+              and x.get("hashedBy") == "chillblast" for x in _ver), r.stdout[-400:] + str(_ver)[:300])
+check("PC ...a frame the old sweep verified isn't read again, and the 1.6 files in _verify are "
+      "left exactly as they were",
+      not any(x["relpath"].endswith("done.fit") for x in _ver)
+      and _leg == {n: d7_sha(os.path.join(pa, "_verify", n)) for n in _leg}
+      and not _glob.glob(os.path.join(pa, "_verify", "sweep_*.log")), str(_leg))
+check("PC a wrong hash, a wrong size, a missing file and a path that leaves the archive each "
+      "become one problem row, and the sweep says where to look",
+      sorted(x["problem"] for x in _prob) == ["hash", "missing", "outside archive", "size 5"]
+      and next(x for x in _prob if x["problem"] == "hash").get("found") == pc_sha(b"wrong bytes")
+      and all(x.get("schema") == "problem-row/1" for x in _prob) and "ATTENTION" in r.stdout,
+      str(_prob)[:400])
+check("PC status.json keeps the old sweep's fields (Brett's PowerShell checks read them) and adds "
+      "the new ones; the sweep's log is in _verify/pc",
+      _st.get("verifiedThisRun") == 6 and _st.get("failedThisRun") == 3
+      and _st.get("missingThisRun") == 1 and _st.get("pendingBefore") == 10
+      and _st.get("totalVerified") == 7 and _st.get("totalProblems") == 4
+      and _st.get("schema") == "sweep-status/1" and _st.get("machineId") == "chillblast"
+      and _st.get("read") == _READ and _st.get("sweptAt") and _st.get("sweptAtUtc")
+      and len(_glob.glob(os.path.join(pa, "_verify", "pc", "sweep_*.log"))) == 1, str(_st))
+r = PCS.run("--sweep", extra_env=PCX)
+check("PC a second sweep has nothing left to check: a problem is never retried by itself",
+      len(pc_rows(pa, "verified.jsonl")) == 6 and len(pc_rows(pa, "problems.jsonl")) == 4
+      and pc_json(pa, "status.json").get("pendingBefore") == 0, r.stdout[-300:])
+r = PCS.run("--ship", extra_env=ND_S)
+check("PC ...and the Mac's next ship stamps its four frames verified from _verify/pc",
+      "4 frame(s) confirmed verified by the PC sweep" in r.stdout
+      and sum(1 for e in PCS.ledger()["files"].values() if e.get("archiveVerifiedAt")) == 4,
+      r.stdout[-300:])
+
+# copies a ship never finished: set aside, only those, and only when it's safe
+PCQ = teh.Env("PCQ", asiair=False, seestar=True)
+PCQ.env.update(D7_MAC)
+qa = PCQ.archive
+os.makedirs(os.path.join(qa, "S30P"))
+for st in ("20260910-224402", "20260910-225402", "20260911-224402"):
+    PCQ.add_seestar_sub("M 27", st)
+PCQ.run("--no-ship")
+r = PCQ.run("--ship", extra_env=teh.no_delete_env(PCQ.root, qa, cut_ship=2))
+qlog = os.path.join(qa, "_verify", "mac", "shipped.jsonl")
+_cut = d7_rows(qlog, "failed")
+_cut_rel = _cut[0]["relpath"] if _cut else "?"
+_cut_path = d7_at(qa, _cut_rel)
+_rd = os.path.join(qa, "_verify", "mac", "requests")
+_reqs = sorted(os.listdir(_rd)) if os.path.isdir(_rd) else []
+check("PC a ship that leaves a copy unfinished asks the PC for a sweep straight away "
+      "(a request in _verify/mac/requests)",
+      "Shipped 2 file(s)" in r.stdout and len(_cut) == 1 and len(_reqs) == 1
+      and re.fullmatch(r"sweep-\d{8}T\d{6}Z-[a-z0-9-]+-[0-9a-f]{8}\.json", _reqs[0] or "")
+      and "Asked the PC" in r.stdout, r.stdout[-400:] + str(_reqs))
+_hand = pc_file(qa, "S30P/Hand (H 1)/H 1_sub Day 1/Light_hand.fit", b"hand copy")   # like the 865
+_dss = pc_file(qa, "S30P/Dumbbell Nebula (M 27)/M 27_sub Day 1/.DS_Store", b"x")
+r = PCQ.run("--sweep", extra_env=PCX)
+check("PC the sweep leaves an unfinished copy alone for ten minutes after its ship",
+      os.path.isfile(_cut_path) and not os.path.exists(os.path.join(qa, "_Quarantine"))
+      and "less than ten minutes" in r.stdout, r.stdout[-300:])
+r = PCQ.run("--pc-tick", extra_env=PCX)
+_resp = pc_json(qa, "responses", _reqs[0] if _reqs else "?")
+check("PC ...so the Mac's request is answered 'queued' and tried again at the next tick",
+      _resp.get("status") == "queued" and _resp.get("schema") == "response/1", str(_resp))
+_rows = d7_rows(qlog)
+for x in _rows:
+    x["at"] = pc_utc(60)                  # an hour passes (the copy was written after its row)
+pc_put_rows(qlog, _rows, "w")
+_qlock = os.path.join(qa, "_verify", "lock", "ship.lock")
+with open(_qlock, "w", encoding="utf-8") as f:
+    json.dump({"schema": "ship-lock/1", "machineId": "mac", "host": "BRETTS-MAC", "pid": 1,
+               "op": "ship", "startedAt": pc_utc(2), "renewedAt": pc_utc(1)}, f)
+r = PCQ.run("--sweep", extra_env=PCX)
+check("PC ...and alone while any ship holds the archive lock",
+      os.path.isfile(_cut_path) and "a ship is running" in r.stdout, r.stdout[-300:])
+os.remove(_qlock)
+r = PCQ.run("--pc-tick", extra_env=PCX)
+_qdest = os.path.join(qa, "_Quarantine", "ship-incomplete", *_cut_rel.split("\\"))
+_qrows = pc_rows(qa, "quarantine.jsonl")
+check("PC then it moves that copy, and only it, into _Quarantine/ship-incomplete under the same "
+      "path, and logs it; the hand-copied frame and Finder's file stay where they are",
+      not os.path.exists(_cut_path) and os.path.isfile(_qdest) and len(_qrows) == 1
+      and _qrows[0].get("relpath") == _cut_rel and _qrows[0].get("state") == "failed"
+      and _qrows[0].get("schema") == "quarantine-row/1"
+      and _qrows[0].get("expectedSize", 0) > _qrows[0].get("size", 0)
+      and os.path.isfile(_hand) and os.path.isfile(_dss), str(_qrows)[:400])
+_resp = pc_json(qa, "responses", _reqs[0] if _reqs else "?")
+check("PC ...and answers the Mac's request: done, with what it did",
+      _resp.get("status") == "done" and (_resp.get("result") or {}).get("setAside") == 1
+      and os.path.isfile(os.path.join(_rd, _reqs[0] if _reqs else "?")), str(_resp))
+r = PCQ.run("--ship", extra_env=teh.no_delete_env(PCQ.root, qa))
+check("PC the Mac's next ship sends that frame again, to the same path",
+      "Shipped 1 file(s)" in r.stdout and os.path.isfile(_cut_path)
+      and os.path.getsize(_cut_path) == _cut[0].get("size"), r.stdout[-300:])
+r = PCQ.run("--sweep", extra_env=PCX)
+check("PC ...and the next sweep verifies it",
+      any(x["relpath"] == _cut_rel for x in pc_rows(qa, "verified.jsonl")), r.stdout[-300:])
+PCQ.add_seestar_sub("M 27", "20260912-224402")
+PCQ.run("--no-ship")
+PCQ.run("--ship", extra_env=teh.no_delete_env(PCQ.root, qa))
+_urel = d7_rows(qlog, "shipped")[-1]["relpath"]
+_up = d7_at(qa, _urel)
+with teh.held_exclusively(_up):
+    r = PCQ.run("--sweep", extra_env=dict(PCX, **teh.read_error_env(PCQ.root, [_up])))
+check("PC a shipped frame that can't be read just now (in use, or a disk error) gets no problem "
+      "row: the sweep says so and reads it again next time",
+      "couldn't be read just now" in r.stdout
+      and not any(x["relpath"] == _urel for x in pc_rows(qa, "problems.jsonl"))
+      and not any(x["relpath"] == _urel for x in pc_rows(qa, "verified.jsonl"))
+      and pc_json(qa, "status.json").get("unreadableThisRun") == 1, r.stdout[-300:])
+r = PCQ.run("--sweep", extra_env=PCX)
+check("PC ...and once it can be read, the next sweep verifies it",
+      any(x["relpath"] == _urel for x in pc_rows(qa, "verified.jsonl")), r.stdout[-300:])
+# every byte arrived, but the read-back over the share said otherwise
+PCQ.add_seestar_sub("M 27", "20260914-224402")
+PCQ.run("--no-ship")
+PCQ.run("--ship", extra_env=teh.no_delete_env(PCQ.root, qa))
+_rows = d7_rows(qlog)
+_whole = [x for x in _rows if x.get("state") == "shipped"][-1]
+for x in _rows:
+    if x is _whole:
+        x.update(state="failed", why="read back differs from what was sent")
+    if x.get("relpath") == _whole["relpath"]:
+        x["at"] = pc_utc(60)
+pc_put_rows(qlog, _rows, "w")
+_ledp = os.path.join(PCQ.state, "ledger.json")
+_led = json.load(open(_ledp, encoding="utf-8"))
+for e in _led["files"].values():
+    if e.get("archiveLocation") == _whole["relpath"]:
+        e.pop("archiveLocation"); e.pop("archiveShippedAt")
+json.dump(_led, open(_ledp, "w", encoding="utf-8"))
+r = PCQ.run("--sweep", extra_env=PCX)
+check("PC a copy whose read-back failed but whose bytes are all there is left where it is "
+      "(the PC reads it whole and correct), with no problem row",
+      os.path.isfile(d7_at(qa, _whole["relpath"])) and "whole and correct" in r.stdout
+      and not any(x["relpath"] == _whole["relpath"] for x in pc_rows(qa, "quarantine.jsonl"))
+      and not any(x["relpath"] == _whole["relpath"] for x in pc_rows(qa, "problems.jsonl")),
+      r.stdout[-300:])
+r = PCQ.run("--ship", extra_env=teh.no_delete_env(PCQ.root, qa))
+check("PC ...and the Mac's next ship records it as shipped without sending it again",
+      "Shipped 1 file(s)" in r.stdout
+      and [x.get("adopted") for x in d7_rows(qlog, "shipped") if x["relpath"] == _whole["relpath"]] == [True]
+      and any(e.get("archiveLocation") == _whole["relpath"] for e in PCQ.ledger()["files"].values()),
+      r.stdout[-300:])
+_odd1 = pc_file(qa, "S30P/Odd (O 1)/O 1_sub Day 1/older.fit", b"older")
+teh.backdate(_odd1, 3 * 3600)
+_odd2 = pc_file(qa, "S30P/Odd (O 1)/O 1_sub Day 1/bigger.fit", b"far too many bytes")
+pc_put_rows(qlog, [{"schema": "ship-row/1", "state": "started", "relpath": rel, "size": size,
+                    "sha256": "0" * 64, "machine": "Mac", "machineId": "mac", "shipId": "odd",
+                    "at": pc_utc(60)}
+                   for rel, size in (("S30P\\Odd (O 1)\\O 1_sub Day 1\\older.fit", 5),
+                                     ("S30P\\Odd (O 1)\\O 1_sub Day 1\\bigger.fit", 4))])
+PCQ.run("--sweep", extra_env=PCX)
+r = PCQ.run("--sweep", extra_env=PCX)
+_oddp = [x for x in pc_rows(qa, "problems.jsonl")
+         if str(x.get("problem")).startswith("unfinished copy left where it is")]
+check("PC a 'started' copy older than its ship, or bigger than its frame, is never moved: one "
+      "problem row each, not repeated",
+      os.path.isfile(_odd1) and os.path.isfile(_odd2) and len(_oddp) == 2
+      and any("older than the ship" in x["problem"] for x in _oddp)
+      and any("bigger than the frame" in x["problem"] for x in _oddp), str(_oddp)[:400])
+_twice = "S30P\\Odd (O 1)\\O 1_sub Day 2\\twice.fit"
+for n in (1, 2):
+    pc_file(qa, _twice, b"half")
+    pc_put_rows(qlog, [{"schema": "ship-row/1", "state": s_, "relpath": _twice, "size": 8,
+                        "sha256": "1" * 64, "machine": "Mac", "machineId": "mac",
+                        "shipId": f"t{n}", "at": pc_utc(60 - n)} for s_ in ("started", "failed")])
+    PCQ.run("--sweep", extra_env=PCX)
+_qd = os.path.join(qa, "_Quarantine", "ship-incomplete", "S30P", "Odd (O 1)", "O 1_sub Day 2")
+check("PC a second unfinished copy under the same path is set aside beside the first, never over it",
+      sorted(os.listdir(_qd)) == ["twice (2).fit", "twice.fit"] if os.path.isdir(_qd) else False,
+      str(os.listdir(_qd)) if os.path.isdir(_qd) else "no folder")
+_day1 = "S30P/Dumbbell Nebula (M 27)/M 27_sub Day 1/"
+_op1 = pc_file(qa, _day1 + "20260910-224402.fit.mac.partial", b"p" * 10)
+_op2 = pc_file(qa, _day1 + "20260910-224402.fit.BAD", b"b" * 20)
+r = PCQ.run("--sweep", extra_env=PCX)
+_st = pc_json(qa, "status.json")
+check("PC partial and .BAD copies a 1.6 ship left are listed (status and log) and left where they are",
+      (_st.get("oldPartials") or {}).get("count") == 2 and (_st.get("oldPartials") or {}).get("bytes") == 30
+      and os.path.isfile(_op1) and os.path.isfile(_op2) and "--move-old-partials" in r.stdout,
+      str(_st.get("oldPartials")) + r.stdout[-300:])
+with open(os.path.join(qa, "_verify", "ship.lock"), "w") as f:
+    f.write("{}")
+PCQ.run("--sweep", "--move-old-partials", extra_env=PCX)
+_kept = os.path.isfile(_op1) and os.path.isfile(_op2)
+os.remove(os.path.join(qa, "_verify", "ship.lock"))
+r = PCQ.run("--sweep", "--move-old-partials", extra_env=PCX)
+_od = os.path.join(qa, "_Quarantine", "old-partials", *_day1.rstrip("/").split("/"))
+check("PC --move-old-partials waits while a 1.6 ship may be running, and otherwise moves them "
+      "into _Quarantine/old-partials, logged; nothing is deleted",
+      _kept and not os.path.exists(_op1) and not os.path.exists(_op2)
+      and sorted(os.listdir(_od)) == ["20260910-224402.fit.BAD", "20260910-224402.fit.mac.partial"]
+      and (pc_json(qa, "status.json").get("oldPartials") or {}).get("movedThisRun") == 2
+      and sum(1 for x in pc_rows(qa, "quarantine.jsonl") if "1.6" in str(x.get("why"))) == 2,
+      r.stdout[-300:])
+_pcb = d7_tree(os.path.join(qa, "_verify", "pc"))
+r = PCQ.run("--sweep", extra_env=dict(PCX, ASTRO_MACHINE_ID="Chill Blast"))
+check("PC with a short name that breaks the rule the sweep does nothing and says what to change",
+      r.returncode == 2 and "ASTRO_MACHINE_ID" in r.stderr
+      and d7_tree(os.path.join(qa, "_verify", "pc")) == _pcb, r.stderr[-300:])
+
+# the inventory (spec 7.1)
+pc_file(pa, "_Index/sweep/sweep.ps1", b"x")
+pc_file(pa, "_rights-check/tree/canary.fit", b"c")
+pc_file(pa, "_Quarantine/ship-incomplete/S30P/q.fit", b"q")
+_ret = "_to_delete/S30P/Gone (G 1)/G 1_sub Day 3/20260801-220000.fit"
+pc_file(pa, _ret, b"retired")
+_dark = "ZWO Askar Scopes/T (T 1)/T (T 1) Day 1/calibration/darks/Dark_300.0s_Bin1_20260720-090000_0001.fit"
+teh.backdate(pc_file(pa, _dark, b"dark frame"), 2 * 86400)
+_stack = "S30P/Dumbbell Nebula (M 27)/Stacked_30_M 27_10.0s_IRCUT_20260910-230000.fit"
+pc_file(pa, _stack, b"stack")
+_jpg = "S30P/Dumbbell Nebula (M 27)/preview.jpg"
+teh.backdate(pc_file(pa, _jpg, b"jpg"), 86400)
+if os.name != "nt":
+    os.symlink(PCS.state, os.path.join(pa, "S30P", "link-out"))
+r = PCS.run("--inventory", "--root", pa, extra_env=PCX)
+_ist = pc_json(pa, "inventory-E.status.json")
+_gen = os.path.join(pa, "_verify", "pc", str(_ist.get("file")))
+_irows = d7_rows(_gen)
+_by = {x["relpath"]: x for x in _irows}
+check("PC --inventory of the archive writes a new generation in _verify/pc, then the status file "
+      "naming it, with its row count and its sha256",
+      r.returncode == 0 and _ist.get("schema") == "inventory-status/1"
+      and _ist.get("file") == f"inventory-E-{_ist.get('generation')}.jsonl"
+      and _ist.get("rows") == len(_irows) > 0 and _ist.get("sha256OfJsonl") == d7_sha(_gen)
+      and _ist.get("shipInProgress") is False, str(_ist))
+check("PC ...it lists the frames and leaves out _verify, _Index, _Quarantine, the rights check "
+      "and links",
+      _old_dir.replace("\\", "/") + "old.fit" in _by
+      and not any(k.split("/")[0] in ("_verify", "_Index", "_Quarantine", "_rights-check") for k in _by)
+      and not any("link-out" in k for k in _by), str(sorted(_by))[:400])
+_m27 = [x for x in _irows if x.get("target") == "Dumbbell Nebula (M 27)" and x.get("kind") == "light"]
+check("PC ...each row says what its path says: camera and target folders, Day, night (from the "
+      "name, noon to noon) and kind; _to_delete rows are marked retired",
+      len(_m27) == 4 and all(x["camera"] == "S30P" and x["schema"] == "inventory-row/1"
+                             and (x["day"], x["night"]) in ((1, "2026-09-10"), (2, "2026-09-11"))
+                             and x["nightSource"] == "filename" for x in _m27)
+      and (_by.get(_dark) or {}).get("kind") == "dark" and (_by.get(_stack) or {}).get("kind") == "stack"
+      and (_by.get(_jpg) or {}).get("kind") == "other"
+      and (_by.get(_ret) or {}).get("retired") is True and (_by.get(_ret) or {}).get("camera") == "S30P"
+      and (_by.get(_ret) or {}).get("target") == "Gone (G 1)"
+      and (_by.get(_ret) or {}).get("day") == 3, str(_m27)[:300] + str(_by.get(_ret)))
+check("PC ...and no row has a hash yet: those come only from the PC's own hash cache",
+      all(x.get("sha256") is None and x.get("read") is None for x in _irows), "")
+r = PCS.run("--hash", "--root", pa, extra_env=PCX)
+_cache = d7_rows(os.path.join(PCS.state, "hash-cache.jsonl"))
+_seed = [x for x in _cache if x.get("source") == "verified.jsonl"]
+_mine = [x for x in _cache if not x.get("source")]
+_order = [x["relpath"] for x in _mine]
+_n_own = 13 if os.name == "nt" else 6     # Windows reads the seeded ones again, unbuffered
+check("PC --hash starts the PC's cache from verified.jsonl (sizes that still match), then hashes "
+      "the rest of the archive itself, newest first",
+      r.returncode == 0 and len(_seed) == 7 and len(_mine) == _n_own
+      and all(x["root"] == "E" and x["hashedBy"] == "chillblast" and x["read"] == _READ
+              and x["sha256"] == d7_sha(d7_at(pa, x["relpath"])) for x in _mine)
+      and _jpg in _order and _dark in _order and _order.index(_jpg) < _order.index(_dark)
+      and f"Hashed {_n_own} file(s)" in r.stdout, r.stdout[-300:] + str(_order))
+r = PCS.run("--inventory", "--root", pa, extra_env=PCX)
+_irows = d7_rows(os.path.join(pa, "_verify", "pc", pc_json(pa, "inventory-E.status.json").get("file", "?")))
+check("PC ...so the next inventory carries every file's hash, who made it and how it was read",
+      _irows and all(x.get("sha256") == d7_sha(d7_at(pa, x["relpath"])) and x.get("hashedBy")
+                     for x in _irows), str([x for x in _irows if not x.get("sha256")])[:300])
+with open(d7_at(pa, _old_dir + "old.fit"), "ab") as f:
+    f.write(b" and more")
+PCS.run("--hash", "--root", pa, "--max-minutes", "0", extra_env=PCX)
+r = PCS.run("--hash", "--root", pa, "--max-minutes", "0", extra_env=PCX)
+_chg = [x for x in pc_rows(pa, "problems.jsonl") if x.get("problem") == "changed since it was hashed"]
+check("PC a hashed file whose size or time changes is a problem (P7), written once; "
+      "--max-minutes 0 hashes nothing and says what is left",
+      len(_chg) == 1 and _chg[0]["relpath"].endswith("old.fit") and "Hashed 0 file(s)" in r.stdout
+      and "1 left for next time" in r.stdout, r.stdout[-300:] + str(_chg))
+_victim = d7_at(pa, _old_dir + "done.fit")
+_vst = os.stat(_victim)
+with open(_victim, "r+b") as f:
+    f.write(b"DONE")                                 # same size, other bytes
+os.utime(_victim, ns=(_vst.st_atime_ns, _vst.st_mtime_ns))
+_last = [x for x in d7_rows(os.path.join(PCS.state, "hash-cache.jsonl"))
+         if x["relpath"].endswith("done.fit")][-1]
+pc_put_rows(os.path.join(PCS.state, "hash-cache.jsonl"),
+            [dict(_last, checkedAt="2000-01-01T00:00:00+00:00")])      # checked longest ago
+r = PCS.run("--hash", "--root", pa, "--rolling", extra_env=PCX)
+_rot = [x for x in pc_rows(pa, "problems.jsonl")
+        if x.get("problem") == "content changed since it was hashed"]
+check("PC --rolling re-reads the 1/30th checked longest ago; a frame whose bytes changed under "
+      "the same size and time is a problem (P7, bit rot)",
+      len(_rot) == 1 and _rot[0]["relpath"].endswith("done.fit")
+      and _rot[0].get("found") == d7_sha(_victim), r.stdout[-300:] + str(_rot))
+_nfd = "S30P/Cafe\u0301 (C 1)/C 1_sub Day 1/20260801-210000.fit"       # é stored as e + accent
+pc_file(pa, _nfd, b"accent")
+r = PCS.run("--hash", "--root", pa, extra_env=PCX)
+_crow = [x for x in d7_rows(os.path.join(PCS.state, "hash-cache.jsonl"))
+         if x["relpath"] == "S30P/Caf\u00e9 (C 1)/C 1_sub Day 1/20260801-210000.fit"]
+check("PC a name stored decomposed (é as e + accent) is read as it is on the disk, and listed "
+      "in its composed (NFC) spelling",
+      bool(_crow) and _crow[-1]["sha256"] == pc_sha(b"accent") and "couldn't be read" not in r.stdout,
+      r.stdout[-300:])
+_g_old = os.path.join(pa, "_verify", "pc", "inventory-E-20200101T000000Z.jsonl")
+open(_g_old, "w").close()
+_g_prev = pc_json(pa, "inventory-E.status.json").get("file")
+r = PCS.run("--inventory", "--root", pa, extra_env=PCX)
+_gens = sorted(os.path.basename(p) for p in _glob.glob(os.path.join(pa, "_verify", "pc", "inventory-E-*.jsonl")))
+check("PC each inventory is a new generation; the one before stays for a day, older ones go",
+      not os.path.exists(_g_old) and len(_gens) == 2 and _g_prev in _gens
+      and pc_json(pa, "inventory-E.status.json").get("file") == _gens[-1], str(_gens))
+with open(os.path.join(pa, "_verify", "lock", "ship.lock"), "w", encoding="utf-8") as f:
+    json.dump({"schema": "ship-lock/1", "machineId": "mac", "pid": 1, "op": "ship",
+               "startedAt": pc_utc(1), "renewedAt": pc_utc(0)}, f)
+r = PCS.run("--inventory", "--root", pa, extra_env=PCX)
+os.remove(os.path.join(pa, "_verify", "lock", "ship.lock"))
+check("PC an inventory taken while a ship runs says so (shipInProgress), so newer files count as "
+      "not yet listed",
+      pc_json(pa, "inventory-E.status.json").get("shipInProgress") is True
+      and "a ship was running" in r.stdout, r.stdout[-300:])
+if os.name != "nt":
+    _bad1 = pc_file(pa, "S30P/Odd/trailing.fit ", b"x")
+    _bad2 = pc_file(pa, "S30P/Odd/NUL.fit", b"y")
+    PCS.run("--inventory", "--root", pa, extra_env=PCX)
+    r = PCS.run("--inventory", "--root", pa, extra_env=PCX)
+    _uns = [x for x in pc_rows(pa, "problems.jsonl") if str(x.get("problem")).startswith("unsafe name")]
+    _irows = d7_rows(os.path.join(pa, "_verify", "pc", pc_json(pa, "inventory-E.status.json").get("file", "?")))
+    check("PC a file whose name breaks the spec's path rules (a trailing space, NUL.fit) is left out "
+          "of the inventory and counted, and is one problem row, never opened",
+          pc_json(pa, "inventory-E.status.json").get("skippedRows") == 2 and len(_uns) == 2
+          and not any("/Odd/" in x["relpath"] for x in _irows), str(_uns)[:300])
+    os.remove(_bad1); os.remove(_bad2)
+else:
+    print("  SKIP  PC unsafe names in the archive (Windows can't make them)")
+_wb_before = d7_tree(pa)
+r1 = PCS.run("--inventory", "--root", PCS.sdest30)
+r2 = PCS.run("--hash", "--root", PCS.sdest30)
+_local = _glob.glob(os.path.join(PCS.state, "inventory-*.jsonl"))
+_lrows = d7_rows(_local[0]) if len(_local) == 1 else []
+check("PC on the Mac, --inventory and --hash of its own frame folders write only into its state "
+      "folder (inventory-<short name>.jsonl, the hash cache), never on the archive",
+      r1.returncode == 0 and r2.returncode == 0 and len(_local) == 1 and len(_lrows) == 4
+      and any(x.get("root") == "workbench" for x in d7_rows(os.path.join(PCS.state, "hash-cache.jsonl")))
+      and os.path.isfile(_local[0].replace(".jsonl", ".status.json")) and d7_tree(pa) == _wb_before,
+      r1.stdout[-200:] + r2.stdout[-200:] + str(_local))
+
+# path rules (spec 12) and the PC's reads
+_cases = ["S30P/M 27/Day 1/a.fit", "S30P\\M 27\\a.fit", "/abs/a.fit", "C:/x.fit", "//server/share/a.fit",
+          "S30P/../a.fit", "S30P/a\u0001.fit", "S30P/a:b.fit", "S30P/a.fit.", "S30P/a.fit ",
+          "x/" + "a" * 300, "S30P/NUL.txt", "S30P/con", "S30P/CONIN$", "S30P/COM\u00b9.fit",
+          "S30P/lpt3.fit", "Cafe\u0301/a.fit", "", "S30P//a.fit"]
+_got = d7_probe(PCS.env, "print(json.dumps([m.safe_relpath(x) for x in " + json.dumps(_cases) + "]))")
+check("PC paths read from any file follow spec 12: '/' and NFC; absolute, drive, UNC, '..', "
+      "control characters, ':', a trailing dot or space, over 260, reserved names (NUL.txt, "
+      "CONIN$, COM¹, LPT3) are refused",
+      _got == ["S30P/M 27/Day 1/a.fit", "S30P/M 27/a.fit"] + [None] * 14 + ["Caf\u00e9/a.fit", None, None],
+      str(_got))
+_blob = os.urandom(3 * 1024 * 1024 + 123)
+_hp = pc_file(PCS.root, "blob.fit", _blob)
+_got = d7_probe(PCS.env, f"print(json.dumps(m.hash_file_unbuffered({_hp!r})))")
+check("PC the PC's own reads bypass Windows' cache (FILE_FLAG_NO_BUFFERING, P1) and agree with an "
+      "ordinary sha256, odd sizes too; elsewhere they say 'buffered'",
+      _got == [pc_sha(_blob), len(_blob), _READ], str(_got))
+
+# requests, answers and the heartbeat (spec 10)
+_rdir = os.path.join(pa, "_verify", "mac", "requests")
+r = PCS.run("--request", "sweep", extra_env=ND_S)
+_rq = sorted(os.listdir(_rdir)) if os.path.isdir(_rdir) else []
+_body = {}
+if len(_rq) == 1:
+    with open(os.path.join(_rdir, _rq[0]), encoding="utf-8") as f:
+        _body = json.load(f)
+check("PC --request on the Mac files <kind>-<UTC time>-<short name>-<8 hex>.json in "
+      "_verify/mac/requests (spec 10.2)",
+      r.returncode == 0 and len(_rq) == 1
+      and re.fullmatch(r"sweep-\d{8}T\d{6}Z-[a-z0-9-]+-[0-9a-f]{8}\.json", _rq[0] if _rq else "")
+      and _body.get("schema") == "request/1" and _body.get("kind") == "sweep"
+      and _body.get("id") == (_rq[0][:-5] if _rq else None) and d7_bad(PCS.root) == [],
+      r.stdout[-300:] + str(_rq))
+r = PCS.run("--request", "sweep", extra_env=ND_S)
+check("PC ...asked again while that one waits, it is reused, not repeated",
+      sorted(os.listdir(_rdir)) == _rq and "already waiting" in r.stdout, r.stdout[-200:])
+r = PCS.run("--pc-tick", extra_env=PCX)
+_resp = pc_json(pa, "responses", _rq[0] if _rq else "?")
+check("PC --pc-tick runs the sweep the Mac asked for and answers it (started, then done, with "
+      "the result); the PC never moves or deletes the request",
+      _resp.get("status") == "done" and _resp.get("kind") == "sweep" and _resp.get("startedAt")
+      and _resp.get("finishedAt") and (_resp.get("result") or {}).get("ok") is True
+      and os.path.isfile(os.path.join(_rdir, _rq[0] if _rq else "?")), str(_resp))
+_t0 = d7_tree(pa)
+r = PCS.run("--pc-tick", extra_env=PCX)
+_t1 = d7_tree(pa)
+_hb = pc_json(pa, "pc-heartbeat.json")
+_hbt = _dt.fromisoformat(_hb.get("generatedAt", "2000-01-01T00:00:00+00:00"))
+check("PC with nothing to do a tick writes only the heartbeat: who, when, and that nothing runs",
+      sorted(k for k in set(_t0) | set(_t1) if _t0.get(k) != _t1.get(k)) == ["_verify/pc/pc-heartbeat.json"]
+      and _hb.get("schema") == "pc-heartbeat/1" and _hb.get("job") == "idle"
+      and _hb.get("sweepRunning") is False and _hb.get("inventoryRunning") is False
+      and _hb.get("machineId") == "chillblast" and _hb.get("machineLabel") == "Chillblast"
+      and abs((_dt.now(_tz.utc) - _hbt).total_seconds()) < 120, str(_hb))
+_now = _dt.now(_tz.utc).strftime("%Y%m%dT%H%M%SZ")
+_bad = {"expired": ("sweep-20200101T000000Z-macbook-0123abcd.json", "{}"),
+        "big": (f"inventory-{_now}-macbook-11111111.json", json.dumps({"pad": "x" * 5000})),
+        "notjson": (f"sweep-{_now}-macbook-22222222.json", "nope"),
+        "later": (f"hash-{_now}-macbook-33333333.json", "{}"),
+        "badname": ("sweep-now.json", "{}"),
+        "unknown": (f"delete-{_now}-macbook-44444444.json", "{}")}
+for _n, (_fn, _txt) in _bad.items():
+    with open(os.path.join(_rdir, _fn), "w", encoding="utf-8") as f:
+        f.write(_txt)
+r = PCS.run("--pc-tick", extra_env=PCX)
+_answers = {k: pc_json(pa, "responses", fn).get("status") for k, (fn, _t) in _bad.items()}
+check("PC requests are checked before anything runs: over a day old is expired; too big, not "
+      "JSON, or a kind for a later version is rejected; a name that isn't a request gets no answer",
+      _answers == {"expired": "expired", "big": "rejected", "notjson": "rejected",
+                   "later": "rejected", "badname": None, "unknown": None}, str(_answers))
+r = PCS.run("--request", "inventory", extra_env=ND_S)
+_left = sorted(os.listdir(_rdir))
+_inv = [x for x in _left if x.startswith("inventory-") and "-macbook-" not in x]
+check("PC the Mac's next --request tidies away its own requests the PC has finished with, and "
+      "leaves other computers' alone",
+      (_rq[0] if _rq else "?") not in _left and _bad["expired"][0] in _left and len(_inv) == 1,
+      str(_left))
+r = PCS.run("--pc-tick", extra_env=PCX)
+_resp = pc_json(pa, "responses", _inv[0] if _inv else "?")
+check("PC ...and an inventory request gets a new generation and is answered done",
+      _resp.get("status") == "done" and ((_resp.get("result") or {}).get("rows") or 0) > 0,
+      str(_resp))
+r = PCS.run("--pc-nightly", extra_env=PCX)
+check("PC --pc-nightly runs the sweep, the inventory and the hash (and the inventory again when "
+      "it hashed anything), and leaves the heartbeat idle",
+      r.returncode == 0 and "Sweep:" in r.stdout and r.stdout.count("Inventory:") >= 1
+      and "Hashed" in r.stdout and pc_json(pa, "pc-heartbeat.json").get("job") == "idle",
+      r.stdout[-400:])
+
+# the share's rights, tried from the Mac on the PC's test folder
+CR = teh.Env("CR", asiair=False, seestar=True)
+r0 = CR.run("--check-share-rights")
+_rc = os.path.join(CR.archive, "_rights-check")
+pc_file(_rc, "tree/canary.fit", b"PC canary")
+pc_file(_rc, "_verify/canary.jsonl", b"{}\n")
+pc_file(_rc, "_verify/pc/canary.json", b"{}\n")
+r1 = CR.run("--check-share-rights", extra_env=teh.no_delete_env(CR.root, _rc))
+r2 = CR.run("--check-share-rights")
+check("PC --check-share-rights with no test folder says to run the PC's script first",
+      r0.returncode == 1 and "set-archive-rights.ps1 -Scratch" in r0.stderr, r0.stderr[-200:])
+check("PC ...under D7's rights every answer is right (create and write, never delete or rename; "
+      "in _verify only mac and lock) and it says so",
+      r1.returncode == 0 and "FAIL" not in r1.stdout and r1.stdout.count("PASS") == 24
+      and "what D7 needs" in r1.stdout, r1.stdout[-600:] + r1.stderr[-200:])
+check("PC ...with the old rights it names each wrong answer and says not to apply them; it never "
+      "touches anything outside the test folder",
+      r2.returncode == 1 and r2.stdout.count("FAIL") == 11 and "Don't apply" in r2.stderr
+      and os.listdir(CR.archive) == ["_rights-check"], r2.stdout[-400:] + str(os.listdir(CR.archive)))
 
 print("\n── Chain F2: --set-filter ledger correction ─────────────────")
 F2 = teh.Env("F2")

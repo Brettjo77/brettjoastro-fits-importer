@@ -506,6 +506,10 @@ class App:
                     state.seestar_seen(s)
                     totals = eng.run_seestar_import(state, s, args, only_targets=ssel)
                     total_t += totals["targets"]; total_f += totals["files"]
+            # then straight into the archive when the share is already up,
+            # as a Terminal import does (1.7.0); quiet when it isn't, and
+            # never asks Finder to connect from here
+            eng.ship_after_import(state, mount_share=False)
             self.last_result = (f"Imported {total_f} frame(s) across "
                                 f"{total_t} target(s).")
             dur = int(time.time() - t0)

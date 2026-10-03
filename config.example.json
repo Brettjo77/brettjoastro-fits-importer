@@ -14,6 +14,8 @@
   "ASTRO_ARCHIVE_LABEL": "E:\\Astro Image Data",
   "//archive": "Optional — only if you keep an archive on another computer (see PC-SYNC.md). Leave the URL empty otherwise — the ship agent is then never installed and no share is ever mounted for you.",
   "ASTRO_ARCHIVE_URL": "",
+  "//ship": "1.7.0. A ship that would leave the archive with less than this many GB free sends nothing. Leave these out unless you need them: ASTRO_MACHINE_ID (this computer's short name: a to z, 0 to 9 and -, at most 32) and ASTRO_MACHINE_LABEL (the name people read) default to mac/Mac and pc/PC; ASTRO_SHIP_FOLDER (this computer's folder under the archive's _verify) defaults to mac on a Mac and pc on Windows, and two computers must never share one; ASTRO_PC_HASH_MINUTES (archive PC only, default 360) stops the nightly hash at a file after that long.",
+  "ASTRO_ARCHIVE_MIN_FREE_GB": 10,
   "SEESTAR_IMPORT_SUB_JPEGS": false,
   "//desk": "Astro Desk (the panel's Archive tab, 1.6.0). Where Siril is, for Start Siril here, and the Observatory's dataset (target states and hours). On Windows the defaults are C:\\Program Files\\Siril\\bin\\siril.exe and E:\\Astro Config Data\\Observatory\\dataset.json.",
   "ASTRO_SIRIL_EXE": "/Applications/Siril.app/Contents/MacOS/Siril",
