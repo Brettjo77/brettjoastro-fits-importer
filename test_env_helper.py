@@ -258,10 +258,15 @@ def backdate(path, seconds):
         k32.CloseHandle.argtypes = (wintypes.HANDLE,)
         # FILE_WRITE_ATTRIBUTES, any sharing, OPEN_EXISTING, BACKUP_SEMANTICS (folders too)
         h = k32.CreateFileW(os.path.abspath(path), 0x100, 0x7, None, 3, 0x02000000, None)
+        if h in (None, wintypes.HANDLE(-1).value):
+            raise ctypes.WinError(ctypes.get_last_error())
         ft = int((t + 11644473600) * 10 ** 7)
         when = wintypes.FILETIME(ft & 0xFFFFFFFF, ft >> 32)
-        k32.SetFileTime(h, ctypes.byref(when), None, ctypes.byref(when))
-        k32.CloseHandle(h)
+        try:
+            if not k32.SetFileTime(h, ctypes.byref(when), None, ctypes.byref(when)):
+                raise ctypes.WinError(ctypes.get_last_error())
+        finally:
+            k32.CloseHandle(h)
 
 def read_error_env(root, paths):
     """Env additions under which a child Python can't read `paths` (a disk
@@ -289,6 +294,8 @@ def held_exclusively(path):
                                 wintypes.HANDLE)
     k32.CloseHandle.argtypes = (wintypes.HANDLE,)
     h = k32.CreateFileW(os.path.abspath(path), 0x80000000, 0, None, 3, 0, None)
+    if h in (None, wintypes.HANDLE(-1).value):
+        raise ctypes.WinError(ctypes.get_last_error())
     try:
         yield
     finally:

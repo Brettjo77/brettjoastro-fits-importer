@@ -1860,6 +1860,16 @@ check("W1 set-archive-rights.ps1 changes nothing without -Apply, saves today's r
       and "is the account you are signed in with" in _body and "not a local user account" in _body
       and "is an administrator on this PC" in _body and "/deny" in _body and "(DE,DC)" in _body,
       f"gate {_gate} saves {_saves} changes {_changes}")
+_full_save = _body[_body.index("archive-all.acl"):_body.index("Today's rights saved")]
+check("W1 ...on Windows PowerShell 5.1 its save of every file's rights can't stop it half-way (that "
+      "one icacls call runs under Continue, its exit code decides); _verify\\mac and _verify\\lock get "
+      "Modify inside but no Delete on the folder itself, never a /deny that would strip their grant; "
+      "it says when the share itself gives Full Control",
+      "$ErrorActionPreference = 'Continue'" in _full_save and "$LASTEXITCODE" in _full_save
+      and "2>$null" not in _body and "(OI)(CI)(IO)(M)" in _body
+      and not re.search(r"Path = \$(mac|lock);[^\n]*'/deny'", _body)
+      and "Get-SmbShareAccess" in _body and "AccessRight Change" in _body
+      and "TrimEnd('\\')" in _body, _full_save[:300])
 _bin = os.path.join(W1.root, "installed-bin")
 os.makedirs(_bin, exist_ok=True)
 for _f in _st.INSTALLED.get(engw.PLATFORM, _st.INSTALLED["windows"]):   # what THIS OS installs
@@ -2670,6 +2680,19 @@ check("PC --move-old-partials waits while a 1.6 ship may be running, and otherwi
       and (pc_json(qa, "status.json").get("oldPartials") or {}).get("movedThisRun") == 2
       and sum(1 for x in pc_rows(qa, "quarantine.jsonl") if "1.6" in str(x.get("why"))) == 2,
       r.stdout[-300:])
+# a job lock that a stopped job left behind, its process number since reused
+# (here: this test's own, which is alive) only blocks while it is renewed
+_jl = os.path.join(PCQ.state, "sweep.lock")
+with open(_jl, "w", encoding="utf-8") as f:
+    json.dump({"pid": os.getpid(), "since": pc_utc(20)}, f)
+r_fresh = PCQ.run("--sweep", extra_env=PCX)
+teh.backdate(_jl, 20 * 60)
+r_old = PCQ.run("--sweep", extra_env=PCX)
+check("PC a running job's lock blocks a second sweep, but one not renewed for ten minutes is a "
+      "leftover, even when its process number now belongs to a live program",
+      "already running" in r_fresh.stdout and "Sweep:" not in r_fresh.stdout
+      and "Sweep:" in r_old.stdout and not os.path.exists(_jl),
+      r_fresh.stdout[-200:] + r_old.stdout[-200:])
 _pcb = d7_tree(os.path.join(qa, "_verify", "pc"))
 r = PCQ.run("--sweep", extra_env=dict(PCX, ASTRO_MACHINE_ID="Chill Blast"))
 check("PC with a short name that breaks the rule the sweep does nothing and says what to change",

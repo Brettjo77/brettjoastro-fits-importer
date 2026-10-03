@@ -565,12 +565,11 @@ def _win_hash_unbuffered(path, chunk):
     full = os.path.abspath(path)
     if not full.startswith("\\\\"):
         full = "\\\\?\\" + full                     # long paths too
-    # shared as Python's own open() shares: a file another program still has
-    # open is read, not refused (the caller re-checks size and time after)
-    GENERIC_READ, SHARE_ALL, OPEN_EXISTING = 0x80000000, 0x7, 3
-    NO_BUFFERING, SEQUENTIAL = 0x20000000, 0x08000000
+    # shared for reading, writing and deleting: a file another program still
+    # has open is read, not refused (the caller re-checks size and time after)
+    GENERIC_READ, SHARE_ALL, OPEN_EXISTING, NO_BUFFERING = 0x80000000, 0x7, 3, 0x20000000
     handle = k32.CreateFileW(full, GENERIC_READ, SHARE_ALL, None, OPEN_EXISTING,
-                             NO_BUFFERING | SEQUENTIAL, None)
+                             NO_BUFFERING, None)
     if handle in (None, wintypes.HANDLE(-1).value):
         err = ctypes.get_last_error()
         if err == 87:                               # the volume refuses unbuffered reads
@@ -593,6 +592,8 @@ def _win_hash_unbuffered(path, chunk):
                 break
             h.update(ctypes.string_at(buf, got.value))
             size += got.value
+            if got.value < chunk:
+                break                     # the end: no read past it at an unaligned offset
     finally:
         k32.VirtualFree(buf, 0, 0x8000)                  # MEM_RELEASE
         k32.CloseHandle(handle)
@@ -665,6 +666,8 @@ def owner_trusted(path):
         OWNER = 0x1
         need = wintypes.DWORD()
         adv.GetFileSecurityW(path, OWNER, None, 0, ctypes.byref(need))
+        if ctypes.get_last_error() == 5:
+            return False                  # the file won't even show its owner: not ours
         if not need.value:
             return None
         sd = ctypes.create_string_buffer(need.value)
@@ -4747,7 +4750,8 @@ PC_CREATED_SLACK_S = 10 * 60        # ...and only if it was made by that ship (c
 PC_HEARTBEAT_EVERY_S = 60           # while a job runs (spec 10.1); the 5-minute task when idle
 PC_KEEP_GENERATION_S = 24 * 3600    # the previous inventory stays readable this long
 PC_REQUEST_EXPIRE_S = 24 * 3600
-PC_JOB_STALE_S = 24 * 3600          # a job lock older than this is a leftover
+PC_JOB_RENEW_S = 60                 # a running job touches its lock this often...
+PC_JOB_STALE_S = 10 * 60            # ...so one not touched for this long is a leftover
 PC_HASH_MINUTES = 360               # the nightly hash stops at a file after this long
 PC_ROLLING_SHARE = 30               # P7: a 1/30th of the cached files is re-read each night
 REQUEST_KINDS = ("sweep", "inventory", "hash", "preclear")
@@ -4854,11 +4858,14 @@ def _pc_trusts(path):
 
 class _JobLock:
     """One sweep, one inventory and one hash at a time on this computer: a
-    lock file in the state folder naming the process. One left behind by a
-    process that has gone (or older than a day) is taken over."""
+    lock file in the state folder naming the process, touched every minute
+    while the job runs (as the archive's ship lock is renewed). A lock not
+    touched for ten minutes is a leftover from a job that was stopped, even
+    if Windows has since given its process number to another program."""
 
     def __init__(self, name):
         self.name, self.path, self.held = name, os.path.join(STATE_DIR, f"{name}.lock"), False
+        self._stop = threading.Event()
 
     def __enter__(self):
         os.makedirs(STATE_DIR, exist_ok=True)
@@ -4868,35 +4875,58 @@ class _JobLock:
             except FileExistsError:
                 if job_running(self.name):
                     return self
-                try:
-                    os.remove(self.path)
-                except OSError:
+                if not _remove_retrying(self.path):
                     return self
                 continue
             with os.fdopen(fd, "w", encoding="utf-8") as f:
                 json.dump({"pid": os.getpid(), "since": _utc_iso()}, f)
             self.held = True
+            threading.Thread(target=self._renew, daemon=True).start()
             return self
         return self
 
+    def _renew(self):
+        while not self._stop.wait(PC_JOB_RENEW_S):
+            try:
+                os.utime(self.path, None)
+            except OSError:
+                pass                       # read by another process this instant: next minute
+
     def __exit__(self, *exc):
         if self.held:
-            try:
-                os.remove(self.path)
-            except OSError:
-                pass
+            self._stop.set()
+            _remove_retrying(self.path)
             self.held = False
         return False
 
+def _remove_retrying(path, tries=20):
+    """Remove one of this computer's own lock files. On Windows a reader
+    holding it open for a moment blocks that, so try again briefly."""
+    for n in range(tries):
+        try:
+            os.remove(path)
+            return True
+        except FileNotFoundError:
+            return True
+        except OSError:
+            if n == tries - 1:
+                return False
+            time.sleep(0.1)
+    return False
+
 def job_running(name):
-    """Is this computer's sweep / inventory / hash running right now?"""
+    """Is this computer's sweep / inventory / hash running right now? Its lock
+    was touched in the last ten minutes, and the process it names is alive."""
     path = os.path.join(STATE_DIR, f"{name}.lock")
+    try:
+        age = time.time() - os.path.getmtime(path)
+    except OSError:
+        return False
+    if age > PC_JOB_STALE_S:
+        return False
     held = _read_json_file(path)
     if not held:
-        return os.path.exists(path) and time.time() - _mtime(path) < 60   # being written
-    since = _parse_utc(held.get("since"))
-    if since and (_utc_now() - since).total_seconds() > PC_JOB_STALE_S:
-        return False
+        return True                       # being written this instant
     return pid_alive(held.get("pid"))
 
 def _mtime(path):

@@ -33,14 +33,14 @@ Phase 0 of the Sync View plan. The share's user can now be denied Delete on the 
   - `--pc-nightly` runs the sweep, the inventory and the hash.
 - **The Windows installer** sets up "Astro archive sweep" (logon and 03:30, `--pc-nightly`) and "Astro sync requests" (every 5 minutes, `--pc-tick`), both Python, as you. It also makes the new folders under `_verify`.
 - **The share's rights:**
-  - On the PC, `pc\set-archive-rights.ps1` sets them. It only shows what it would do unless you add `-Apply`, saves today's rights first, and has `-Scratch` (a test folder only) and `-Undo`.
+  - On the PC, `pc\set-archive-rights.ps1` sets them. It only shows what it would do unless you add `-Apply`, saves today's rights first, and has `-Scratch` (a test folder only) and `-Undo`. It says if the share itself gives the share's user Full Control (Change is all the importer needs), and lists any folder the new rule can't reach.
   - On the Mac, `--check-share-rights` tries each allowed and refused operation in that test folder.
   - See PC-SYNC.md, Part C. Leave the rights as they are until both computers run 1.7.0.
 - **Each computer has a short name and a label** (`ASTRO_MACHINE_ID`, `ASTRO_MACHINE_LABEL`) beside its id. A short name that breaks the rule (a to z, 0 to 9 and -, at most 32) stops anything that would write it.
 
 **Mac / Windows:** the ship, the calibration and Collect Lights fixes, the panel ship and the inventory of your own frames are the same on both. The PC's jobs (sweep, the archive's inventory and hashing, answering requests) run only on the archive PC, because only its own reads of its own disk count as proof. The Mac asks with `--request` and tries the share's rights with `--check-share-rights`. PARITY.md lists each difference and why.
 
-622 end-to-end checks (483 engine + 139 panel), including 82 new engine checks and 2 new panel checks. On Linux every one runs except the real-ACL check (a Mac or the PC only), and all pass except the same two self-test lines that only pass on a Mac or a PC. Still to run on the Mac and the PC.
+624 end-to-end checks (485 engine + 139 panel), including 84 new engine checks and 2 new panel checks. On Linux every one runs except the real-ACL check (a Mac or the PC only), and all pass except the same two self-test lines that only pass on a Mac or a PC. Still to run on the Mac and the PC.
 
 ## 1.6.0 (2026-10-02): Astro Desk, the archive ready to process
 

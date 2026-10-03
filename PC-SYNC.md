@@ -91,13 +91,15 @@ From 1.7.0 the share's user (`astro`) can be denied Delete on the archive (decis
 
        powershell -ExecutionPolicy Bypass -File .\set-archive-rights.ps1 -Apply
 
-   It saves today's rights first (in `%LOCALAPPDATA%\Astro Import\rights-backup`) and prints the commands that put them back exactly. To take the new rights off again:
+   It saves today's rights first (in `%LOCALAPPDATA%\Astro Import\rights-backup`) and prints the commands that put them back exactly. It also lists any folder that doesn't take rights from above (the new rule can't reach those), and says if the share itself gives `astro` Full Control. The importer needs only Change there; with Full Control, `astro` could change the rights on the frames it filed. The script prints the two commands that set Change. To take the new rights off again:
 
        powershell -ExecutionPolicy Bypass -File .\set-archive-rights.ps1 -Undo -Apply
 
    Delete `_rights-check` on the PC yourself when you no longer need it.
 
-With these rights Finder on the Mac can't rename, move or bin anything on the share either. That's the point: tidy the archive on the PC.
+With these rights Finder on the Mac can't rename, move or bin anything on the share either. That's the point: tidy the archive on the PC. What they guard against is accidents (Finder, a script, a bug); they can't stop someone who has the share's password from changing a file's contents, so the PC's own backups still matter.
+
+The PC's two tasks run while you are signed in to the PC (a locked screen is fine). Signed out, nothing runs and the Mac sees the PC as asleep.
 
 ## A copy that was cut off half-way
 

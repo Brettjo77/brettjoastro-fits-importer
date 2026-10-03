@@ -87,7 +87,7 @@ foreach ($f in @('set-archive-rights.ps1')) {
 # sweep.ps1 retired in 1.7.0: the sweep is Python now (--sweep)
 foreach ($f in @('sweep.ps1', 'install_sweep.ps1')) {
     $old = Join-Path $bin "pc\$f"
-    if (Test-Path -LiteralPath $old) { Rename-Item -LiteralPath $old -NewName "$f.retired" -Force -ErrorAction SilentlyContinue }
+    if (Test-Path -LiteralPath $old) { Rename-Item -LiteralPath $old -NewName "$f.retired-$(Get-Date -Format 'yyyyMMdd_HHmmss')" -ErrorAction SilentlyContinue }
 }
 Ok "Engine, panel and watcher copied to $bin"
 
@@ -210,11 +210,12 @@ if ($archiveSet) {
 # sweep under its old name replaces the old sweep.ps1 task; the old script
 # files are left where they are (they are yours to delete).
 if ($archiveSet) {
+    $made = $true
     foreach ($d in @('_verify\pc', '_verify\mac\requests', '_verify\lock', '_Quarantine\ship-incomplete')) {
         try { New-Item -ItemType Directory -Force -Path (Join-Path $archive $d) -ErrorAction Stop | Out-Null }
-        catch { Warn "Could not create $archive\$d ($($_.Exception.Message))" }
+        catch { $made = $false; Warn "Could not create $archive\$d ($($_.Exception.Message))" }
     }
-    Ok "The archive's _verify\pc, _verify\mac and _verify\lock folders are in place"
+    if ($made) { Ok "The archive's _verify\pc, _verify\mac and _verify\lock folders are in place" }
     $me = "$env:USERDOMAIN\$env:USERNAME"
     $pri = New-ScheduledTaskPrincipal -UserId $me -LogonType Interactive -RunLevel Limited
     try {
@@ -236,7 +237,8 @@ if ($archiveSet) {
         $t = New-ScheduledTaskTrigger -Daily -At 00:00
         $t.Repetition = (New-ScheduledTaskTrigger -Once -At 00:00 -RepetitionInterval (New-TimeSpan -Minutes 5) -RepetitionDuration (New-TimeSpan -Days 1)).Repetition
         $t1 = New-ScheduledTaskTrigger -AtLogOn -User $me
-        $set = New-ScheduledTaskSettingsSet -StartWhenAvailable -ExecutionTimeLimit (New-TimeSpan -Hours 2) -MultipleInstances IgnoreNew
+        # light work, so it runs on a UPS's battery too: the Mac keeps seeing the heartbeat
+        $set = New-ScheduledTaskSettingsSet -StartWhenAvailable -ExecutionTimeLimit (New-TimeSpan -Hours 2) -MultipleInstances IgnoreNew -AllowStartIfOnBatteries -DontStopIfGoingOnBatteries
         Register-ScheduledTask -TaskName 'Astro sync requests' -Action $act -Trigger @($t, $t1) -Settings $set -Principal $pri -Force -ErrorAction Stop | Out-Null
         Ok "Sync requests answered every 5 minutes (the Mac sees this PC is awake)"
     } catch {
