@@ -6,6 +6,16 @@ ledger, and only then offers to clear the camera. The owner, Brett, is an
 astrophotographer, not a developer. Explain changes in plain words, give
 commands he can paste, and go one step at a time.
 
+## The project map
+
+This repo is one part of Brett's astrophotography pipeline. The shared map of every project, and of the links between them (receipts, the archive layout, night dates, the app fork), is a Claude Doc:
+
+https://claude.ai/code/artifact/53e55b0a-4c92-4427-a3f4-ada548ad5960
+
+- Always refer to it (Brett, 3 Oct 2026). Read it with the Claude Docs tools at the start of every session, and check it whenever a task touches another project or anything another tool reads.
+- Before you finish, update it if the work changed a project's state, a link between projects or an open question: small, targeted edits, and a row at the top of its Change log.
+- If the Claude Docs tools aren't available, tell Brett what the map needs changing.
+
 ## Layout
 
 - `astro-import.py`: the engine (scan, import, ledger, SAFE clear, discard, ship, report, dashboard). `VERSION` lives here.
