@@ -1787,7 +1787,7 @@ const DESK_TODO=new Set(["captured","stacked","processing"]);
 const deskState=s=>`<span class="ad-state ${esc(s||"none")}">${esc(s?(s==="processing"?"in processing":s):"no state")}</span>`;
 const fmtNight=iso=>{ if(!iso) return ""; const [y,m,d]=iso.split("-"); return `${+d} ${MONTHS[+m-1]} ${y}`; };
 const fmtSize=b=>b>=1073741824?(b/1073741824).toFixed(1)+" GB":b>=1048576?Math.round(b/1048576)+" MB":Math.max(1,Math.round(b/1024))+" KB";
-// The project layer (1.8): To process and In progress, from projects.json.
+// The project layer (1.7): To process and In progress, from projects.json.
 // projectsHtml is pure (no DOM), so a test can render the fixture and look.
 const PROJ_WHERE={chillblast_archive:"on the archive",mac:"on this Mac",pc:"on this PC",
   "mac-unchecked":"on the Mac (per its ledger)","pc-unchecked":"on the PC (per its ledger)"};

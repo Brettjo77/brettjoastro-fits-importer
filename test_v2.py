@@ -1820,7 +1820,7 @@ _mac_inst = set(re.findall(r'install_file "\$SCRIPT_DIR/([^"]+)"',
 _ps = open(os.path.join(_here, "install-windows.ps1"), encoding="utf-8-sig").read()
 _m = re.search(r"foreach \(\$f in @\(([^)]*'astro-import\.py'[^)]*)\)\)", _ps)
 _win_inst = set(re.findall(r"'([^']+)'", _m.group(1))) if _m else set()
-_m = re.search(r"foreach \(\$f in @\(([^)]*'targets\.json'[^)]*)\)\)", _ps)   # the contract (1.8)
+_m = re.search(r"foreach \(\$f in @\(([^)]*'targets\.json'[^)]*)\)\)", _ps)   # the contract (1.7)
 if _m:
     _win_inst |= {"contract/" + f for f in re.findall(r"'([^']+)'", _m.group(1))}
 check("W1 the Mac install check expects only files install-scripts.sh installs",
@@ -4864,8 +4864,8 @@ r = AD.run("--help", extra_env={"ASTRO_SIRIL_EXE": os.path.join(tempfile.gettemp
 check("AD test mode refuses a Siril path outside the test root before anything runs",
       r.returncode == 3 and "ASTRO_SIRIL_EXE is outside the test root" in r.stderr, r.stderr[-300:])
 
-# ═══════════════ CHAIN PL: the project layer, read-only (1.8) ═════════════════
-print("\n── Chain PL: projects.json — what is ready to process, derived, read-only (1.8) ──")
+# ═══════════════ CHAIN PL: the project layer, read-only (1.7) ═════════════════
+print("\n── Chain PL: projects.json — what is ready to process, derived, read-only (1.7) ──")
 # After the frames ship, nothing says "you captured this, now process it".
 # --projects derives a status per dataset (target + scope + site) from the
 # ledger(s), the PC's inventory and Final Astro Images, and writes ONE

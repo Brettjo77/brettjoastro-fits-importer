@@ -1471,7 +1471,7 @@ try:
           r_nosiril.get("ok") is False and "ASTRO_SIRIL_EXE" in (r_nosiril.get("error") or "")
           and r_sfile.get("_status") == 400 and len(teh.os_calls(envd.root, "launch")) == 1,
           json.dumps([r_nosiril, r_sfile]))
-    # ── the project layer on the Archive tab (1.8) ─────────────────────────
+    # ── the project layer on the Archive tab (1.7) ─────────────────────────
     check("PL the Archive tab carries the To-process section and its loader",
           'id="deskProjects"' in page and "loadProjects" in page and "data-xopen" in page)
     # The page's script, parse-checked and the new section rendered, in node

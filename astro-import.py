@@ -54,7 +54,7 @@ from collections import defaultdict
 from datetime import date, datetime, timedelta, timezone
 
 # One version for every platform (1.5.0: the Windows 11 edition joins the Mac).
-VERSION = "1.8.0"
+VERSION = "1.7.0"
 IS_WINDOWS = os.name == "nt"
 IS_MAC = sys.platform == "darwin"
 PLATFORM = "windows" if IS_WINDOWS else ("mac" if IS_MAC else "linux")
@@ -817,7 +817,7 @@ OBSERVATORY_DATASET = _env_path(
     os.path.join(os.path.splitdrive(ARCHIVE_MOUNT)[0] + "\\", "Astro Config Data", "Observatory",
                  "dataset.json") if IS_WINDOWS
     else os.path.join(_DEF_STATE, "observatory-dataset.json"))
-# Project layer (1.8): the contract (canonical targets and scopes) ships
+# Project layer (1.7): the contract (canonical targets and scopes) ships
 # beside the engine; Final Astro Images sits at the archive DRIVE's root on
 # the PC (it is not inside the share the Mac mounts, so the Mac default is
 # empty and --projects says finals were not checked).
@@ -5874,7 +5874,7 @@ def run_pc_nightly(mount=None, max_minutes=None):
     out["hash"] = run_hash(mount, max_minutes=minutes, rolling=True)
     if out["hash"].get("hashed"):
         out["inventory2"] = run_inventory(mount)
-    # The project layer (1.8): rebuild projects.json from the fresh inventory,
+    # The project layer (1.7): rebuild projects.json from the fresh inventory,
     # so the Desk's To-process list is never older than last night. Reads the
     # ledger, writes only projects.json; a problem here never fails the night.
     try:

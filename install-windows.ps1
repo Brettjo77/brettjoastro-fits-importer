@@ -80,7 +80,7 @@ foreach ($f in @('astro-import.py', 'astro-app.py', 'astro-watch.py', 'selftest.
     if (-not (Test-Path -LiteralPath $src)) { Warn "Missing from the package: $f"; exit 1 }
     Copy-Item -LiteralPath $src -Destination $bin -Force -ErrorAction Stop
 }
-# The contract (1.8): canonical targets and scopes, read by --projects. Brett edits
+# The contract (1.7): canonical targets and scopes, read by --projects. Brett edits
 # the installed copy, so an update never replaces it: a changed shipped copy lands
 # beside it as <name>.new for him to merge.
 New-Item -ItemType Directory -Force -Path (Join-Path $bin 'contract') -ErrorAction Stop | Out-Null
