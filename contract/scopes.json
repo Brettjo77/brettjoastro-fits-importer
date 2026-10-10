@@ -1,0 +1,27 @@
+{
+ "schema": "scopes/1",
+ "note": "One entry per scope AND site. 'archive_root' is its folder on the archive drive. 'match' is how a ledger row is recognised as this scope: the camera name, the resolved scope name for the two Askars (they share one camera and one archive root), and 'cam_token' for a second unit of the same model (the '|cam=' identity in the ledger key). An entry whose cam_token is still null never matches, so set it before that unit's first files arrive; until then they fall to the home entry of the same model. Colours follow the Observatory palette; null means Brett has not picked one yet.",
+ "default_site": "Shinfield",
+ "scopes": [
+  {"id": "S30P", "name": "Seestar S30 Pro", "archive_root": "S30P", "site": "Shinfield",
+   "colour": "yellow", "match": {"camera": "ZWO Seestar S30 Pro"}},
+  {"id": "S30", "name": "Seestar S30", "archive_root": "S30", "site": "Shinfield",
+   "colour": "blue", "match": {"camera": "ZWO Seestar S30"}},
+  {"id": "S50", "name": "Seestar S50", "archive_root": "S50", "site": "Shinfield",
+   "colour": "black", "match": {"camera": "ZWO Seestar S50"}},
+  {"id": "S50P", "name": "Seestar S50 Pro", "archive_root": "S50P", "site": "Shinfield",
+   "colour": null, "match": {"camera": "ZWO Seestar S50 Pro"}},
+  {"id": "FRA400", "name": "Askar FRA400", "archive_root": "ZWO Askar Scopes", "site": "Shinfield",
+   "colour": "red", "match": {"camera": "ZWO ASI585MC Air", "scope": "Askar FRA400"}},
+  {"id": "107PHQ", "name": "Askar 107PHQ", "archive_root": "ZWO Askar Scopes", "site": "Shinfield",
+   "colour": "green", "match": {"camera": "ZWO ASI585MC Air", "scope": "Askar 107PHQ"}},
+  {"id": "S50P-STARFRONT", "name": "Seestar S50 Pro (Starfront, Texas)", "archive_root": "S50P",
+   "site": "Starfront", "colour": null,
+   "match": {"camera": "ZWO Seestar S50 Pro", "cam_token": null},
+   "note": "Set cam_token to the Starfront unit's '|cam=' identity once its first files arrive."},
+  {"id": "S30P-TENERIFE", "name": "Seestar S30 Pro (Tenerife, rented)", "archive_root": "S30P",
+   "site": "Tenerife", "colour": null,
+   "match": {"camera": "ZWO Seestar S30 Pro", "cam_token": null},
+   "note": "Set cam_token to the rented unit's '|cam=' identity once its first files arrive."}
+ ]
+}

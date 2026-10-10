@@ -51,10 +51,10 @@ import unicodedata
 import uuid
 import time
 from collections import defaultdict
-from datetime import datetime, timedelta, timezone
+from datetime import date, datetime, timedelta, timezone
 
 # One version for every platform (1.5.0: the Windows 11 edition joins the Mac).
-VERSION = "1.7.0"
+VERSION = "1.8.0"
 IS_WINDOWS = os.name == "nt"
 IS_MAC = sys.platform == "darwin"
 PLATFORM = "windows" if IS_WINDOWS else ("mac" if IS_MAC else "linux")
@@ -223,7 +223,8 @@ def _test_root_guard():
              ("SEESTAR_DEST_S50PRO", SEESTAR_DEST_S50PRO),
              ("ASIAIR_EQUIPMENT", EQUIPMENT_JSON), ("ASIAIR_RECEIPTS", RECEIPT_BASE),
              ("ASIAIR_LEGACY_NAMES", LEGACY_CUSTOM_NAMES),
-             ("ASTRO_SIRIL_EXE", SIRIL_EXE), ("ASTRO_OBSERVATORY_DATASET", OBSERVATORY_DATASET)]
+             ("ASTRO_SIRIL_EXE", SIRIL_EXE), ("ASTRO_OBSERVATORY_DATASET", OBSERVATORY_DATASET),
+             ("ASTRO_CONTRACT_DIR", CONTRACT_DIR), ("ASTRO_FINALS_DIR", FINALS_DIR)]
     paths += [("SEESTAR_VOLUME", v) for v in SEESTAR_VOLUMES]
     paths += [("ASTRO_DRIVE_ROOTS", r)
               for r in (os.environ.get("ASTRO_DRIVE_ROOTS") or "").split(os.pathsep)]
@@ -816,6 +817,27 @@ OBSERVATORY_DATASET = _env_path(
     os.path.join(os.path.splitdrive(ARCHIVE_MOUNT)[0] + "\\", "Astro Config Data", "Observatory",
                  "dataset.json") if IS_WINDOWS
     else os.path.join(_DEF_STATE, "observatory-dataset.json"))
+# Project layer (1.8): the contract (canonical targets and scopes) ships
+# beside the engine; Final Astro Images sits at the archive DRIVE's root on
+# the PC (it is not inside the share the Mac mounts, so the Mac default is
+# empty and --projects says finals were not checked).
+CONTRACT_DIR = _env_path("ASTRO_CONTRACT_DIR",
+                         os.path.join(os.path.dirname(os.path.abspath(__file__)), "contract"))
+FINALS_DIR = _env_path(
+    "ASTRO_FINALS_DIR",
+    os.path.join(os.path.splitdrive(ARCHIVE_MOUNT)[0] + "\\", "Final Astro Images")
+    if IS_WINDOWS else "")
+def _env_int(var, default):
+    value = os.environ.get(var)
+    if value is None:
+        value = _CONFIG.get(var)          # 0 is a real setting, not "unset"
+    if value is None:
+        return default
+    try:
+        return int(value)
+    except (TypeError, ValueError):
+        return default
+QUIET_PERIOD_DAYS = _env_int("ASTRO_QUIET_PERIOD_DAYS", 14)
 _test_root_guard()
 
 # One-time migration from the pre-unification state locations (spec §1).
@@ -9017,6 +9039,515 @@ def run_skiplist_dialog(state):
 # MAIN
 # ═══════════════════════════════════════════════════════════════════════════
 
+# ═════════════════════════════════════════════════════════════════════════
+# Project layer (1.8, Project_Layer_Spec.md): a read-only view that answers
+# "you captured the light for this — now process it". It reads the ledger(s),
+# the PC's inventory of the archive, the Final Astro Images folder and the
+# contract (canonical targets and scopes), and writes ONE regenerable file,
+# projects.json. It never moves, renames or deletes anything.
+# ═════════════════════════════════════════════════════════════════════════
+
+PROJECT_STATUS_ORDER = ["capturing", "ready_to_process", "in_progress", "done"]
+_PL_DENY_SOURCETYPES = {"stack", "stack-jpg", "sub-jpg", "mw", "mw-stack", "mw-jpg", "media"}
+# Not \b: the site's filenames join code and name with "_", and "_" counts
+# as a word character, so \b would miss the code in "NGC7023_Iris_Nebula".
+_PL_CODE_RE = re.compile(
+    r"(?<![A-Za-z0-9])(M|NGC|IC|C|SH2|HIP|GAIA|BARNARD|B)[\s._-]*(\d+)(?!\d)", re.I)
+_PL_PAREN_RE = re.compile(r"^(.*?)\s*\(([^)]*)\)$")
+_PL_FINAL_EXTS = (".jpg", ".jpeg", ".png", ".tif", ".tiff")
+
+def _codekey(code):
+    """One spelling for a catalogue code: 'M 42', 'M42' and 'm_42' are all
+    'M42'; 'Sh2 129' and 'SH2129' are 'SH2-129'."""
+    s = re.sub(r"[\s._-]+", "", str(code or "").upper())
+    if s.startswith("SH2") and len(s) > 3:
+        s = "SH2-" + s[3:]
+    return s
+
+def _codes_in(text):
+    """Every catalogue code written anywhere in a name, as code keys."""
+    out = []
+    for m in _PL_CODE_RE.finditer(text or ""):
+        pre = m.group(1).upper()
+        if pre in ("B", "C") and m.group(1) != pre:
+            continue   # 'b4'/'c1' in a filename is never a catalogue code
+        pre = "BARNARD" if pre == "B" else pre
+        key = f"SH2-{m.group(2)}" if pre == "SH2" else f"{pre}{m.group(2)}"
+        if pre == "HIP":
+            remap = SEESTAR_HIP_REMAP.get(f"HIP {m.group(2)}")
+            if remap:
+                key = _codekey(remap)
+        if key not in out:
+            out.append(key)
+    return out
+
+def load_contract():
+    """contract/targets.json and contract/scopes.json, indexed for lookups.
+    A missing or unreadable file becomes a warning, never a crash."""
+    out = {"targets": [], "scopes": [], "by_code": {}, "by_namekey": {},
+           "ambiguous_names": set(), "default_site": "Shinfield", "warnings": []}
+    for fname, key in (("targets.json", "targets"), ("scopes.json", "scopes")):
+        path = os.path.join(CONTRACT_DIR, fname)
+        try:
+            with open(path, encoding="utf-8") as f:
+                d = json.load(f)
+        except (OSError, ValueError) as e:
+            out["warnings"].append(f"contract/{fname} could not be read: {e}")
+            continue
+        out[key] = d.get(key) if isinstance(d.get(key), list) else []
+        if key == "scopes" and d.get("default_site"):
+            out["default_site"] = d["default_site"]
+    for t in out["targets"]:
+        for c in t.get("codes") or []:
+            out["by_code"].setdefault(_codekey(c), t)
+        for a in [t.get("name") or ""] + (t.get("aliases") or []):
+            k = _name_key(a)
+            if not k:
+                continue
+            if k in out["by_namekey"] and out["by_namekey"][k] is not t:
+                out["ambiguous_names"].add(k)   # e.g. two 'Reflection Nebula's
+            else:
+                out["by_namekey"][k] = t
+    return out
+
+def _lookup_name(contract, text):
+    k = _name_key(text)
+    if not k or k in contract["ambiguous_names"]:
+        return None
+    return contract["by_namekey"].get(k)
+
+def resolve_target(contract, raw, custom_names=None):
+    """The contract target for any name the ledger, a receipt or an archive
+    folder uses — 'NGC 7380', 'NGC 7380 - Wizard Nebula', 'Wizard Nebula
+    (NGC 7380)', a mosaic panel, or a saved custom name. Returns
+    (target, how) or (None, why)."""
+    base = re.sub(r"\s+\(mosaic\)$", "", str(raw or "").strip())
+    base = re.sub(r"\s*·\s*\d+-\d+$", "", base)          # display panel suffix
+    m = MOSAIC_RE.match(base)
+    if m and re.fullmatch(r"\d+-\d+", m.group(2)):
+        base = m.group(1)
+    if not base:
+        return None, "empty name"
+    texts = [base]
+    if custom_names:
+        custom = custom_names.get(base) or custom_names.get(str(raw or "").strip())
+        if custom:
+            texts.append(custom)
+    for text in texts:
+        for key in _codes_in(text):
+            t = contract["by_code"].get(key)
+            if t:
+                return t, f"code {key}"
+        t = _lookup_name(contract, text)
+        if t:
+            return t, "name"
+        dm = _DISPLAY_RE.match(text)                      # 'CODE - Common'
+        if dm:
+            t = _lookup_name(contract, dm.group(2))
+            if t:
+                return t, "display name"
+        fm = _PL_PAREN_RE.match(text)                     # 'Name (CODE)'
+        if fm:
+            t = _lookup_name(contract, fm.group(1))
+            if t:
+                return t, "folder name"
+    return None, "no catalogue code or known name"
+
+def _scope_tokens(entry):
+    """Compressed spellings that mean this scope in a filename: the id, the
+    name, and the name without its maker ('Seestar S30 Pro' → 's30pro')."""
+    toks = {entry.get("id", ""), entry.get("name", "")}
+    toks.add(re.sub(r"^(seestar|askar|zwo)\s+", "", (entry.get("name") or ""), flags=re.I))
+    return {re.sub(r"[\s._-]+", "", t).lower() for t in toks if t}
+
+def _rig_in(text, contract):
+    """Which scope a filename names, or None. The longest spelling wins, so
+    'S30Pro' is the S30 Pro and never the S30."""
+    cache = contract.get("_tokens")
+    if cache is None:
+        cache = contract["_tokens"] = [(s["id"], _scope_tokens(s))
+                                       for s in contract["scopes"]]
+    flat = re.sub(r"[\s._-]+", "", str(text or "")).lower()
+    best, best_len = None, 0
+    for sid, toks in cache:
+        for tok in toks:
+            if len(tok) > best_len and tok in flat:
+                best, best_len = sid, len(tok)
+    return best
+
+def resolve_scope(contract, row, ledger_key=None):
+    """The contract scope (and so the site) for a ledger row. A second unit
+    of the same model is told apart by the '|cam=' identity in the ledger
+    key; a site entry whose cam_token is still null never matches."""
+    cam = row.get("camera") or ""
+    if not cam and row.get("device") == "seestar" and row.get("scope"):
+        cam = "ZWO " + row["scope"]
+    token = None
+    if ledger_key and "|cam=" in ledger_key:
+        token = ledger_key.split("|cam=", 1)[1]
+    cands = []
+    for s in contract["scopes"]:
+        mt = s.get("match") or {}
+        mc = mt.get("camera") or ""
+        hit = (cam and cam == mc) \
+            or (row.get("scope") and "ZWO " + row["scope"] == mc) \
+            or (row.get("scope") and row["scope"] == s.get("name"))
+        if not hit:
+            continue
+        if mt.get("scope") and mt["scope"] != row.get("scope"):
+            continue
+        cands.append(s)
+    for s in cands:
+        tok = (s.get("match") or {}).get("cam_token")
+        if tok and token and tok == token:
+            return s
+    for s in cands:
+        if "cam_token" not in (s.get("match") or {}):
+            return s
+    return None
+
+def scopes_for_root(contract, root):
+    return [s for s in contract["scopes"] if s.get("archive_root") == root]
+
+def _project_light(row):
+    """Is this ledger row one light frame? Subs and panels from a Seestar,
+    Plan/Live lights from the ASIAir, and back-catalogue rows whose filename
+    says Light_*.fit."""
+    st = row.get("sourceType")
+    if st in ("sub", "panel", "Plan", "Live"):
+        return True
+    if st in _PL_DENY_SOURCETYPES:
+        return False
+    name = (row.get("filename") or "").lower()
+    return name.startswith("light_") and name.endswith((".fit", ".fits", ".fts"))
+
+def load_capture_state():
+    """The one human-set fact (spec §4): per dataset, auto / open / complete.
+    Written by AstroLog (step 3); read here. Missing file means all auto."""
+    d = _read_json_file(os.path.join(STATE_DIR, "capture-state.json"))
+    ds = d.get("datasets") if isinstance(d.get("datasets"), dict) else d
+    return {k: v for k, v in (ds or {}).items()
+            if isinstance(v, str) and v in ("auto", "open", "complete")}
+
+def _latest_inventory_path():
+    """The archive inventory the sweep/nightly last finished: the generation
+    inventory-E.status.json names, else the newest file (status missing)."""
+    folder = _pc_path(ARCHIVE_MOUNT)
+    gen = _read_json_file(os.path.join(folder, "inventory-E.status.json")).get("generation")
+    if gen:
+        p = os.path.join(folder, f"inventory-E-{gen}.jsonl")
+        if os.path.isfile(p):
+            return p
+    try:
+        gens = sorted(f for f in os.listdir(folder)
+                      if f.startswith("inventory-E-") and f.endswith(".jsonl"))
+    except OSError:
+        return None
+    return os.path.join(folder, gens[-1]) if gens else None
+
+def _scan_finals(contract):
+    """Finished pictures in Final Astro Images, with the codes and the scope
+    their filenames carry. (None, why) when the folder can't be looked at."""
+    if not FINALS_DIR:
+        return None, "no Final Astro Images folder is configured on this computer"
+    if not os.path.isdir(FINALS_DIR):
+        return None, f"{FINALS_DIR} isn't there"
+    found, count = [], 0
+    for dirpath, dns, fns in os.walk(FINALS_DIR):
+        dns[:] = [d for d in dns if not d.startswith((".", "_"))]
+        for fn in fns:
+            if not fn.lower().endswith(_PL_FINAL_EXTS):
+                continue
+            count += 1
+            if count > 20000:
+                return found, "Final Astro Images is very large; stopped at 20,000 files"
+            rel = _rel(os.path.join(dirpath, fn), FINALS_DIR).replace("\\", "/")
+            sub = rel.split("/")[0] if "/" in rel else ""
+            stem = os.path.splitext(fn)[0]
+            found.append({"name": fn, "sub": sub,
+                          "codes": _codes_in(stem), "rig": _rig_in(stem, contract)})
+    return found, ""
+
+def _finals_sub_roots(contract, sub):
+    """Which archive roots a Final Astro Images subfolder stands for, or []
+    when the subfolder doesn't name a scope (then a final counts for every
+    dataset of its target, and the dataset says so)."""
+    flat = re.sub(r"[\s._-]+", "", sub or "").lower()
+    roots = set()
+    for s in contract["scopes"]:
+        toks = _scope_tokens(s) | {re.sub(r"[\s._-]+", "", s.get("archive_root", "")).lower()}
+        if flat and flat in toks:
+            roots.add(s["archive_root"])
+    return roots
+
+def run_targets_draft(state):
+    """Build targets-draft.json in the state folder from this computer's own
+    ledger: every distinct target name, resolved against the contract, with
+    the ones the contract doesn't know listed for Brett to review. Read-only
+    apart from the draft itself; the contract is never touched."""
+    contract = load_contract()
+    for w in contract["warnings"]:
+        warn(w)
+    raws = {}
+    for key, row in ((state.ledger or {}).get("files") or {}).items():
+        if not isinstance(row, dict) or not _project_light(row):
+            continue
+        for raw in (row.get("target"), row.get("displayName")):
+            if raw:
+                raws.setdefault(raw, key)
+    resolved, unresolved = [], []
+    for raw in sorted(raws):
+        t, how = resolve_target(contract, raw, state.custom_names)
+        if t:
+            resolved.append({"raw": raw, "target_id": t["id"], "name": t["name"], "how": how})
+        else:
+            unresolved.append({"raw": raw, "why": how})
+    draft = {"schema": "targets-draft/1", "generated_at": _utc_iso(),
+             "contract_dir": CONTRACT_DIR,
+             "resolved": resolved, "unresolved": unresolved}
+    out = os.path.join(STATE_DIR, "targets-draft.json")
+    _confine(out, "--targets-draft")
+    _atomic_write_json(out, draft)
+    success(f"{len(resolved)} of {len(raws)} names match the contract; "
+            f"draft written to {out}")
+    if unresolved:
+        warn(f"{len(unresolved)} name(s) the contract doesn't know yet:")
+        for u in unresolved:
+            print(f"   {u['raw']}")
+        info("Add each one to contract/targets.json (a new target, or an "
+             "alias on an existing one), then run --targets-draft again.")
+    return draft
+
+def build_projects(state, extra_ledgers=(), today=None):
+    """The whole project layer as one dict (spec §7): every dataset
+    (target + scope + site) with its sessions, where its frames are, and a
+    status derived from the facts — never typed in. Pure read."""
+    contract = load_contract()
+    warnings = list(contract["warnings"])
+    if today is None:
+        today = date.today()
+    elif isinstance(today, str):
+        today = date.fromisoformat(today)
+    # Which computer holds frames that are still in a ledger's dest folders:
+    # this machine by its own name, a --with-ledger snapshot as the other one
+    # (Brett's world is one Mac and one PC).
+    here = SHIP_FOLDER if SHIP_FOLDER in ("mac", "pc") else ("pc" if IS_WINDOWS else "mac")
+    there = "pc" if here == "mac" else "mac"
+    ledgers = [("this computer", here, ((state.ledger or {}).get("files") or {}))]
+    for p in extra_ledgers:
+        lf = _read_json_file(p).get("files") or {}
+        if not lf:
+            warnings.append(f"{p}: no ledger rows could be read")
+        ledgers.append((os.path.basename(p), there, lf))
+
+    datasets = {}           # (tid, scope_id) -> working dict
+    folder_names = {}       # (tid, root) -> folder on the archive
+    unresolved, unknown_scopes, bad_nights = set(), set(), 0
+    for label, loc, files in ledgers:
+        for key, row in files.items():
+            if not isinstance(row, dict) or not _project_light(row):
+                continue
+            night = row.get("night")
+            if not night:
+                continue
+            if not isinstance(night, str) or not re.fullmatch(r"\d{4}-\d{2}-\d{2}", night):
+                bad_nights += 1
+                continue
+            t = None
+            for nm in (row.get("displayName"), row.get("target")):
+                if nm:
+                    t, _how = resolve_target(contract, nm, state.custom_names)
+                    if t is not None:
+                        break
+            if t is None:
+                nm = row.get("displayName") or row.get("target")
+                if nm:
+                    unresolved.add(nm)
+                continue
+            s = resolve_scope(contract, row, key)
+            if s is None:
+                unknown_scopes.add(row.get("scope") or row.get("camera") or "?")
+                continue
+            d = datasets.setdefault((t["id"], s["id"]), {
+                "target": t, "scope": s, "nights": {}, "locations": set()})
+            n = d["nights"].setdefault(night, {"frames": 0, "integration": 0.0})
+            n["frames"] += 1
+            try:
+                n["integration"] += float(row.get("exposureSeconds") or 0)
+            except (TypeError, ValueError):
+                pass
+            if row.get("archiveLocation") or row.get("archiveVerifiedAt") \
+                    or row.get("archivePath"):
+                d["locations"].add("chillblast_archive")
+                arel = (row.get("archiveLocation") or row.get("archivePath") or "")
+                parts = [p for p in arel.replace("\\", "/").split("/") if p]
+                if len(parts) >= 2:
+                    folder_names.setdefault((t["id"], parts[0]), parts[1])
+            if row.get("dest") and not row.get("tidiedAt"):
+                d["locations"].add(loc)
+    if unresolved:
+        warnings.append(f"{len(unresolved)} target name(s) the contract doesn't know "
+                        f"(run --targets-draft to list them); their frames are not counted")
+    if unknown_scopes:
+        warnings.append("contract/scopes.json doesn't recognise: "
+                        + ", ".join(sorted(unknown_scopes)[:6])
+                        + " — those frames are not counted")
+    if bad_nights:
+        warnings.append(f"{bad_nights} ledger row(s) carry a night that isn't a date "
+                        f"and were not counted")
+
+    # What the archive itself shows: masters, autostacks and in-archive
+    # finals per target folder, from the PC's newest inventory.
+    evidence = {}           # (root, folder) -> {"masters": [...], "autostacks": n}
+    inv_path = _latest_inventory_path()
+    if inv_path:
+        for r in _read_jsonl_rows(inv_path):
+            if r.get("retired"):
+                continue
+            root, folder = r.get("camera"), r.get("target")
+            rel = r.get("relpath") or ""
+            if not root or not folder or "/" not in rel:
+                continue
+            name = rel.rsplit("/", 1)[1]
+            kind = _desk_kind(name, rel.rsplit("/", 1)[0])
+            e = evidence.setdefault((root, folder), {"masters": [], "autostacks": 0})
+            if kind == "master":
+                e["masters"].append(name)
+            elif kind == "autostack":
+                e["autostacks"] += 1
+            t, _how = resolve_target(contract, folder, state.custom_names)
+            if t is not None:
+                folder_names.setdefault((t["id"], root), folder)
+    else:
+        warnings.append("no archive inventory was found; masters (In progress) "
+                        "were not checked — run --inventory on the PC first")
+
+    finals, finals_note = _scan_finals(contract)
+    if finals is None:
+        warnings.append(f"finished pictures were not checked: {finals_note}")
+    elif finals_note:
+        warnings.append(finals_note)
+
+    capture_state = load_capture_state()
+    out_projects = {}
+    for (tid, sid), d in sorted(datasets.items()):
+        t, s = d["target"], d["scope"]
+        root, site = s.get("archive_root"), s.get("site") or contract["default_site"]
+        nights = sorted(d["nights"])
+        last = nights[-1]
+        days_since = (today - date.fromisoformat(last)).days
+        key = f"{tid}|{sid}|{site}"
+        cstate = capture_state.get(key, "auto")
+        folder = folder_names.get((tid, root))
+        shared_root = len(scopes_for_root(contract, root)) > 1
+        notes = []
+
+        masters = []
+        if folder and (root, folder) in evidence:
+            for m in evidence[(root, folder)]["masters"]:
+                rig = _rig_in(m, contract)
+                if rig in (None, sid):
+                    masters.append(m)
+                    if rig is None and shared_root:
+                        notes.append("shared-folder")
+        tcodes = {_codekey(c) for c in t.get("codes") or []} | {_codekey(tid)}
+        done_files = []
+        for f in finals or []:
+            if not tcodes & set(f["codes"]):
+                continue
+            roots = _finals_sub_roots(contract, f["sub"])
+            if roots and root not in roots:
+                continue
+            if f["rig"] and f["rig"] != sid:
+                continue
+            done_files.append(f["name"])
+            if not f["rig"] and (shared_root or not roots):
+                notes.append("unscoped-final")
+
+        if done_files:
+            status = "done"
+        elif masters:
+            status = "in_progress"
+        elif cstate == "open":
+            status = "capturing"
+        elif cstate == "complete":
+            status = "ready_to_process"
+        else:
+            status = "capturing" if days_since <= QUIET_PERIOD_DAYS else "ready_to_process"
+
+        entry = {
+            "scope": sid, "scope_name": s.get("name"), "site": site,
+            "status": status, "capture_state": cstate,
+            "nights": len(nights), "frames": sum(n["frames"] for n in d["nights"].values()),
+            "integration_seconds": round(sum(n["integration"] for n in d["nights"].values())),
+            "first_session": nights[0], "last_session": last,
+            "locations": sorted(d["locations"]),
+            "archive_rel": f"{root}/{folder}" if folder else None,
+        }
+        if masters:
+            entry["masters"] = sorted(masters)[:20]
+        if done_files:
+            entry["finals"] = sorted(set(done_files))[:20]
+        if notes:
+            entry["attribution"] = sorted(set(notes))
+        p = out_projects.setdefault(tid, {"target_id": tid, "name": t.get("name"),
+                                          "datasets": []})
+        p["datasets"].append(entry)
+
+    projects = []
+    for tid, p in out_projects.items():
+        ds = p["datasets"]
+        rank = min(PROJECT_STATUS_ORDER.index(e["status"]) for e in ds)
+        p["status"] = PROJECT_STATUS_ORDER[rank]
+        p["to_process"] = any(e["status"] == "ready_to_process" for e in ds)
+        p["last_captured"] = max(e["last_session"] for e in ds)
+        p["integration_seconds"] = sum(e["integration_seconds"] for e in ds)
+        projects.append(p)
+    projects.sort(key=lambda p: p["last_captured"], reverse=True)
+
+    return {"schema": "projects/1", "generated_at": _utc_iso(),
+            "quiet_period_days": QUIET_PERIOD_DAYS,
+            "sources": {"ledgers": [l for l, _loc, _f in ledgers],
+                        "inventory": os.path.basename(inv_path) if inv_path else None,
+                        "finals_dir": FINALS_DIR or None,
+                        "capture_state": bool(capture_state)},
+            "warnings": warnings, "projects": projects}
+
+def load_projects():
+    """projects.json from the state folder, or None. The panel reads this."""
+    d = _read_json_file(os.path.join(STATE_DIR, "projects.json"))
+    return d if d.get("schema") == "projects/1" \
+        and isinstance(d.get("projects"), list) else None
+
+def run_projects(state, extra_ledgers=(), dry_run=False):
+    """--projects: rebuild projects.json. Safe to repeat; writes nothing else."""
+    doc = build_projects(state, extra_ledgers=extra_ledgers)
+    counts = {}
+    for p in doc["projects"]:
+        for e in p["datasets"]:
+            counts[e["status"]] = counts.get(e["status"], 0) + 1
+    bits = [f"{counts.get(k, 0)} {k.replace('_', ' ')}" for k in
+            ("ready_to_process", "in_progress", "capturing", "done") if counts.get(k)]
+    info(f"{len(doc['projects'])} projects: " + (", ".join(bits) or "nothing yet"))
+    for w in doc["warnings"]:
+        warn(w)
+    out = os.path.join(STATE_DIR, "projects.json")
+    if dry_run:
+        info(f"Dry run: {out} was not written.")
+        return doc
+    _confine(out, "--projects")
+    _atomic_write_json(out, doc)
+    success(f"Wrote {out}")
+    ok, _owner = mirror_owner_ok(MIRROR_DIR)
+    if ok:
+        try:
+            _confine(os.path.join(MIRROR_DIR, "projects.json"), "--projects mirror")
+            os.makedirs(MIRROR_DIR, exist_ok=True)
+            _atomic_write_json(os.path.join(MIRROR_DIR, "projects.json"), doc)
+        except OSError:
+            pass
+    return doc
+
 def main():
     global VERBOSE
     p = argparse.ArgumentParser(description="BrettjoAstro FITS Importer — backup-first (ASIAir + Seestar)")
@@ -9062,6 +9593,17 @@ def main():
     p.add_argument("--space", action="store_true",
                    help="read-only: what on this computer is safe to delete (its archive "
                         "copy re-checked by the PC), what is waiting, and what to keep")
+    p.add_argument("--projects", action="store_true",
+                   help="read-only: rebuild projects.json (what is ready to process, "
+                        "in progress, still capturing, done) from the ledger, the PC's "
+                        "archive inventory and Final Astro Images")
+    p.add_argument("--with-ledger", action="append", default=[], metavar="FILE",
+                   help="with --projects: also read another computer's ledger.json "
+                        "(a read-only snapshot; may repeat)")
+    p.add_argument("--targets-draft", action="store_true",
+                   help="read-only: list this ledger's target names against "
+                        "contract/targets.json and write targets-draft.json with "
+                        "the ones the contract doesn't know yet")
     p.add_argument("--tidy-stacks", action="store_true",
                    help="list archived Seestar stacks outranked by a higher stack from "
                         "the SAME night and offer to remove them (typed DELETE; "
@@ -9213,6 +9755,12 @@ def main():
         return
     if args.space:
         run_space(state)
+        return
+    if args.targets_draft:
+        run_targets_draft(state)
+        return
+    if args.projects:
+        run_projects(state, extra_ledgers=args.with_ledger, dry_run=args.dry_run)
         return
     if args.tidy_stacks:
         if args.dry_run:

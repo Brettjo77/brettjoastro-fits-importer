@@ -889,6 +889,15 @@ class Handler(BaseHTTPRequestHandler):
             # "Open in Astro Desk" link lands here with ?target=&code=&scope=)
             self._html(PAGE.replace("__ASTRO_TOKEN__", TOKEN)
                        .replace("__STATUS_TIP__", STATUS_TIP))
+        elif self.path == "/api/projects":
+            # The project layer's own file (projects.json, written by
+            # --projects). Read-only; None when it hasn't been built yet.
+            try:
+                doc = eng.load_projects()
+            except Exception:
+                doc = None
+            self._json({"ok": doc is not None, "opener":
+                        "Explorer" if eng.IS_WINDOWS else "Finder", "projects": doc})
         elif self.path == "/api/archive/index":
             try:
                 self._json(eng.archive_index())
@@ -1405,6 +1414,7 @@ button.linkbtn:disabled{opacity:.5;cursor:default}
     <div class="card">
       <div class="eyebrow" style="display:flex;justify-content:space-between"><span id="deskListTitle">Still to process</span><span id="deskCount"></span></div>
       <div class="ad-note" id="deskNote">Reading the archive…</div>
+      <div id="deskProjects"></div>
       <input class="ad-search" id="deskSearch" type="search" placeholder="Find a target" aria-label="Find a target">
       <label class="ad-opt"><input type="checkbox" id="deskAll"> Show every folder, finished ones too</label>
       <div id="deskList"></div>
@@ -1767,7 +1777,45 @@ const DESK_TODO=new Set(["captured","stacked","processing"]);
 const deskState=s=>`<span class="ad-state ${esc(s||"none")}">${esc(s?(s==="processing"?"in processing":s):"no state")}</span>`;
 const fmtNight=iso=>{ if(!iso) return ""; const [y,m,d]=iso.split("-"); return `${+d} ${MONTHS[+m-1]} ${y}`; };
 const fmtSize=b=>b>=1073741824?(b/1073741824).toFixed(1)+" GB":b>=1048576?Math.round(b/1048576)+" MB":Math.max(1,Math.round(b/1024))+" KB";
+async function loadProjects(){
+  let pj=null;
+  try{ pj=await api("/api/projects"); }catch(e){ pj=null; }
+  const box=$("#deskProjects");
+  if(!pj||!pj.ok||!pj.projects){
+    box.innerHTML='<p class="ad-note">No projects.json yet — run the importer with --projects to get the To-process list here. The list below uses the Observatory scan.</p>';
+    return;
+  }
+  const opener=pj.opener||"Explorer";
+  const rows=[];
+  for(const p of pj.projects.projects||[]) for(const d of p.datasets||[])
+    rows.push({name:p.name||p.target_id, d});
+  const sect=(title,status)=>{
+    const list=rows.filter(r=>r.d.status===status)
+      .sort((a,b)=>(b.d.last_session||"").localeCompare(a.d.last_session||""));
+    if(!list.length) return "";
+    return `<div class="ad-sec"><div class="eyebrow">${title} · ${list.length}</div>`+
+      list.map(r=>{
+        const d=r.d, h=d.integration_seconds?(d.integration_seconds/3600).toFixed(1)+" h":"";
+        const where=(d.locations||[]).map(l=>l==="chillblast_archive"?"archive":l).join(" + ");
+        const facts=[d.scope_name||d.scope, d.site, d.nights?d.nights+" night"+(d.nights===1?"":"s"):"", h, where]
+          .filter(Boolean).join(" · ");
+        const btn=d.archive_rel?`<button data-xopen="${esc(d.archive_rel)}">Open in ${opener}</button>`
+          :`<span class="small">not on the archive yet</span>`;
+        return `<div class="ad-file"${d.archive_rel?` data-xsel="${esc(d.archive_rel)}"`:""}>
+          <span class="nm">${esc(r.name)}</span><span class="mt">${esc(facts)}</span>${btn}</div>`;
+      }).join("")+"</div>";
+  };
+  const html=sect("To process",'ready_to_process')+sect("In progress",'in_progress');
+  box.innerHTML=html||'<p class="ad-note">Nothing is waiting to process — everything is still capturing, or done.</p>';
+  box.querySelectorAll("[data-xopen]").forEach(b=>b.addEventListener("click",async ev=>{
+    ev.stopPropagation();
+    const res=await api("/api/archive/open",{rel:b.dataset.xopen});
+    if(!res.ok){ $("#deskNote").textContent=res.error||"Couldn't open that folder."; }
+  }));
+  box.querySelectorAll("[data-xsel]").forEach(r=>r.addEventListener("click",()=>deskOpen(r.dataset.xsel)));
+}
 async function loadDesk(){
+  loadProjects();
   try{
     desk=await api("/api/archive/index");
   }catch(e){ desk={error:String(e)}; }

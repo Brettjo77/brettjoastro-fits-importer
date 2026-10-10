@@ -1471,6 +1471,59 @@ try:
           r_nosiril.get("ok") is False and "ASTRO_SIRIL_EXE" in (r_nosiril.get("error") or "")
           and r_sfile.get("_status") == 400 and len(teh.os_calls(envd.root, "launch")) == 1,
           json.dumps([r_nosiril, r_sfile]))
+    # ── the project layer on the Archive tab (1.8) ─────────────────────────
+    check("PL the Archive tab carries the To-process section and its loader",
+          'id="deskProjects"' in page and "loadProjects" in page and "data-xopen" in page)
+    pj0 = api("/api/projects", url=URLD)
+    check("PL /api/projects before --projects has run: ok false, so the tab says to run it "
+          "and falls back to the Observatory list",
+          pj0.get("ok") is False and pj0.get("projects") is None, json.dumps(pj0))
+    os.makedirs(envd.state, exist_ok=True)
+    with open(os.path.join(envd.state, "projects.json"), "w", encoding="utf-8") as f:
+        json.dump({"schema": "projects/1", "generated_at": "2026-10-10T08:00:00+00:00",
+                   "quiet_period_days": 14, "sources": {}, "warnings": [],
+                   "projects": [{"target_id": "NGC7380", "name": "Wizard Nebula",
+                                 "status": "ready_to_process", "to_process": True,
+                                 "last_captured": "2026-09-01", "integration_seconds": 27000,
+                                 "datasets": [
+                       {"scope": "FRA400", "scope_name": "Askar FRA400", "site": "Shinfield",
+                        "status": "ready_to_process", "capture_state": "auto", "nights": 3,
+                        "frames": 90, "integration_seconds": 27000,
+                        "first_session": "2026-08-20", "last_session": "2026-09-01",
+                        "locations": ["chillblast_archive"],
+                        "archive_rel": "/".join(ad_wiz)},
+                       {"scope": "S30P", "scope_name": "Seestar S30 Pro", "site": "Shinfield",
+                        "status": "capturing", "capture_state": "auto", "nights": 1,
+                        "frames": 10, "integration_seconds": 100,
+                        "first_session": "2026-10-08", "last_session": "2026-10-08",
+                        "locations": ["mac"], "archive_rel": None}]}]}, f)
+    pj = api("/api/projects", url=URLD)
+    pj_ds = (pj.get("projects") or {}).get("projects", [{}])[0].get("datasets", [{}])[0]
+    check("PL /api/projects serves projects.json once it exists, with the opener's name "
+          "for the button",
+          pj.get("ok") is True and pj.get("opener") in ("Explorer", "Finder")
+          and pj_ds.get("archive_rel") == "/".join(ad_wiz), json.dumps(pj)[:300])
+    opens_before = len(teh.os_calls(envd.root, "open"))
+    r_open = api("/api/archive/open", {"rel": pj_ds["archive_rel"]}, url=URLD)
+    opens_now = teh.os_calls(envd.root, "open")
+    check("PL Open in Explorer/Finder from a To-process row opens the dataset's target "
+          "folder on the archive (recorded in test mode)",
+          r_open.get("ok") is True and len(opens_now) == opens_before + 1
+          and opens_now[-1].get("target") == os.path.join(ad_arch, *ad_wiz),
+          json.dumps([r_open, opens_now[-2:]]))
+    with open(os.path.join(envd.state, "projects.json"), "w", encoding="utf-8") as f:
+        json.dump({"schema": "projects/1", "generated_at": "x", "quiet_period_days": 14,
+                   "sources": {}, "warnings": [], "projects": [
+                       {"target_id": "X", "name": "X", "status": "ready_to_process",
+                        "to_process": True, "last_captured": "2026-09-01",
+                        "integration_seconds": 0, "datasets": [
+                            {"scope": "S30P", "status": "ready_to_process",
+                             "archive_rel": "../state"}]}]}, f)
+    r_bad = api("/api/archive/open", {"rel": "../state"}, url=URLD)
+    check("PL a hand-edited projects.json cannot point the open outside the archive",
+          r_bad.get("_status") == 400 and len(teh.os_calls(envd.root, "open")) == opens_before + 1,
+          json.dumps(r_bad))
+    os.remove(os.path.join(envd.state, "projects.json"))
     check("AD read-only: after all of it the archive is exactly as it was (no _verify probe)",
           ad_tree() == tree0 and not os.path.exists(os.path.join(ad_arch, "_verify")))
 finally:

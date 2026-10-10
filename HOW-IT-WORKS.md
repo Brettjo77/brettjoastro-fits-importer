@@ -232,6 +232,23 @@ From there:
 
 The tab only reads. It never changes anything in the archive. It only opens folders and pictures that are inside the archive, never programs.
 
+## The project layer: "you captured this, now process it"
+
+Once frames ship to the archive they are safe — and easily forgotten. `--projects` writes one small file, `projects.json`, that remembers for you. It is regenerable at any time and safe to delete; nothing else is written.
+
+A **project** is one object in the sky. A **dataset** is that object on one scope at one site (a wide Seestar mosaic and an Askar close-up are two pieces of work). Each dataset gets a status, worked out from facts, never typed in:
+
+- **Capturing** — the last session is recent (within the quiet period, 14 days by default), so you're probably still adding nights.
+- **Ready to process** — the quiet period has passed and nothing has been started. This is the list to look at in front of the telly.
+- **In progress** — the target's folder on the archive holds one of your own masters. The Seestar's own `Stacked_…` files never count; only your work does.
+- **Done** — a finished picture in `Final Astro Images` carries the target's catalogue code in its filename.
+
+The one thing you (through AstroLog, later) can set by hand is per dataset: **open** ("I'm keeping this going all season") or **complete** ("that's enough light, count it as ready now").
+
+The facts come from this computer's ledger (another computer's snapshot can be added with `--with-ledger`), the PC's inventory of the archive, and the `Final Astro Images` folder. The names come from `contract/targets.json` and `contract/scopes.json` beside the engine — the one list of what each object and each scope is called, shared with the other tools. `--targets-draft` tells you which names in your ledger the contract doesn't know yet, so you can add them.
+
+On the Archive tab, **To process** and **In progress** now sit at the top, newest capture first, each row with an **Open in Explorer** (or **Show in Finder**) button straight to that object's folder on the archive.
+
 ## When things go wrong
 
 Interruptions are expected, not exceptional. A copy that dies mid-file leaves

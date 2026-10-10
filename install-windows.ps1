@@ -80,6 +80,12 @@ foreach ($f in @('astro-import.py', 'astro-app.py', 'astro-watch.py', 'selftest.
     if (-not (Test-Path -LiteralPath $src)) { Warn "Missing from the package: $f"; exit 1 }
     Copy-Item -LiteralPath $src -Destination $bin -Force -ErrorAction Stop
 }
+# The contract (1.8): canonical targets and scopes, read by --projects
+New-Item -ItemType Directory -Force -Path (Join-Path $bin 'contract') -ErrorAction Stop | Out-Null
+foreach ($f in @('targets.json', 'scopes.json')) {
+    $src = Join-Path $here "contract\$f"
+    if (Test-Path -LiteralPath $src) { Copy-Item -LiteralPath $src -Destination (Join-Path $bin 'contract') -Force }
+}
 foreach ($f in @('set-archive-rights.ps1')) {
     $src = Join-Path $here "pc\$f"
     if (Test-Path -LiteralPath $src) { Copy-Item -LiteralPath $src -Destination (Join-Path $bin 'pc') -Force }

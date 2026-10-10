@@ -122,6 +122,10 @@ install_file "$SCRIPT_DIR/astro-import.py"  "$BIN_DIR/astro-import.py"  true
 install_file "$SCRIPT_DIR/astro-app.py"     "$BIN_DIR/astro-app.py"     true
 install_file "$SCRIPT_DIR/astro-watch.sh"   "$BIN_DIR/astro-watch.sh"   true
 install_file "$SCRIPT_DIR/selftest.py"      "$BIN_DIR/selftest.py"      true
+# The contract (1.8): canonical targets and scopes, read by --projects
+mkdir -p "$BIN_DIR/contract"
+install_file "$SCRIPT_DIR/contract/targets.json" "$BIN_DIR/contract/targets.json" false
+install_file "$SCRIPT_DIR/contract/scopes.json"  "$BIN_DIR/contract/scopes.json"  false
 # Compatibility copy: `asiair-import.py` IS the unified engine now.
 if [ -f "$BIN_DIR/astro-import.py" ]; then
     cp "$BIN_DIR/astro-import.py" "$BIN_DIR/asiair-import.py"

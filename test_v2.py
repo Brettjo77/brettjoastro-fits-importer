@@ -1820,6 +1820,9 @@ _mac_inst = set(re.findall(r'install_file "\$SCRIPT_DIR/([^"]+)"',
 _ps = open(os.path.join(_here, "install-windows.ps1"), encoding="utf-8-sig").read()
 _m = re.search(r"foreach \(\$f in @\(([^)]*'astro-import\.py'[^)]*)\)\)", _ps)
 _win_inst = set(re.findall(r"'([^']+)'", _m.group(1))) if _m else set()
+_m = re.search(r"foreach \(\$f in @\(([^)]*'targets\.json'[^)]*)\)\)", _ps)   # the contract (1.8)
+if _m:
+    _win_inst |= {"contract/" + f for f in re.findall(r"'([^']+)'", _m.group(1))}
 check("W1 the Mac install check expects only files install-scripts.sh installs",
       set(_st.INSTALLED["mac"]) <= _mac_inst, f"{_st.INSTALLED['mac']} vs {sorted(_mac_inst)}")
 check("W1 the Windows install check expects only files install-windows.ps1 installs",
@@ -1873,7 +1876,9 @@ check("W1 ...on Windows PowerShell 5.1 its save of every file's rights can't sto
 _bin = os.path.join(W1.root, "installed-bin")
 os.makedirs(_bin, exist_ok=True)
 for _f in _st.INSTALLED.get(engw.PLATFORM, _st.INSTALLED["windows"]):   # what THIS OS installs
-    shutil.copy2(os.path.join(_here, _f), _bin)
+    _dst = os.path.join(_bin, _f)                 # contract/… keeps its folder
+    os.makedirs(os.path.dirname(_dst), exist_ok=True)
+    shutil.copy2(os.path.join(_here, _f), _dst)
 r = wrun(script=os.path.join(_bin, "selftest.py"))
 check("W1 the install check passes from an installed folder (not only the source folder)",
       " present" in r.stdout and not re.search(r"FAIL\s+\S+ present", r.stdout),
@@ -4858,6 +4863,255 @@ check("AD launch_app: a missing program is False and starts nothing; Siril is re
 r = AD.run("--help", extra_env={"ASTRO_SIRIL_EXE": os.path.join(tempfile.gettempdir(), "not-in-root", "siril")})
 check("AD test mode refuses a Siril path outside the test root before anything runs",
       r.returncode == 3 and "ASTRO_SIRIL_EXE is outside the test root" in r.stderr, r.stderr[-300:])
+
+# ═══════════════ CHAIN PL: the project layer, read-only (1.8) ═════════════════
+print("\n── Chain PL: projects.json — what is ready to process, derived, read-only (1.8) ──")
+# After the frames ship, nothing says "you captured this, now process it".
+# --projects derives a status per dataset (target + scope + site) from the
+# ledger(s), the PC's inventory and Final Astro Images, and writes ONE
+# regenerable file. Status is derived, never typed in (spec: Project_Layer_Spec).
+PL = teh.Env("PL", asiair=False, seestar=False)
+PL_TODAY = "2026-10-10"
+
+# the shipped contract, copied INTO the root (test mode reads nothing outside)
+PL_CON = os.path.join(PL.root, "contract")
+os.makedirs(PL_CON)
+for _f in ("targets.json", "scopes.json"):
+    shutil.copy(os.path.join(os.path.dirname(SCRIPT), "contract", _f), PL_CON)
+with open(os.path.join(PL_CON, "scopes.json")) as f:
+    _sc = json.load(f)
+for _s in _sc["scopes"]:                      # the Starfront S50 Pro, configured
+    if _s["id"] == "S50P-STARFRONT":
+        _s["match"]["cam_token"] = "SF50-0001"
+with open(os.path.join(PL_CON, "scopes.json"), "w") as f:
+    json.dump(_sc, f)
+PL.env.update({"ASTRO_CONTRACT_DIR": PL_CON,
+               "ASTRO_FINALS_DIR": os.path.join(PL.root, "finals")})
+
+def pl_row(target, display, night, *, scope=None, device=None, st="sub", exp=10.0,
+           dest=None, arch=None):
+    r = {"filename": f"Light_{target}_{exp}s_{night.replace('-', '')}-220000.fit",
+         "target": target, "displayName": display, "night": night,
+         "sourceType": st, "exposureSeconds": exp}
+    if device:
+        r.update(device="seestar", scope=scope)
+    else:
+        r.update(camera="ZWO ASI585MC Air", scope=scope)
+    if dest:
+        r["dest"] = os.path.join(PL.root, "dest", dest)
+    if arch:
+        r["archiveLocation"] = arch
+    return r
+
+PL_LED = {"version": 1, "calibration": {}, "files": {
+    # Iris on the FRA400: archived, a master AND a final → done
+    "i1": pl_row("NGC 7023", "NGC 7023 - Iris Nebula", "2026-09-01", st="Plan",
+                 scope="Askar FRA400", exp=300.0, dest="i1.fit",
+                 arch="ZWO Askar Scopes\\Iris Nebula (NGC 7023)\\Iris Day 1\\i1.fit"),
+    "i2": pl_row("NGC 7023", "NGC 7023 - Iris Nebula", "2026-09-20", st="Plan",
+                 scope="Askar FRA400", exp=300.0,
+                 arch="ZWO Askar Scopes\\Iris Nebula (NGC 7023)\\Iris Day 2\\i2.fit"),
+    # Iris on the 107PHQ: same shared Askar folder, no rig on the master → in progress, shared
+    "i3": pl_row("NGC 7023", "NGC 7023 - Iris Nebula", "2026-09-05", st="Live",
+                 scope="Askar 107PHQ", exp=120.0,
+                 arch="ZWO Askar Scopes\\Iris Nebula (NGC 7023)\\Iris Day 1\\i3.fit"),
+    # M 42 on the S30 Pro: two days ago, only its autostack on the archive → capturing
+    "m1": pl_row("M 42", "M 42 - Orion Nebula", "2026-10-08",
+                 device=True, scope="Seestar S30 Pro", dest="m1.fit"),
+    # Wizard on the S50 Pro: 39 quiet days → ready to process
+    "w1": pl_row("NGC 7380", "NGC 7380 - Wizard Nebula", "2026-09-01", st="panel",
+                 device=True, scope="Seestar S50 Pro",
+                 arch="S50P\\Wizard Nebula (NGC 7380)\\Wizard Day 1\\w1.fit"),
+    # the quiet-period boundary: day 14 still capturing, day 15 ready
+    "b1": pl_row("NGC 1499", "NGC 1499 - California Nebula", "2026-09-26",
+                 device=True, scope="Seestar S50", dest="b1.fit"),
+    "b2": pl_row("NGC 2244", "NGC 2244 - Rosette Nebula", "2026-09-25",
+                 device=True, scope="Seestar S50", dest="b2.fit"),
+    # overrides: open keeps capturing after 40 days; complete is ready inside 5
+    "o1": pl_row("NGC 281", "NGC 281 - Pacman Nebula", "2026-08-31",
+                 device=True, scope="Seestar S30 Pro", dest="o1.fit"),
+    "o2": pl_row("Sh2-129", "Sh2-129 - Squid Nebula", "2026-10-05",
+                 device=True, scope="Seestar S30 Pro", dest="o2.fit"),
+    # never lights: a stack, a jpg and a Milky Way frame
+    "x1": {"filename": "Stacked_120_M 42.fit", "target": "M 42", "device": "seestar",
+           "scope": "Seestar S30 Pro", "sourceType": "stack", "night": "2026-10-08"},
+    "x2": {"filename": "M 42.jpg", "target": "M 42", "device": "seestar",
+           "scope": "Seestar S30 Pro", "sourceType": "sub-jpg", "night": "2026-10-08"},
+    # a name the contract doesn't know
+    "u1": pl_row("Nannys Favourite", "Nannys Favourite", "2026-09-02",
+                 device=True, scope="Seestar S30 Pro", dest="u1.fit"),
+}}
+# the Starfront S50 Pro: same model, told apart by the |cam= identity
+PL_LED["files"]["sf1|cam=SF50-0001"] = pl_row(
+    "NGC 6888", "NGC 6888 - Crescent Nebula", "2026-09-02",
+    device=True, scope="Seestar S50 Pro",
+    arch="S50P\\Crescent Nebula (NGC 6888)\\Crescent Day 1\\c1.fit")
+os.makedirs(PL.state, exist_ok=True)
+with open(os.path.join(PL.state, "ledger.json"), "w") as f:
+    json.dump(PL_LED, f)
+with open(os.path.join(PL.state, "capture-state.json"), "w") as f:
+    json.dump({"datasets": {"NGC281|S30P|Shinfield": "open",
+                            "Sh2-129|S30P|Shinfield": "complete",
+                            "M42|S30P|Shinfield": "sideways"}}, f)   # junk value ignored
+
+# the PC's inventory: a plain master for Iris (shared folder), an autostack
+# for M 42, and a rig-tagged master for the Wizard's Askar folder
+PL_PC = os.path.join(PL.archive, "_verify", "pc")
+os.makedirs(PL_PC)
+def pl_inv_row(rel, root, folder):
+    return {"schema": "inventory-row/1", "relpath": rel, "camera": root,
+            "target": folder, "size": 1, "mtimeNs": 1, "kind": "light", "retired": False}
+with open(os.path.join(PL_PC, "inventory-E-20261009T000000Z.jsonl"), "w") as f:
+    for r in [pl_inv_row("ZWO Askar Scopes/Iris Nebula (NGC 7023)/processed/master_integration.fit",
+                         "ZWO Askar Scopes", "Iris Nebula (NGC 7023)"),
+              pl_inv_row("S30P/Orion Nebula (M 42)/Stacked_120_M 42.fit",
+                         "S30P", "Orion Nebula (M 42)"),
+              pl_inv_row("ZWO Askar Scopes/Wizard Nebula (NGC 7380)/masterLight_107PHQ.fit",
+                         "ZWO Askar Scopes", "Wizard Nebula (NGC 7380)")]:
+        f.write(json.dumps(r) + "\n")
+# finals: Iris finished on the FRA400 (named rig, named scope folder)
+os.makedirs(os.path.join(PL.root, "finals", "ZWO Askar Scopes"))
+with open(os.path.join(PL.root, "finals", "ZWO Askar Scopes",
+                       "NGC7023_Iris_Nebula__2026-10_FRA400.jpg"), "w") as f:
+    f.write("x")
+# ...and a Crescent final loose in the folder root: counts, but says it's unscoped
+with open(os.path.join(PL.root, "finals", "NGC6888_Crescent_Nebula.jpg"), "w") as f:
+    f.write("x")
+
+def pl_build(extra=""):
+    return probe(PL.env, "st = m.State()\n"
+                 f"doc = m.build_projects(st{extra}, today='{PL_TODAY}')\n"
+                 "print(json.dumps(doc))\n")
+
+def pl_ds(doc, tid, sid):
+    for p in doc.get("projects", []):
+        if p.get("target_id") == tid:
+            for d in p.get("datasets", []):
+                if d.get("scope") == sid:
+                    return p, d
+    return {}, {}
+
+pl_state0 = {f: os.path.getsize(os.path.join(PL.state, f)) for f in os.listdir(PL.state)}
+doc = pl_build()
+_, d_fra = pl_ds(doc, "NGC7023", "FRA400")
+_, d_107 = pl_ds(doc, "NGC7023", "107PHQ")
+check("PL done beats everything: the Iris FRA400 final (code + rig in the filename, in the "
+      "scope's folder) makes that dataset done",
+      d_fra.get("status") == "done"
+      and d_fra.get("finals") == ["NGC7023_Iris_Nebula__2026-10_FRA400.jpg"], json.dumps(d_fra))
+check("PL a master with no rig in a shared Askar folder: the 107PHQ dataset is in progress "
+      "and says the folder is shared; the FRA400 final never marks the 107PHQ done",
+      d_107.get("status") == "in_progress" and "shared-folder" in (d_107.get("attribution") or [])
+      and d_107.get("masters") == ["master_integration.fit"], json.dumps(d_107))
+p_iris, _ = pl_ds(doc, "NGC7023", "FRA400")
+check("PL the project rolls up to its least advanced dataset (Iris: in progress, not done)",
+      p_iris.get("status") == "in_progress" and p_iris.get("to_process") is False,
+      json.dumps({k: v for k, v in p_iris.items() if k != "datasets"}))
+_, d_m42 = pl_ds(doc, "M42", "S30P")
+check("PL a Seestar autostack is the scope's own work, not Brett's: M 42 stays capturing, "
+      "still on the mac, and its archive folder is named from the inventory",
+      d_m42.get("status") == "capturing" and not d_m42.get("masters")
+      and d_m42.get("locations") == ["mac"]
+      and d_m42.get("archive_rel") == "S30P/Orion Nebula (M 42)", json.dumps(d_m42))
+p_wiz, d_wiz = pl_ds(doc, "NGC7380", "S50P")
+_, d_wiz_ask = pl_ds(doc, "NGC7380", "107PHQ")
+check("PL 39 quiet days make the Wizard S50P ready to process (and the project says so); "
+      "the rig-tagged Askar master touches no S50P dataset",
+      d_wiz.get("status") == "ready_to_process" and p_wiz.get("to_process") is True
+      and not d_wiz.get("masters") and not d_wiz_ask, json.dumps(d_wiz))
+_, d_b14 = pl_ds(doc, "NGC1499", "S50")
+_, d_b15 = pl_ds(doc, "NGC2237", "S50")
+check("PL the quiet period boundary: 14 days without a session is still capturing, 15 is "
+      "ready (and 'NGC 2244' resolves to the merged Rosette target NGC2237)",
+      d_b14.get("status") == "capturing" and d_b15.get("status") == "ready_to_process",
+      json.dumps([d_b14, d_b15]))
+_, d_open = pl_ds(doc, "NGC281", "S30P")
+_, d_comp = pl_ds(doc, "Sh2-129", "S30P")
+check("PL capture_state: 'open' holds capturing through 40 quiet days, 'complete' is ready "
+      "after 5, and a junk value is ignored",
+      d_open.get("status") == "capturing" and d_open.get("capture_state") == "open"
+      and d_comp.get("status") == "ready_to_process"
+      and d_m42.get("capture_state") == "auto", json.dumps([d_open, d_comp]))
+_, d_sf = pl_ds(doc, "NGC6888", "S50P-STARFRONT")
+check("PL the Starfront S50 Pro is its own dataset by |cam= identity, site Starfront, and "
+      "its unscoped final counts but is marked",
+      d_sf.get("site") == "Starfront" and d_sf.get("status") == "done"
+      and "unscoped-final" in (d_sf.get("attribution") or []), json.dumps(d_sf))
+check("PL stacks and jpgs are never sessions (M 42 has 1 frame), and an unknown name becomes "
+      "a warning, not a crash",
+      d_m42.get("frames") == 1 and any("1 target name" in w for w in doc.get("warnings", [])),
+      json.dumps([d_m42.get("frames"), doc.get("warnings")]))
+check("PL build_projects wrote nothing: the state folder is untouched and no OS call was made",
+      {f: os.path.getsize(os.path.join(PL.state, f)) for f in os.listdir(PL.state)} == pl_state0
+      and not teh.os_calls(PL.root), str(teh.os_calls(PL.root))[:200])
+
+# another computer's ledger (--with-ledger): the Mac's copy of the Wizard adds
+# a night and the 'mac' location to the same dataset
+PL_MAC = os.path.join(PL.root, "mac-ledger.json")
+with open(PL_MAC, "w") as f:
+    json.dump({"version": 1, "calibration": {}, "files": {
+        "w2": pl_row("NGC 7380", "NGC 7380 - Wizard Nebula", "2026-09-03", st="panel",
+                     device=True, scope="Seestar S50 Pro", dest="w2.fit")}}, f)
+doc2 = pl_build(extra=f", extra_ledgers=[{PL_MAC!r}]")
+_, d_wiz2 = pl_ds(doc2, "NGC7380", "S50P")
+check("PL --with-ledger merges another computer's sessions into the same dataset "
+      "(2 nights, archive + the other computer)",
+      d_wiz2.get("nights") == 2 and d_wiz2.get("locations") == ["chillblast_archive", "pc"],
+      json.dumps(d_wiz2))
+
+r = PL.run("--projects")
+pj_path = os.path.join(PL.state, "projects.json")
+with open(pj_path) as f:
+    pj1 = json.load(f)
+r2 = PL.run("--projects")
+with open(pj_path) as f:
+    pj2 = json.load(f)
+pj1.pop("generated_at"), pj2.pop("generated_at")
+check("PL --projects writes projects.json (and its mirror copy), says the counts, and a "
+      "re-run is identical apart from the timestamp",
+      r.returncode == 0 and "ready to process" in r.stdout and pj1 == pj2
+      and os.path.isfile(os.path.join(PL.mirror, "projects.json")), r.stdout[-300:])
+check("PL projects.json carries the schema, the quiet period and its sources",
+      pj1.get("schema") == "projects/1" and pj1.get("quiet_period_days") == 14
+      and pj1["sources"].get("inventory") == "inventory-E-20261009T000000Z.jsonl",
+      json.dumps(pj1.get("sources")))
+
+rd = PL.run("--targets-draft")
+with open(os.path.join(PL.state, "targets-draft.json")) as f:
+    draft = json.load(f)
+check("PL --targets-draft resolves every known name and lists the unknown one for Brett, "
+      "and never touches the contract",
+      rd.returncode == 0 and [u["raw"] for u in draft["unresolved"]] == ["Nannys Favourite"]
+      and any(x["raw"] == "NGC 7380 - Wizard Nebula" and x["target_id"] == "NGC7380"
+              for x in draft["resolved"])
+      and json.load(open(os.path.join(PL_CON, "targets.json")))
+      == json.load(open(os.path.join(os.path.dirname(SCRIPT), "contract", "targets.json"))),
+      rd.stdout[-300:])
+
+# no inventory and no finals: warnings, never a crash, statuses still derived
+PL2 = teh.Env("PL2", asiair=False, seestar=False)
+os.makedirs(os.path.join(PL2.root, "contract"))
+for _f in ("targets.json", "scopes.json"):
+    shutil.copy(os.path.join(os.path.dirname(SCRIPT), "contract", _f), os.path.join(PL2.root, "contract"))
+PL2.env.update({"ASTRO_CONTRACT_DIR": os.path.join(PL2.root, "contract")})
+os.makedirs(PL2.state, exist_ok=True)
+with open(os.path.join(PL2.state, "ledger.json"), "w") as f:
+    json.dump({"version": 1, "calibration": {}, "files": {
+        "w1": {"filename": "Light_NGC 7380_20.0s_20260901-220000.fit", "target": "NGC 7380",
+               "device": "seestar", "scope": "Seestar S50 Pro", "sourceType": "panel",
+               "night": "2026-09-01", "exposureSeconds": 20.0}}}, f)
+doc3 = probe(PL2.env, "st = m.State()\n"
+             "doc = m.build_projects(st, today='2026-10-10')\n"
+             "print(json.dumps(doc))\n")
+_, d3 = pl_ds(doc3, "NGC7380", "S50P")
+check("PL with no inventory and no finals folder the rollup still derives Ready, and says "
+      "what it could not check",
+      d3.get("status") == "ready_to_process"
+      and any("inventory" in w for w in doc3.get("warnings", []))
+      and any("finished pictures" in w.lower() for w in doc3.get("warnings", [])),
+      json.dumps(doc3.get("warnings")))
+shutil.rmtree(PL2.root, ignore_errors=True)
+shutil.rmtree(PL.root, ignore_errors=True)
 
 # ═══════════════ Summary ═════════════════════════════════════════════════════
 print("\n═══════════════════════════════════════════════════")
