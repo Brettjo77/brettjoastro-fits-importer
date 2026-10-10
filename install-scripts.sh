@@ -122,10 +122,26 @@ install_file "$SCRIPT_DIR/astro-import.py"  "$BIN_DIR/astro-import.py"  true
 install_file "$SCRIPT_DIR/astro-app.py"     "$BIN_DIR/astro-app.py"     true
 install_file "$SCRIPT_DIR/astro-watch.sh"   "$BIN_DIR/astro-watch.sh"   true
 install_file "$SCRIPT_DIR/selftest.py"      "$BIN_DIR/selftest.py"      true
-# The contract (1.8): canonical targets and scopes, read by --projects
+# The contract (1.8): canonical targets and scopes, read by --projects. Brett
+# edits the installed copy, so an update never replaces it: a changed shipped
+# copy lands beside it as <name>.new for him to merge.
 mkdir -p "$BIN_DIR/contract"
-install_file "$SCRIPT_DIR/contract/targets.json" "$BIN_DIR/contract/targets.json" false
-install_file "$SCRIPT_DIR/contract/scopes.json"  "$BIN_DIR/contract/scopes.json"  false
+if [ -f "$BIN_DIR/contract/targets.json" ]; then
+    if ! cmp -s "$SCRIPT_DIR/contract/targets.json" "$BIN_DIR/contract/targets.json"; then
+        cp "$SCRIPT_DIR/contract/targets.json" "$BIN_DIR/contract/targets.json.new"
+        warn "contract/targets.json kept as yours; the newer shipped copy is beside it as targets.json.new"
+    fi
+else
+    install_file "$SCRIPT_DIR/contract/targets.json" "$BIN_DIR/contract/targets.json" false
+fi
+if [ -f "$BIN_DIR/contract/scopes.json" ]; then
+    if ! cmp -s "$SCRIPT_DIR/contract/scopes.json" "$BIN_DIR/contract/scopes.json"; then
+        cp "$SCRIPT_DIR/contract/scopes.json" "$BIN_DIR/contract/scopes.json.new"
+        warn "contract/scopes.json kept as yours; the newer shipped copy is beside it as scopes.json.new"
+    fi
+else
+    install_file "$SCRIPT_DIR/contract/scopes.json"  "$BIN_DIR/contract/scopes.json"  false
+fi
 # Compatibility copy: `asiair-import.py` IS the unified engine now.
 if [ -f "$BIN_DIR/astro-import.py" ]; then
     cp "$BIN_DIR/astro-import.py" "$BIN_DIR/asiair-import.py"

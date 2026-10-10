@@ -2,23 +2,35 @@
 
 ## 1.8.0 (2026-10-10): the project layer — "you captured this, now process it"
 
-Step 1 and step 2 of the Project Layer Spec. Once frames ship to the archive they are safe but forgotten; now one regenerable file, `projects.json`, remembers per project what is ready to process, in progress, still capturing or done — derived from the facts, never typed in.
+Step 1 and step 2 of the Project Layer Spec, then a five-reviewer pass (safety, correctness, Mac/Windows parity, the panel, and the owner's eye) whose findings are folded in. Once frames ship to the archive they are safe but forgotten; now one regenerable file, `projects.json`, remembers per project what is ready to process, in progress, still capturing or done — derived from the facts, never typed in.
 
-- **The contract ships beside the engine** (`contract/`): `targets.json` (one entry per object, with every catalogue code that is the same object — M 31 and NGC 224 are one Andromeda) and `scopes.json` (each scope and site, its archive root, and how a ledger row is recognised as it — the two Askars by name, a second Seestar of the same model by its `|cam=` identity; the Starfront and Tenerife entries wait for their first files).
-- **`--targets-draft`** (read-only): checks every target name in this computer's ledger against the contract and writes `targets-draft.json` with the ones the contract doesn't know, for Brett to add as targets or aliases. The contract is never changed by code.
-- **`--projects`** (read-only): writes `projects.json` in the state folder (and the mirror). Per dataset (target + scope + site): nights, frames, integration, first and last session, where the frames are (this computer, the archive, or both), the archive folder, and a status —
-  - **capturing** while the last session is within the quiet period (14 days, `ASTRO_QUIET_PERIOD_DAYS`);
+- **The contract ships beside the engine** (`contract/`): `targets.json` (one entry per object, with every catalogue code that is the same object — M 31 and NGC 224 are one Andromeda, NGC 7380 and Sh2-142 one Wizard; the common names Brett uses as aliases) and `scopes.json` (each scope, its archive root, and how a frame is recognised as it). Brett edits the installed copy; an update never replaces it, and a changed shipped copy lands beside it as `targets.json.new`.
+- **`--targets-draft`**: checks every target name in this computer's ledger against the contract and writes `targets-draft.json` with the ones the contract doesn't know (and why, and how many frames), for Brett to add as targets or aliases. It never changes the contract.
+- **`--projects`**: writes `projects.json` in the state folder (and a copy in Import Status, once this computer has published there). Per dataset (target + scope): nights, frames, integration, first and last session, where the frames are, the archive folder, and a status —
+  - **capturing** while the last session is within the quiet period (14 observing nights, `ASTRO_QUIET_PERIOD_DAYS`);
   - **ready to process** once the quiet period has passed and nothing has been started;
-  - **in progress** when the target folder holds one of Brett's own masters (from the PC's inventory; the Seestar's own `Stacked_*` files never count);
-  - **done** when a finished picture in `Final Astro Images` names the target's code (a rig name in the filename picks the Askar; without one the dataset says the final is shared or unscoped).
-  - The one human-set fact is `capture-state.json` (per dataset: auto, open or complete — spec §4); a project rolls up to its least advanced dataset, and is flagged for the To-process list as soon as any dataset is ready.
-  - `--with-ledger FILE` also reads another computer's ledger snapshot, so the PC can count the Mac's sessions too.
-- **Astro Desk starts with the projects**: the Archive tab's new **To process** and **In progress** sections come from `projects.json` (newest capture first, with scope, site, nights, hours and where the data lives), and every row has **Open in Explorer** (**Show in Finder** on the Mac) straight to the target's folder on the archive — through the same archive-only open as before, which never runs anything it finds. Without a `projects.json` the tab says so and the Observatory-based list still works.
+  - **in progress** when the target's folder on the archive holds one of Brett's own masters (from the PC's inventory; every folder that is that target counts, even a renamed one; the Seestar's own `Stacked_*` files never do);
+  - **done** when a finished picture in `Final Astro Images` names the target's code and, by filename or folder, the scope. A picture that names no scope counts only for an object with one dataset. A filename naming both Askars marks both.
+  - "On this Mac" (or "on this PC") is checked on the disk right now, not remembered: Brett clears his own disks by hand. "On the archive" comes from the ledger. The other computer's frames show as "per its ledger".
+  - The one human-set fact is `capture-state.json` (per dataset: auto, open or complete — the format is in HOW-IT-WORKS). A project rolls up to its least advanced dataset, and is flagged for the To-process list as soon as any dataset is ready.
+  - `--with-ledger FILE` also reads another computer's ledger snapshot; a frame in both is counted once (by its bytes). Merged and baseline rows that carry no night are dated from their filename; rows with no scope are warned about, not counted.
+  - A ledger that can't be read writes nothing: an empty list never replaces a good one.
+- **`--pc-nightly` ends by rebuilding `projects.json`** from the fresh inventory, so the PC's To-process list is never older than last night. It is the one PC job that reads the ledger, and it only reads it.
+- **Astro Desk starts with the projects.** The Archive tab now opens with **To process** and **In progress** from `projects.json`, newest capture first, with the date the list was worked out, its warnings and when the first capturing dataset becomes ready. Each row shows the scope, where the data is, hours and nights, and has an **Open in Explorer** (**Open in Finder** on the Mac) button straight to the target's folder on the archive — through the same archive-only open as before, which never runs anything it finds; it says when it has opened, and why when it can't. A row not yet on the archive says so. Without a `projects.json` the tab names the command to run. The Observatory's folder list sits below as before.
 - The installers put `contract/` beside the engine, and the self-test checks it is there.
 
-**Mac / Windows:** the contract, both commands and the Desk sections are the same on both. `Final Astro Images` sits at the archive drive's root, which the Mac's share doesn't carry, so its default is Windows-only; on the Mac `--projects` says finals were not checked unless `ASTRO_FINALS_DIR` points somewhere. PARITY.md has the detail.
+**Found while building, for Brett (the spec asked for mismatches to be flagged):**
+- No canonical target id or site existed anywhere; `targets.json` and `scopes.json` are the first.
+- A second Seestar of the same model can't be told apart: the ledger records the camera model, never the unit. The Starfront S50 Pro and the Tenerife S30 Pro entries exist but are switched off; their frames count under Shinfield until the importer records the unit at import.
+- The two Askars share one archive folder, so a master there that doesn't name the rig counts for both (and says so).
+- `Final Astro Images` sits at the archive drive's root, outside the share the Mac mounts, so only the PC checks "done" by default.
+- Receipts aren't read: the ledger already holds every session the receipts describe.
+- The Mac's sessions reach the PC's rollup only through `--with-ledger` for now; a ledger snapshot written by the ship is the next step.
+- Open for Brett: whether "open" should beat an old final when a target is re-started for a new season (today the final wins); whether Sh2-171 (Teddy Bear) and NGC 7822 should be one target; colours for the S50 Pro and the Starfront S50 Pro; and the targets seed itself, built from the importer's own name list plus a merge pass, which wants his eye.
 
-644 end-to-end checks (500 engine + 144 panel), including 15 new engine checks and 5 new panel checks. On Linux all pass except the same four U1/AP lines that only pass on a Mac or a PC. Still to run on the Mac and the PC.
+**Mac / Windows:** the contract, both commands and the Desk sections are the same on both. `Final Astro Images` and the archive inventory are the PC's by default: on the Mac `--projects` says finals were not checked unless `ASTRO_FINALS_DIR` points at a share of that folder, and "in progress" needs the share mounted. PARITY.md has the detail.
+
+655 end-to-end checks (507 engine + 148 panel), including 22 new engine checks and 9 new panel checks (the panel's inline script is parse-checked and the new section rendered in node when node is installed; SKIP otherwise). On Linux all pass except the four U1 and AP lines that only pass on a Mac or a PC (the two self-test lines 1.7.0 named, plus two astropy ones). Still to run on the Mac and the PC.
 
 ## 1.7.0 (2026-10-03): shipping without Delete, and the PC's own jobs in Python
 

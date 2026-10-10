@@ -1,6 +1,7 @@
 {
  "schema": "targets/1",
- "note": "One entry per object. 'codes' lists every catalogue code that is the SAME object (M 31 and NGC 224 are one Andromeda). 'aliases' holds other names Brett has used for it. Edit by hand or review a targets-draft.json.",
+ "note": "One entry per object. 'codes' lists every catalogue code that is the SAME object (M 31 and NGC 224 are one Andromeda). 'aliases' are the other names Brett uses for it. Edit this file by hand: an update never replaces it. --targets-draft lists the names it doesn't know yet.",
+ "review": "Seed built 10 Oct 2026 from the importer's own name list plus a merge pass; Brett to review. Not merged on purpose: Sh2-171 (Teddy Bear) and NGC 7822 are the same complex but kept apart until Brett says.",
  "targets": [
   {
    "id": "M1",
@@ -15,7 +16,8 @@
    "id": "M8",
    "name": "Lagoon Nebula",
    "codes": [
-    "M 8"
+    "M 8",
+    "NGC 6523"
    ],
    "aliases": []
   },
@@ -23,7 +25,8 @@
    "id": "M13",
    "name": "Great Globular Cluster",
    "codes": [
-    "M 13"
+    "M 13",
+    "NGC 6205"
    ],
    "aliases": []
   },
@@ -31,7 +34,8 @@
    "id": "M16",
    "name": "Eagle Nebula",
    "codes": [
-    "M 16"
+    "M 16",
+    "NGC 6611"
    ],
    "aliases": []
   },
@@ -48,7 +52,8 @@
    "id": "M20",
    "name": "Trifid Nebula",
    "codes": [
-    "M 20"
+    "M 20",
+    "NGC 6514"
    ],
    "aliases": []
   },
@@ -56,7 +61,8 @@
    "id": "M27",
    "name": "Dumbbell Nebula",
    "codes": [
-    "M 27"
+    "M 27",
+    "NGC 6853"
    ],
    "aliases": []
   },
@@ -67,13 +73,16 @@
     "M 31",
     "NGC 224"
    ],
-   "aliases": []
+   "aliases": [
+    "Andromeda"
+   ]
   },
   {
    "id": "M33",
    "name": "Triangulum Galaxy",
    "codes": [
-    "M 33"
+    "M 33",
+    "NGC 598"
    ],
    "aliases": []
   },
@@ -81,7 +90,8 @@
    "id": "M42",
    "name": "Orion Nebula",
    "codes": [
-    "M 42"
+    "M 42",
+    "NGC 1976"
    ],
    "aliases": []
   },
@@ -89,7 +99,8 @@
    "id": "M43",
    "name": "De Mairan's Nebula",
    "codes": [
-    "M 43"
+    "M 43",
+    "NGC 1982"
    ],
    "aliases": []
   },
@@ -97,7 +108,8 @@
    "id": "M44",
    "name": "Beehive Cluster",
    "codes": [
-    "M 44"
+    "M 44",
+    "NGC 2632"
    ],
    "aliases": []
   },
@@ -105,15 +117,19 @@
    "id": "M45",
    "name": "Pleiades",
    "codes": [
-    "M 45"
+    "M 45",
+    "Mel 22"
    ],
-   "aliases": []
+   "aliases": [
+    "Seven Sisters"
+   ]
   },
   {
    "id": "M51",
    "name": "Whirlpool Galaxy",
    "codes": [
-    "M 51"
+    "M 51",
+    "NGC 5194"
    ],
    "aliases": []
   },
@@ -130,7 +146,8 @@
    "id": "M63",
    "name": "Sunflower Galaxy",
    "codes": [
-    "M 63"
+    "M 63",
+    "NGC 5055"
    ],
    "aliases": []
   },
@@ -138,7 +155,8 @@
    "id": "M64",
    "name": "Black Eye Galaxy",
    "codes": [
-    "M 64"
+    "M 64",
+    "NGC 4826"
    ],
    "aliases": []
   },
@@ -146,7 +164,8 @@
    "id": "M76",
    "name": "Little Dumbbell Nebula",
    "codes": [
-    "M 76"
+    "M 76",
+    "NGC 650"
    ],
    "aliases": []
   },
@@ -154,7 +173,8 @@
    "id": "M78",
    "name": "Reflection Nebula",
    "codes": [
-    "M 78"
+    "M 78",
+    "NGC 2068"
    ],
    "aliases": []
   },
@@ -162,7 +182,8 @@
    "id": "M81",
    "name": "Bode's Galaxy",
    "codes": [
-    "M 81"
+    "M 81",
+    "NGC 3031"
    ],
    "aliases": []
   },
@@ -170,7 +191,8 @@
    "id": "M82",
    "name": "Cigar Galaxy",
    "codes": [
-    "M 82"
+    "M 82",
+    "NGC 3034"
    ],
    "aliases": []
   },
@@ -178,7 +200,8 @@
    "id": "M83",
    "name": "Southern Pinwheel Galaxy",
    "codes": [
-    "M 83"
+    "M 83",
+    "NGC 5236"
    ],
    "aliases": []
   },
@@ -186,7 +209,8 @@
    "id": "M87",
    "name": "Virgo A",
    "codes": [
-    "M 87"
+    "M 87",
+    "NGC 4486"
    ],
    "aliases": []
   },
@@ -194,7 +218,8 @@
    "id": "M94",
    "name": "Cat's Eye Galaxy",
    "codes": [
-    "M 94"
+    "M 94",
+    "NGC 4736"
    ],
    "aliases": []
   },
@@ -202,7 +227,8 @@
    "id": "M97",
    "name": "Owl Nebula",
    "codes": [
-    "M 97"
+    "M 97",
+    "NGC 3587"
    ],
    "aliases": []
   },
@@ -210,7 +236,8 @@
    "id": "M101",
    "name": "Pinwheel Galaxy",
    "codes": [
-    "M 101"
+    "M 101",
+    "NGC 5457"
    ],
    "aliases": []
   },
@@ -218,7 +245,8 @@
    "id": "M104",
    "name": "Sombrero Galaxy",
    "codes": [
-    "M 104"
+    "M 104",
+    "NGC 4594"
    ],
    "aliases": []
   },
@@ -226,7 +254,8 @@
    "id": "M106",
    "name": "Spiral Galaxy",
    "codes": [
-    "M 106"
+    "M 106",
+    "NGC 4258"
    ],
    "aliases": []
   },
@@ -234,7 +263,8 @@
    "id": "M110",
    "name": "Satellite of Andromeda",
    "codes": [
-    "M 110"
+    "M 110",
+    "NGC 205"
    ],
    "aliases": []
   },
@@ -250,7 +280,8 @@
    "id": "NGC281",
    "name": "Pacman Nebula",
    "codes": [
-    "NGC 281"
+    "NGC 281",
+    "Sh2-184"
    ],
    "aliases": []
   },
@@ -298,9 +329,12 @@
    "id": "NGC1499",
    "name": "California Nebula",
    "codes": [
-    "NGC 1499"
+    "NGC 1499",
+    "Sh2-220"
    ],
-   "aliases": []
+   "aliases": [
+    "California"
+   ]
   },
   {
    "id": "NGC1977",
@@ -330,7 +364,8 @@
    "id": "NGC2174",
    "name": "Monkey Head Nebula",
    "codes": [
-    "NGC 2174"
+    "NGC 2174",
+    "Sh2-252"
    ],
    "aliases": []
   },
@@ -341,9 +376,12 @@
     "NGC 2237",
     "NGC 2238",
     "NGC 2239",
-    "NGC 2244"
+    "NGC 2244",
+    "Sh2-275"
    ],
-   "aliases": []
+   "aliases": [
+    "Rosette"
+   ]
   },
   {
    "id": "NGC2264",
@@ -357,7 +395,8 @@
    "id": "NGC2359",
    "name": "Thor's Helmet",
    "codes": [
-    "NGC 2359"
+    "NGC 2359",
+    "Sh2-298"
    ],
    "aliases": []
   },
@@ -525,9 +564,12 @@
    "id": "NGC6888",
    "name": "Crescent Nebula",
    "codes": [
-    "NGC 6888"
+    "NGC 6888",
+    "Sh2-105"
    ],
-   "aliases": []
+   "aliases": [
+    "Crescent"
+   ]
   },
   {
    "id": "NGC6960",
@@ -558,9 +600,12 @@
    "id": "NGC7000",
    "name": "North America Nebula",
    "codes": [
-    "NGC 7000"
+    "NGC 7000",
+    "Sh2-117"
    ],
-   "aliases": []
+   "aliases": [
+    "North America"
+   ]
   },
   {
    "id": "NGC7023",
@@ -568,7 +613,9 @@
    "codes": [
     "NGC 7023"
    ],
-   "aliases": []
+   "aliases": [
+    "Iris"
+   ]
   },
   {
    "id": "NGC7293",
@@ -582,17 +629,23 @@
    "id": "NGC7380",
    "name": "Wizard Nebula",
    "codes": [
-    "NGC 7380"
+    "NGC 7380",
+    "Sh2-142"
    ],
-   "aliases": []
+   "aliases": [
+    "Wizard"
+   ]
   },
   {
    "id": "NGC7635",
    "name": "Bubble Nebula",
    "codes": [
-    "NGC 7635"
+    "NGC 7635",
+    "Sh2-162"
    ],
-   "aliases": []
+   "aliases": [
+    "Bubble"
+   ]
   },
   {
    "id": "NGC7822",
@@ -606,7 +659,8 @@
    "id": "IC405",
    "name": "Flaming Star Nebula",
    "codes": [
-    "IC 405"
+    "IC 405",
+    "Sh2-229"
    ],
    "aliases": []
   },
@@ -614,7 +668,8 @@
    "id": "IC410",
    "name": "Tadpole Nebula",
    "codes": [
-    "IC 410"
+    "IC 410",
+    "Sh2-236"
    ],
    "aliases": []
   },
@@ -625,13 +680,16 @@
     "IC 434",
     "Barnard 33"
    ],
-   "aliases": []
+   "aliases": [
+    "Horsehead"
+   ]
   },
   {
    "id": "IC443",
    "name": "Jellyfish Nebula",
    "codes": [
-    "IC 443"
+    "IC 443",
+    "Sh2-248"
    ],
    "aliases": []
   },
@@ -647,25 +705,47 @@
    "id": "IC1396",
    "name": "Elephant's Trunk Nebula",
    "codes": [
-    "IC 1396"
+    "IC 1396",
+    "Sh2-131",
+    "vdB 142"
    ],
-   "aliases": []
+   "aliases": [
+    "Elephant Trunk",
+    "Elephant's Trunk"
+   ]
+  },
+  {
+   "id": "IC1795",
+   "name": "Fish Head Nebula",
+   "codes": [
+    "IC 1795"
+   ],
+   "aliases": [
+    "Fish Head",
+    "Fishhead"
+   ]
   },
   {
    "id": "IC1805",
    "name": "Heart Nebula",
    "codes": [
-    "IC 1805"
+    "IC 1805",
+    "Sh2-190"
    ],
-   "aliases": []
+   "aliases": [
+    "Heart"
+   ]
   },
   {
    "id": "IC1848",
    "name": "Soul Nebula",
    "codes": [
-    "IC 1848"
+    "IC 1848",
+    "Sh2-199"
    ],
-   "aliases": []
+   "aliases": [
+    "Soul"
+   ]
   },
   {
    "id": "IC2118",
@@ -679,7 +759,8 @@
    "id": "IC2177",
    "name": "Seagull Nebula",
    "codes": [
-    "IC 2177"
+    "IC 2177",
+    "Sh2-296"
    ],
    "aliases": []
   },
@@ -704,13 +785,14 @@
    "id": "IC5146",
    "name": "Cocoon Nebula",
    "codes": [
-    "IC 5146"
+    "IC 5146",
+    "Sh2-125"
    ],
    "aliases": []
   },
   {
    "id": "IC1318A",
-   "name": "Sadr Region (A)",
+   "name": "Sadr Region A",
    "codes": [
     "IC 1318A"
    ],
@@ -739,7 +821,10 @@
    "codes": [
     "Sh2-132"
    ],
-   "aliases": []
+   "aliases": [
+    "LDN 1163",
+    "Lion"
+   ]
   },
   {
    "id": "Sh2-171",
@@ -747,7 +832,10 @@
    "codes": [
     "Sh2-171"
    ],
-   "aliases": []
+   "aliases": [
+    "Teddy Bear",
+    "Teddy Bear Nebula"
+   ]
   },
   {
    "id": "Sh2-240",
@@ -766,22 +854,6 @@
    "aliases": []
   },
   {
-   "id": "GAIA2192287033139966848",
-   "name": "Squid Nebula",
-   "codes": [
-    "GAIA 2192287033139966848"
-   ],
-   "aliases": []
-  },
-  {
-   "id": "vdB142",
-   "name": "Elephant's Trunk",
-   "codes": [
-    "vdB 142"
-   ],
-   "aliases": []
-  },
-  {
    "id": "LDN1622",
    "name": "Boogeyman Nebula",
    "codes": [
@@ -790,10 +862,10 @@
    "aliases": []
   },
   {
-   "id": "MilkyWay",
-   "name": "Milky Way Core",
+   "id": "GAIA2192287033139966848",
+   "name": "Squid Nebula",
    "codes": [
-    "MilkyWay"
+    "GAIA 2192287033139966848"
    ],
    "aliases": []
   }

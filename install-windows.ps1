@@ -80,11 +80,19 @@ foreach ($f in @('astro-import.py', 'astro-app.py', 'astro-watch.py', 'selftest.
     if (-not (Test-Path -LiteralPath $src)) { Warn "Missing from the package: $f"; exit 1 }
     Copy-Item -LiteralPath $src -Destination $bin -Force -ErrorAction Stop
 }
-# The contract (1.8): canonical targets and scopes, read by --projects
+# The contract (1.8): canonical targets and scopes, read by --projects. Brett edits
+# the installed copy, so an update never replaces it: a changed shipped copy lands
+# beside it as <name>.new for him to merge.
 New-Item -ItemType Directory -Force -Path (Join-Path $bin 'contract') -ErrorAction Stop | Out-Null
 foreach ($f in @('targets.json', 'scopes.json')) {
     $src = Join-Path $here "contract\$f"
-    if (Test-Path -LiteralPath $src) { Copy-Item -LiteralPath $src -Destination (Join-Path $bin 'contract') -Force }
+    $dst = Join-Path $bin "contract\$f"
+    if (-not (Test-Path -LiteralPath $src)) { Warn "Missing from the package: contract\$f"; continue }
+    if (-not (Test-Path -LiteralPath $dst)) { Copy-Item -LiteralPath $src -Destination $dst -Force; continue }
+    if ((Get-FileHash -LiteralPath $src).Hash -ne (Get-FileHash -LiteralPath $dst).Hash) {
+        Copy-Item -LiteralPath $src -Destination "$dst.new" -Force
+        Warn "contract\$f kept as yours; the newer shipped copy is beside it as $f.new"
+    }
 }
 foreach ($f in @('set-archive-rights.ps1')) {
     $src = Join-Path $here "pc\$f"

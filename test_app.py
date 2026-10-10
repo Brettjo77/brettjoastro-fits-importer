@@ -1474,6 +1474,63 @@ try:
     # ── the project layer on the Archive tab (1.8) ─────────────────────────
     check("PL the Archive tab carries the To-process section and its loader",
           'id="deskProjects"' in page and "loadProjects" in page and "data-xopen" in page)
+    # The page's script, parse-checked and the new section rendered, in node
+    # (a syntax slip anywhere in the inline script would blank every tab)
+    import shutil as _sh
+    node = _sh.which("node") or next((p for p in ("/opt/node22/bin/node", "/usr/local/bin/node")
+                                      if os.path.isfile(p)), None)
+    script = re.search(r"<script>(.*?)</script>", page, re.S)
+    if node and script:
+        r_parse = subprocess.run([node, "-e", "new Function(require('fs').readFileSync(0,'utf8'))"],
+                                 input=script.group(1), capture_output=True, text=True, timeout=30)
+        check("PL the panel's inline script parses (node)", r_parse.returncode == 0,
+              r_parse.stderr[-300:])
+        js = script.group(1)
+        pieces = [re.search(p_, js, re.S).group(0) for p_ in
+                  (r"const MONTHS=[^\n]*", r"const esc=[^\n]*", r"const fmtNight=[^\n]*",
+                   r"const PROJ_WHERE=.*?\nfunction projectsHtml\(pj\)\{.*?\n\}\n")]
+        fixture = {"ok": True, "opener": "Finder", "command": "python3 ~/bin/astro-import.py --projects",
+                   "projects": {"schema": "projects/1", "generated_at": "2026-10-10T08:00:00+00:00",
+                                "quiet_period_days": 14, "warnings": ["one warning"],
+                                "projects": [{"target_id": "NGC7380", "name": "Wizard <b>Nebula</b>",
+                                              "datasets": [
+                       {"scope": "FRA400", "scope_name": "Askar FRA400", "site": "Shinfield",
+                        "status": "ready_to_process", "nights": 3, "integration_seconds": 27000,
+                        "last_session": "2026-09-01", "locations": ["chillblast_archive"],
+                        "archive_rel": "/".join(ad_wiz)},
+                       {"scope": "S50P", "scope_name": "Seestar S50 Pro", "site": "Shinfield",
+                        "status": "in_progress", "nights": 1, "integration_seconds": 100,
+                        "last_session": "2026-09-10", "locations": ["chillblast_archive"],
+                        "archive_rel": "S50P/Wizard Nebula (NGC 7380)"},
+                       {"scope": "S30P", "status": "capturing", "nights": 1, "integration_seconds": 100,
+                        "last_session": "2026-10-08", "locations": ["mac"], "archive_rel": None}]}]}}
+        harness = ("let deskSel=null;\n" + "\n".join(pieces) +
+                   f"\nprocess.stdout.write(projectsHtml({json.dumps(fixture)}));\n"
+                   f"process.stdout.write('\\n---\\n'+projectsHtml({{ok:false,why:'missing',command:'py -3 x'}}));\n")
+        r_html = subprocess.run([node, "-e", harness], capture_output=True, text=True, timeout=30)
+        html, _, missing = r_html.stdout.partition("\n---\n")
+        check("PL projectsHtml renders the fixture: the name escaped, the dataset's folder on the "
+              "button labelled for this computer, hours and nights, the warning, when it was worked "
+              "out, and the capturing one's ready-from date; nothing reads 'undefined'",
+              r_html.returncode == 0 and "Wizard &lt;b&gt;Nebula&lt;/b&gt;" in html
+              and "<b>" not in html and f'data-xopen="{"/".join(ad_wiz)}"' in html
+              and "Open in Finder" in html and "7.5 h" in html and "3 nights" in html
+              and "⚠ one warning" in html and "Worked out 10 Oct 2026" in html
+              and "ready from 23 Oct 2026" in html and "2 min" in html
+              and "undefined" not in html and "To process · 1" in html
+              and "In progress · 1" in html and "1 still capturing" in html,
+              (r_html.stderr or html)[-500:])
+        check("PL without projects.json the section says plainly what to run, and where",
+              "hasn't been worked out on this computer yet" in missing and "py -3 x" in missing,
+              missing[-300:])
+    else:
+        print("  SKIP  PL node isn't installed: the inline script's parse check and the rendered "
+              "To-process section")
+    statuses = set(re.findall(r'sect\("[^"]+","([a-z_]+)"\)', page)) | \
+        set(re.findall(r'status==="([a-z_]+)"', page))
+    check("PL every status string the page uses is one the engine writes",
+          statuses and statuses <= {"capturing", "ready_to_process", "in_progress", "done"},
+          str(statuses))
     pj0 = api("/api/projects", url=URLD)
     check("PL /api/projects before --projects has run: ok false, so the tab says to run it "
           "and falls back to the Observatory list",

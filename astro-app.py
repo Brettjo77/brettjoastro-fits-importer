@@ -896,8 +896,13 @@ class Handler(BaseHTTPRequestHandler):
                 doc = eng.load_projects()
             except Exception:
                 doc = None
-            self._json({"ok": doc is not None, "opener":
-                        "Explorer" if eng.IS_WINDOWS else "Finder", "projects": doc})
+            why = None
+            if doc is None:
+                why = "missing" if not os.path.exists(
+                    os.path.join(eng.STATE_DIR, "projects.json")) else "unreadable"
+            self._json({"ok": doc is not None, "why": why, "projects": doc,
+                        "opener": "Explorer" if eng.IS_WINDOWS else "Finder",
+                        "command": eng.PROJECTS_COMMAND_HINT})
         elif self.path == "/api/archive/index":
             try:
                 self._json(eng.archive_index())
@@ -1170,6 +1175,9 @@ button.primary:hover:not(:disabled){color:var(--accent-ink);filter:brightness(1.
 .ad-file .nm{flex:1;min-width:0;overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
 .ad-file .mt{color:var(--muted);font-size:12px;font-variant-numeric:tabular-nums;white-space:nowrap}
 .ad-file button{padding:4px 11px;font-size:12px;border-radius:8px}
+.ad-row>button{flex:none;padding:4px 11px;font-size:12px;border-radius:8px}
+.ad-nowhere{flex:none;font-size:11.5px;color:var(--muted)}
+#deskProjects .ad-sec:first-of-type{margin-top:8px}
 #deskMsg{min-height:18px;font-size:12.5px;margin-top:6px}
 #deskCount{text-transform:none;letter-spacing:.02em;font-variant-numeric:tabular-nums}
 #deskMsg.bad{color:color-mix(in srgb, var(--serious) 80%, var(--ink))}
@@ -1412,12 +1420,14 @@ button.linkbtn:disabled{opacity:.5;cursor:default}
 <div id="tab-archive" style="display:none">
   <div class="ad-cols">
     <div class="card">
-      <div class="eyebrow" style="display:flex;justify-content:space-between"><span id="deskListTitle">Still to process</span><span id="deskCount"></span></div>
-      <div class="ad-note" id="deskNote">Reading the archive…</div>
-      <div id="deskProjects"></div>
-      <input class="ad-search" id="deskSearch" type="search" placeholder="Find a target" aria-label="Find a target">
-      <label class="ad-opt"><input type="checkbox" id="deskAll"> Show every folder, finished ones too</label>
-      <div id="deskList"></div>
+      <div id="deskProjects"><p class="ad-note">Working out what's ready…</p></div>
+      <div class="ad-sec">
+        <div class="eyebrow" style="display:flex;justify-content:space-between"><span id="deskListTitle">Folders on the archive</span><span id="deskCount"></span></div>
+        <div class="ad-note" id="deskNote">Reading the archive…</div>
+        <input class="ad-search" id="deskSearch" type="search" placeholder="Find a target" aria-label="Find a target">
+        <label class="ad-opt"><input type="checkbox" id="deskAll"> Show every folder, finished ones too</label>
+        <div id="deskList"></div>
+      </div>
     </div>
     <div class="card" id="deskDetail">
       <div class="eyebrow">Archive</div>
@@ -1777,42 +1787,72 @@ const DESK_TODO=new Set(["captured","stacked","processing"]);
 const deskState=s=>`<span class="ad-state ${esc(s||"none")}">${esc(s?(s==="processing"?"in processing":s):"no state")}</span>`;
 const fmtNight=iso=>{ if(!iso) return ""; const [y,m,d]=iso.split("-"); return `${+d} ${MONTHS[+m-1]} ${y}`; };
 const fmtSize=b=>b>=1073741824?(b/1073741824).toFixed(1)+" GB":b>=1048576?Math.round(b/1048576)+" MB":Math.max(1,Math.round(b/1024))+" KB";
-async function loadProjects(){
-  let pj=null;
-  try{ pj=await api("/api/projects"); }catch(e){ pj=null; }
-  const box=$("#deskProjects");
+// The project layer (1.8): To process and In progress, from projects.json.
+// projectsHtml is pure (no DOM), so a test can render the fixture and look.
+const PROJ_WHERE={chillblast_archive:"on the archive",mac:"on this Mac",pc:"on this PC",
+  "mac-unchecked":"on the Mac (per its ledger)","pc-unchecked":"on the PC (per its ledger)"};
+const fmtHours=s=>!s?"":s<360?Math.round(s/60)+" min":(s/3600).toFixed(1)+" h";
+function projectsHtml(pj){
   if(!pj||!pj.ok||!pj.projects){
-    box.innerHTML='<p class="ad-note">No projects.json yet — run the importer with --projects to get the To-process list here. The list below uses the Observatory scan.</p>';
-    return;
+    const cmd=pj&&pj.command?` In Terminal: <code>${esc(pj.command)}</code>.`:"";
+    return `<p class="ad-note">${pj&&pj.why==="unreadable"
+      ?"The To-process list on this computer couldn't be read. Run the importer with --projects again to rebuild it (safe: it only reads)."
+      :"The To-process list hasn't been worked out on this computer yet. Run the importer with --projects (safe: it only reads). Until then, use the folder list below."}${cmd}</p>`;
   }
-  const opener=pj.opener||"Explorer";
-  const rows=[];
-  for(const p of pj.projects.projects||[]) for(const d of p.datasets||[])
-    rows.push({name:p.name||p.target_id, d});
+  const label=`Open in ${esc(pj.opener||"Explorer")}`;
+  const doc=pj.projects, rows=[];
+  for(const p of (Array.isArray(doc.projects)?doc.projects:[])) for(const d of (Array.isArray(p.datasets)?p.datasets:[]))
+    if(d&&typeof d==="object") rows.push({name:p.name||p.target_id||"Unnamed target", d});
+  const readyFrom=d=>{ const t=new Date(String(d.last_session||"")+"T12:00:00"); if(isNaN(t)) return "";
+    t.setDate(t.getDate()+(+doc.quiet_period_days||14)+1); return t.toISOString().slice(0,10); };
   const sect=(title,status)=>{
     const list=rows.filter(r=>r.d.status===status)
-      .sort((a,b)=>(b.d.last_session||"").localeCompare(a.d.last_session||""));
+      .sort((a,b)=>String(b.d.last_session||"").localeCompare(String(a.d.last_session||"")));
     if(!list.length) return "";
     return `<div class="ad-sec"><div class="eyebrow">${title} · ${list.length}</div>`+
       list.map(r=>{
-        const d=r.d, h=d.integration_seconds?(d.integration_seconds/3600).toFixed(1)+" h":"";
-        const where=(d.locations||[]).map(l=>l==="chillblast_archive"?"archive":l).join(" + ");
-        const facts=[d.scope_name||d.scope, d.site, d.nights?d.nights+" night"+(d.nights===1?"":"s"):"", h, where]
-          .filter(Boolean).join(" · ");
-        const btn=d.archive_rel?`<button data-xopen="${esc(d.archive_rel)}">Open in ${opener}</button>`
-          :`<span class="small">not on the archive yet</span>`;
-        return `<div class="ad-file"${d.archive_rel?` data-xsel="${esc(d.archive_rel)}"`:""}>
-          <span class="nm">${esc(r.name)}</span><span class="mt">${esc(facts)}</span>${btn}</div>`;
+        const d=r.d, locs=Array.isArray(d.locations)?d.locations:[];
+        const where=locs.map(l=>PROJ_WHERE[l]||l).join(" and ");
+        const facts=[d.scope_name||d.scope, d.site, where].filter(Boolean).join(" · ");
+        const nights=d.nights?d.nights+" night"+(d.nights===1?"":"s"):"";
+        const btn=d.archive_rel?`<button data-xopen="${esc(d.archive_rel)}">${label}</button>`
+          :`<span class="ad-nowhere">${locs.length&&!locs.includes("chillblast_archive")?"not shipped to the archive yet":"no folder on the archive"}</span>`;
+        const sel=d.archive_rel?` data-xsel="${esc(d.archive_rel)}" tabindex="0" role="button"`:"";
+        return `<div class="ad-row${deskSel&&deskSel===d.archive_rel?" on":""}"${sel}>
+          <div class="tmain"><div class="tname">${esc(r.name)}</div><div class="tmeta">${esc(facts)}</div></div>
+          <div class="tstats"><div class="big">${esc(fmtHours(d.integration_seconds))}</div><div class="small">${esc(nights)}</div></div>${btn}</div>`;
       }).join("")+"</div>";
   };
-  const html=sect("To process",'ready_to_process')+sect("In progress",'in_progress');
-  box.innerHTML=html||'<p class="ad-note">Nothing is waiting to process — everything is still capturing, or done.</p>';
+  const when=(doc.generated_at||"").slice(0,10);
+  const warns=(doc.warnings||[]).map(w=>`<p class="ad-note">⚠ ${esc(w)}</p>`).join("");
+  const body=sect("To process","ready_to_process")+sect("In progress","in_progress");
+  const cap=rows.filter(r=>r.d.status==="capturing"), done=rows.filter(r=>r.d.status==="done").length;
+  const soonest=cap.map(r=>readyFrom(r.d)).filter(Boolean).sort()[0];
+  const tail=rows.length?`<p class="ad-note">${cap.length} still capturing${soonest?` (the first is ready from ${esc(fmtNight(soonest))})`:""}, ${done} done.</p>`
+    :`<p class="ad-note">No captures were counted on this computer yet.</p>`;
+  return `<div class="ad-note" id="deskProjMsg" aria-live="polite">Worked out ${when?esc(fmtNight(when)):"at an unknown time"}${pj.command?` — to refresh, in Terminal: <code>${esc(pj.command)}</code>`:""}.</div>`
+    +warns+(body||(rows.length?`<p class="ad-note">Nothing is waiting to process.</p>`:""))+tail;
+}
+async function loadProjects(){
+  let pj=null;
+  try{ pj=await api("/api/projects"); }catch(e){ pj={ok:false,why:"unreadable"}; }
+  const box=$("#deskProjects");
+  try{ box.innerHTML=projectsHtml(pj); }
+  catch(e){ box.innerHTML=`<p class="ad-note">The To-process list couldn't be shown (${esc(String(e))}). Run the importer with --projects to rebuild it.</p>`; return; }
+  const say=t=>{ const m=$("#deskProjMsg"); if(m) m.textContent=t; };
   box.querySelectorAll("[data-xopen]").forEach(b=>b.addEventListener("click",async ev=>{
-    ev.stopPropagation();
-    const res=await api("/api/archive/open",{rel:b.dataset.xopen});
-    if(!res.ok){ $("#deskNote").textContent=res.error||"Couldn't open that folder."; }
+    ev.stopPropagation(); b.disabled=true;
+    let res; try{ res=await api("/api/archive/open",{rel:b.dataset.xopen}); }
+    catch(e){ res={error:"The panel didn't answer — is it still running?"}; }
+    b.disabled=false;
+    say(res.ok?`Opened in ${pj.opener||"Explorer"} — it may be behind this window.`
+      :res.error==="not in the archive"?"That folder isn't on the archive right now. Is the archive drive (or share) connected, or was the folder renamed?"
+      :(res.error||"Couldn't open that folder."));
   }));
-  box.querySelectorAll("[data-xsel]").forEach(r=>r.addEventListener("click",()=>deskOpen(r.dataset.xsel)));
+  box.querySelectorAll("[data-xsel]").forEach(r=>{
+    r.addEventListener("click",()=>deskOpen(r.dataset.xsel));
+    r.addEventListener("keydown",e=>{ if(e.key==="Enter"&&e.target===r) deskOpen(r.dataset.xsel); });
+  });
 }
 async function loadDesk(){
   loadProjects();
@@ -1869,7 +1909,8 @@ function renderDeskList(){
 }
 async function deskOpen(rel){
   deskSel=rel; renderDeskList();
-  const it=(desk.items||[]).find(x=>x.rel===rel)||{target:rel.split("/").pop(),rel};
+  document.querySelectorAll("#deskProjects [data-xsel]").forEach(r=>r.classList.toggle("on",r.dataset.xsel===rel));
+  const it=((desk&&desk.items)||[]).find(x=>x.rel===rel)||{target:rel.split("/").pop(),rel};
   const box=$("#deskDetail");
   box.innerHTML=`<div class="eyebrow">${esc(it.root||"Archive")}</div><div class="ad-title">${esc(it.target)}</div><p class="ad-note">Reading the folder…</p>`;
   const r=await fetch("/api/archive/list?rel="+encodeURIComponent(rel)).then(x=>x.json()).catch(e=>({error:String(e)}));
@@ -1887,7 +1928,7 @@ async function deskOpen(rel){
     ${facts?`<div class="ad-facts">${facts}</div>`:""}
     <div class="ad-path"><code id="deskPath">${esc(r.abs)}</code><button id="deskCopy">Copy path</button></div>
     <div class="ad-btns"><button class="primary" data-open="${esc(r.rel)}">Open folder</button>
-      <button id="deskSiril"${desk.sirilFound?"":` title="Siril not found at ${esc(desk.sirilPath)}"`}>Start Siril here</button></div>
+      <button id="deskSiril"${desk&&desk.sirilFound?"":` title="Siril not found at ${esc((desk&&desk.sirilPath)||"")}"`}>Start Siril here</button></div>
     <div id="deskMsg" aria-live="polite"></div>
     <p class="ad-hint">For PixInsight WBPP, SyQon or Lightroom: open the folder and drag the nights in. A master opens in PixInsight and a finished picture in its usual app, from the lists below.</p>
     ${folderRows(r.nights,"Nights")}

@@ -4872,41 +4872,42 @@ print("\n── Chain PL: projects.json — what is ready to process, derived, r
 # regenerable file. Status is derived, never typed in (spec: Project_Layer_Spec).
 PL = teh.Env("PL", asiair=False, seestar=False)
 PL_TODAY = "2026-10-10"
+PL_SRC = os.path.dirname(SCRIPT)
 
 # the shipped contract, copied INTO the root (test mode reads nothing outside)
 PL_CON = os.path.join(PL.root, "contract")
 os.makedirs(PL_CON)
 for _f in ("targets.json", "scopes.json"):
-    shutil.copy(os.path.join(os.path.dirname(SCRIPT), "contract", _f), PL_CON)
-with open(os.path.join(PL_CON, "scopes.json")) as f:
-    _sc = json.load(f)
-for _s in _sc["scopes"]:                      # the Starfront S50 Pro, configured
-    if _s["id"] == "S50P-STARFRONT":
-        _s["match"]["cam_token"] = "SF50-0001"
-with open(os.path.join(PL_CON, "scopes.json"), "w") as f:
-    json.dump(_sc, f)
+    shutil.copy(os.path.join(PL_SRC, "contract", _f), PL_CON)
 PL.env.update({"ASTRO_CONTRACT_DIR": PL_CON,
-               "ASTRO_FINALS_DIR": os.path.join(PL.root, "finals")})
+               "ASTRO_FINALS_DIR": os.path.join(PL.root, "finals"),
+               "ASTRO_SHIP_FOLDER": "mac"})   # runs as the Mac on every OS, like D7
 
 def pl_row(target, display, night, *, scope=None, device=None, st="sub", exp=10.0,
-           dest=None, arch=None):
-    r = {"filename": f"Light_{target}_{exp}s_{night.replace('-', '')}-220000.fit",
-         "target": target, "displayName": display, "night": night,
-         "sourceType": st, "exposureSeconds": exp}
+           here=False, arch=None, sha=None):
+    """A ledger row the way the import writes one: `dest` is the folder, the
+    frame is `dest/filename`. here=True also puts the file on this computer."""
+    fn = f"Light_{target}_{exp}s_{night.replace('-', '')}-220000.fit"
+    r = {"filename": fn, "target": target, "displayName": display, "night": night,
+         "sourceType": st, "exposureSeconds": exp, "size": 4,
+         "sha256": sha or hashlib.sha256(fn.encode()).hexdigest()}
     if device:
         r.update(device="seestar", scope=scope)
     else:
         r.update(camera="ZWO ASI585MC Air", scope=scope)
-    if dest:
-        r["dest"] = os.path.join(PL.root, "dest", dest)
+    r["dest"] = os.path.join(PL.root, "dest", target)
+    if here:
+        os.makedirs(r["dest"], exist_ok=True)
+        with open(os.path.join(r["dest"], fn), "wb") as f:
+            f.write(b"\0\0\0\0")
     if arch:
         r["archiveLocation"] = arch
     return r
 
 PL_LED = {"version": 1, "calibration": {}, "files": {
-    # Iris on the FRA400: archived, a master AND a final → done
+    # Iris on the FRA400: archived and still here, a master AND a final → done
     "i1": pl_row("NGC 7023", "NGC 7023 - Iris Nebula", "2026-09-01", st="Plan",
-                 scope="Askar FRA400", exp=300.0, dest="i1.fit",
+                 scope="Askar FRA400", exp=300.0, here=True,
                  arch="ZWO Askar Scopes\\Iris Nebula (NGC 7023)\\Iris Day 1\\i1.fit"),
     "i2": pl_row("NGC 7023", "NGC 7023 - Iris Nebula", "2026-09-20", st="Plan",
                  scope="Askar FRA400", exp=300.0,
@@ -4915,37 +4916,54 @@ PL_LED = {"version": 1, "calibration": {}, "files": {
     "i3": pl_row("NGC 7023", "NGC 7023 - Iris Nebula", "2026-09-05", st="Live",
                  scope="Askar 107PHQ", exp=120.0,
                  arch="ZWO Askar Scopes\\Iris Nebula (NGC 7023)\\Iris Day 1\\i3.fit"),
-    # M 42 on the S30 Pro: two days ago, only its autostack on the archive → capturing
+    # M 42 on the S30 Pro: two days ago, still here, only its autostack on the archive → capturing
     "m1": pl_row("M 42", "M 42 - Orion Nebula", "2026-10-08",
-                 device=True, scope="Seestar S30 Pro", dest="m1.fit"),
-    # Wizard on the S50 Pro: 39 quiet days → ready to process
-    "w1": pl_row("NGC 7380", "NGC 7380 - Wizard Nebula", "2026-09-01", st="panel",
-                 device=True, scope="Seestar S50 Pro",
+                 device=True, scope="Seestar S30 Pro", here=True),
+    # Wizard on the S50 Pro: 39 quiet days → ready to process; cleared from this Mac by hand
+    "w1": pl_row("NGC 7380", "NGC 7380 - Wizard Nebula", "2026-09-01",
+                 device=True, scope="Seestar S50 Pro", sha="w1" * 32,
                  arch="S50P\\Wizard Nebula (NGC 7380)\\Wizard Day 1\\w1.fit"),
     # the quiet-period boundary: day 14 still capturing, day 15 ready
     "b1": pl_row("NGC 1499", "NGC 1499 - California Nebula", "2026-09-26",
-                 device=True, scope="Seestar S50", dest="b1.fit"),
+                 device=True, scope="Seestar S50", here=True),
     "b2": pl_row("NGC 2244", "NGC 2244 - Rosette Nebula", "2026-09-25",
-                 device=True, scope="Seestar S50", dest="b2.fit"),
+                 device=True, scope="Seestar S50", here=True),
     # overrides: open keeps capturing after 40 days; complete is ready inside 5
     "o1": pl_row("NGC 281", "NGC 281 - Pacman Nebula", "2026-08-31",
-                 device=True, scope="Seestar S30 Pro", dest="o1.fit"),
-    "o2": pl_row("Sh2-129", "Sh2-129 - Squid Nebula", "2026-10-05",
-                 device=True, scope="Seestar S30 Pro", dest="o2.fit"),
-    # never lights: a stack, a jpg and a Milky Way frame
+                 device=True, scope="Seestar S30 Pro", here=True),
+    "o2": pl_row("Sh2-129", "Sh2-129 - Flying Bat Nebula", "2026-10-05",
+                 device=True, scope="Seestar S30 Pro", here=True),
+    # Bubble on the S30 Pro: its final sits in a folder named for the scope → done
+    "u2": pl_row("NGC 7635", "NGC 7635 - Bubble Nebula", "2026-08-20",
+                 device=True, scope="Seestar S30 Pro", here=True),
+    # a second S50 Pro (Starfront): no unit identity exists yet, so it is the home S50P
+    "sf1": pl_row("NGC 6888", "NGC 6888 - Crescent Nebula", "2026-09-02",
+                  device=True, scope="Seestar S50 Pro",
+                  arch="S50P\\Crescent Nebula (NGC 6888)\\Crescent Day 1\\c1.fit"),
+    # a merged ASIAir row (no night in the row: the filename's stamp is used),
+    # and a baseline ASIAir row with no scope at all (warned, not counted)
+    "g1": {"filename": "Light_NGC 7023_300.0s_20260910-221500.fit", "target": "NGC 7023",
+           "displayName": "NGC 7023 - Iris Nebula", "sourceType": "Plan", "origin": "merged",
+           "camera": "ZWO ASI585MC Air", "scope": "Askar 107PHQ", "exposureSeconds": 300.0},
+    "g2": {"filename": "Light_NGC 7023_300.0s_20260911-221500.fit", "target": "NGC 7023",
+           "sourceType": "Live", "origin": "baseline", "camera": "ZWO ASI585MC Air",
+           "night": "2026-09-11"},
+    # never lights: a stack, a jpg, a mosaic panel stack and a Milky Way frame
     "x1": {"filename": "Stacked_120_M 42.fit", "target": "M 42", "device": "seestar",
            "scope": "Seestar S30 Pro", "sourceType": "stack", "night": "2026-10-08"},
     "x2": {"filename": "M 42.jpg", "target": "M 42", "device": "seestar",
            "scope": "Seestar S30 Pro", "sourceType": "sub-jpg", "night": "2026-10-08"},
-    # a name the contract doesn't know
+    "x3": {"filename": "M 42_mosaic_pt1.fit", "target": "M 42", "device": "seestar",
+           "scope": "Seestar S30 Pro", "sourceType": "panel", "night": "2026-10-08"},
+    "x4": {"filename": "Light_MW_10.0s_20261008-221500.fit", "target": "MilkyWay",
+           "device": "seestar", "scope": "Seestar S30 Pro", "sourceType": "mw",
+           "night": "2026-10-08"},
+    # names the contract doesn't know, and one that names several objects
     "u1": pl_row("Nannys Favourite", "Nannys Favourite", "2026-09-02",
-                 device=True, scope="Seestar S30 Pro", dest="u1.fit"),
+                 device=True, scope="Seestar S30 Pro", here=True),
+    "u3": pl_row("Leo Triplet", "Leo Triplet (M 65, M 66, NGC 3628)", "2026-03-02",
+                 device=True, scope="Seestar S30 Pro", here=True),
 }}
-# the Starfront S50 Pro: same model, told apart by the |cam= identity
-PL_LED["files"]["sf1|cam=SF50-0001"] = pl_row(
-    "NGC 6888", "NGC 6888 - Crescent Nebula", "2026-09-02",
-    device=True, scope="Seestar S50 Pro",
-    arch="S50P\\Crescent Nebula (NGC 6888)\\Crescent Day 1\\c1.fit")
 os.makedirs(PL.state, exist_ok=True)
 with open(os.path.join(PL.state, "ledger.json"), "w") as f:
     json.dump(PL_LED, f)
@@ -4955,7 +4973,8 @@ with open(os.path.join(PL.state, "capture-state.json"), "w") as f:
                             "M42|S30P|Shinfield": "sideways"}}, f)   # junk value ignored
 
 # the PC's inventory: a plain master for Iris (shared folder), an autostack
-# for M 42, and a rig-tagged master for the Wizard's Askar folder
+# for M 42, a rig-tagged master in the Wizard's Askar folder, and a master
+# for the Wizard in a second, renamed folder of the same target
 PL_PC = os.path.join(PL.archive, "_verify", "pc")
 os.makedirs(PL_PC)
 def pl_inv_row(rel, root, folder):
@@ -4967,16 +4986,24 @@ with open(os.path.join(PL_PC, "inventory-E-20261009T000000Z.jsonl"), "w") as f:
               pl_inv_row("S30P/Orion Nebula (M 42)/Stacked_120_M 42.fit",
                          "S30P", "Orion Nebula (M 42)"),
               pl_inv_row("ZWO Askar Scopes/Wizard Nebula (NGC 7380)/masterLight_107PHQ.fit",
-                         "ZWO Askar Scopes", "Wizard Nebula (NGC 7380)")]:
+                         "ZWO Askar Scopes", "Wizard Nebula (NGC 7380)"),
+              pl_inv_row("S30P/NGC 7635 - Bubble/WBPP/master/masterLight.xisf",
+                         "S30P", "NGC 7635 - Bubble")]:
         f.write(json.dumps(r) + "\n")
-# finals: Iris finished on the FRA400 (named rig, named scope folder)
+    f.write("this line is not JSON\n")
+with open(os.path.join(PL_PC, "inventory-E.status.json"), "w") as f:
+    json.dump({"schema": "inventory-status/1", "generation": "20261009T000000Z"}, f)
+# finals: Iris finished on the FRA400 (named rig, named scope-root folder); the
+# Bubble in a folder named for its scope; a loose Iris picture that names no
+# scope (two Iris datasets: it marks neither); a Crescent one (one dataset: done)
 os.makedirs(os.path.join(PL.root, "finals", "ZWO Askar Scopes"))
-with open(os.path.join(PL.root, "finals", "ZWO Askar Scopes",
-                       "NGC7023_Iris_Nebula__2026-10_FRA400.jpg"), "w") as f:
-    f.write("x")
-# ...and a Crescent final loose in the folder root: counts, but says it's unscoped
-with open(os.path.join(PL.root, "finals", "NGC6888_Crescent_Nebula.jpg"), "w") as f:
-    f.write("x")
+os.makedirs(os.path.join(PL.root, "finals", "Seestar S30 Pro"))
+for _p in (("ZWO Askar Scopes", "NGC7023_Iris_Nebula__2026-10_FRA400.jpg"),
+           ("Seestar S30 Pro", "NGC7635_Bubble_Nebula.jpg"),
+           ("NGC7023_Iris_loose.jpg",), ("NGC6888_Crescent_Nebula.jpg",),
+           ("._NGC6888_Crescent_Nebula.jpg",)):
+    with open(os.path.join(PL.root, "finals", *_p), "w") as f:
+        f.write("x")
 
 def pl_build(extra=""):
     return probe(PL.env, "st = m.State()\n"
@@ -4991,33 +5018,68 @@ def pl_ds(doc, tid, sid):
                     return p, d
     return {}, {}
 
+names = probe(PL.env, "c = m.load_contract()\n"
+              "r = lambda x: (m.resolve_target(c, x)[0] or {}).get('id')\n"
+              "print(json.dumps({'a': [r(x) for x in ['NGC 7380', 'NGC 7380 - Wizard Nebula', "
+              "'Wizard Nebula (NGC 7380)', 'Wizard', 'M 31_1-2', 'M 31 - Andromeda Galaxy · 1-2', "
+              "'Sh 2-129', 'SH2 129', 'HIP 24727', 'IC 1318A', 'IC 1318', 'LDN 1622', "
+              "'Horsehead (IC 434 / B33)', 'Leo Triplet (M 65, M 66, NGC 3628)', "
+              "'Reflection Nebula', 'MUSIC 42', 'the b4 crop']], "
+              "'rigs': [m._rigs_in(x, c) for x in ['NGC7023_Iris_Nebula__2026-10_FRA400', "
+              "'M45_Pleiades_15s_500subs', 'M31_10s_300x', 'NGC7023_FRA400_107PHQ', 'IC1396_S30Pro']],"
+              "'codes': m._codes_in('NGC7023_Iris_B33_crop vdB142 IC1318A')}))\n")
+check("PL names resolve as Brett writes them: codes in any spelling, display and folder "
+      "forms, mosaic panels, an alias, a letter suffix, LDN; the HIP goto star maps to IC 405; "
+      "a name for several objects, a generic name and a false code don't resolve",
+      names.get("a") == ["NGC7380", "NGC7380", "NGC7380", "NGC7380", "M31", "M31", "Sh2-129",
+                         "Sh2-129", "IC405", "IC1318A", "IC1318", "LDN1622", "IC434", None, None,
+                         None, None], json.dumps(names.get("a")))
+check("PL a scope in a filename is a whole word: S30Pro is the S30 Pro and never the S30, "
+      "'500subs' is not the S50, and a final named for both Askars names both",
+      names.get("rigs") == [["FRA400"], [], [], ["FRA400", "107PHQ"], ["S30P"]]
+      and names.get("codes") == ["NGC7023", "BARNARD33", "VDB142", "IC1318A", "IC1318"],
+      json.dumps([names.get("rigs"), names.get("codes")]))
+
 pl_state0 = {f: os.path.getsize(os.path.join(PL.state, f)) for f in os.listdir(PL.state)}
 doc = pl_build()
 _, d_fra = pl_ds(doc, "NGC7023", "FRA400")
 _, d_107 = pl_ds(doc, "NGC7023", "107PHQ")
 check("PL done beats everything: the Iris FRA400 final (code + rig in the filename, in the "
-      "scope's folder) makes that dataset done",
+      "scope's folder) makes that dataset done; its frames are both on the archive and here",
       d_fra.get("status") == "done"
-      and d_fra.get("finals") == ["NGC7023_Iris_Nebula__2026-10_FRA400.jpg"], json.dumps(d_fra))
+      and d_fra.get("finals") == ["NGC7023_Iris_Nebula__2026-10_FRA400.jpg"]
+      and d_fra.get("locations") == ["chillblast_archive", "mac"], json.dumps(d_fra))
 check("PL a master with no rig in a shared Askar folder: the 107PHQ dataset is in progress "
-      "and says the folder is shared; the FRA400 final never marks the 107PHQ done",
+      "and says the folder is shared; the FRA400 final and the loose Iris final never mark it "
+      "done (a final that names no scope counts only for a one-dataset target)",
       d_107.get("status") == "in_progress" and "shared-folder" in (d_107.get("attribution") or [])
+      and "unscoped-final" in (d_107.get("attribution") or [])
       and d_107.get("masters") == ["master_integration.fit"], json.dumps(d_107))
+check("PL a merged row with no night is dated from its filename (107PHQ Iris: 2 nights); "
+      "a baseline row with no scope is warned about, not counted",
+      d_107.get("nights") == 2 and d_107.get("first_session") == "2026-09-05"
+      and any("no scope recorded" in w for w in doc.get("warnings", [])),
+      json.dumps([d_107.get("nights"), doc.get("warnings")]))
 p_iris, _ = pl_ds(doc, "NGC7023", "FRA400")
-check("PL the project rolls up to its least advanced dataset (Iris: in progress, not done)",
-      p_iris.get("status") == "in_progress" and p_iris.get("to_process") is False,
+check("PL the project rolls up to its least advanced dataset (Iris: in progress, not done) "
+      "and is named with its code",
+      p_iris.get("status") == "in_progress" and p_iris.get("to_process") is False
+      and p_iris.get("name") == "Iris Nebula (NGC 7023)",
       json.dumps({k: v for k, v in p_iris.items() if k != "datasets"}))
 _, d_m42 = pl_ds(doc, "M42", "S30P")
 check("PL a Seestar autostack is the scope's own work, not Brett's: M 42 stays capturing, "
-      "still on the mac, and its archive folder is named from the inventory",
+      "still on this Mac, with 1 frame (stack, preview, panel stack and Milky Way rows are "
+      "never sessions), and its archive folder is named from the inventory",
       d_m42.get("status") == "capturing" and not d_m42.get("masters")
-      and d_m42.get("locations") == ["mac"]
+      and d_m42.get("locations") == ["mac"] and d_m42.get("frames") == 1
       and d_m42.get("archive_rel") == "S30P/Orion Nebula (M 42)", json.dumps(d_m42))
 p_wiz, d_wiz = pl_ds(doc, "NGC7380", "S50P")
 _, d_wiz_ask = pl_ds(doc, "NGC7380", "107PHQ")
 check("PL 39 quiet days make the Wizard S50P ready to process (and the project says so); "
-      "the rig-tagged Askar master touches no S50P dataset",
+      "cleared from this Mac by hand, it is only on the archive; the rig-tagged Askar master "
+      "touches no S50P dataset",
       d_wiz.get("status") == "ready_to_process" and p_wiz.get("to_process") is True
+      and d_wiz.get("locations") == ["chillblast_archive"]
       and not d_wiz.get("masters") and not d_wiz_ask, json.dumps(d_wiz))
 _, d_b14 = pl_ds(doc, "NGC1499", "S50")
 _, d_b15 = pl_ds(doc, "NGC2237", "S50")
@@ -5032,73 +5094,109 @@ check("PL capture_state: 'open' holds capturing through 40 quiet days, 'complete
       d_open.get("status") == "capturing" and d_open.get("capture_state") == "open"
       and d_comp.get("status") == "ready_to_process"
       and d_m42.get("capture_state") == "auto", json.dumps([d_open, d_comp]))
-_, d_sf = pl_ds(doc, "NGC6888", "S50P-STARFRONT")
-check("PL the Starfront S50 Pro is its own dataset by |cam= identity, site Starfront, and "
-      "its unscoped final counts but is marked",
-      d_sf.get("site") == "Starfront" and d_sf.get("status") == "done"
-      and "unscoped-final" in (d_sf.get("attribution") or []), json.dumps(d_sf))
-check("PL stacks and jpgs are never sessions (M 42 has 1 frame), and an unknown name becomes "
-      "a warning, not a crash",
-      d_m42.get("frames") == 1 and any("1 target name" in w for w in doc.get("warnings", [])),
-      json.dumps([d_m42.get("frames"), doc.get("warnings")]))
+_, d_bub = pl_ds(doc, "NGC7635", "S30P")
+check("PL a final in a folder named for the scope marks that scope's dataset done; a master "
+      "in a renamed folder of the same target still counts as that target's",
+      d_bub.get("status") == "done" and d_bub.get("finals") == ["NGC7635_Bubble_Nebula.jpg"]
+      and d_bub.get("masters") == ["masterLight.xisf"]
+      and d_bub.get("archive_rel") == "S30P/NGC 7635 - Bubble", json.dumps(d_bub))
+_, d_sf = pl_ds(doc, "NGC6888", "S50P")
+_, d_sf2 = pl_ds(doc, "NGC6888", "S50P-STARFRONT")
+check("PL a second S50 Pro can't be told apart yet, so its frames are the home S50P at "
+      "Shinfield (the Starfront entry stays switched off); its loose final counts because "
+      "the target has one dataset, and a ._ sidecar is not a second final",
+      d_sf.get("site") == "Shinfield" and d_sf.get("status") == "done" and not d_sf2
+      and d_sf.get("finals") == ["NGC6888_Crescent_Nebula.jpg"], json.dumps([d_sf, d_sf2]))
+check("PL two unknown names become one warning, not a crash, and neither is counted",
+      any("2 target name" in w for w in doc.get("warnings", []))
+      and not pl_ds(doc, "NGC3628", "S30P")[1], json.dumps(doc.get("warnings")))
 check("PL build_projects wrote nothing: the state folder is untouched and no OS call was made",
       {f: os.path.getsize(os.path.join(PL.state, f)) for f in os.listdir(PL.state)} == pl_state0
       and not teh.os_calls(PL.root), str(teh.os_calls(PL.root))[:200])
 
-# another computer's ledger (--with-ledger): the Mac's copy of the Wizard adds
-# a night and the 'mac' location to the same dataset
-PL_MAC = os.path.join(PL.root, "mac-ledger.json")
-with open(PL_MAC, "w") as f:
+# another computer's ledger (--with-ledger): the PC's copy of the Wizard adds
+# a night, repeats w1 (same bytes: never counted twice) and says the frames
+# are on the PC, which this Mac can't check
+PL_PC_LED = os.path.join(PL.root, "pc-ledger.json")
+with open(PL_PC_LED, "w") as f:
     json.dump({"version": 1, "calibration": {}, "files": {
-        "w2": pl_row("NGC 7380", "NGC 7380 - Wizard Nebula", "2026-09-03", st="panel",
-                     device=True, scope="Seestar S50 Pro", dest="w2.fit")}}, f)
-doc2 = pl_build(extra=f", extra_ledgers=[{PL_MAC!r}]")
+        "w1-again": dict(PL_LED["files"]["w1"], dest="C:\\Astro\\S50P"),
+        "w2": pl_row("NGC 7380", "NGC 7380 - Wizard Nebula", "2026-09-03",
+                     device=True, scope="Seestar S50 Pro")}}, f)
+doc2 = pl_build(extra=f", extra_ledgers=[{PL_PC_LED!r}]")
 _, d_wiz2 = pl_ds(doc2, "NGC7380", "S50P")
-check("PL --with-ledger merges another computer's sessions into the same dataset "
-      "(2 nights, archive + the other computer)",
-      d_wiz2.get("nights") == 2 and d_wiz2.get("locations") == ["chillblast_archive", "pc"],
+check("PL --with-ledger merges another computer's sessions into the same dataset: 2 nights "
+      "and 2 frames (the repeated frame counted once), on the archive and 'on the PC per its "
+      "ledger'",
+      d_wiz2.get("nights") == 2 and d_wiz2.get("frames") == 2
+      and d_wiz2.get("locations") == ["chillblast_archive", "pc-unchecked"],
       json.dumps(d_wiz2))
+r_out = PL.run("--projects", "--with-ledger", os.path.join(tempfile.gettempdir(), "not-in-root", "ledger.json"))
+check("PL test mode refuses a --with-ledger file outside the test root (exit 3), and writes nothing",
+      r_out.returncode == 3 and not os.path.exists(os.path.join(PL.state, "projects.json")),
+      r_out.stderr[-300:])
 
 r = PL.run("--projects")
 pj_path = os.path.join(PL.state, "projects.json")
 with open(pj_path) as f:
     pj1 = json.load(f)
+no_mirror = not os.path.exists(os.path.join(PL.mirror, "projects.json"))
+probe(PL.env, "print(json.dumps(m.mirror_owner_ok(m.MIRROR_DIR, claim=True)[0]))")
 r2 = PL.run("--projects")
 with open(pj_path) as f:
     pj2 = json.load(f)
 pj1.pop("generated_at"), pj2.pop("generated_at")
-check("PL --projects writes projects.json (and its mirror copy), says the counts, and a "
-      "re-run is identical apart from the timestamp",
-      r.returncode == 0 and "ready to process" in r.stdout and pj1 == pj2
+check("PL --projects writes projects.json, says the counts, and a re-run is identical apart "
+      "from the timestamp; the mirror copy only once this computer has claimed its mirror",
+      r.returncode == 0 and "ready to process" in r.stdout and pj1 == pj2 and no_mirror
       and os.path.isfile(os.path.join(PL.mirror, "projects.json")), r.stdout[-300:])
-check("PL projects.json carries the schema, the quiet period and its sources",
+check("PL projects.json carries the schema, the quiet period, the night it was worked out for "
+      "and its sources (the inventory the status file names)",
       pj1.get("schema") == "projects/1" and pj1.get("quiet_period_days") == 14
+      and re.fullmatch(r"\d{4}-\d{2}-\d{2}", pj1.get("as_of_night", ""))
       and pj1["sources"].get("inventory") == "inventory-E-20261009T000000Z.jsonl",
       json.dumps(pj1.get("sources")))
+with open(os.path.join(PL.state, "ledger.json"), "w") as f:
+    f.write("{ not json")
+with open(os.path.join(PL.state, "ledger.json.bak"), "w") as f:
+    f.write("{ not json either")
+r3 = PL.run("--projects")
+with open(pj_path) as f:
+    pj3 = json.load(f)
+pj3.pop("generated_at")
+check("PL a ledger that can't be read leaves the last good projects.json alone",
+      r3.returncode == 0 and "left as it is" in r3.stdout + r3.stderr and pj3 == pj2,
+      (r3.stdout + r3.stderr)[-300:])
+with open(os.path.join(PL.state, "ledger.json"), "w") as f:
+    json.dump(PL_LED, f)
+os.remove(os.path.join(PL.state, "ledger.json.bak"))
 
 rd = PL.run("--targets-draft")
 with open(os.path.join(PL.state, "targets-draft.json")) as f:
     draft = json.load(f)
-check("PL --targets-draft resolves every known name and lists the unknown one for Brett, "
-      "and never touches the contract",
-      rd.returncode == 0 and [u["raw"] for u in draft["unresolved"]] == ["Nannys Favourite"]
+check("PL --targets-draft resolves every known name and lists the unknown ones for Brett "
+      "(with why), and never touches the contract",
+      rd.returncode == 0
+      and sorted(u["raw"] for u in draft["unresolved"]) == ["Leo Triplet (M 65, M 66, NGC 3628)",
+                                                           "Nannys Favourite"]
       and any(x["raw"] == "NGC 7380 - Wizard Nebula" and x["target_id"] == "NGC7380"
               for x in draft["resolved"])
       and json.load(open(os.path.join(PL_CON, "targets.json")))
-      == json.load(open(os.path.join(os.path.dirname(SCRIPT), "contract", "targets.json"))),
+      == json.load(open(os.path.join(PL_SRC, "contract", "targets.json"))),
       rd.stdout[-300:])
 
-# no inventory and no finals: warnings, never a crash, statuses still derived
+# no inventory and no finals: warnings, never a crash, statuses still derived;
+# a contract file that isn't JSON is one warning, not a crash
 PL2 = teh.Env("PL2", asiair=False, seestar=False)
 os.makedirs(os.path.join(PL2.root, "contract"))
 for _f in ("targets.json", "scopes.json"):
-    shutil.copy(os.path.join(os.path.dirname(SCRIPT), "contract", _f), os.path.join(PL2.root, "contract"))
+    shutil.copy(os.path.join(PL_SRC, "contract", _f), os.path.join(PL2.root, "contract"))
 PL2.env.update({"ASTRO_CONTRACT_DIR": os.path.join(PL2.root, "contract")})
 os.makedirs(PL2.state, exist_ok=True)
 with open(os.path.join(PL2.state, "ledger.json"), "w") as f:
     json.dump({"version": 1, "calibration": {}, "files": {
         "w1": {"filename": "Light_NGC 7380_20.0s_20260901-220000.fit", "target": "NGC 7380",
-               "device": "seestar", "scope": "Seestar S50 Pro", "sourceType": "panel",
+               "device": "seestar", "scope": "Seestar S50 Pro", "sourceType": "sub",
                "night": "2026-09-01", "exposureSeconds": 20.0}}}, f)
 doc3 = probe(PL2.env, "st = m.State()\n"
              "doc = m.build_projects(st, today='2026-10-10')\n"
@@ -5110,6 +5208,14 @@ check("PL with no inventory and no finals folder the rollup still derives Ready,
       and any("inventory" in w for w in doc3.get("warnings", []))
       and any("finished pictures" in w.lower() for w in doc3.get("warnings", [])),
       json.dumps(doc3.get("warnings")))
+with open(os.path.join(PL2.root, "contract", "targets.json"), "w") as f:
+    f.write("[1, 2, 3]")
+doc4 = probe(PL2.env, "st = m.State()\n"
+             "doc = m.build_projects(st, today='2026-10-10')\n"
+             "print(json.dumps(doc))\n")
+check("PL a contract file of the wrong shape is a warning and an empty list, not a crash",
+      doc4.get("projects") == [] and any("targets.json" in w for w in doc4.get("warnings", [])),
+      json.dumps(doc4.get("warnings") or doc4)[:300])
 shutil.rmtree(PL2.root, ignore_errors=True)
 shutil.rmtree(PL.root, ignore_errors=True)
 

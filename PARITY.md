@@ -72,7 +72,7 @@ way. Every release updates it.
 | Status line ("Everything is safe" / "N frames only on the Mac" or "…on this PC", with a tooltip; `--status [--json]`, `GET /api/status`, and the `statusSummary` field of `/api/state`). Worked out by `--status --json` in a short-lived child process, only when `ledger.json` changes (`STATUS_CMD` lets the app use its own command; a frozen app works it out in-process) | ✓ | ✓ | engine + panel |
 | Space on this computer (dashboard section and `--space`): read-only; "safe to delete" only for frames whose archive copy the PC has re-hashed; never deletes | ✓ Finder | ✓ File Explorer | engine |
 | Astro Desk, the Archive tab (1.6.0): read-only list of what is still to process, a target's nights, masters and pictures; opens folders and image files inside the archive only (never programs or shortcuts, token required); Start Siril here (`siril -d <folder>`, detached) | ✓ when the share is mounted; Finder, `open` | ✓ local E:; File Explorer, `os.startfile` | engine + panel |
-| The project layer (1.8.0): `contract/` beside the engine, `--targets-draft`, `--projects` → `projects.json`, and the Archive tab's To-process and In-progress sections with Open in Explorer / Show in Finder (through the same archive-only open) | ✓ | ✓ | engine + panel + installers |
+| The project layer (1.8.0): `contract/` beside the engine, `--targets-draft`, `--projects` → `projects.json`, and the Archive tab's To-process and In-progress sections with Open in Explorer / Open in Finder (through the same archive-only open) | ✓ (In progress needs the share mounted: the masters come from the PC's inventory; Open in Finder) | ✓ local E:, rebuilt nightly by `--pc-nightly`; Open in Explorer | engine + panel + installers |
 | `Final Astro Images` for the project layer's "done": it sits at the archive DRIVE's root, which the Mac's share (`…\Astro Image Data`) doesn't carry — so the default is Windows-only, and on the Mac `--projects` says finals were not checked unless `ASTRO_FINALS_DIR` is set | needs `ASTRO_FINALS_DIR` | ✓ `E:\Final Astro Images` | engine |
 | Quit the panel from another program (`POST /api/quit`: token, JSON and origin rules; 409 `busy` while an operation runs or a question card is up) | ✓ | ✓ | panel |
 | Stands aside while the desktop app is in charge (`app-takeover.json`, with an absolute `appPath`; `--app-owner`) | ✓ watcher, Restart, installer, app wrapper | ✓ watcher, Restart, installer | engine + installers |
@@ -110,6 +110,9 @@ The same keys on both, in `config.json` next to the ledger:
 | `SEESTAR_IMPORT_SUB_JPEGS` | import per-sub previews | `false` | `false` |
 | `ASTRO_SIRIL_EXE` | Siril, for "Start Siril here" | `/Applications/Siril.app/Contents/MacOS/Siril` | `C:\Program Files\Siril\bin\siril.exe` |
 | `ASTRO_OBSERVATORY_DATASET` | the Observatory's dataset (states, hours) | `~/Library/Application Support/Astro Import/observatory-dataset.json` | `<archive drive>\Astro Config Data\Observatory\dataset.json` |
+| `ASTRO_CONTRACT_DIR` | the contract (`targets.json`, `scopes.json`) (1.8.0) | `contract/` beside the engine | same |
+| `ASTRO_FINALS_DIR` | finished pictures, for the project layer's "done" (1.8.0) | empty: finals not checked (the share doesn't carry the folder) | `<archive drive>\Final Astro Images` |
+| `ASTRO_QUIET_PERIOD_DAYS` | days without a session before a dataset is ready to process (1.8.0) | 14 | 14 |
 
 Paths never cross between machines. `--export-settings` / `--import-settings`
 carry the portable part instead: custom target names, the never-import list,
@@ -127,6 +130,10 @@ the scope table, and the non-path keys.
   under `_verify`: the Mac `_verify\mac\shipped.jsonl` (and its requests in
   `_verify\mac\requests`), the PC `_verify\pc\shipped-pc.jsonl`. The old
   logs in `_verify` are history: read, never written again.
+- **The project layer's files (1.8.0):** `projects.json` and `targets-draft.json`
+  in each machine's state folder (and `projects.json` in its own mirror).
+  Each machine's rollup counts its own ledger; `--with-ledger` adds the other
+  computer's snapshot, read only.
 - **What the PC writes:** everything in `_verify\pc` (the share's user may
   only read there): `verified.jsonl`, `problems.jsonl`, `status.json`,
   `quarantine.jsonl`, the sweep logs, the inventory generations and
@@ -147,6 +154,12 @@ the scope table, and the non-path keys.
 
 ## Differences by design
 
+- **The project layer's "done" and "in progress" (1.8.0)** need what only
+  the PC sees by default: `Final Astro Images` sits at the archive drive's
+  root, outside the share the Mac mounts, and the masters come from the PC's
+  inventory in `_verify\pc`, which the Mac reads only while the share is
+  mounted. So the PC's `projects.json` is the complete one (and `--pc-nightly`
+  rebuilds it each night); the Mac's says what it could not check.
 - **Finder "done" tags** on imported ASIAir folders are macOS-only. NTFS has
   no Finder labels; the ledger is the real record on both.
 - **The Windows watcher's notification** names the camera but not the new

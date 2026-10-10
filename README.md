@@ -212,8 +212,8 @@ The panel covers day-to-day use; everything is also scriptable:
 | `--inventory [--root DIR]` / `--hash [--root DIR] [--max-minutes N] [--rolling]` | List, or hash, every file under a folder: the archive on the PC (into `_verify\pc`), or your own frame folders (into the state folder) (1.7.0) |
 | `--pc-tick` / `--pc-nightly` | Archive PC's scheduled work: the heartbeat and the Mac's requests every 5 minutes; sweep, inventory and hash at logon and 03:30 (1.7.0) |
 | `--space` | Read-only: what on this computer is safe to delete (archive copy re-checked by the PC), what is waiting, and what to keep, with the paths of safe folders |
-| `--projects [--with-ledger FILE] [--dry-run]` | Read-only: rebuild `projects.json` — per project and scope, what is ready to process, in progress, still capturing or done (1.8.0) |
-| `--targets-draft` | Read-only: this ledger's target names against `contract/targets.json`, with the unknown ones listed to add (1.8.0) |
+| `--projects [--with-ledger FILE] [--dry-run]` | Changes nothing in your frames or the archive; writes one file, `projects.json`, in the state folder: per project and scope, what is ready to process, in progress, still capturing or done (1.8.0) |
+| `--targets-draft` | Writes `targets-draft.json` in the state folder: this ledger's target names against `contract/targets.json`, with the unknown ones listed to add (1.8.0) |
 | `--tidy-stacks [--dry-run]` | List archived Seestar stacks that a later stack of the same session continues, and offer removal (typed DELETE) |
 | `--refresh-metadata` | Back-fill ledger metadata after parser improvements (safe, repeatable) |
 | `--set-filter "<target>" "<filter>"` | Record the true filter for a target's ASIAir frames (`--night` to limit; `none` clears) |
@@ -227,11 +227,11 @@ The panel covers day-to-day use; everything is also scriptable:
 
 ## Testing
 
-644 end-to-end checks run the real engine and the real panel against simulated cameras (hand-built minimal FITS files, every device layout, crash/rename/mosaic/Milky-Way/cleanup/consent/interruption/multi-Seestar scenarios — including that the destination preview must equal the folders the import then actually creates, that a folder holding any unproven file is never offered as SAFE, and that the panel refuses foreign-origin requests):
+655 end-to-end checks run the real engine and the real panel against simulated cameras (hand-built minimal FITS files, every device layout, crash/rename/mosaic/Milky-Way/cleanup/consent/interruption/multi-Seestar scenarios — including that the destination preview must equal the folders the import then actually creates, that a folder holding any unproven file is never offered as SAFE, and that the panel refuses foreign-origin requests):
 
 ```bash
-python3 test_v2.py     # 500 engine checks (chain W1 simulates the Windows drive layer)
-python3 test_app.py    # 144 panel checks (boots the real HTTP server)
+python3 test_v2.py     # 507 engine checks (chain W1 simulates the Windows drive layer)
+python3 test_app.py    # 148 panel checks (boots the real HTTP server)
 # on Windows:  py -3 -X utf8 selftest.py   then the two suites above with  py -3 -X utf8
 ```
 
@@ -249,6 +249,7 @@ CLAUDE.md                            working rules for Claude Code, which builds
 Install … .command                   double-click installer (the no-terminal route)
 astro-import.py                      the engine (all cameras, ledger, report, dashboard)
 astro-app.py                         the control panel (localhost:8765)
+contract/                            targets.json and scopes.json: the one list of object and scope names (1.8.0)
 astro-watch.sh                       drive watcher (one for both cameras)
 BrettjoAstro FITS Importer.app/      app wrapper — the panel's grantable macOS identity
 Restart FITS Importer.command        Desktop one-click restart (Terminal context)
