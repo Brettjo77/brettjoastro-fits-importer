@@ -2407,8 +2407,9 @@ if _deny:
               "on the PC) the ship still files every frame, and a delete there is refused",
               _dr.returncode == 0 and "Shipped 2 file(s)" in r.stdout and len(_shipped) == 2
               and _refused,
-              f"icacls/chmod rc={_dr.returncode} {(_dr.stdout + _dr.stderr)[-160:]!r} | ship rc={r.returncode} "
-              f"shipped={len(_shipped)} refused={_refused} | {r.stdout[-200:]!r} | {r.stderr[-400:]!r}")
+              f"refused={_refused} shipped-on-disk={len(_shipped)} said-shipped-2={'Shipped 2 file(s)' in r.stdout} "
+              f"ship rc={r.returncode} rights rc={_dr.returncode} | {r.stdout[-300:]!r} | {r.stderr[-300:]!r} "
+              f"| {(_dr.stdout + _dr.stderr)[-120:]!r}")
     finally:
         subprocess.run(_undo, capture_output=True, text=True)
 else:
@@ -5232,5 +5233,5 @@ shutil.rmtree(PL.root, ignore_errors=True)
 print("\n═══════════════════════════════════════════════════")
 print(f"  {PASS} passed, {FAIL} failed")
 for name, detail in FAILURES:
-    print(f"  ✗ {name}: {detail[:200]}")
+    print(f"  ✗ {name}: {detail[:600]}")
 sys.exit(1 if FAIL else 0)
