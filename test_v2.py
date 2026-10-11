@@ -1886,7 +1886,11 @@ check("W1 the install check passes from an installed folder (not only the source
       + r.stderr[-300:])
 
 print("\n── Chain P1: --ship files Seestar frames into the archive (1.4.0) ──")
+# Ship as the Mac on every OS (1.7.0): on the PC the engine's own log is
+# _verify\pc\shipped-pc.jsonl, and this chain reads the Mac's. D7 and PC do the same.
+D7_MAC = {"ASTRO_SHIP_FOLDER": "mac", "ASTRO_SHIP_LOG": "shipped.jsonl"}
 P1 = teh.Env("P1", asiair=False, seestar=True)
+P1.env.update(D7_MAC)
 # The archive already holds Dumbbell Nebula (M 27) with Day 1 (night 1 Sep) and Day 2 (night 2 Sep)
 arch = P1.archive
 tE = os.path.join(arch, "S30P", "Dumbbell Nebula (M 27)")
@@ -2035,7 +2039,7 @@ def d7_sha(path):
 
 # These checks are the Mac's ship over the share, run on any computer: the
 # PC's own log lives in _verify/pc, which the share user may only read.
-D7_MAC = {"ASTRO_SHIP_FOLDER": "mac", "ASTRO_SHIP_LOG": "shipped.jsonl"}
+# D7_MAC is defined before chain P1 (the ship chains all run as the Mac)
 
 def d7_at(arch, rel):
     return os.path.join(arch, *rel.split("\\"))
@@ -2402,7 +2406,9 @@ if _deny:
         check("D7 under a real no-Delete rule from the operating system (an ACL on a Mac, icacls "
               "on the PC) the ship still files every frame, and a delete there is refused",
               _dr.returncode == 0 and "Shipped 2 file(s)" in r.stdout and len(_shipped) == 2
-              and _refused, _dr.stderr[-200:] + r.stdout[-300:])
+              and _refused,
+              f"icacls/chmod rc={_dr.returncode} {(_dr.stdout + _dr.stderr)[-160:]!r} | ship rc={r.returncode} "
+              f"shipped={len(_shipped)} refused={_refused} | {r.stdout[-200:]!r} | {r.stderr[-400:]!r}")
     finally:
         subprocess.run(_undo, capture_output=True, text=True)
 else:
@@ -2752,7 +2758,10 @@ _cache = d7_rows(os.path.join(PCS.state, "hash-cache.jsonl"))
 _seed = [x for x in _cache if x.get("source") == "verified.jsonl"]
 _mine = [x for x in _cache if not x.get("source")]
 _order = [x["relpath"] for x in _mine]
-_n_own = 13 if os.name == "nt" else 6     # Windows reads the seeded ones again, unbuffered
+# Windows re-reads, unbuffered, only the seeded rows the old sweep read buffered
+# (done.fit, from the 1.6 verified.jsonl); the PC's own sweep rows were read
+# unbuffered already and are not read again. 6 files are new to the cache.
+_n_own = 6 + (sum(1 for x in _seed if x.get("read") != "unbuffered") if os.name == "nt" else 0)
 check("PC --hash starts the PC's cache from verified.jsonl (sizes that still match), then hashes "
       "the rest of the archive itself, newest first",
       r.returncode == 0 and len(_seed) == 7 and len(_mine) == _n_own
