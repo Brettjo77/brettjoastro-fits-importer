@@ -2383,12 +2383,22 @@ os.makedirs(_rcam); os.makedirs(os.path.join(D7r.archive, "_verify", "mac"))
 for st in ("20260910-224402", "20260911-224402"):
     D7r.add_seestar_sub("M 27", st)
 D7r.run("--no-ship")
-_me = (os.environ.get("USERDOMAIN", "") + "\\" if os.environ.get("USERDOMAIN") else "") \
-    + os.environ.get("USERNAME", "")
+# Who runs this test, asked of the OS: the suite wipes its own environment for
+# test mode (isolate_runner), so USERDOMAIN and USERNAME are empty here. An
+# empty name made icacls put the rule on the group "BUILTIN", which binds
+# nobody, and the delete went through (first PC run, 11 Oct).
+_me = ""
+if os.name == "nt":
+    _me = subprocess.run(["whoami"], capture_output=True, text=True).stdout.strip()
+    if not _me:
+        try:
+            _me = os.getlogin()
+        except OSError:
+            _me = ""
 if sys.platform == "darwin":
     _deny = ["chmod", "+a", "everyone deny delete,delete_child,file_inherit,directory_inherit", _rcam]
     _undo = ["chmod", "-R", "-N", _rcam]
-elif os.name == "nt":
+elif os.name == "nt" and _me:
     _deny = ["icacls", _rcam, "/deny", f"{_me}:(OI)(CI)(DE,DC)"]
     _undo = ["icacls", _rcam, "/remove:d", _me, "/t", "/c", "/q"]
 else:
@@ -2417,7 +2427,8 @@ if _deny:
     finally:
         subprocess.run(_undo, capture_output=True, text=True)
 else:
-    print("  SKIP  D7 a real no-Delete folder from the operating system (a Mac or the PC only)")
+    print("  SKIP  D7 a real no-Delete folder from the operating system (a Mac or the PC only"
+          + ("; this PC could not say who runs the test" if os.name == "nt" else "") + ")")
 
 # ═══════════════ CHAIN PC: the archive PC's own jobs (1.7.0, phase 0) ════════
 print("\n── Chain PC: the PC's sweep, inventory, hash cache and requests (1.7.0) ──")
