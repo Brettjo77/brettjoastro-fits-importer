@@ -40,6 +40,27 @@ INSTALLED = {
 }
 
 
+def desktop_dir(test_mode=False, shell=None):
+    """Where the Restart button lives. On Windows the installer asks the shell
+    ([Environment]::GetFolderPath('Desktop')), and with OneDrive that is
+    OneDrive\\Desktop, not Users\\<name>\\Desktop: ask the same way (1.7.0). In
+    test mode the plain folder under the test's home, so nothing outside the
+    root is ever looked at."""
+    if os.name == "nt" and not test_mode:
+        try:
+            if shell is None:
+                import ctypes
+                buf = ctypes.create_unicode_buffer(1024)
+                # CSIDL_DESKTOPDIRECTORY, the user's own, as the shell resolves it
+                if ctypes.windll.shell32.SHGetFolderPathW(None, 0x10, None, 0, buf) == 0:
+                    shell = lambda: buf.value
+            got = shell() if shell else ""
+            if got:
+                return got
+        except Exception:
+            pass
+    return os.path.join(os.path.expanduser("~"), "Desktop")
+
 def line(kind, name, detail=""):
     RESULTS[kind] += 1
     print(f"  {kind:<4}  {name}" + (f"  — {detail}" if detail else ""))
@@ -187,7 +208,7 @@ def main():
                   "it offers to take over again", warn_only=True)
         else:
             check("camera watcher starts at logon", os.path.isfile(startup), startup)
-        desk = os.path.join(os.path.expanduser("~"), "Desktop", "Restart FITS Importer.cmd")
+        desk = os.path.join(desktop_dir(bool(eng.TEST_ROOT)), "Restart FITS Importer.cmd")
         if owner == "app":                     # the installer leaves it out then (U1)
             line("SKIP", "Restart FITS Importer on the Desktop", f"not needed: {app_note}")
         else:

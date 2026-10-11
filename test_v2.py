@@ -1879,6 +1879,17 @@ for _f in _st.INSTALLED.get(engw.PLATFORM, _st.INSTALLED["windows"]):   # what T
     _dst = os.path.join(_bin, _f)                 # contract/… keeps its folder
     os.makedirs(os.path.dirname(_dst), exist_ok=True)
     shutil.copy2(os.path.join(_here, _f), _dst)
+# The Desktop as the installer names it: with OneDrive it is OneDrive\Desktop (the PC,
+# 11 Oct 2026, warned about a button that was there). In test mode never the real one.
+_home_desk = os.path.join(os.path.expanduser("~"), "Desktop")
+_shell_desk = lambda: os.path.join("X:\\", "OneDrive", "Desktop")
+check("W1 the self-test looks for the Restart button where Windows says the Desktop is (OneDrive "
+      "may move it), and only under the test home in test mode",
+      _st.desktop_dir(test_mode=True, shell=_shell_desk) == _home_desk
+      and _st.desktop_dir(test_mode=False, shell=lambda: "") == _home_desk
+      and (_st.desktop_dir(test_mode=False, shell=_shell_desk) == _shell_desk()
+           if os.name == "nt" else _st.desktop_dir(test_mode=False, shell=_shell_desk) == _home_desk),
+      _st.desktop_dir(test_mode=False, shell=_shell_desk))
 r = wrun(script=os.path.join(_bin, "selftest.py"))
 check("W1 the install check passes from an installed folder (not only the source folder)",
       " present" in r.stdout and not re.search(r"FAIL\s+\S+ present", r.stdout),
