@@ -2398,6 +2398,10 @@ if _deny:
     try:
         r = D7r.run("--ship")
         _shipped = [os.path.join(dp, f) for dp, _d, fs in os.walk(_rcam) for f in fs]
+        _acl = ""
+        if _shipped and os.name == "nt":          # what the rule really put on the file
+            _acl = " || ".join(subprocess.run(["icacls", q], capture_output=True, text=True).stdout.strip()[:220]
+                               for q in (_shipped[0], os.path.dirname(_shipped[0]), _rcam))
         try:
             os.remove(_shipped[0])
             _refused = False
@@ -2409,7 +2413,7 @@ if _deny:
               and _refused,
               f"refused={_refused} shipped-on-disk={len(_shipped)} said-shipped-2={'Shipped 2 file(s)' in r.stdout} "
               f"ship rc={r.returncode} rights rc={_dr.returncode} | {r.stdout[-300:]!r} | {r.stderr[-300:]!r} "
-              f"| {(_dr.stdout + _dr.stderr)[-120:]!r}")
+              f"| {(_dr.stdout + _dr.stderr)[-120:]!r} | acl: {_acl}")
     finally:
         subprocess.run(_undo, capture_output=True, text=True)
 else:
@@ -5233,5 +5237,5 @@ shutil.rmtree(PL.root, ignore_errors=True)
 print("\n═══════════════════════════════════════════════════")
 print(f"  {PASS} passed, {FAIL} failed")
 for name, detail in FAILURES:
-    print(f"  ✗ {name}: {detail[:600]}")
+    print(f"  ✗ {name}: {detail[:1400]}")
 sys.exit(1 if FAIL else 0)
