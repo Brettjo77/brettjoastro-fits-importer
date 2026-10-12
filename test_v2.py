@@ -5209,6 +5209,7 @@ PLp.env.update({"ASTRO_CONTRACT_DIR": PLp_CON, "ASTRO_SHIP_FOLDER": "pc",
 os.makedirs(os.path.join(PLp.archive, "_verify", "mac"))
 with open(os.path.join(PLp.archive, "_verify", "mac", "ledger-snapshot.json"), "w") as f:
     json.dump({"schema": "ledger-snapshot/1", "machineId": "mac",
+               "customNames": {"Nannys Favourite": "M 31 - Andromeda"},   # the Mac's custom name
                "files": {k: {kk: vv for kk, vv in r.items() if kk != "dest"}
                          for k, r in PL_LED["files"].items()}}, f)
 r = PLp.run("--projects")
@@ -5219,8 +5220,19 @@ check("PL on a computer that has never imported (no ledger.json) --projects says
       r.returncode == 0 and "no ledger yet" in (r.stdout + r.stderr)
       and "ledger-snapshot.json" in json.dumps(_pjp.get("sources", {}))
       and len(_pjp.get("projects") or []) >= 5
-      and sum(1 for p in _pjp["projects"] for e in p["datasets"]) == sum(1 for p in pj1["projects"] for e in p["datasets"]),
+      and sum(1 for p in _pjp["projects"] for e in p["datasets"]) == sum(1 for p in pj1["projects"] for e in p["datasets"]) + 1
+      and any(p["id"] == "M31" for p in _pjp["projects"]),      # the snapshot's custom name resolved it
       (r.stdout + r.stderr)[-300:] + json.dumps(_pjp.get("sources")))
+r = PLp.run("--targets-draft")
+_drp = os.path.join(PLp.state, "targets-draft.json")
+_dr = json.load(open(_drp)) if os.path.isfile(_drp) else {}
+check("PL ...and --targets-draft there reads the same snapshot: the Mac's names, resolved with the "
+      "Mac's custom names, and the unknown ones listed",
+      r.returncode == 0 and any(x.get("target_id") == "NGC7023" for x in _dr.get("resolved", []))
+      and any(x.get("target_id") == "M31" and x["raw"] == "Nannys Favourite" for x in _dr.get("resolved", []))
+      and any(x["raw"].startswith("Leo Triplet") for x in _dr.get("unresolved", []))
+      and any("ledger-snapshot.json" in str(x) for x in _dr.get("ledgers", [])),
+      (r.stdout + r.stderr)[-300:] + str(_dr.get("unresolved"))[:200])
 # ...and with no snapshot either, a good projects.json is never replaced by an empty one
 PLq = teh.Env("PLq", asiair=False, seestar=False)
 shutil.copytree(PL_CON, os.path.join(PLq.root, "contract"))

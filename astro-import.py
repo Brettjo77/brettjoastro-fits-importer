@@ -3441,7 +3441,8 @@ def write_ledger_snapshot(state, mount=None):
         _confine(path, "the ledger snapshot")
         _atomic_write_json(path, {"schema": "ledger-snapshot/1", "machine": MACHINE_LABEL,
                                   "machineId": machine_identity()["slug"], "at": _utc_iso(),
-                                  "files": state.ledger.get("files") or {}})
+                                  "files": state.ledger.get("files") or {},
+                                  "customNames": state.custom_names or {}})
         return path
     except OSError as e:
         warn(f"The ledger snapshot for the other computer could not be written ({e}); "
@@ -3453,6 +3454,30 @@ def other_ledger_snapshot(mount=None):
     _here, there = ship_sides()
     path = _verify_path(mount or ARCHIVE_MOUNT, there, LEDGER_SNAPSHOT_NAME)
     return path if os.path.isfile(path) else None
+
+def _snapshot_custom_names(paths):
+    """The custom names the other computer's snapshot(s) carry."""
+    names = {}
+    for p in paths:
+        d = _read_json_file(p)
+        cn = d.get("customNames") if isinstance(d, dict) else None
+        if isinstance(cn, dict):
+            names.update({k: v for k, v in cn.items() if isinstance(k, str) and isinstance(v, str)})
+    return names
+
+def projects_inputs(state, extra_ledgers=()):
+    """What the project layer reads besides this computer's own ledger:
+    the other computer's ledger snapshot on the archive, by itself, plus any
+    --with-ledger file; and the custom names, the snapshot's under this
+    computer's own. Returns (ledger paths, custom names)."""
+    extra = list(extra_ledgers)
+    snap = other_ledger_snapshot()
+    if snap and os.path.realpath(snap) not in {os.path.realpath(x) for x in extra}:
+        info(f"Reading the {ship_sides()[1]}'s ledger snapshot: {snap}")
+        extra.append(snap)
+    names = _snapshot_custom_names(extra)
+    names.update(state.custom_names or {})
+    return extra, names
 
 def ship_log_path(mount=None):
     """This machine's own ship log: _verify\\mac\\shipped.jsonl on the Mac,
@@ -9474,15 +9499,17 @@ def _frame_here(row):
 
 def run_targets_draft(state):
     """Build targets-draft.json in the state folder from this computer's own
-    ledger: every distinct target name, resolved against the contract, with
+    ledger and the other computer's snapshot (what --projects reads): every
+    distinct target name, resolved against the contract, with
     the ones the contract doesn't know listed for Brett to review. Read-only
     apart from the draft itself; the contract is never touched."""
     contract = load_contract()
     for w in contract["warnings"]:
         warn(w)
-    rows = {}
-    for key, row in ((state.ledger or {}).get("files") or {}).items():
-        if not isinstance(row, dict) or not _project_light(row):
+    extra, names = projects_inputs(state)
+    rows, notes = {}, []
+    for row, _loc, _own, dup in _project_rows(state, extra, notes):
+        if dup:
             continue
         raws = tuple(x for x in (row.get("displayName"), row.get("target"))
                      if isinstance(x, str) and x)
@@ -9493,7 +9520,7 @@ def run_targets_draft(state):
     for raws, n in sorted(rows.items()):
         t = how = None
         for raw in raws:
-            t, how = resolve_target(contract, raw, state.custom_names)
+            t, how = resolve_target(contract, raw, names)
             if t is not None:
                 break
         if t is not None:
@@ -9501,8 +9528,10 @@ def run_targets_draft(state):
                              "how": how, "frames": n})
         else:
             unresolved.append({"raw": raws[0], "why": how, "frames": n})
+    for w in notes:
+        warn(w)
     draft = {"schema": "targets-draft/1", "generated_at": _utc_iso(),
-             "contract_dir": CONTRACT_DIR,
+             "contract_dir": CONTRACT_DIR, "ledgers": ["this computer"] + extra,
              "resolved": resolved, "unresolved": unresolved}
     out = os.path.join(STATE_DIR, "targets-draft.json")
     _confine(out, "--targets-draft")
@@ -9519,12 +9548,13 @@ def run_targets_draft(state):
              "as targets.json.new for you to merge.")
     return draft
 
-def build_projects(state, extra_ledgers=(), today=None):
+def build_projects(state, extra_ledgers=(), today=None, custom_names=None):
     """The whole project layer as one dict (spec §7): every dataset
     (target + scope + site) with its sessions, where its frames are, and a
     status derived from the facts — never typed in. Pure read."""
     contract = load_contract()
     warnings = list(contract["warnings"])
+    names = custom_names if isinstance(custom_names, dict) else (state.custom_names or {})
     if today is None:
         today = date.fromisoformat(observing_night(datetime.now()))   # nights, not dates
     elif isinstance(today, str):
@@ -9547,7 +9577,7 @@ def build_projects(state, extra_ledgers=(), today=None):
         t = None
         for nm in (row.get("displayName"), row.get("target")):
             if isinstance(nm, str) and nm:
-                t, _how = resolve_target(contract, nm, state.custom_names)
+                t, _how = resolve_target(contract, nm, names)
                 if t is not None:
                     break
         if t is None:
@@ -9603,7 +9633,7 @@ def build_projects(state, extra_ledgers=(), today=None):
                     or not isinstance(rel, str) or "/" not in rel:
                 continue
             if (root, folder) not in folder_cache:
-                t, _how = resolve_target(contract, folder, state.custom_names)
+                t, _how = resolve_target(contract, folder, names)
                 folder_cache[(root, folder)] = t["id"] if t else None
                 if t:
                     folder_names[(t["id"], root)] = folder
@@ -9731,12 +9761,8 @@ def run_projects(state, extra_ledgers=(), dry_run=False):
         # sessions are none, and the list comes from the other computer's snapshot
         warn("This computer has no ledger yet (nothing has been imported here): "
              "only the other computer's sessions can be listed.")
-    extra = list(extra_ledgers)
-    snap = other_ledger_snapshot()
-    if snap and os.path.realpath(snap) not in {os.path.realpath(x) for x in extra}:
-        info(f"Reading the {ship_sides()[1]}'s ledger snapshot: {snap}")
-        extra.append(snap)
-    doc = build_projects(state, extra_ledgers=extra)
+    extra, names = projects_inputs(state, extra_ledgers)
+    doc = build_projects(state, extra_ledgers=extra, custom_names=names)
     if state.ledger is None and not doc["projects"] and os.path.isfile(out):
         warn("Nothing to list from here and no other computer's ledger snapshot was found "
              "on the archive; projects.json was left as it is.")
