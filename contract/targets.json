@@ -1,7 +1,7 @@
 {
  "schema": "targets/1",
  "note": "One entry per object. 'codes' lists every catalogue code that is the SAME object (M 31 and NGC 224 are one Andromeda). 'aliases' are the other names Brett uses for it. Edit this file by hand: an update never replaces it. --targets-draft lists the names it doesn't know yet.",
- "review": "Seed built 10 Oct 2026 from the importer's own name list plus a merge pass; Brett to review. Not merged on purpose: Sh2-171 (Teddy Bear) and NGC 7822 are the same complex but kept apart until Brett says.",
+ "review": "Seed built 10 Oct 2026 from the importer's own name list plus a merge pass; Brett to review. Not merged on purpose: Sh2-171 (Teddy Bear) and NGC 7822 are the same complex but kept apart until Brett says. 12 Oct: 37 targets added from the Mac's --targets-draft (48 names, 3 left: 'Unknown', 3 frames, is nobody's; 'NGC 1893 - Flaming Star' is filed under NGC 1893, the Tadpoles' cluster, not IC 405, because the code wins; 'Fish on a Platter', 'Middle Heart' and 'Markarian's Chain' are name-only until Brett gives them a code). Possible merges for Brett: NGC 6910 (Sadr Region) with IC 1318; NGC 6823 with NGC 6820 / Sh2-86.",
  "targets": [
   {
    "id": "M1",
@@ -662,7 +662,9 @@
     "IC 405",
     "Sh2-229"
    ],
-   "aliases": []
+   "aliases": [
+    "Flaming Star"
+   ]
   },
   {
    "id": "IC410",
@@ -707,11 +709,13 @@
    "codes": [
     "IC 1396",
     "Sh2-131",
-    "vdB 142"
+    "vdB 142",
+    "HIP 106890"
    ],
    "aliases": [
     "Elephant Trunk",
-    "Elephant's Trunk"
+    "Elephant's Trunk",
+    "Elephant Trunk Nebula"
    ]
   },
   {
@@ -866,6 +870,345 @@
    "name": "Squid Nebula",
    "codes": [
     "GAIA 2192287033139966848"
+   ],
+   "aliases": []
+  },
+  {
+   "id": "3IATLAS",
+   "name": "Comet 3I/ATLAS",
+   "codes": [],
+   "aliases": [
+    "3I ATLAS",
+    "3I/ATLAS",
+    "Comet 3I/ATLAS"
+   ]
+  },
+  {
+   "id": "BETELGEUSE",
+   "name": "Betelgeuse",
+   "codes": [],
+   "aliases": [
+    "Betelgeuse",
+    "Alpha Orionis"
+   ]
+  },
+  {
+   "id": "NGC2419",
+   "name": "Intergalactic Wanderer",
+   "codes": [
+    "NGC 2419",
+    "C 25"
+   ],
+   "aliases": [
+    "Intergalactic Wanderer"
+   ]
+  },
+  {
+   "id": "LDN386",
+   "name": "Dark nebula LDN 386",
+   "codes": [
+    "LDN 386"
+   ],
+   "aliases": [
+    "Dark Nebula LDN 386"
+   ]
+  },
+  {
+   "id": "LDN1235",
+   "name": "Dark Shark Nebula",
+   "codes": [
+    "LDN 1235"
+   ],
+   "aliases": [
+    "Dark Shark Nebula",
+    "Dark Shark"
+   ]
+  },
+  {
+   "id": "FISHONAPLATTER",
+   "name": "Fish on a Platter Nebula",
+   "codes": [],
+   "aliases": [
+    "Fish on a Platter Nebula",
+    "Fish on a Platter"
+   ]
+  },
+  {
+   "id": "IC63",
+   "name": "Ghost of Cassiopeia",
+   "codes": [
+    "IC 63"
+   ],
+   "aliases": [
+    "Ghost of Cassiopeia",
+    "Ghost of Cassiopeiae",
+    "Gamma Cassiopeiae",
+    "Gamma Cassiopeiae - Ghost of Cassiopeiae"
+   ]
+  },
+  {
+   "id": "NGC6229",
+   "name": "Globular cluster in Hercules",
+   "codes": [
+    "NGC 6229"
+   ],
+   "aliases": [
+    "Globular Cluster NGC 6229"
+   ]
+  },
+  {
+   "id": "IC342",
+   "name": "Hidden Galaxy",
+   "codes": [
+    "IC 342",
+    "C 5"
+   ],
+   "aliases": [
+    "Hidden Galaxy"
+   ]
+  },
+  {
+   "id": "LDN1082",
+   "name": "Dark nebula LDN 1082",
+   "codes": [
+    "LDN 1082"
+   ],
+   "aliases": []
+  },
+  {
+   "id": "LDN1373",
+   "name": "Middle Heart Nebula",
+   "codes": [
+    "LDN 1373"
+   ],
+   "aliases": [
+    "Middle Heart Nebula",
+    "Middle Heart"
+   ]
+  },
+  {
+   "id": "M109",
+   "name": "Vacuum Cleaner Galaxy",
+   "codes": [
+    "M 109",
+    "NGC 3992"
+   ],
+   "aliases": []
+  },
+  {
+   "id": "M29",
+   "name": "Cooling Tower Cluster",
+   "codes": [
+    "M 29",
+    "NGC 6913"
+   ],
+   "aliases": []
+  },
+  {
+   "id": "M3",
+   "name": "Globular cluster M 3",
+   "codes": [
+    "M 3",
+    "NGC 5272"
+   ],
+   "aliases": []
+  },
+  {
+   "id": "M38",
+   "name": "Starfish Cluster",
+   "codes": [
+    "M 38",
+    "NGC 1912"
+   ],
+   "aliases": [
+    "Starfish Cluster"
+   ]
+  },
+  {
+   "id": "M39",
+   "name": "Open cluster M 39",
+   "codes": [
+    "M 39",
+    "NGC 7092"
+   ],
+   "aliases": []
+  },
+  {
+   "id": "M52",
+   "name": "Open cluster M 52",
+   "codes": [
+    "M 52",
+    "NGC 7654"
+   ],
+   "aliases": []
+  },
+  {
+   "id": "M56",
+   "name": "Globular cluster M 56",
+   "codes": [
+    "M 56",
+    "NGC 6779"
+   ],
+   "aliases": []
+  },
+  {
+   "id": "M92",
+   "name": "Globular cluster M 92",
+   "codes": [
+    "M 92",
+    "NGC 6341"
+   ],
+   "aliases": []
+  },
+  {
+   "id": "MARKARIANSCHAIN",
+   "name": "Markarian's Chain",
+   "codes": [],
+   "aliases": [
+    "Markarian's Chain",
+    "Markarians Chain"
+   ]
+  },
+  {
+   "id": "MILKYWAYCORE",
+   "name": "Milky Way Core",
+   "codes": [],
+   "aliases": [
+    "Milky Way Core",
+    "Milky Way"
+   ]
+  },
+  {
+   "id": "NGC1893",
+   "name": "Open cluster in the Tadpoles (IC 410)",
+   "codes": [
+    "NGC 1893"
+   ],
+   "aliases": []
+  },
+  {
+   "id": "NGC2071",
+   "name": "Reflection nebula near M 78",
+   "codes": [
+    "NGC 2071"
+   ],
+   "aliases": []
+  },
+  {
+   "id": "NGC4236",
+   "name": "Barred spiral galaxy in Draco",
+   "codes": [
+    "NGC 4236",
+    "C 3"
+   ],
+   "aliases": []
+  },
+  {
+   "id": "NGC6823",
+   "name": "Open cluster in NGC 6820",
+   "codes": [
+    "NGC 6823"
+   ],
+   "aliases": []
+  },
+  {
+   "id": "NGC6871",
+   "name": "Open cluster in Cygnus",
+   "codes": [
+    "NGC 6871"
+   ],
+   "aliases": []
+  },
+  {
+   "id": "NGC6934",
+   "name": "Globular cluster in Delphinus",
+   "codes": [
+    "NGC 6934",
+    "C 47"
+   ],
+   "aliases": []
+  },
+  {
+   "id": "NGC6946",
+   "name": "Fireworks Galaxy",
+   "codes": [
+    "NGC 6946",
+    "C 12"
+   ],
+   "aliases": [
+    "Fireworks Galaxy"
+   ]
+  },
+  {
+   "id": "NGC7510",
+   "name": "Open cluster in Cepheus",
+   "codes": [
+    "NGC 7510"
+   ],
+   "aliases": []
+  },
+  {
+   "id": "Sh2-157",
+   "name": "Lobster Claw Nebula",
+   "codes": [
+    "Sh2-157"
+   ],
+   "aliases": [
+    "Lobster Claw Nebula",
+    "Lobster Claw"
+   ]
+  },
+  {
+   "id": "NGC6910",
+   "name": "Sadr Region",
+   "codes": [
+    "NGC 6910"
+   ],
+   "aliases": [
+    "Sadr Region",
+    "Sadr"
+   ]
+  },
+  {
+   "id": "NGC891",
+   "name": "Silver Sliver Galaxy",
+   "codes": [
+    "NGC 891",
+    "C 23"
+   ],
+   "aliases": [
+    "Silver Sliver Galaxy",
+    "Silver Sliver"
+   ]
+  },
+  {
+   "id": "IC417",
+   "name": "Spider Nebula",
+   "codes": [
+    "IC 417",
+    "Sh2-234"
+   ],
+   "aliases": [
+    "Spider Nebula",
+    "Spider"
+   ]
+  },
+  {
+   "id": "M108",
+   "name": "Surfboard Galaxy",
+   "codes": [
+    "M 108",
+    "NGC 3556"
+   ],
+   "aliases": [
+    "Surfboard Galaxy"
+   ]
+  },
+  {
+   "id": "vdB126",
+   "name": "vdB 126",
+   "codes": [
+    "vdB 126"
    ],
    "aliases": []
   }
