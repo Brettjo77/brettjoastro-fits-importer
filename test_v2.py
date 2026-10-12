@@ -1944,8 +1944,11 @@ _snap = os.path.join(arch, "_verify", "mac", "ledger-snapshot.json")
 _sj = json.load(open(_snap, encoding="utf-8")) if os.path.isfile(_snap) else {}
 check("P1 the ship leaves a copy of this computer's ledger rows in its own _verify folder "
       "(ledger-snapshot.json), for the other computer's --projects (1.7.0)",
-      _sj.get("schema") == "ledger-snapshot/1" and _sj.get("machineId")
-      and set(_sj.get("files") or {}) == set(P1.ledger()["files"]), str(_sj)[:200])
+      _sj.get("schema") == "ledger-snapshot/1" and _sj.get("machineId") and _sj.get("machineUid")
+      and set(_sj.get("files") or {}) == {k for k, e in P1.ledger()["files"].items() if e.get("sourceType") == "sub"}
+      and all(r.get("here") is True and "dest" not in r for r in _sj["files"].values()),
+      f"schema={_sj.get('schema')} uid={bool(_sj.get('machineUid'))} rows={sorted(_sj.get('files') or {})} "
+      f"ledger={sorted(P1.ledger()['files'])} here={[r.get('here') for r in (_sj.get('files') or {}).values()]}")
 r = P1.run("--ship")
 check("P1 re-run ships nothing (already shipped, awaiting the sweep)",
       "Ship: 0 file(s)" in r.stdout and "3 already shipped" in r.stdout, r.stdout[-400:])
@@ -5245,6 +5248,200 @@ check("PL ...and with no ledger and no snapshot the last good projects.json is l
       "left as it is" in (r.stdout + r.stderr)
       and json.load(open(os.path.join(PLq.state, "projects.json")))["projects"] == [{"keep": "me"}],
       (r.stdout + r.stderr)[-300:])
+
+# ── the ten-reviewer pass, 12 Oct 2026: each fix with the input that broke it ──
+def pl_pc_env(name, snapshot_files, **snap_extra):
+    """A PC that never imported, with the contract and the Mac's snapshot."""
+    e = teh.Env(name, asiair=False, seestar=False)
+    shutil.copytree(PL_CON, os.path.join(e.root, "contract"))
+    e.env.update({"ASTRO_CONTRACT_DIR": os.path.join(e.root, "contract"), "ASTRO_SHIP_FOLDER": "pc",
+                  "ASTRO_FINALS_DIR": os.path.join(e.root, "finals")})
+    os.makedirs(os.path.join(e.archive, "_verify", "mac"), exist_ok=True)
+    os.makedirs(e.state, exist_ok=True)
+    snap = {"schema": "ledger-snapshot/1", "machine": "Mac", "machineId": "mac", "machineUid": "mac-1",
+            "at": "2026-10-10T08:00:00Z", "files": snapshot_files, "customNames": {}}
+    snap.update(snap_extra)
+    with open(os.path.join(e.archive, "_verify", "mac", "ledger-snapshot.json"), "w") as f:
+        json.dump(snap, f)
+    return e
+
+def pl_snap_row(target, display, night, sha, scope="Seestar S30 Pro", key=None, size=4, **extra):
+    r = {"filename": f"Light_{target}_10.0s_{night.replace('-', '')}-220000.fit", "target": target,
+         "displayName": display, "night": night, "sourceType": "sub", "exposureSeconds": 10.0,
+         "size": size, "sha256": sha, "device": "seestar", "scope": scope}
+    r.update(extra)
+    return r
+
+# 1. a dataset whose first copy was dropped (unknown name) and whose second copy is
+#    a duplicate by bytes crashed build_projects (IndexError on an empty nights dict);
+#    and the same frame with a sha on one side and none on the other was counted twice
+PLd = pl_pc_env("PLd", {
+    "a": pl_snap_row("Old Seestar Name", "Old Seestar Name", "2026-09-01", "aa" * 32),
+    "b": pl_snap_row("NGC 7023", "NGC 7023 - Iris Nebula", "2026-09-01", "aa" * 32),
+    "S30P/M 27/x1.fit": pl_snap_row("M 27", "M 27 - Dumbbell", "2026-09-02", "bb" * 32, size=7),
+    "S30P/M 27/x1.fit|cam=ZWO Seestar S30 Pro": pl_snap_row("M 27", "M 27 - Dumbbell", "2026-09-02", None, size=7),
+    "junk1": {"filename": "Light_M 42_10.0s_20260903-220000.fit", "target": "M 42", "night": "2026-09-03",
+              "sourceType": ["sub"], "size": [4], "device": "seestar", "scope": "Seestar S30 Pro"},
+    "junk2": pl_snap_row("M 42", "M 42 - Orion", "2026-09-03", "cc" * 32, exposureSeconds=float("inf")),
+    "junk3": pl_snap_row("M 42", "M 42 - Orion", "2026-09-03", "dd" * 32, exposureSeconds=10 ** 400),
+    "junk4": pl_snap_row("M 42", "M 42 - Orion", "2026-09-03", "ee" * 32, size="four"),
+}, customNames=["not", "a", "dict"])
+r = PLd.run("--projects")
+_pjd = json.load(open(os.path.join(PLd.state, "projects.json"))) if os.path.isfile(os.path.join(PLd.state, "projects.json")) else {}
+_, _iris = pl_ds(_pjd, "NGC7023", "S30P")
+_, _m27 = pl_ds(_pjd, "M27", "S30P")
+_, _m42 = pl_ds(_pjd, "M42", "S30P")
+check("PL a frame whose first copy had an unknown name and whose second copy is the same bytes "
+      "is one frame in the dataset that resolved (no crash); the same frame with and without a sha "
+      "is one frame; rows that are not ledger rows (lists, inf, 10**400, 'four') are not counted and "
+      "do not crash; a garbage customNames is ignored",
+      r.returncode == 0 and _iris.get("frames") == 1 and _m27.get("frames") == 1
+      and _m42.get("frames") == 3 and _m42.get("integration_seconds") == 10
+      and any("could not be read" in w for w in _pjd.get("warnings", [])),
+      f"rc={r.returncode} iris={_iris.get('frames')} m27={_m27.get('frames')} m42={_m42.get('frames')}/"
+      f"{_m42.get('integration_seconds')} warn={_pjd.get('warnings')} | {(r.stdout + r.stderr)[-400:]!r}")
+
+# 2. a snapshot a newer importer wrote is not read; a stale one is said to be stale
+PLv = pl_pc_env("PLv", {"a": pl_snap_row("M 31", "M 31", "2026-09-01", "aa" * 32)}, schema="ledger-snapshot/9")
+r = PLv.run("--projects")
+_pjv = json.load(open(os.path.join(PLv.state, "projects.json"))) if os.path.isfile(os.path.join(PLv.state, "projects.json")) else {}
+check("PL a snapshot written by a newer importer is a warning and not counted",
+      r.returncode == 0 and any("newer importer" in w for w in _pjv.get("warnings", []))
+      and not _pjv.get("projects") and _pjv["sources"]["snapshots"][0]["rows"] == 0,
+      f"rc={r.returncode} {_pjv.get('warnings')} | {(r.stdout + r.stderr)[-300:]!r}")
+PLo = pl_pc_env("PLo", {"a": pl_snap_row("M 31", "M 31", "2026-09-01", "aa" * 32)}, at="2026-09-20T08:00:00Z")
+r = PLo.run("--projects")
+_pjo = json.load(open(os.path.join(PLo.state, "projects.json")))
+check("PL a snapshot older than 36 hours is said to be stale (its age is in sources.snapshots) and still counted",
+      r.returncode == 0 and any("day(s) old" in w for w in _pjo.get("warnings", []))
+      and _pjo["sources"]["snapshots"][0]["age_hours"] > 24 * 10 and len(_pjo["projects"]) == 1,
+      f"{_pjo.get('warnings')} {_pjo['sources'].get('snapshots')}")
+
+# 3. capture-state.json with a byte-order mark (PowerShell 5, Notepad) and a capitalised value
+PLb = pl_pc_env("PLb", {"a": pl_snap_row("NGC 281", "NGC 281 - Pacman", "2026-08-20", "aa" * 32)})
+with open(os.path.join(PLb.state, "capture-state.json"), "wb") as f:
+    f.write(b"\xef\xbb\xbf" + json.dumps({"datasets": {"NGC281|S30P|Shinfield": "Open ", "NGC9999|S30P|Shinfield": "open",
+                                                        "NGC281|S30|Shinfield": "maybe"}}).encode())
+r = PLb.run("--projects")
+_pjb = json.load(open(os.path.join(PLb.state, "projects.json")))
+_, _pac = pl_ds(_pjb, "NGC281", "S30P")
+check("PL capture-state.json with a BOM and 'Open ' still holds the Pacman capturing after 50 quiet days; a key "
+      "for a dataset that doesn't exist and a value that isn't auto/open/complete are warnings",
+      _pac.get("status") == "capturing" and _pac.get("capture_state") == "open"
+      and any("NGC9999" in w for w in _pjb["warnings"]) and any("maybe" in w for w in _pjb["warnings"]),
+      f"{_pac.get('status')}/{_pac.get('capture_state')} {_pjb.get('warnings')}")
+
+# 4. calibration masters are not Brett's processing; a final names its scope as '30P' or by a
+#    folder on the way; an unscoped final in the scope's own root folder marks the one dataset there
+PLm = pl_pc_env("PLm", {
+    "a": pl_snap_row("M 42", "M 42 - Orion", "2026-08-01", "aa" * 32),
+    "b": pl_snap_row("NGC 7000", "NGC 7000 - North America", "2026-08-01", "bb" * 32),
+    "c": pl_snap_row("NGC 7000", "NGC 7000 - North America", "2026-08-02", "cc" * 32, scope="Seestar S30",
+                     camera="ZWO Seestar S30"),
+    "d": pl_snap_row("NGC 7380", "NGC 7380 - Wizard", "2026-08-01", "dd" * 32, scope="Askar FRA400",
+                     device=None, camera="ZWO ASI585MC Air", sourceType="Plan"),
+    "e": pl_snap_row("NGC 7380", "NGC 7380 - Wizard", "2026-08-01", "ee" * 32),
+})
+_mpc = os.path.join(PLm.archive, "_verify", "pc"); os.makedirs(_mpc)
+with open(os.path.join(_mpc, "inventory-E-20261010T000000Z.jsonl"), "w") as f:
+    for rel, root, folder in [("S30P/Orion Nebula (M 42)/calibration/darks/masterDark_10s.fit", "S30P", "Orion Nebula (M 42)"),
+                              ("S30P/Orion Nebula (M 42)/masterFlat_x.xisf", "S30P", "Orion Nebula (M 42)")]:
+        f.write(json.dumps({"schema": "inventory-row/1", "relpath": rel, "camera": root, "target": folder,
+                            "size": 1, "mtimeNs": 1, "kind": "light", "retired": False}) + "\n")
+with open(os.path.join(_mpc, "inventory-E.status.json"), "w") as f:
+    json.dump({"schema": "inventory-status/1", "generation": "20261010T000000Z"}, f)
+for sub_, name in (("S30P Final Images/NGC 7000 North America", "NGC7000_NorthAmerican_Nebula_30P_August_2026.jpg"),
+                   ("ZWO Askar Scopes", "NGC7380_Wizard_HOO.jpg")):
+    os.makedirs(os.path.join(PLm.root, "finals", sub_), exist_ok=True)
+    open(os.path.join(PLm.root, "finals", sub_, name), "wb").write(b"x")
+r = PLm.run("--projects")
+_pjm = json.load(open(os.path.join(PLm.state, "projects.json")))
+_, _m42m = pl_ds(_pjm, "M42", "S30P"); _, _na30p = pl_ds(_pjm, "NGC7000", "S30P"); _, _na30 = pl_ds(_pjm, "NGC7000", "S30")
+_, _wfra = pl_ds(_pjm, "NGC7380", "FRA400"); _, _ws30p = pl_ds(_pjm, "NGC7380", "S30P")
+check("PL masterDark and masterFlat never make a dataset 'in progress'; '30P' in a final's name (and 'S30P' two "
+      "folders up) marks the S30 Pro dataset done and not the S30's; a final with no scope in the Askar root folder "
+      "marks the one Askar dataset done and not the S30P's",
+      _m42m.get("status") == "ready_to_process" and _na30p.get("status") == "done" and _na30.get("status") != "done"
+      and _wfra.get("status") == "done" and _ws30p.get("status") == "ready_to_process",
+      f"m42={_m42m.get('status')} na30p={_na30p.get('status')} na30={_na30.get('status')} "
+      f"wfra={_wfra.get('status')} ws30p={_ws30p.get('status')} {(r.stdout + r.stderr)[-200:]!r}")
+
+# 5. names: an unknown letter suffix falls back to its code; long catalogue names and leading
+#    zeros; the Double Cluster is one target; a generic name is nobody's; the Sadr Region is the nebula
+_nm = probe(PLd.env, "c = m.load_contract()\n"
+            "r = lambda x: (m.resolve_target(c, x)[0] or {}).get('id')\n"
+            "print(json.dumps([r(x) for x in ['NGC 7023B', 'IC 1396A', 'Messier 31', 'NGC 0224', 'Caldwell 25', "
+            "'Double Cluster', 'NGC 869/884', 'Sadr Region', 'Reflection Nebula', 'Sharpless 157', 'HIP 106890 - Elephant Trunk Nebula (mosaic)']] + c['warnings']))\n")
+check("PL 'NGC 7023B' (unknown suffix) is NGC 7023, 'IC 1396A' is IC 1396, 'Messier 31' and 'NGC 0224' are M 31, "
+      "'Caldwell 25' is NGC 2419, the Double Cluster is NGC 869 whichever way it is written, 'Sadr Region' is the "
+      "nebula, a generic name is nobody's, and the contract loads without a warning",
+      _nm == ["NGC7023", "IC1396", "M31", "M31", "NGC2419", "NGC869", "NGC869", "IC1318", None, "Sh2-157", "IC1396"],
+      json.dumps(_nm))
+
+# 6. the Mac with the share gone: a list that had the PC's half is left alone, not replaced by a Mac-only one
+PLu = teh.Env("PLu", asiair=False, seestar=False)
+shutil.copytree(PL_CON, os.path.join(PLu.root, "contract"))
+PLu.env.update({"ASTRO_CONTRACT_DIR": os.path.join(PLu.root, "contract"), "ASTRO_SHIP_FOLDER": "mac",
+                "ASTRO_ARCHIVE_MOUNT": os.path.join(PLu.root, "not-mounted")})
+os.makedirs(PLu.state, exist_ok=True)
+with open(os.path.join(PLu.state, "ledger.json"), "w") as f:
+    json.dump({"version": 1, "calibration": {}, "files": {"a": pl_snap_row("M 31", "M 31", "2026-09-01", "aa" * 32)}}, f)
+with open(os.path.join(PLu.state, "projects.json"), "w") as f:
+    json.dump({"schema": "projects/1", "projects": [{"keep": "me"}], "sources": {"snapshots": [{"rows": 9}]}}, f)
+r = PLu.run("--projects")
+check("PL on the Mac with the archive not mounted, a projects.json that carried the PC's record is left alone "
+      "and the reason is said; --projects never asks Finder to mount",
+      "wasn't read this time" in (r.stdout + r.stderr)
+      and json.load(open(os.path.join(PLu.state, "projects.json")))["projects"] == [{"keep": "me"}]
+      and teh.os_calls(PLu.root, "mount") == [], (r.stdout + r.stderr)[-300:])
+
+# 7. the PC's nightly on a PC that never imported: the list is built right after the inventory,
+#    the status file says which step did what, and a step that fails doesn't cost the night its list
+PLn = pl_pc_env("PLn", {"a": pl_snap_row("M 31", "M 31", "2026-09-01", "aa" * 32)})
+PLn.env.update(PCX)
+os.makedirs(os.path.join(PLn.archive, "S30P"), exist_ok=True)
+r = PLn.run("--pc-nightly", "--max-minutes", "0")
+_ns = pc_json(PLn.archive, "nightly-status.json")
+_pjn_path = os.path.join(PLn.state, "projects.json")
+_pjn = json.load(open(_pjn_path)) if os.path.isfile(_pjn_path) else {}
+check("PL --pc-nightly on a PC with no ledger builds projects.json from the Mac's snapshot right after the "
+      "inventory (before the hash), writes _verify/pc/nightly-status.json with each step's result, exits 0, "
+      "and creates no ledger of its own",
+      r.returncode == 0 and len(_pjn.get("projects") or []) == 1 and _ns.get("ok") is True
+      and list(_ns.get("steps", {}))[:3] == ["sweep", "inventory", "projects"]
+      and _ns.get("projectsGeneratedAt") and not os.path.isfile(os.path.join(PLn.state, "ledger.json")),
+      f"rc={r.returncode} steps={_ns.get('steps')} ok={_ns.get('ok')} n={len(_pjn.get('projects') or [])} "
+      f"| {(r.stdout + r.stderr)[-300:]!r}")
+
+# 8. --ship on a computer that never imported (the PC's scheduled 09:30 ship) says so and takes no lock
+PLs = teh.Env("PLs", asiair=False, seestar=True)
+os.makedirs(os.path.join(PLs.archive, "S30P"), exist_ok=True)
+r = PLs.run("--ship")
+check("PL --ship on a computer with no ledger says there is nothing to ship, exits 0, and never touches the archive",
+      r.returncode == 0 and "nothing to ship" in r.stdout
+      and not os.path.exists(os.path.join(PLs.archive, "_verify")), (r.stdout + r.stderr)[-300:])
+
+# 9. the snapshot is one computer's: another computer's file in the same folder is never replaced;
+#    an atomic write that fails leaves no temp file behind
+PLw = teh.Env("PLw", asiair=False, seestar=False)
+PLw.env.update({"ASTRO_SHIP_FOLDER": "mac"})
+os.makedirs(os.path.join(PLw.archive, "S30P")); os.makedirs(os.path.join(PLw.archive, "_verify", "mac"))
+os.makedirs(PLw.state, exist_ok=True)
+with open(os.path.join(PLw.state, "ledger.json"), "w") as f:
+    json.dump({"version": 1, "calibration": {}, "files": {"a": pl_snap_row("M 31", "M 31", "2026-09-01", "aa" * 32)}}, f)
+_foreign = os.path.join(PLw.archive, "_verify", "mac", "ledger-snapshot.json")
+with open(_foreign, "w") as f:
+    json.dump({"schema": "ledger-snapshot/1", "machineUid": "someone-else", "machine": "Other Mac", "files": {"z": {}}}, f)
+_w = probe(PLw.env, "st = m.State()\n"
+           "got = m.write_ledger_snapshot(st)\n"
+           "d = os.path.join(m.STATE_DIR, 'adir'); os.makedirs(d); open(os.path.join(d, 'x'), 'w').close()\n"
+           "err = None\n"
+           "try: m._atomic_write_json(d, {'a': 1})\n"
+           "except OSError as e: err = type(e).__name__\n"
+           "print(json.dumps({'got': got, 'err': err, 'tmp': [n for n in os.listdir(m.STATE_DIR) if n.endswith('.tmp')]}))\n")
+check("PL the ledger snapshot never replaces another computer's, and an atomic write that fails leaves no .tmp behind",
+      _w.get("got") is None and json.load(open(_foreign))["machineUid"] == "someone-else"
+      and _w.get("err") and _w.get("tmp") == [], json.dumps(_w))
 with open(os.path.join(PL.state, "ledger.json"), "w") as f:
     f.write("{ not json")
 with open(os.path.join(PL.state, "ledger.json.bak"), "w") as f:
