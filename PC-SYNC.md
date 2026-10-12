@@ -48,12 +48,14 @@ From 1.7.0 the PC's side is the importer itself, in Python: the old `sweep.ps1` 
 
 1. Install the importer on the PC: unzip it and double-click **Install on Windows.cmd** (see the Windows section of [INSTALL.md](INSTALL.md)). With `E:\Astro Image Data` in place it also:
    - makes the folders `_verify\pc` (only the PC writes there), `_verify\mac` and `_verify\mac\requests` (the Mac's), `_verify\lock` (the ship lock) and `_Quarantine\ship-incomplete`;
-   - sets up the scheduled task **Astro archive sweep**, at every logon and daily at 03:30. It checks every shipped frame (`--sweep`), lists the archive (`--inventory`) and hashes new files (`--hash`), all from this disk;
+   - sets up the scheduled task **Astro archive sweep**, at every logon and daily at 03:30. It checks every shipped frame (`--sweep`), lists the archive (`--inventory`), hashes new files (`--hash`) and rebuilds `projects.json`, all from this disk, and leaves its result in `_verify\pc\nightly-status.json`;
    - sets up **Astro sync requests**, every 5 minutes. It writes a heartbeat (`_verify\pc\pc-heartbeat.json`) so the Mac can tell the PC is awake, and does what the Mac asked for in `_verify\mac\requests`.
 
-   If an older **Astro archive sweep** was set up from an administrator prompt, the installer can't replace it and says so. Open PowerShell as administrator, run this, then run the installer again:
+   Run the installer from a normal window, never one opened with "Run as administrator" (from 1.7.0 it refuses one). If any of the three tasks was set up from an administrator window before, the installer can't replace it and says so. Open PowerShell as administrator, run these three lines, close that window, and run the installer again from a normal one:
 
+       Unregister-ScheduledTask -TaskName 'BrettjoAstro FITS Importer ship' -Confirm:$false
        Unregister-ScheduledTask -TaskName 'Astro archive sweep' -Confirm:$false
+       Unregister-ScheduledTask -TaskName 'Astro sync requests' -Confirm:$false
 
    The old script files (for example `_Index\sweep\sweep.ps1`) stay where they are. They are yours to delete.
 
@@ -99,7 +101,7 @@ From 1.7.0 the share's user (`astro`) can be denied Delete on the archive (decis
 
 With these rights Finder on the Mac can't rename, move or bin anything on the share either. That's the point: tidy the archive on the PC. What they guard against is accidents (Finder, a script, a bug); they can't stop someone who has the share's password from changing a file's contents, so the PC's own backups still matter.
 
-The PC's two tasks run while you are signed in to the PC (a locked screen is fine). Signed out, nothing runs and the Mac sees the PC as asleep.
+The PC's tasks (the sweep, the sync requests and the ship) run while you are signed in to the PC (a locked screen is fine). The share's user (`astro`) is only for the Mac's connection; the tasks run as you. If Explorer leaves `desktop.ini` or `Thumbs.db` files in the archive, they are ignored by the inventory; to stop Windows writing them on the share at all, the `DisableThumbsDBOnNetworkFolders` policy is the usual switch. Signed out, nothing runs and the Mac sees the PC as asleep.
 
 ## A copy that was cut off half-way
 

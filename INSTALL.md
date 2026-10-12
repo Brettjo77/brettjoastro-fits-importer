@@ -72,17 +72,27 @@ To check an install any time: `/usr/local/bin/python3 ~/bin/selftest.py` (every 
 
 ## Windows 11
 
-No administrator rights are needed.
+No administrator rights are needed, and the installer must **not** be run from
+an Administrator window ("Run as administrator"): tasks made that way can't be
+replaced later from a normal window. From 1.7.0 the installer refuses an
+Administrator window and prints what to do.
 
 1. **Python.** If you don't already have Python 3 from
    [python.org](https://www.python.org/downloads/windows/), install it. On
    the first screen, tick **Add python.exe to PATH**.
 2. **Unzip.** Download the importer zip, right-click it → **Extract All…**.
+   Windows makes a folder with the zip's name and puts the importer's own
+   folder inside it, so you may need to open two folders to reach
+   `Install on Windows.cmd`. Either is fine.
 3. **Install.** Open the extracted folder and double-click
    **Install on Windows.cmd**.
    - If Windows says "Windows protected your PC", click **More info** →
      **Run anyway**. The scripts aren't code-signed.
-   - The installer adds `astropy` if it's missing.
+   - The installer adds `astropy` if it's missing. If you have just
+     installed a newer Python, run it again, or add astropy yourself in
+     Terminal (PowerShell):
+
+         py -3 -m pip install --user astropy
    - It copies the importer to `%LOCALAPPDATA%\BrettjoAstro\bin`.
    - It starts the camera watcher now and at every logon.
    - It puts **Restart FITS Importer** on your Desktop.
@@ -92,8 +102,14 @@ No administrator rights are needed.
      as you: **Astro archive sweep** at logon and 03:30 (checks every shipped
      frame, lists the archive, hashes new files) and **Astro sync requests**
      every 5 minutes (answers what the Mac asks for). An older sweep task
-     under that name is replaced; see PC-SYNC.md if one set up as
-     administrator can't be.
+     under that name is replaced. One set up from an Administrator window
+     can't be: the installer then prints the three `Unregister-ScheduledTask`
+     lines to run once as administrator (see PC-SYNC.md), after which you
+     close that window and run the installer again from a normal one.
+   - The contract files (`contract\targets.json`, `scopes.json`) are updated
+     in place when yours are the ones we shipped. A file you have edited is
+     kept, and the newer shipped copy lands beside it as `targets.json.new`
+     for you to merge.
 4. **Plug in the Seestar or ASIAir.** A notification appears and the panel
    opens (`http://127.0.0.1:8765`). Tick what you want and press **Import**.
    The first import starts this PC's own ledger.
@@ -101,9 +117,12 @@ No administrator rights are needed.
    - Verified frames are then filed into `E:\Astro Image Data`, the same as
      the Mac's ship does.
 5. **Check the install** any time. Open **Terminal** (right-click Start →
-   Terminal; it opens PowerShell) and run:
+   Terminal; it opens PowerShell) and paste this line as it is:
 
        py -3 -X utf8 "$env:LOCALAPPDATA\BrettjoAstro\bin\selftest.py"
+
+   Lines in these docs that start with `/usr/local/bin/python3` are the Mac's;
+   PowerShell doesn't know them. The PC's lines start with `py -3`.
 
    (In the old Command Prompt, write `%LOCALAPPDATA%` instead of
    `$env:LOCALAPPDATA`.)

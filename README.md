@@ -227,11 +227,11 @@ The panel covers day-to-day use; everything is also scriptable:
 
 ## Testing
 
-660 end-to-end checks run the real engine and the real panel against simulated cameras (hand-built minimal FITS files, every device layout, crash/rename/mosaic/Milky-Way/cleanup/consent/interruption/multi-Seestar scenarios — including that the destination preview must equal the folders the import then actually creates, that a folder holding any unproven file is never offered as SAFE, and that the panel refuses foreign-origin requests):
+696 end-to-end checks run the real engine and the real panel against simulated cameras (hand-built minimal FITS files, every device layout, crash/rename/mosaic/Milky-Way/cleanup/consent/interruption/multi-Seestar scenarios — including that the destination preview must equal the folders the import then actually creates, that a folder holding any unproven file is never offered as SAFE, and that the panel refuses foreign-origin requests):
 
 ```bash
-python3 test_v2.py     # 512 engine checks (chain W1 simulates the Windows drive layer)
-python3 test_app.py    # 148 panel checks (boots the real HTTP server)
+python3 test_v2.py     # 541 engine checks (chain W1 simulates the Windows drive layer)
+python3 test_app.py    # 155 panel checks (boots the real HTTP server)
 # on Windows:  py -3 -X utf8 selftest.py   then the two suites above with  py -3 -X utf8
 ```
 
@@ -255,7 +255,7 @@ BrettjoAstro FITS Importer.app/      app wrapper — the panel's grantable macOS
 Restart FITS Importer.command        Desktop one-click restart (Terminal context)
 com.brettjohnson.astro-import.plist  LaunchAgent template ($HOME substituted on install)
 com.brettjohnson.astro-ship.plist    optional twice-daily ship agent (only with an archive configured)
-pc/                                  the PC side of PC-SYNC.md (PowerShell sweep)
+pc/                                  set-archive-rights.ps1 for the archive PC (the sweep itself is Python since 1.7.0)
 Install on Windows.cmd               Windows: double-click to install or update
 install-windows.ps1                  Windows installer (no admin rights needed)
 astro-watch.py                       Windows camera watcher (started at logon)

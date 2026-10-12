@@ -23,18 +23,63 @@ SCRIPT = os.path.join(os.path.dirname(os.path.abspath(__file__)), "astro-import.
 # VERSION line, never these checks (1.5.4)
 with open(SCRIPT, encoding="utf-8") as _f:
     VERSION = re.search(r'^VERSION = "(\d+\.\d+\.\d+)"$', _f.read(), re.M).group(1)
-PASS, FAIL = 0, 0
+PASS, FAIL, SKIPPED = 0, 0, 0
 FAILURES = []
+DETAIL_CAP = 8000     # a failure's detail is kept whole up to this (1.7.0: 1400 hid the cause)
+import atexit, traceback
+try:
+    sys.stdout.reconfigure(encoding="utf-8", errors="replace")   # Windows consoles (1.7.0)
+    sys.stderr.reconfigure(encoding="utf-8", errors="replace")
+except (AttributeError, ValueError):
+    pass
 
 def check(name, cond, detail=""):
+    """One check. `cond` may be a callable: it is called here, and an exception is a
+    FAIL with the traceback, never a crash of the suite (1.7.0)."""
     global PASS, FAIL
+    if callable(cond):
+        try:
+            cond = cond()
+        except Exception:
+            cond, detail = False, traceback.format_exc() + (f"\n{detail}" if detail else "")
     if cond:
         PASS += 1
         print(f"  PASS  {name}")
     else:
         FAIL += 1
-        FAILURES.append((name, detail))
-        print(f"  FAIL  {name}   {detail}")
+        line = sys._getframe(1).f_lineno
+        FAILURES.append((f"{name}  [test_v2.py:{line}]", str(detail)))
+        print(f"  FAIL  {name}   {str(detail)[:400]}")
+
+def skip(name):
+    """A check this OS or account can't run: printed and counted, never silent (1.7.0)."""
+    global SKIPPED
+    SKIPPED += 1
+    print(f"  SKIP  {name}")
+
+_SUMMARY_DONE = False
+def summary(crash=None):
+    """The one summary, printed once, also when the suite dies early (1.7.0): a crash
+    half-way used to leave no summary at all, and the last FAIL lines scrolled away."""
+    global _SUMMARY_DONE
+    if _SUMMARY_DONE:
+        return
+    _SUMMARY_DONE = True
+    print("\n═══════════════════════════════════════════════════")
+    if crash:
+        FAILURES.append(("CRASH: the suite stopped here, later checks did not run", crash))
+    print(f"  {PASS} passed, {FAIL + (1 if crash else 0)} failed, {SKIPPED} skipped"
+          + (f"  ({PASS + FAIL + SKIPPED} checks on this OS)" if SKIPPED else ""))
+    for name, detail in FAILURES:
+        d = detail if len(detail) <= DETAIL_CAP else detail[:DETAIL_CAP] + f"… [{len(detail) - DETAIL_CAP} more]"
+        print(f"  ✗ {name}: {d}")
+    sys.stdout.flush()
+
+def _excepthook(tp, val, tb):
+    summary("".join(traceback.format_exception(tp, val, tb)))
+    sys.exit(1)
+sys.excepthook = _excepthook
+atexit.register(lambda: summary() if not _SUMMARY_DONE and (PASS or FAIL) else None)
 
 # ── Minimal FITS generator ───────────────────────────────────────────────────
 def _card(key, value, string=False):
@@ -1403,7 +1448,7 @@ if CAN_LINK:
           and os.path.isfile(os.path.join(S20h.myworks, "M 3_sub", "20260923-213000.fit")),
           (r.stdout + r.stderr)[-300:])
 else:
-    print("  SKIP  S20 link containment (this OS needs admin rights to make links)")
+    skip("S20 link containment (this OS needs admin rights to make links)")
 
 # The two faults a subprocess can't stage on its own (a delete that fails, a
 # second Seestar mounted) are injected through a tiny wrapper.
@@ -1815,8 +1860,12 @@ check("W1 --import-settings adds what is missing and never overwrites what the P
 _here = os.path.dirname(SCRIPT)
 _st_spec = importlib.util.spec_from_file_location("selftest_w1", os.path.join(_here, "selftest.py"))
 _st = importlib.util.module_from_spec(_st_spec); _st_spec.loader.exec_module(_st)
-_mac_inst = set(re.findall(r'install_file "\$SCRIPT_DIR/([^"]+)"',
-                           open(os.path.join(_here, "install-scripts.sh"), encoding="utf-8").read()))
+_sh_text = open(os.path.join(_here, "install-scripts.sh"), encoding="utf-8").read()
+_mac_inst = set(re.findall(r'install_file "\$SCRIPT_DIR/([^"]+)"', _sh_text))
+# the contract files go through the marked `contract update` loop (1.7.0)
+_m = re.search(r'for f in ([^;]+); do\s*\n\s*src="\$SCRIPT_DIR/contract/\$f"', _sh_text)
+if _m:
+    _mac_inst |= {"contract/" + f for f in _m.group(1).split()}
 _ps = open(os.path.join(_here, "install-windows.ps1"), encoding="utf-8-sig").read()
 _m = re.search(r"foreach \(\$f in @\(([^)]*'astro-import\.py'[^)]*)\)\)", _ps)
 _win_inst = set(re.findall(r"'([^']+)'", _m.group(1))) if _m else set()
@@ -1841,7 +1890,7 @@ check("W1 the Windows installer schedules the PC's jobs in Python, as Brett: 'As
       "--pc-nightly" in _s7 and "--pc-tick" in _s7 and "'Astro archive sweep'" in _s7
       and "'Astro sync requests'" in _s7 and "-At 03:30" in _s7 and "-AtLogOn" in _s7
       and "New-TimeSpan -Minutes 5" in _s7 and _s7.count("-MultipleInstances IgnoreNew") == 2
-      and "-RunLevel Limited" in _s7 and "powershell.exe" not in _s7
+      and "-RunLevel Limited" in _ps and "powershell.exe" not in _s7
       and all(d in _s7 for d in ("'_verify\\pc'", "'_verify\\mac\\requests'", "'_verify\\lock'",
                                  "'_Quarantine\\ship-incomplete'"))
       and not os.path.exists(os.path.join(_here, "pc", "sweep.ps1"))
@@ -2446,9 +2495,14 @@ if _deny:
               f"| {(_dr.stdout + _dr.stderr)[-120:]!r} | acl: {_acl}")
     finally:
         subprocess.run(_undo, capture_output=True, text=True)
+elif os.name == "nt" or sys.platform == "darwin":
+    # on Brett's machines this check must run: a skip there is a failure (1.7.0)
+    check("D7 a real no-Delete folder from the operating system could be set up on this "
+          "Mac or PC (the check above needs it)", False,
+          "this PC could not say who runs the test (whoami failed)" if os.name == "nt"
+          else "chmod +a / the ACL test could not be set up on this Mac")
 else:
-    print("  SKIP  D7 a real no-Delete folder from the operating system (a Mac or the PC only"
-          + ("; this PC could not say who runs the test" if os.name == "nt" else "") + ")")
+    skip("D7 a real no-Delete folder from the operating system (a Mac or the PC only)")
 
 # ═══════════════ CHAIN PC: the archive PC's own jobs (1.7.0, phase 0) ════════
 print("\n── Chain PC: the PC's sweep, inventory, hash cache and requests (1.7.0) ──")
@@ -2874,7 +2928,7 @@ if os.name != "nt":
           and not any("/Odd/" in x["relpath"] for x in _irows), str(_uns)[:300])
     os.remove(_bad1); os.remove(_bad2)
 else:
-    print("  SKIP  PC unsafe names in the archive (Windows can't make them)")
+    skip("PC unsafe names in the archive (Windows can't make them)")
 _wb_before = d7_tree(pa)
 r1 = PCS.run("--inventory", "--root", PCS.sdest30)
 r2 = PCS.run("--hash", "--root", PCS.sdest30)
@@ -3208,7 +3262,7 @@ check("I1 an unknown target's name dialog is recorded; the import goes on under 
       any(c["kind"] == "dialog" and "MYSTERY 7" in c.values() for c in calls)
       and count_fits(day_dir(I1i, "MYSTERY 7", 1)) == 1, json.dumps(calls)[:300] + r.stdout[-300:])
 if os.name == "nt":
-    print("  SKIP  I1 no fake OS command ran (Windows runs no shell scripts; "
+    skip("I1 no fake OS command ran (Windows runs no shell scripts; "
           "the records above are the proof)")
 else:
     check("I1 ...and no OS command ran (the fake ones first on PATH stayed silent)",
@@ -3285,7 +3339,7 @@ for kind in ("notify", "eject", "open", "mount", "powershell", "choose", "dialog
     check(f"I1 gate '{kind}' called directly: recorded exactly once, not performed",
           n == 1 and kind not in (got.get("err") or {}), f"{n} record(s) {json.dumps(got)[:300]}")
 if os.name == "nt":
-    print("  SKIP  I1 ...none of them ran a fake OS command (Windows runs no shell scripts)")
+    skip("I1 ...none of them ran a fake OS command (Windows runs no shell scripts)")
 else:
     check("I1 ...none of them ran an OS command (the fake ones stayed silent)",
           not teh.executed(I1g.root), teh.executed(I1g.root)[-300:])
@@ -3349,7 +3403,7 @@ try:
 except (OSError, NotImplementedError):
     I1l = None
 if I1l is None:
-    print("  SKIP  I1 a MyWorks linked out of the root (this account can't make symlinks)")
+    skip("I1 a MyWorks linked out of the root (this account can't make symlinks)")
 else:
     s20_seed_ledger(I1l)
     subs = [I1l.add_seestar_sub("M 42", st, creator="Seestar S50 Pro")
@@ -3435,7 +3489,7 @@ check("I1 watcher single_instance() under a test, Windows forced: the pid file, 
       got.get("single") is True and got.get("pid") is True and got.get("ctypes") == [],
       json.dumps(got)[:300])
 if os.name == "nt":
-    print("  SKIP  I1 ...and the watcher ran no fake OS command (Windows runs no shell scripts)")
+    skip("I1 ...and the watcher ran no fake OS command (Windows runs no shell scripts)")
 else:
     check("I1 ...and the watcher ran no OS command (the fake ones stayed silent)",
           not teh.executed(I1w.root), teh.executed(I1w.root)[-300:])
@@ -3780,7 +3834,7 @@ def bash_decision(name, rc, out):
 
 if os.name == "nt" or not shutil.which("bash"):
     for name in BASH_GATES:
-        print(f"  SKIP  U1 {os.path.basename(name)}'s owner check (no bash here)")
+        skip(f"U1 {os.path.basename(name)}'s owner check (no bash here)")
 else:
     for name, (pre, post) in BASH_GATES.items():
         block = owner_block(os.path.join(HERE, name))
@@ -3814,8 +3868,8 @@ check("U1 the Restart .cmd's owner check waits before it closes (its message can
                                       cmd_exit[:cmd_exit.index("exit /b 0")]),
       str(CMD_BLOCK))
 if os.name != "nt":
-    print("  SKIP  U1 install-windows.ps1's owner check through powershell.exe (Windows only)")
-    print("  SKIP  U1 the Restart .cmd's owner check through cmd.exe (Windows only)")
+    skip("U1 install-windows.ps1's owner check through powershell.exe (Windows only)")
+    skip("U1 the Restart .cmd's owner check through cmd.exe (Windows only)")
 else:
     SYSROOT = os.environ.get("SYSTEMROOT") or r"C:\Windows"
     POWERSHELL = os.path.join(SYSROOT, "System32", "WindowsPowerShell", "v1.0", "powershell.exe")
@@ -5505,9 +5559,181 @@ check("PL a contract file of the wrong shape is a warning and an empty list, not
 shutil.rmtree(PL2.root, ignore_errors=True)
 shutil.rmtree(PL.root, ignore_errors=True)
 
+# ═══════════════ CHAIN IN: the installers and the suite itself (1.7.0) ════════
+print("\n── Chain IN: the installers and the suite itself (1.7.0, ten-reviewer pass) ──")
+IN_ROOT = tempfile.mkdtemp(prefix="v2test-IN-")
+teh.make_env(IN_ROOT)
+with open(os.path.join(HERE, "install-windows.ps1"), encoding="utf-8-sig") as f:
+    IN_PS = f.read()
+with open(os.path.join(HERE, "install-scripts.sh"), encoding="utf-8") as f:
+    IN_SH = f.read()
+with open(os.path.join(HERE, "com.brettjohnson.astro-ship.plist"), encoding="utf-8") as f:
+    IN_PLIST = f.read()
+
+# every contract file we ship is in shipped.sha256, so an unedited installed copy
+# is updated instead of being left behind with a .new beside it
+with open(os.path.join(HERE, "contract", "shipped.sha256"), encoding="utf-8") as f:
+    IN_SHIPPED = {ln.split()[0].lower() for ln in f if ln.strip() and not ln.startswith("#")}
+_missing = []
+for _f in ("targets.json", "scopes.json"):
+    with open(os.path.join(HERE, "contract", _f), "rb") as f:
+        h = hashlib.sha256(f.read()).hexdigest()
+    if h not in IN_SHIPPED:
+        _missing.append(f"{h}  {_f}")
+check("IN contract/shipped.sha256 lists the hash of every contract file in this build "
+      "(add the new line when a contract file changes)", not _missing,
+      "add to contract/shipped.sha256: " + "; ".join(_missing))
+
+# the Mac installer's contract block, run on its own: new → installed; an unedited
+# shipped copy → replaced (no .new); Brett's edits → kept, the new copy beside it
+_cblock = owner_block(os.path.join(HERE, "install-scripts.sh"),
+                      begin="# >>> contract update", end="# <<< contract update")
+if os.name == "nt" or not shutil.which("bash") or not shutil.which("shasum"):
+    skip("IN the Mac installer's contract update block (needs bash and shasum)")
+elif _cblock is None:
+    check("IN install-scripts.sh has exactly one marked contract update block", False, "no block")
+else:
+    src = os.path.join(IN_ROOT, "zip", "contract")
+    bin_ = os.path.join(IN_ROOT, "bin", "contract")
+    os.makedirs(src); os.makedirs(bin_)
+    shutil.copy(os.path.join(HERE, "contract", "scopes.json"), src)
+    with open(os.path.join(src, "targets.json"), "w") as f:
+        f.write('{"shipped": "new"}')
+    with open(os.path.join(src, "shipped.sha256"), "w") as f:
+        f.write("# test list\n" + hashlib.sha256(b'{"shipped": "old"}').hexdigest() + "  targets.json\n")
+    _script = os.path.join(IN_ROOT, "contract-block.sh")
+    with open(_script, "w", encoding="utf-8") as f:
+        f.write("#!/bin/bash\nset -euo pipefail\n"
+                'success() { echo "OK $1"; }; warn() { echo "WARN $1"; }\n'
+                'install_file() { cp "$1" "$2"; echo "INSTALL $(basename "$2")"; }\n'
+                f"SCRIPT_DIR={shq(os.path.join(IN_ROOT, 'zip'))}\nBIN_DIR={shq(os.path.join(IN_ROOT, 'bin'))}\n"
+                + "\n".join(_cblock) + "\n")
+    def _run_block():
+        return subprocess.run(["bash", _script], capture_output=True, text=True, timeout=60)
+    r1 = _run_block()                                  # nothing installed yet
+    _t = os.path.join(bin_, "targets.json")
+    check("IN contract block: a first install copies both contract files, no .new",
+          r1.returncode == 0 and open(_t).read() == '{"shipped": "new"}'
+          and os.path.exists(os.path.join(bin_, "scopes.json")) and not os.path.exists(_t + ".new"),
+          r1.stdout + r1.stderr)
+    with open(_t, "w") as f:
+        f.write('{"shipped": "old"}')                  # an older shipped copy, unedited
+    with open(_t + ".new", "w") as f:
+        f.write("stale")
+    r2 = _run_block()
+    check("IN contract block: an unedited older shipped copy is simply updated, and a stale .new "
+          "beside it removed", r2.returncode == 0 and open(_t).read() == '{"shipped": "new"}'
+          and not os.path.exists(_t + ".new") and "updated" in r2.stdout, r2.stdout + r2.stderr)
+    with open(_t, "w") as f:
+        f.write('{"mine": "edited by Brett"}')
+    r3 = _run_block()
+    check("IN contract block: Brett's edited copy is kept, the shipped one lands as .new, "
+          "and the installer carries on", r3.returncode == 0
+          and open(_t).read() == '{"mine": "edited by Brett"}'
+          and os.path.exists(_t + ".new") and open(_t + ".new").read() == '{"shipped": "new"}'
+          and "your edits" in r3.stdout, r3.stdout + r3.stderr)
+
+# the Windows installer: what the reviews asked for, read from the script
+check("IN install-windows.ps1 refuses an Administrator window unless -AllowElevated, and names "
+      "the three tasks to unregister",
+      "IsInRole" in IN_PS and "AllowElevated" in IN_PS
+      and all(f"'{n}'" in IN_PS for n in ("BrettjoAstro FITS Importer ship", "Astro archive sweep",
+                                           "Astro sync requests")))
+check("IN install-windows.ps1 takes the account from WindowsIdentity, never USERDOMAIN\\USERNAME",
+      "WindowsIdentity]::GetCurrent()" in IN_PS and "$env:USERDOMAIN" not in IN_PS)
+check("IN install-windows.ps1 registers all three tasks through one helper with the Unregister hint",
+      IN_PS.count("Register-AstroTask ") == 3 and IN_PS.count("function Register-AstroTask") == 1
+      and IN_PS.count("Register-ScheduledTask ") == 1 and "Unregister-ScheduledTask -TaskName '$name'" in IN_PS)
+_sw = IN_PS.find("if ($sweepOk) {")
+check("IN install-windows.ps1 sets sweep.ps1 aside only after the Python sweep task registered",
+      _sw > 0 and "Rename-Item" in IN_PS[_sw:_sw + 600] and IN_PS.count("sweep.ps1.retired") == 0
+      and IN_PS.count("'sweep.ps1', 'install_sweep.ps1'") == 1)
+check("IN install-windows.ps1 reads contract\\shipped.sha256 and replaces only unedited shipped copies",
+      "shipped.sha256" in IN_PS and "$shipped -contains $have" in IN_PS)
+check("IN install-windows.ps1 cuts a stuck sync tick after 15 minutes, not 2 hours",
+      "--pc-tick" in IN_PS and "ExecutionTimeLimit (New-TimeSpan -Minutes 15)" in IN_PS)
+check("IN install-windows.ps1 is still UTF-8 with a BOM and CRLF",
+      open(os.path.join(HERE, "install-windows.ps1"), "rb").read()[:3] == b"\xef\xbb\xbf"
+      and "\r\n" in open(os.path.join(HERE, "install-windows.ps1"), newline="").read()
+      and "\n" not in open(os.path.join(HERE, "install-windows.ps1"), newline="").read().replace("\r\n", ""))
+
+# the Mac installer and the ship agent
+check("IN install-scripts.sh strips the quarantine flag from the Desktop Restart button",
+      "xattr -d com.apple.quarantine" in IN_SH)
+check("IN install-scripts.sh reads config.json with the same Python as the owner check, and "
+      "a failure there can't stop the installer (set -e)",
+      '"$PYCHECK" - <<\'PY\' 2>/dev/null || true' in IN_SH and "/usr/bin/python3 - <<'PY'" not in IN_SH)
+check("IN install-scripts.sh leaves the web ship agent off while the FITs Importer App is in charge",
+      'if [ -n "$APP_OWNS" ]; then' in IN_SH
+      and IN_SH.find('if [ -n "$APP_OWNS" ]; then') < IN_SH.find('elif [ -z "$ARCHIVE_CONFIGURED" ]; then'))
+check("IN the ship agent runs under caffeinate -i, from a plain bash -c, and still falls back "
+      "to Apple's python3",
+      "/usr/bin/caffeinate -i" in IN_PLIST and "<string>-c</string>" in IN_PLIST
+      and "<string>-lc</string>" not in IN_PLIST and "P=/usr/bin/python3" in IN_PLIST)
+check("IN .gitattributes keeps .ps1 and .cmd files CRLF on every clone",
+      os.path.exists(os.path.join(HERE, ".gitattributes"))
+      and "*.ps1 text eol=crlf" in open(os.path.join(HERE, ".gitattributes")).read()
+      and "*.cmd text eol=crlf" in open(os.path.join(HERE, ".gitattributes")).read())
+
+# the share-host probe before `open smb://`: a PC that is off answers nothing, so the
+# Mac asks Finder for nothing (no "connecting" sheet, no 20-second wait)
+import socket as _sock
+_srv = _sock.socket(); _srv.bind(("127.0.0.1", 0)); _srv.listen(1)
+_open_port = _srv.getsockname()[1]
+_closed = _sock.socket(); _closed.bind(("127.0.0.1", 0)); _closed_port = _closed.getsockname()[1]; _closed.close()
+_env_in = teh.make_env(IN_ROOT)
+_t0 = time.time()
+_pr = probe(_env_in, "print(json.dumps({"
+            f"'up': m._share_host_up('smb://astro@127.0.0.1:{_open_port}/AstroImageData'),"
+            f"'down': m._share_host_up('smb://astro@127.0.0.1:{_closed_port}/AstroImageData'),"
+            "'bad': m._share_host_up('not a url'), 'none': m._share_host_up(None),"
+            "'nohost': m._share_host_up('smb:///share')}))\n")
+_took = time.time() - _t0
+_srv.close()
+check("IN _share_host_up: a listening host is up, a closed port, no URL or no host is down, "
+      "and it answers in seconds",
+      _pr.get("up") is True and _pr.get("down") is False and _pr.get("bad") is False
+      and _pr.get("none") is False and _pr.get("nohost") is False and _took < 15,
+      f"{_pr} took {_took:.1f}s")
+check("IN _try_mount_archive asks Finder only after the probe (the probe comes first in the code)",
+      "if not _share_host_up(url):" in open(SCRIPT, encoding="utf-8").read()
+      and open(SCRIPT, encoding="utf-8").read().find("if not _share_host_up(url):")
+      < open(SCRIPT, encoding="utf-8").read().find('subprocess.run(["open", url]'))
+
+# a config.json saved by Notepad (UTF-8 with a byte-order mark) is read, not ignored
+_cfg = os.path.join(IN_ROOT, "config.json")
+with open(_cfg, "w", encoding="utf-8-sig") as f:
+    json.dump({"ASTRO_QUIET_PERIOD_DAYS": 5}, f)
+_pr = probe(teh.make_env(IN_ROOT, ASIAIR_CONFIG=_cfg), "print(json.dumps({'q': m.QUIET_PERIOD_DAYS}))\n")
+check("IN a config.json with a byte-order mark (Notepad) is honoured", _pr.get("q") == 5, str(_pr))
+
+# the suite's own plumbing: a check given a callable that raises is a FAIL with the
+# traceback, not a crash of the whole suite (checked through a child, so this run's
+# own count stays honest)
+_plumb = os.path.join(IN_ROOT, "plumb.py")
+with open(_plumb, "w", encoding="utf-8") as f:
+    f.write("import sys, re, os\n"
+            f"__file__ = {os.path.join(HERE, 'test_v2.py')!r}\n"
+            f"src = open({os.path.join(HERE, 'test_v2.py')!r}, encoding='utf-8').read()\n"
+            "head = src[:src.index('# ── Minimal FITS generator')]\n"
+            "head = head.replace('teh.isolate_runner()', 'pass')\n"
+            "exec(compile(head, 'head', 'exec'))\n"
+            "check('a check that raises', lambda: 1 // 0)\n"
+            "skip('something this OS cannot do')\n"
+            "check('a plain pass', True)\n"
+            "raise RuntimeError('the suite died here')\n")
+_r = subprocess.run([sys.executable, _plumb], capture_output=True, text=True, encoding="utf-8",
+                    errors="replace", timeout=120, cwd=HERE,
+                    env=dict(os.environ, PYTHONPATH=HERE))
+check("IN the suite's check() turns a raising callable into a FAIL with the traceback, counts "
+      "skips, and a crash still ends in a summary that names it",
+      _r.returncode == 1 and "FAIL  a check that raises" in _r.stdout and "ZeroDivisionError" in _r.stdout
+      and "1 passed, 2 failed, 1 skipped" in _r.stdout and "CRASH: the suite stopped here" in _r.stdout
+      and "the suite died here" in _r.stdout and "[test_v2.py:" in _r.stdout
+      and _r.stdout.count("passed,") == 1,
+      (_r.stdout + _r.stderr)[-1500:])
+shutil.rmtree(IN_ROOT, ignore_errors=True)
+
 # ═══════════════ Summary ═════════════════════════════════════════════════════
-print("\n═══════════════════════════════════════════════════")
-print(f"  {PASS} passed, {FAIL} failed")
-for name, detail in FAILURES:
-    print(f"  ✗ {name}: {detail[:1400]}")
+summary()
 sys.exit(1 if FAIL else 0)

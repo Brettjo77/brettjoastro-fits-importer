@@ -26,15 +26,63 @@ import test_env_helper as teh  # noqa: E402
 teh.isolate_runner()   # test mode for this process too
 
 BUILD = os.path.dirname(os.path.abspath(__file__))
-PASS = FAIL = 0
+PASS = FAIL = SKIPPED = 0
+FAILURES = []
+DETAIL_CAP = 8000
+import atexit, traceback
+try:
+    sys.stdout.reconfigure(encoding="utf-8", errors="replace")
+    sys.stderr.reconfigure(encoding="utf-8", errors="replace")
+except (AttributeError, ValueError):
+    pass
 
 def check(name, cond, detail=""):
+    """One check; a callable `cond` is called here and an exception is a FAIL, not a
+    crash. Failures are listed again in the summary, whole (1.7.0)."""
     global PASS, FAIL
-    print(("  PASS  " if cond else "  FAIL  ") + name + ("" if cond else f"   {detail}"))
+    if callable(cond):
+        try:
+            cond = cond()
+        except Exception:
+            cond, detail = False, traceback.format_exc() + (f"\n{detail}" if detail else "")
+    print(("  PASS  " if cond else "  FAIL  ") + name + ("" if cond else f"   {str(detail)[:400]}"))
     if cond:
         PASS += 1
     else:
         FAIL += 1
+        FAILURES.append((f"{name}  [test_app.py:{sys._getframe(1).f_lineno}]", str(detail)))
+
+def skip(name):
+    global SKIPPED
+    SKIPPED += 1
+    skip(f"{name}")
+
+_SUMMARY_DONE = False
+def summary(crash=None):
+    global _SUMMARY_DONE
+    if _SUMMARY_DONE:
+        return
+    _SUMMARY_DONE = True
+    if crash:
+        FAILURES.append(("CRASH: the suite stopped here, later checks did not run", crash))
+    if FAILURES:
+        try:
+            show_panel_logs()
+        except Exception:
+            pass
+    print("\n═══════════════════════════════════════")
+    print(f"  {PASS} passed, {FAIL + (1 if crash else 0)} failed"
+          + (f", {SKIPPED} skipped" if SKIPPED else ""))
+    for name, detail in FAILURES:
+        d = detail if len(detail) <= DETAIL_CAP else detail[:DETAIL_CAP] + f"… [{len(detail) - DETAIL_CAP} more]"
+        print(f"  ✗ {name}: {d}")
+    sys.stdout.flush()
+
+def _excepthook(tp, val, tb):
+    summary("".join(traceback.format_exception(tp, val, tb)))
+    sys.exit(1)
+sys.excepthook = _excepthook
+atexit.register(lambda: summary() if not _SUMMARY_DONE and (PASS or FAIL) else None)
 
 TOKEN = {"v": ""}   # the per-launch token, read from the page like a browser would
 
@@ -1550,7 +1598,7 @@ try:
               and "couldn't be read" in unreadable and 'id="deskRefresh"' in unreadable,
               filtered[-300:] + unreadable[-300:])
     else:
-        print("  SKIP  PL node isn't installed: the inline script's parse check and the rendered "
+        skip("PL node isn't installed: the inline script's parse check and the rendered "
               "To-process section")
     statuses = set(re.findall(r'sect\("[^"]+","([a-z_]+)"\)', page)) | \
         set(re.findall(r'status==="([a-z_]+)"', page))
@@ -1658,8 +1706,5 @@ finally:
     procn.terminate()
     procn.wait(timeout=30)
 
-if FAIL:
-    show_panel_logs()
-print("\n═══════════════════════════════════════")
-print(f"  {PASS} passed, {FAIL} failed")
+summary()
 sys.exit(1 if FAIL else 0)

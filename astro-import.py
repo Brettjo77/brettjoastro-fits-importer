@@ -250,7 +250,8 @@ _CONFIG_PATH = os.path.expanduser(os.environ.get(
 if TEST_ROOT and _CONFIG_PATH and not _within(_CONFIG_PATH, TEST_ROOT):
     _test_refuse(f"ASIAIR_CONFIG is outside the test root {TEST_ROOT}: {_CONFIG_PATH}")
 try:
-    with open(_CONFIG_PATH) as _cf:
+    # utf-8-sig: Notepad on Windows writes a byte-order mark (1.7.0)
+    with open(_CONFIG_PATH, encoding="utf-8-sig") as _cf:
         _CONFIG = json.load(_cf)
     if not isinstance(_CONFIG, dict):
         _CONFIG = {}
@@ -4410,6 +4411,20 @@ def _ship_apply_verified(state, mount):
                     n += 1
     return n
 
+def _share_host_up(url, timeout=2.0):
+    """True when the share's host answers on the SMB port (445). A quick probe before
+    `open smb://...`: with the PC off, Finder would otherwise sit on a "connecting"
+    sheet for a minute or more (1.7.0). Unknown host or no host in the URL → False."""
+    m = re.match(r"^[a-z]+://(?:[^/@]*@)?([^/:]+)(?::(\d+))?", str(url or ""), re.I)
+    if not m:
+        return False
+    host, port = m.group(1), int(m.group(2) or 445)
+    try:
+        with socket.create_connection((host, port), timeout=timeout):
+            return True
+    except OSError:
+        return False
+
 def _try_mount_archive(mount, url, wait=20):
     """Ask Finder to mount the share (password from the keychain). Returns True when
     the archive becomes reachable within `wait` seconds."""
@@ -4418,6 +4433,8 @@ def _try_mount_archive(mount, url, wait=20):
         return False
     if not url or sys.platform != "darwin":
         return False
+    if not _share_host_up(url):
+        return False                        # PC off: no Finder sheet, no wait
     try:
         subprocess.run(["open", url], stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL, timeout=15)
     except Exception:

@@ -20,6 +20,7 @@
   "//desk": "Astro Desk (the panel's Archive tab, 1.6.0). Where Siril is, for Start Siril here, and the Observatory's dataset (target states and hours). On Windows the defaults are C:\\Program Files\\Siril\\bin\\siril.exe and E:\\Astro Config Data\\Observatory\\dataset.json.",
   "ASTRO_SIRIL_EXE": "/Applications/Siril.app/Contents/MacOS/Siril",
   "ASTRO_OBSERVATORY_DATASET": "~/Library/Application Support/Astro Import/observatory-dataset.json",
+  "//windows": "On Windows, Notepad saves this file as UTF-8 with a byte-order mark: that is fine from 1.7.0 (it was ignored before). Write every backslash twice, as in the archive paths above.",
   "//projects": "The project layer (1.7.0). ASTRO_QUIET_PERIOD_DAYS: a dataset with no new session for this many days counts as ready to process (default 14). ASTRO_FINALS_DIR: where finished pictures live, for 'done' — the Windows default is E:\\Final Astro Images; the Mac's share doesn't carry that folder, so share it from the PC and set it here (for example \"/Volumes/Final Astro Images\") if the Mac should check finals. ASTRO_CONTRACT_DIR only if the contract folder isn't beside the engine.",
   "ASTRO_QUIET_PERIOD_DAYS": 14
 }
