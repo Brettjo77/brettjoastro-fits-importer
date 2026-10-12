@@ -17,6 +17,7 @@ own window. The watcher opens/focuses the panel when the camera is plugged in.
 
 import argparse
 import contextlib
+import io
 import hashlib
 import importlib.util
 import json
@@ -766,6 +767,10 @@ STATUS = SafeStatus()
 # it nor (without a CORS preflight this server never answers) send the header
 # (1.4.3 review finding V1).
 TOKEN = secrets.token_urlsafe(24)
+# ...and a boot id the page can compare against /api/state: a tab left open
+# across a restart or an update would otherwise press buttons that are all
+# refused (403) with no word why (1.7.0, found on the PC 12 Oct)
+BOOT = secrets.token_hex(8)
 # Which panel this is (a hash of its state folder, sent by /api/ping): a test
 # checks it is talking to its OWN panel before it trusts the token (1.5.2)
 INSTANCE = hashlib.sha256(os.path.realpath(eng.STATE_DIR).encode("utf-8")).hexdigest()[:16]
@@ -786,6 +791,14 @@ def _split_hostport(raw):
         host, _, port = raw.partition(":")
     return host, port
 
+
+def _note_page(text):
+    """A one-sentence page in the panel's own colours, for the Dashboard frame."""
+    safe = text.replace("&", "&amp;").replace("<", "&lt;").replace(">", "&gt;")
+    return ("<!DOCTYPE html><html><head><meta charset='utf-8'><title>Dashboard</title>"
+            "<style>body{margin:0;padding:28px;font:15px/1.5 system-ui,-apple-system,sans-serif;"
+            "color:#1f2937;background:#f8fafc}@media(prefers-color-scheme:dark){body{color:#e5e7eb;"
+            "background:#0b1220}}p{max-width:60ch}</style></head><body><p>" + safe + "</p></body></html>")
 
 class Handler(BaseHTTPRequestHandler):
     timeout = 15                              # a stalled client can't hold a thread
@@ -872,13 +885,16 @@ class Handler(BaseHTTPRequestHandler):
             self._json({"error": "forbidden"}, 403)
             return
         if self.path == "/" or self.path.startswith("/index"):
-            self._html(PAGE.replace("__ASTRO_TOKEN__", TOKEN)
+            self._html(PAGE.replace("__ASTRO_TOKEN__", TOKEN).replace("__ASTRO_BOOT__", BOOT)
                        .replace("__STATUS_TIP__", STATUS_TIP))
         elif self.path == "/api/ping":
             self._json({"ok": True, "app": "astro-import", "version": APP_VERSION,
                         "instance": INSTANCE})
         elif self.path == "/api/state":
-            self._json(APP.snapshot())
+            snap = APP.snapshot()
+            snap["boot"] = BOOT
+            snap["version"] = APP_VERSION
+            self._json(snap)
         elif self.path == "/api/status":
             STATUS.ready.wait(5)               # just after start: the first computation
             self._json(STATUS.value)
@@ -887,7 +903,7 @@ class Handler(BaseHTTPRequestHandler):
         elif self.path == "/archive" or self.path.startswith("/archive?"):
             # Astro Desk: the same page, opened on its Archive tab (AstroLog's
             # "Open in Astro Desk" link lands here with ?target=&code=&scope=)
-            self._html(PAGE.replace("__ASTRO_TOKEN__", TOKEN)
+            self._html(PAGE.replace("__ASTRO_TOKEN__", TOKEN).replace("__ASTRO_BOOT__", BOOT)
                        .replace("__STATUS_TIP__", STATUS_TIP))
         elif self.path == "/api/projects":
             # The project layer's own file (projects.json, written by
@@ -916,13 +932,44 @@ class Handler(BaseHTTPRequestHandler):
             else:
                 self._json(listing)
         elif self.path == "/dashboard" or self.path.startswith("/dashboard?"):
+            # Framable always (it lives in the panel's own Dashboard tab): a
+            # reply that forbids framing shows as "refused to connect".
             try:
                 state = eng.State()
-                path = eng.generate_dashboard(state)
-                with open(path) as f:
+                path = None
+                if state.has_ledger():
+                    path = eng.generate_dashboard(state)
+                else:
+                    here_side, there_side = eng.ship_sides()
+                    here = "PC" if here_side == "pc" else "Mac"
+                    other = "PC" if there_side == "pc" else "Mac"
+                    snap = eng.other_ledger_snapshot()
+                    files, meta = (eng.load_ledger_snapshot(snap, []) if snap else ({}, {}))
+                    if files:
+                        age = meta.get("age_hours")
+                        when = (meta.get("at") or "")[:10]
+                        path = eng.generate_dashboard(
+                            state, files=files,
+                            banner=f"Nothing has been imported on this {here}. This is the {other}'s "
+                                   f"record, as its last ship left it on the archive on {when}"
+                                   + (f" ({int(age // 24)} day(s) ago)" if isinstance(age, float) and age >= 24 else "")
+                                   + ". Space figures are this computer's.")
+                    else:
+                        self._html(_note_page(
+                            f"Nothing has been imported on this {here}, so there is no dashboard "
+                            f"of its own here. The dashboard is drawn from the imports, and they "
+                            f"happen on the {other}. Once the {other} has shipped to the archive "
+                            f"with 1.7.0, its record shows here. Meanwhile the Archive tab lists "
+                            f"what is ready to process."), frame_self=True)
+                        return
+                if not path:
+                    self._html(_note_page("The dashboard couldn't be saved in the state folder; "
+                                          "see the Activity log."), frame_self=True)
+                    return
+                with open(path, encoding="utf-8") as f:
                     self._html(f.read(), frame_self=True)
             except Exception as e:
-                self._html(f"<pre>dashboard unavailable: {e}</pre>", 500)
+                self._html(_note_page(f"The dashboard couldn't be built ({e})."), 500, frame_self=True)
         else:
             self._json({"error": "not found"}, 404)
 
@@ -992,8 +1039,34 @@ class Handler(BaseHTTPRequestHandler):
             elif not (os.path.isdir(path) or os.path.isfile(path)):
                 self._json({"ok": False, "error": "not a folder or file"}, 400)
             else:
-                eng.open_path(path)
-                self._json({"ok": True})
+                if eng.open_path(path):
+                    self._json({"ok": True, "abs": path})
+                else:
+                    self._json({"ok": False, "error": f"{'Windows' if eng.IS_WINDOWS else 'macOS'} "
+                                f"couldn't open {os.path.basename(path)}; see the Activity log."}, 500)
+        elif self.path == "/api/projects/rebuild":
+            # The Refresh button: rebuild projects.json here and now. The
+            # engine's own command, in this process; reads, writes that one
+            # file. One at a time, never while an import or ship runs.
+            if not APP.oplock.acquire(blocking=False):
+                self._json({"ok": False, "error": "The importer is busy with another job; try again "
+                            "when it has finished."}, 409)
+                return
+            try:
+                buf = io.StringIO()
+                with contextlib.redirect_stdout(buf), contextlib.redirect_stderr(buf):
+                    try:
+                        got = eng.run_projects(eng.State())
+                    except SystemExit as e:
+                        got = None
+                        buf.write(f"stopped: {e}\n")
+                said = buf.getvalue()
+                APP.write(said)
+                self._json({"ok": got is not None, "said": said[-2000:]})
+            except Exception as e:
+                self._json({"ok": False, "error": f"The list couldn't be rebuilt: {e}"}, 500)
+            finally:
+                APP.oplock.release()
         elif self.path == "/api/answer":
             qid, value = body.get("id"), body.get("value", "")
             if qid is None or not isinstance(value, (str, int, float)):
@@ -1148,6 +1221,19 @@ button.primary:hover:not(:disabled){color:var(--accent-ink);filter:brightness(1.
   .ad-cols{flex:1;min-height:0}
   .ad-cols>.card{min-height:0;overflow-y:auto}
 }
+.ad-rowmsg{font-size:12.5px;margin:-4px 10px 8px;color:var(--muted)}
+.ad-rowmsg.bad{color:var(--serious,#dc2626)}
+.ad-legend{font-size:12px;color:var(--muted);margin:4px 0 8px;line-height:1.45}
+.ad-warn{font-size:13px;margin:6px 0;padding:7px 10px;border-radius:8px;background:rgba(245,158,11,.14);border:1px solid rgba(245,158,11,.5)}
+.ad-head{display:flex;flex-wrap:wrap;gap:8px 12px;align-items:center;margin:2px 0 6px}
+.ad-head select{font:inherit;padding:4px 8px;border-radius:8px;border:1px solid var(--line2);background:var(--surface2);color:var(--ink)}
+details.ad-sec>summary{cursor:pointer;list-style:none}
+details.ad-sec>summary::-webkit-details-marker{display:none}
+details.ad-sec>summary::before{content:"▸ ";opacity:.6}
+details.ad-sec[open]>summary::before{content:"▾ "}
+.tnote{font-size:12px;color:var(--muted);margin-top:2px}
+#staleBar{position:sticky;top:0;z-index:50;padding:10px 14px;background:#fde68a;color:#422006;font-size:14px;display:flex;gap:12px;align-items:center}
+#staleBar button{font:inherit;padding:5px 10px;border-radius:8px;border:1px solid #92400e;background:#fff;color:#422006;cursor:pointer}
 .ad-search{width:100%;font:inherit;padding:8px 11px;border-radius:9px;border:1px solid var(--line2);
   background:var(--surface2);color:var(--ink);margin:6px 0 8px}
 .ad-opt{display:flex;align-items:center;gap:7px;font-size:12.5px;color:var(--ink2);margin-bottom:8px}
@@ -1461,12 +1547,24 @@ document.querySelectorAll(".tabs button").forEach(b=>b.addEventListener("click",
 }));
 
 const TOKEN="__ASTRO_TOKEN__";
+const BOOT="__ASTRO_BOOT__";
 const STATUS_TIP="__STATUS_TIP__";
+// The importer was restarted or updated since this page opened (its token is
+// gone): say so once, at the top, instead of every button failing silently.
+function showStale(){
+  if($("#staleBar")) return;
+  const d=document.createElement("div"); d.id="staleBar"; d.setAttribute("role","alert");
+  d.innerHTML='The FITS Importer was restarted or updated since this page opened, so its buttons won\'t work here. <button type="button" onclick="location.reload()">Reload this page</button>';
+  document.body.prepend(d);
+}
 async function api(path, body){
   const r=await fetch(path,{method:body!==undefined?"POST":"GET",
     headers:{"Content-Type":"application/json","X-Astro-Token":TOKEN},
     body:body!==undefined?JSON.stringify(body):undefined});
-  return r.json();
+  if(r.status===403&&body!==undefined){ showStale(); return {ok:false,error:"This page is out of date: reload it (the importer was restarted)."}; }
+  let j; try{ j=await r.json(); }catch(e){ j={ok:false,error:`The importer answered with something that isn't JSON (${r.status}).`}; }
+  if(j&&typeof j==="object"&&!("_status" in j)) j._status=r.status;
+  return j;
 }
 
 function scopeChip(t){
@@ -1789,70 +1887,104 @@ const fmtNight=iso=>{ if(!iso) return ""; const [y,m,d]=iso.split("-"); return `
 const fmtSize=b=>b>=1073741824?(b/1073741824).toFixed(1)+" GB":b>=1048576?Math.round(b/1048576)+" MB":Math.max(1,Math.round(b/1024))+" KB";
 // The project layer (1.7): To process and In progress, from projects.json.
 // projectsHtml is pure (no DOM), so a test can render the fixture and look.
-const PROJ_WHERE={chillblast_archive:"on the archive",mac:"on this Mac",pc:"on this PC",
+const PROJ_WHERE={chillblast_archive:"on the archive",mac:"on the Mac",pc:"on this PC",
   "mac-unchecked":"on the Mac (per its ledger)","pc-unchecked":"on the PC (per its ledger)"};
 const fmtHours=s=>!s?"":s<360?Math.round(s/60)+" min":(s/3600).toFixed(1)+" h";
-function projectsHtml(pj){
+const fmtWhen=iso=>{ const t=new Date(String(iso||"")); if(isNaN(t)) return ""; const d=t.getDate(), m=MONTHS[t.getMonth()], y=t.getFullYear(); return `${d} ${m} ${y} at ${String(t.getHours()).padStart(2,"0")}:${String(t.getMinutes()).padStart(2,"0")}`; };
+const PROJ_STATUS={ready_to_process:"To process",in_progress:"In progress",capturing:"Still capturing",done:"Done"};
+function projectsHtml(pj, opts){
+  opts=opts||{};
   if(!pj||!pj.ok||!pj.projects){
-    const cmd=pj&&pj.command?` In Terminal: <code>${esc(pj.command)}</code>.`:"";
-    return `<p class="ad-note">${pj&&pj.why==="unreadable"
-      ?"The To-process list on this computer couldn't be read. Run the importer with --projects again to rebuild it (safe: it only reads)."
-      :"The To-process list hasn't been worked out on this computer yet. Run the importer with --projects (safe: it only reads). Until then, use the folder list below."}${cmd}</p>`;
+    const cmd=pj&&pj.command?` In Terminal: <code>${esc(pj.command)}</code>, or press <strong>Refresh now</strong> below.`:"";
+    return `<div class="ad-head"><button type="button" id="deskRefresh">Refresh now</button></div><p class="ad-note">${pj&&pj.why==="unreadable"
+      ?"The To-process list on this computer couldn't be read. Rebuild it: it only reads your records and writes this one list."
+      :"The To-process list hasn't been worked out on this computer yet. Build it: it only reads your records and writes this one list. Until then, use the folder list below."}${cmd}</p>`;
   }
   const label=`Open in ${esc(pj.opener||"Explorer")}`;
   const doc=pj.projects, rows=[];
   for(const p of (Array.isArray(doc.projects)?doc.projects:[])) for(const d of (Array.isArray(p.datasets)?p.datasets:[]))
     if(d&&typeof d==="object") rows.push({name:p.name||p.target_id||"Unnamed target", d});
-  const readyFrom=d=>{ const t=new Date(String(d.last_session||"")+"T12:00:00"); if(isNaN(t)) return "";
-    t.setDate(t.getDate()+(+doc.quiet_period_days||14)+1); return t.toISOString().slice(0,10); };
-  const sect=(title,status)=>{
-    const list=rows.filter(r=>r.d.status===status)
+  const quiet=Number.isFinite(+doc.quiet_period_days)?+doc.quiet_period_days:14;
+  const readyFrom=d=>{ const t=Date.parse(String(d.last_session||"")+"T12:00:00Z"); if(isNaN(t)) return "";
+    return new Date(t+(quiet+1)*864e5).toISOString().slice(0,10); };
+  const scopeOf=d=>d.scope_name||d.scope||"?";
+  const scopes={}; rows.forEach(r=>{ const k=scopeOf(r.d); scopes[k]=(scopes[k]||0)+1; });
+  const pick=opts.scope&&scopes[opts.scope]?opts.scope:"";
+  const vis=pick?rows.filter(r=>scopeOf(r.d)===pick):rows;
+  const reason=d=>{ const last=fmtNight(d.last_session), rf=readyFrom(d);
+    if(d.status==="done") return `finished picture${d.finals&&d.finals[0]?": "+d.finals[0]:""}`;
+    if(d.status==="in_progress") return `master saved on the archive${d.masters&&d.masters[0]?": "+d.masters[0]:""}${(d.attribution||[]).includes("shared-folder")?" (shared Askar folder: may be the other Askar's)":""}`;
+    if(d.status==="capturing") return `last night ${last}${d.capture_state==="open"?" · kept open by you":rf?" · ready from "+fmtNight(rf):""}`;
+    return `nothing new since ${last}${d.capture_state==="complete"?" · marked complete by you":""}`; };
+  const sect=(status,open)=>{
+    const list=vis.filter(r=>r.d.status===status)
       .sort((a,b)=>String(b.d.last_session||"").localeCompare(String(a.d.last_session||"")));
     if(!list.length) return "";
-    return `<div class="ad-sec"><div class="eyebrow">${title} · ${list.length}</div>`+
+    return `<details class="ad-sec"${open?" open":""}><summary class="eyebrow">${PROJ_STATUS[status]} · ${list.length}</summary>`+
       list.map(r=>{
         const d=r.d, locs=Array.isArray(d.locations)?d.locations:[];
         const where=locs.map(l=>PROJ_WHERE[l]||l).join(" and ");
-        const facts=[d.scope_name||d.scope, d.site, where].filter(Boolean).join(" · ");
+        const facts=[scopeOf(d), where].filter(Boolean).join(" · ");
         const nights=d.nights?d.nights+" night"+(d.nights===1?"":"s"):"";
-        const btn=d.archive_rel?`<button data-xopen="${esc(d.archive_rel)}">${label}</button>`
+        const frames=d.frames?` · ${d.frames} frames`:"";
+        const btn=d.archive_rel?`<button type="button" data-xopen="${esc(d.archive_rel)}">${label}</button>`
           :`<span class="ad-nowhere">${locs.length&&!locs.includes("chillblast_archive")?"not shipped to the archive yet":"no folder on the archive"}</span>`;
         const sel=d.archive_rel?` data-xsel="${esc(d.archive_rel)}" tabindex="0" role="button"`:"";
         return `<div class="ad-row${deskSel&&deskSel===d.archive_rel?" on":""}"${sel}>
-          <div class="tmain"><div class="tname">${esc(r.name)}</div><div class="tmeta">${esc(facts)}</div></div>
-          <div class="tstats"><div class="big">${esc(fmtHours(d.integration_seconds))}</div><div class="small">${esc(nights)}</div></div>${btn}</div>`;
-      }).join("")+"</div>";
+          <div class="tmain"><div class="tname">${esc(r.name)}</div><div class="tmeta">${esc(facts)}</div><div class="tnote">${esc(reason(d))}</div></div>
+          <div class="tstats"><div class="big">${esc(fmtHours(d.integration_seconds))}</div><div class="small">${esc(nights+frames)}</div></div>${btn}</div>`;
+      }).join("")+"</details>";
   };
-  const when=(doc.generated_at||"").slice(0,10);
-  const warns=(doc.warnings||[]).map(w=>`<p class="ad-note">⚠ ${esc(w)}</p>`).join("");
-  const body=sect("To process","ready_to_process")+sect("In progress","in_progress");
+  const when=(doc.generated_at||"").slice(0,10), whenFull=fmtWhen(doc.generated_at);
+  const snaps=(doc.sources&&Array.isArray(doc.sources.snapshots))?doc.sources.snapshots.filter(m=>m&&m.rows):[];
+  const snapNote=snaps.map(m=>`${esc(m.machine||"the other computer")}'s record as of ${esc(fmtNight(String(m.at||"").slice(0,10))||"an unknown time")}${typeof m.age_hours==="number"&&m.age_hours>=36?` (${Math.floor(m.age_hours/24)} day${Math.floor(m.age_hours/24)===1?"":"s"} old)`:""}`).join("; ");
+  const warns=(doc.warnings||[]).map(w=>/doesn't know|could not be read|day\(s\) old|newer importer/.test(w)?`<p class="ad-warn">⚠ ${esc(w)}</p>`:`<p class="ad-note">⚠ ${esc(w)}</p>`).join("");
+  const scopeSel=`<select id="deskScope" aria-label="Scope"><option value="">All scopes (${rows.length})</option>${Object.keys(scopes).sort().map(k=>`<option value="${esc(k)}"${k===pick?" selected":""}>${esc(k)} (${scopes[k]})</option>`).join("")}</select>`;
+  const head=`<div class="ad-head">${scopeSel}<button type="button" id="deskRefresh">Refresh now</button></div>`;
+  const legend=`<p class="ad-legend"><strong>To process</strong>: no new frames for ${quiet} nights and no master saved. <strong>In progress</strong>: a master of yours is in the object's folder on the archive. <strong>Still capturing</strong>: frames within the last ${quiet} nights, or kept open by you. <strong>Done</strong>: a finished picture in Final Astro Images names the object and the scope.</p>`;
+  const body=sect("ready_to_process",true)+sect("in_progress",false)+sect("capturing",false)+sect("done",false);
   const cap=rows.filter(r=>r.d.status==="capturing"), done=rows.filter(r=>r.d.status==="done").length;
   const soonest=cap.map(r=>readyFrom(r.d)).filter(Boolean).sort()[0];
   const tail=rows.length?`<p class="ad-note">${cap.length} still capturing${soonest?` (the first is ready from ${esc(fmtNight(soonest))})`:""}, ${done} done.</p>`
     :`<p class="ad-note">No captures were counted on this computer yet.</p>`;
-  return `<div class="ad-note" id="deskProjMsg" aria-live="polite">Worked out ${when?esc(fmtNight(when)):"at an unknown time"}${pj.command?` — to refresh, in Terminal: <code>${esc(pj.command)}</code>`:""}.</div>`
-    +warns+(body||(rows.length?`<p class="ad-note">Nothing is waiting to process.</p>`:""))+tail;
+  return `<div class="ad-note" id="deskProjMsg" aria-live="polite">Worked out ${when?esc(fmtNight(when)):"at an unknown time"}${whenFull?` (${esc(whenFull)})`:""}${snapNote?` from ${snapNote}`:""}.</div>`
+    +head+legend+warns+(body||(rows.length?`<p class="ad-note">Nothing is waiting to process.</p>`:""))+tail;
 }
-async function loadProjects(){
-  let pj=null;
-  try{ pj=await api("/api/projects"); }catch(e){ pj={ok:false,why:"unreadable"}; }
+let PJ=null, deskScopeSel="";
+function renderProjects(){
   const box=$("#deskProjects");
-  try{ box.innerHTML=projectsHtml(pj); }
-  catch(e){ box.innerHTML=`<p class="ad-note">The To-process list couldn't be shown (${esc(String(e))}). Run the importer with --projects to rebuild it.</p>`; return; }
-  const say=t=>{ const m=$("#deskProjMsg"); if(m) m.textContent=t; };
+  try{ box.innerHTML=projectsHtml(PJ,{scope:deskScopeSel}); }
+  catch(e){ box.innerHTML=`<p class="ad-note">The To-process list couldn't be shown (${esc(String(e))}). Press Refresh now, or run the importer with --projects.</p>`; return; }
+  // feedback lands right under the row that was pressed, never at the top of the list
+  const rowSay=(b,t,bad)=>{ const row=b.closest(".ad-row"); if(!row) return;
+    let m=row.nextElementSibling; if(!m||!m.classList.contains("ad-rowmsg")){
+      m=document.createElement("div"); m.className="ad-rowmsg"; m.setAttribute("aria-live","polite"); row.after(m); }
+    m.textContent=t; m.classList.toggle("bad",!!bad); try{ m.scrollIntoView({block:"nearest"}); }catch(e){} };
   box.querySelectorAll("[data-xopen]").forEach(b=>b.addEventListener("click",async ev=>{
-    ev.stopPropagation(); b.disabled=true;
+    ev.stopPropagation(); const lbl=b.textContent; b.disabled=true; b.textContent="Opening…";
     let res; try{ res=await api("/api/archive/open",{rel:b.dataset.xopen}); }
-    catch(e){ res={error:"The panel didn't answer — is it still running?"}; }
-    b.disabled=false;
-    say(res.ok?`Opened in ${pj.opener||"Explorer"} — it may be behind this window.`
+    catch(e){ res={error:"The FITS Importer isn't answering. Use Restart FITS Importer on the Desktop."}; }
+    b.disabled=false; b.textContent=lbl;
+    rowSay(b, res.ok?`Opened in ${PJ&&PJ.opener||"Explorer"}. If you can't see it, it is behind this window: look for it on the taskbar (the Dock on a Mac).`
       :res.error==="not in the archive"?"That folder isn't on the archive right now. Is the archive drive (or share) connected, or was the folder renamed?"
-      :(res.error||"Couldn't open that folder."));
+      :(res.error||"Couldn't open that folder."), !res.ok);
   }));
   box.querySelectorAll("[data-xsel]").forEach(r=>{
     r.addEventListener("click",()=>deskOpen(r.dataset.xsel));
     r.addEventListener("keydown",e=>{ if(e.key==="Enter"&&e.target===r) deskOpen(r.dataset.xsel); });
   });
+  const sel=$("#deskScope"); if(sel) sel.addEventListener("change",()=>{ deskScopeSel=sel.value; renderProjects(); });
+  const rb=$("#deskRefresh"); if(rb) rb.addEventListener("click",async()=>{
+    rb.disabled=true; const lbl=rb.textContent; rb.textContent="Working it out…";
+    let res; try{ res=await api("/api/projects/rebuild",{}); }catch(e){ res={ok:false,error:"The FITS Importer isn't answering."}; }
+    rb.disabled=false; rb.textContent=lbl;
+    if(!res.ok){ const m=$("#deskProjMsg"); if(m) m.textContent=res.error||"The list couldn't be rebuilt; see the Activity log."; return; }
+    await loadProjects();
+  });
+}
+async function loadProjects(){
+  try{ PJ=await api("/api/projects"); }catch(e){ PJ={ok:false,why:"unreadable"}; }
+  renderProjects();
 }
 async function loadDesk(){
   loadProjects();
@@ -1942,8 +2074,9 @@ async function deskOpen(rel){
     ${r.frames===0&&!r.nights.length?`<p class="ad-note">No light frames found in this folder.</p>`:""}`;
   const msg=(t,bad)=>{ const m=$("#deskMsg"); m.textContent=t; m.className=bad?"bad":""; };
   box.querySelectorAll("[data-open]").forEach(b=>b.addEventListener("click",async()=>{
-    const res=await api("/api/archive/open",{rel:b.dataset.open});
-    msg(res.ok?"Opened.":(res.error||"Couldn't open that."),!res.ok);
+    let res; try{ res=await api("/api/archive/open",{rel:b.dataset.open}); }
+    catch(e){ res={error:"The FITS Importer isn't answering."}; }
+    msg(res.ok?"Opened. If you can't see it, it is behind this window.":(res.error||"Couldn't open that."),!res.ok);
   }));
   $("#deskSiril").addEventListener("click",async()=>{
     const res=await api("/api/archive/siril",{rel:r.rel});
@@ -1965,6 +2098,7 @@ if(location.pathname==="/archive"){
 async function tick(){
   try{
     const s=await api("/api/state");
+    if(s.boot&&s.boot!==BOOT) showStale();
     $("#camDot").className="dot"+(s.cameraPresent?" on":"");
     $("#camText").textContent=s.cameraPresent?((s.devices||[]).join(" + ")||"camera")+" connected":"no camera connected";
     busy = s.status!=="idle";

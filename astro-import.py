@@ -517,19 +517,25 @@ def launch_app(exe, args=()):
         return False
 
 def open_path(target):
-    """Open a file or URL with the system's default app."""
+    """Open a file or folder with the system's default app (Explorer or Finder
+    for a folder). True when the system took it, False with the reason in
+    the log when it didn't: a failed open must never read as "Opened"."""
     if TEST_ROOT:
         _test_record("open", target=target)
-        return
+        return True
     try:
         if IS_WINDOWS:
             os.startfile(target)            # noqa: platform-specific
         elif IS_MAC:
-            subprocess.run(["open", target], capture_output=True, timeout=10)
+            r = subprocess.run(["open", target], capture_output=True, timeout=10)
+            return r.returncode == 0
         else:
-            subprocess.run(["xdg-open", target], capture_output=True, timeout=10)
-    except Exception:
-        pass
+            r = subprocess.run(["xdg-open", target], capture_output=True, timeout=10)
+            return r.returncode == 0
+        return True
+    except Exception as e:
+        warn(f"could not open {target}: {e}")
+        return False
 
 def hash_file_unbuffered(path, chunk=1 << 20):
     """(sha256, size, read) of a file on THIS computer's own disk (1.7.0).
@@ -8825,11 +8831,13 @@ def _humanize_event(ev):
         return "Local state restored from iCloud mirror"
     return e
 
-def generate_dashboard(state):
-    """Build the self-contained status page from the ledger. No camera needed."""
-    if not state.has_ledger():
+def generate_dashboard(state, files=None, banner=None):
+    """Build the self-contained status page from the ledger. No camera needed.
+    With `files`, from those ledger rows instead (the other computer's
+    snapshot, on a PC that never imported), with `banner` said at the top."""
+    if files is None and not state.has_ledger():
         return None
-    led = state.ledger
+    led = state.ledger if files is None else {"files": files, "calibration": {}}
     per_target = {}
     monthly = defaultdict(lambda: {"frames": 0, "hours": 0.0})
     rigs = defaultdict(lambda: {"frames": 0, "hours": 0.0})
@@ -8912,6 +8920,12 @@ def generate_dashboard(state):
     payload = json.dumps(data).replace("<", "\\u003c").replace(">", "\\u003e") \
         .replace("&", "\\u0026")
     html = DASHBOARD_TEMPLATE.replace("__DATA__", payload)
+    if banner:
+        safe = (str(banner).replace("&", "&amp;").replace("<", "&lt;").replace(">", "&gt;"))
+        html = html.replace('<body class="viz-root">',
+                            '<body class="viz-root"><p style="margin:10px 16px;padding:9px 13px;'
+                            'border-radius:8px;background:#fde68a;color:#422006;'
+                            'font:14px system-ui,sans-serif">' + safe + '</p>', 1)
     path = os.path.join(STATE_DIR, "dashboard.html")
     try:
         with open(path + ".tmp", "w") as f:
