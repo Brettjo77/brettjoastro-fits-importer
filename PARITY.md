@@ -128,12 +128,14 @@ the scope table, and the non-path keys.
   that it is the same computer, rebuilt.
 - **Archive ship logs (1.7.0):** each machine writes only in its own folder
   under `_verify`: the Mac `_verify\mac\shipped.jsonl` (and its requests in
-  `_verify\mac\requests`), the PC `_verify\pc\shipped-pc.jsonl`. The old
+  `_verify\mac\requests`), the PC `_verify\pc\shipped-pc.jsonl`, and beside
+  each log the `ledger-snapshot.json` its ship leaves for the other computer. The old
   logs in `_verify` are history: read, never written again.
 - **The project layer's files (1.7.0):** `projects.json` and `targets-draft.json`
   in each machine's state folder (and `projects.json` in its own mirror).
-  Each machine's rollup counts its own ledger; `--with-ledger` adds the other
-  computer's snapshot, read only.
+  Each machine's rollup counts its own ledger and, by itself, the other
+  computer's `ledger-snapshot.json` (left by each ship in that computer's own
+  `_verify` folder, read only); `--with-ledger` adds any other.
 - **What the PC writes:** everything in `_verify\pc` (the share's user may
   only read there): `verified.jsonl`, `problems.jsonl`, `status.json`,
   `quarantine.jsonl`, the sweep logs, the inventory generations and
@@ -159,7 +161,8 @@ the scope table, and the non-path keys.
   root, outside the share the Mac mounts, and the masters come from the PC's
   inventory in `_verify\pc`, which the Mac reads only while the share is
   mounted. So the PC's `projects.json` is the complete one (and `--pc-nightly`
-  rebuilds it each night); the Mac's says what it could not check.
+  rebuilds it each night, with the Mac's sessions from the snapshot its ship
+  leaves); the Mac's says what it could not check.
 - **Finder "done" tags** on imported ASIAir folders are macOS-only. NTFS has
   no Finder labels; the ledger is the real record on both.
 - **The Windows watcher's notification** names the camera but not the new

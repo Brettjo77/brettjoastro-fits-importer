@@ -1940,6 +1940,12 @@ check("P1 shipped.jsonl written for the PC sweep, one line per file with sha and
       len(lines) == 3 and all(l["sha256"] and l["size"] and l["relpath"] for l in lines), str(lines[:1]))
 rdir = os.path.join(P1.receipts, "_ship")
 check("P1 a filed receipt v2 was written", os.path.isdir(rdir) and any(f.startswith("filed-") for f in os.listdir(rdir)))
+_snap = os.path.join(arch, "_verify", "mac", "ledger-snapshot.json")
+_sj = json.load(open(_snap, encoding="utf-8")) if os.path.isfile(_snap) else {}
+check("P1 the ship leaves a copy of this computer's ledger rows in its own _verify folder "
+      "(ledger-snapshot.json), for the other computer's --projects (1.7.0)",
+      _sj.get("schema") == "ledger-snapshot/1" and _sj.get("machineId")
+      and set(_sj.get("files") or {}) == set(P1.ledger()["files"]), str(_sj)[:200])
 r = P1.run("--ship")
 check("P1 re-run ships nothing (already shipped, awaiting the sweep)",
       "Ship: 0 file(s)" in r.stdout and "3 already shipped" in r.stdout, r.stdout[-400:])
@@ -5192,6 +5198,41 @@ check("PL projects.json carries the schema, the quiet period, the night it was w
       and re.fullmatch(r"\d{4}-\d{2}-\d{2}", pj1.get("as_of_night", ""))
       and pj1["sources"].get("inventory") == "inventory-E-20261009T000000Z.jsonl",
       json.dumps(pj1.get("sources")))
+# The archive PC has never imported: no ledger.json at all. Its --projects must
+# not mistake that for a broken ledger (the real PC, 12 Oct 2026, said "can't be
+# read" and listed nothing); it reads the Mac's snapshot from _verify/mac by itself.
+PLp = teh.Env("PLp", asiair=False, seestar=False)
+PLp_CON = os.path.join(PLp.root, "contract")
+shutil.copytree(PL_CON, PLp_CON)
+PLp.env.update({"ASTRO_CONTRACT_DIR": PLp_CON, "ASTRO_SHIP_FOLDER": "pc",
+                "ASTRO_FINALS_DIR": os.path.join(PLp.root, "finals")})
+os.makedirs(os.path.join(PLp.archive, "_verify", "mac"))
+with open(os.path.join(PLp.archive, "_verify", "mac", "ledger-snapshot.json"), "w") as f:
+    json.dump({"schema": "ledger-snapshot/1", "machineId": "mac",
+               "files": {k: {kk: vv for kk, vv in r.items() if kk != "dest"}
+                         for k, r in PL_LED["files"].items()}}, f)
+r = PLp.run("--projects")
+_pjp_path = os.path.join(PLp.state, "projects.json")
+_pjp = json.load(open(_pjp_path)) if os.path.isfile(_pjp_path) else {}
+check("PL on a computer that has never imported (no ledger.json) --projects says so, reads the "
+      "other computer's ledger-snapshot.json from its _verify folder by itself, and writes the list",
+      r.returncode == 0 and "no ledger yet" in (r.stdout + r.stderr)
+      and "ledger-snapshot.json" in json.dumps(_pjp.get("sources", {}))
+      and len(_pjp.get("projects") or []) >= 5
+      and sum(1 for p in _pjp["projects"] for e in p["datasets"]) == sum(1 for p in pj1["projects"] for e in p["datasets"]),
+      (r.stdout + r.stderr)[-300:] + json.dumps(_pjp.get("sources")))
+# ...and with no snapshot either, a good projects.json is never replaced by an empty one
+PLq = teh.Env("PLq", asiair=False, seestar=False)
+shutil.copytree(PL_CON, os.path.join(PLq.root, "contract"))
+PLq.env.update({"ASTRO_CONTRACT_DIR": os.path.join(PLq.root, "contract"), "ASTRO_SHIP_FOLDER": "pc"})
+os.makedirs(PLq.state, exist_ok=True)
+with open(os.path.join(PLq.state, "projects.json"), "w") as f:
+    f.write('{"schema": "projects/1", "projects": [{"keep": "me"}]}')
+r = PLq.run("--projects")
+check("PL ...and with no ledger and no snapshot the last good projects.json is left alone, with a reason",
+      "left as it is" in (r.stdout + r.stderr)
+      and json.load(open(os.path.join(PLq.state, "projects.json")))["projects"] == [{"keep": "me"}],
+      (r.stdout + r.stderr)[-300:])
 with open(os.path.join(PL.state, "ledger.json"), "w") as f:
     f.write("{ not json")
 with open(os.path.join(PL.state, "ledger.json.bak"), "w") as f:

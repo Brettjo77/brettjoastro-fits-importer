@@ -294,6 +294,10 @@ SHIP_FOLDER = os.environ.get("ASTRO_SHIP_FOLDER") or _CONFIG.get("ASTRO_SHIP_FOL
     or ("pc" if IS_WINDOWS else "mac")
 if not re.fullmatch(r"[a-z0-9-]{1,32}", SHIP_FOLDER) or SHIP_FOLDER == "lock":
     SHIP_FOLDER = "pc" if IS_WINDOWS else "mac"      # a typo never sends rows elsewhere
+# ...and, beside the ship log, a copy of this machine's ledger left by each ship
+# (1.7.0): the other computer's --projects reads it, so the PC's nightly list
+# carries the Mac's sessions without anyone copying a file.
+LEDGER_SNAPSHOT_NAME = "ledger-snapshot.json"
 # This computer's short name and display name for the Sync view (1.7.0, spec
 # section 2): `ASTRO_MACHINE_ID` is a slug such as "mac" or "chillblast"
 MACHINE_SLUG_RE = re.compile(r"^[a-z0-9-]{1,32}$")
@@ -3419,6 +3423,37 @@ def _verify_path(mount, *parts):
     """A path under the archive's _verify folder."""
     return os.path.join(mount, "_verify", *parts)
 
+def ship_sides():
+    """(here, there): this machine's _verify folder name and the other
+    computer's ("mac"/"pc")."""
+    here = SHIP_FOLDER if SHIP_FOLDER in ("mac", "pc") else ("pc" if IS_WINDOWS else "mac")
+    return here, ("pc" if here == "mac" else "mac")
+
+def write_ledger_snapshot(state, mount=None):
+    """After a ship: a copy of this machine's ledger rows in its own _verify
+    folder (the one place on the archive it may change files), for the
+    other computer's --projects (1.7.0). A failure here only warns: the
+    ship itself is done and recorded."""
+    if not isinstance(state.ledger, dict):
+        return None
+    path = os.path.join(os.path.dirname(ship_log_path(mount)), LEDGER_SNAPSHOT_NAME)
+    try:
+        _confine(path, "the ledger snapshot")
+        _atomic_write_json(path, {"schema": "ledger-snapshot/1", "machine": MACHINE_LABEL,
+                                  "machineId": machine_identity()["slug"], "at": _utc_iso(),
+                                  "files": state.ledger.get("files") or {}})
+        return path
+    except OSError as e:
+        warn(f"The ledger snapshot for the other computer could not be written ({e}); "
+             f"its --projects will not see this computer's sessions until the next ship.")
+        return None
+
+def other_ledger_snapshot(mount=None):
+    """The other computer's ledger snapshot on the archive, when it is there."""
+    _here, there = ship_sides()
+    path = _verify_path(mount or ARCHIVE_MOUNT, there, LEDGER_SNAPSHOT_NAME)
+    return path if os.path.isfile(path) else None
+
 def ship_log_path(mount=None):
     """This machine's own ship log: _verify\\mac\\shipped.jsonl on the Mac,
     _verify\\pc\\shipped-pc.jsonl on the PC (1.7.0)."""
@@ -4754,6 +4789,7 @@ def _run_ship(state, dry_run=False, mount=None, checksum=True, lock=None):
         warn(f"  {rel}: {why}")
     emit("ship", reachable=True, shipped=shipped, problems=len(problems), onlyMac=only_mac,
          waiting=held_back)
+    write_ledger_snapshot(state, mount)
     state.publish_mirror()
     return True
 
@@ -9407,8 +9443,7 @@ def _project_rows(state, extra_ledgers, warnings):
     """Every light row from this computer's ledger and the --with-ledger
     snapshots, de-duplicated by bytes (sha256) or by camera path and size,
     with the label of the computer whose frame folder it sits in."""
-    here = SHIP_FOLDER if SHIP_FOLDER in ("mac", "pc") else ("pc" if IS_WINDOWS else "mac")
-    there = "pc" if here == "mac" else "mac"
+    here, there = ship_sides()
     ledgers = [("this computer", here, True, ((state.ledger or {}).get("files") or {}))]
     for p in extra_ledgers:
         _confine(p, "--with-ledger")
@@ -9687,10 +9722,25 @@ def run_projects(state, extra_ledgers=(), dry_run=False):
     """--projects: rebuild projects.json. Safe to repeat; writes nothing else.
     A ledger that can't be read writes nothing: an empty list must never
     replace a good one."""
-    if state.ledger is None or getattr(state, "ledger_corrupt", False):
+    if getattr(state, "ledger_corrupt", False):
         error("The ledger can't be read, so projects.json was left as it is.")
         return None
-    doc = build_projects(state, extra_ledgers=extra_ledgers)
+    out = os.path.join(STATE_DIR, "projects.json")
+    if state.ledger is None:
+        # a computer that has never imported (the archive PC, usually): its own
+        # sessions are none, and the list comes from the other computer's snapshot
+        warn("This computer has no ledger yet (nothing has been imported here): "
+             "only the other computer's sessions can be listed.")
+    extra = list(extra_ledgers)
+    snap = other_ledger_snapshot()
+    if snap and os.path.realpath(snap) not in {os.path.realpath(x) for x in extra}:
+        info(f"Reading the {ship_sides()[1]}'s ledger snapshot: {snap}")
+        extra.append(snap)
+    doc = build_projects(state, extra_ledgers=extra)
+    if state.ledger is None and not doc["projects"] and os.path.isfile(out):
+        warn("Nothing to list from here and no other computer's ledger snapshot was found "
+             "on the archive; projects.json was left as it is.")
+        return None
     counts = {}
     for p in doc["projects"]:
         for e in p["datasets"]:
@@ -9700,7 +9750,6 @@ def run_projects(state, extra_ledgers=(), dry_run=False):
     info(f"{len(doc['projects'])} projects: " + (", ".join(bits) or "nothing yet"))
     for w in doc["warnings"]:
         warn(w)
-    out = os.path.join(STATE_DIR, "projects.json")
     if dry_run:
         info(f"Dry run: {out} was not written.")
         return doc
