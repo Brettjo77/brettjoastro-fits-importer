@@ -5221,7 +5221,7 @@ check("PL on a computer that has never imported (no ledger.json) --projects says
       and "ledger-snapshot.json" in json.dumps(_pjp.get("sources", {}))
       and len(_pjp.get("projects") or []) >= 5
       and sum(1 for p in _pjp["projects"] for e in p["datasets"]) == sum(1 for p in pj1["projects"] for e in p["datasets"]) + 1
-      and any(p["id"] == "M31" for p in _pjp["projects"]),      # the snapshot's custom name resolved it
+      and any(p.get("target_id") == "M31" for p in _pjp["projects"]),      # the snapshot's custom name resolved it
       (r.stdout + r.stderr)[-300:] + json.dumps(_pjp.get("sources")))
 r = PLp.run("--targets-draft")
 _drp = os.path.join(PLp.state, "targets-draft.json")
