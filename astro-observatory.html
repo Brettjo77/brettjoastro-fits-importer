@@ -527,8 +527,80 @@ const RENDER = {};
 /* ================= OVERVIEW ================= */
 RENDER.overview = function(root){
   if(!TG.length){ root.append(el("p","sub","Nothing to show yet: no light frames were counted. Once frames have been imported and shipped, the Observatory fills in.")); return; }
-  /* hero */
-  const hero=el("div","card hero");
+  /* what each scope captured last: the last three sessions per scope (a session is
+     one object on one night; with UK skies that can be days apart, so sessions, not nights) */
+  const ls=el("div","card");
+  ls.append(el("h2","sec","What each scope captured last"));
+  ls.append(el("div","sub","the last three sessions on each scope, newest first · a session is one object on one night · click one for the object"));
+  const lsg=el("div"); lsg.style.display="grid"; lsg.style.gridTemplateColumns="repeat(auto-fit,minmax(290px,1fr))"; lsg.style.gap="12px"; lsg.style.marginTop="12px";
+  for(const cm of CAMS){
+    const ss=SESS.filter(s=>s.camera===cm.id).sort((a,b)=>b.night.localeCompare(a.night)||(b.hours-a.hours)).slice(0,3);
+    const col=el("div");
+    const h=el("div"); h.style.display="flex"; h.style.alignItems="center"; h.style.gap="7px"; h.style.marginBottom="6px";
+    h.append(camDot(cm.id), el("b",null,cm.id));
+    if(ss.length) h.append(el("span","sub","last on "+fmtDY(ss[0].night)));
+    col.append(h);
+    if(!ss.length) col.append(el("div","sub","no sessions recorded"));
+    for(const s of ss){
+      const b=el("button","pcard");
+      b.append(el("div","p-t",s.target));
+      const m=el("div","p-m");
+      m.append(el("b",null,fmtDY(s.night)), el("span",null,"· "+(s.hours>0?fmtH(s.hours,2):"exposure unrecorded")+" · "+fmtI(s.frames)+" frame"+(s.frames===1?"":"s")));
+      const fl=Object.keys(s.filters||{}).filter(k=>k!=="unrecorded").map(filtLabel).join(", ");
+      if(fl) m.append(el("span",null,"· "+fl));
+      if(s.cal) m.append(el("span",null,"· "+calText(s.cal)));
+      b.append(m);
+      b.addEventListener("click",()=>openTarget(s.target));
+      col.append(b);
+    }
+    lsg.append(col);
+  }
+  ls.append(lsg);
+  root.append(ls);
+
+  /* what to process next: first, under the hero */
+  const q=el("div","card"); q.style.marginTop="14px";
+  q.append(el("h2","sec","What to process next on the PC"));
+  q.append(el("div","sub","worked out from your records · biggest first here; the To process tab lists the same datasets newest first, with Open buttons"));
+  const qg=el("div"); qg.style.display="grid"; qg.style.gridTemplateColumns="repeat(auto-fit,minmax(230px,1fr))"; qg.style.gap="12px"; qg.style.marginTop="12px";
+  let qAny=false;
+  function qcol(stId, verb){
+    const all=CARDS.filter(c=>c.state===stId).sort((a,b)=>(b.hours||0)-(a.hours||0)||(b.lights||0)-(a.lights||0));
+    const cardsQ=all.slice(0,4);
+    if(!cardsQ.length) return;
+    qAny=true;
+    const col=el("div");
+    const h=el("div"); h.style.display="flex"; h.style.alignItems="center"; h.style.gap="7px"; h.style.marginBottom="6px";
+    h.append(stageChip(stId), el("span","sub",verb)); col.append(h);
+    for(const cd of cardsQ){
+      const b=el("button","pcard");
+      b.append(el("div","p-t",cd.target));
+      const m=el("div","p-m"); m.append(camDot(cd.camera), el("span",null,CAMSHORT[cd.camera]||cd.camera));
+      m.append(el("b",null, cd.hours>0 ? fmtH(cd.hours) : fmtI(cd.lights||0)+" frames (exposure unrecorded)"));
+      if(cd.nights) m.append(el("span",null,"· "+cd.nights+" night"+(cd.nights===1?"":"s")));
+      b.append(m);
+      if(cd.action) b.append(el("div","p-act",cd.action));
+      b.addEventListener("click",()=>openTarget(cd.target));
+      col.append(b);
+    }
+    if(all.length>cardsQ.length){
+      const more=el("button","tbtn","+"+(all.length-cardsQ.length)+" more: see Pipeline"); more.style.marginTop="8px";
+      more.addEventListener("click",()=>go("pipeline")); col.append(more);
+    }
+    qg.append(col);
+  }
+  qcol("stacked","ready: no new frames for "+(D.quietPeriodDays||14)+" nights, nothing started");
+  qcol("processing","started: a master is saved, no final yet");
+  qcol("captured","still capturing");
+  if(!qAny){
+    const soon=CARDS.filter(c=>c.state==="captured"&&c.readyOn).map(c=>c.readyOn).sort()[0];
+    qg.append(el("p","sub","Nothing is waiting. Everything is either still capturing"+(soon?" (the first is ready from "+fmtDY(soon)+")":"")+" or done."));
+  }
+  q.append(qg);
+  root.append(q);
+
+  /* the headline figure: interesting, not the job, so it sits below the two cards */
+  const hero=el("div","card hero"); hero.style.marginTop="14px";
   const hl=el("div");
   const big=el("div","big"); big.append(fmtH(totalHours,1).replace(" h",""), el("small",null," hours of integration"));
   hl.append(big);
@@ -589,78 +661,6 @@ RENDER.overview = function(root){
     }
     root.append(nc);
   }
-
-  /* what to process next: first, under the hero */
-  const q=el("div","card"); q.style.marginTop="14px";
-  q.append(el("h2","sec","What to process next on the PC"));
-  q.append(el("div","sub","worked out from your records · biggest first here; the To process tab lists the same datasets newest first, with Open buttons"));
-  const qg=el("div"); qg.style.display="grid"; qg.style.gridTemplateColumns="repeat(auto-fit,minmax(230px,1fr))"; qg.style.gap="12px"; qg.style.marginTop="12px";
-  let qAny=false;
-  function qcol(stId, verb){
-    const all=CARDS.filter(c=>c.state===stId).sort((a,b)=>(b.hours||0)-(a.hours||0)||(b.lights||0)-(a.lights||0));
-    const cardsQ=all.slice(0,4);
-    if(!cardsQ.length) return;
-    qAny=true;
-    const col=el("div");
-    const h=el("div"); h.style.display="flex"; h.style.alignItems="center"; h.style.gap="7px"; h.style.marginBottom="6px";
-    h.append(stageChip(stId), el("span","sub",verb)); col.append(h);
-    for(const cd of cardsQ){
-      const b=el("button","pcard");
-      b.append(el("div","p-t",cd.target));
-      const m=el("div","p-m"); m.append(camDot(cd.camera), el("span",null,CAMSHORT[cd.camera]||cd.camera));
-      m.append(el("b",null, cd.hours>0 ? fmtH(cd.hours) : fmtI(cd.lights||0)+" frames (exposure unrecorded)"));
-      if(cd.nights) m.append(el("span",null,"· "+cd.nights+" night"+(cd.nights===1?"":"s")));
-      b.append(m);
-      if(cd.action) b.append(el("div","p-act",cd.action));
-      b.addEventListener("click",()=>openTarget(cd.target));
-      col.append(b);
-    }
-    if(all.length>cardsQ.length){
-      const more=el("button","tbtn","+"+(all.length-cardsQ.length)+" more: see Pipeline"); more.style.marginTop="8px";
-      more.addEventListener("click",()=>go("pipeline")); col.append(more);
-    }
-    qg.append(col);
-  }
-  qcol("stacked","ready: no new frames for "+(D.quietPeriodDays||14)+" nights, nothing started");
-  qcol("processing","started: a master is saved, no final yet");
-  qcol("captured","still capturing");
-  if(!qAny){
-    const soon=CARDS.filter(c=>c.state==="captured"&&c.readyOn).map(c=>c.readyOn).sort()[0];
-    qg.append(el("p","sub","Nothing is waiting. Everything is either still capturing"+(soon?" (the first is ready from "+fmtDY(soon)+")":"")+" or done."));
-  }
-  q.append(qg);
-  root.append(q);
-
-  /* what each scope captured last: the last three sessions per scope (a session is
-     one object on one night; with UK skies that can be days apart, so sessions, not nights) */
-  const ls=el("div","card"); ls.style.marginTop="14px";
-  ls.append(el("h2","sec","What each scope captured last"));
-  ls.append(el("div","sub","the last three sessions on each scope, newest first · a session is one object on one night · click one for the object"));
-  const lsg=el("div"); lsg.style.display="grid"; lsg.style.gridTemplateColumns="repeat(auto-fit,minmax(290px,1fr))"; lsg.style.gap="12px"; lsg.style.marginTop="12px";
-  for(const cm of CAMS){
-    const ss=SESS.filter(s=>s.camera===cm.id).sort((a,b)=>b.night.localeCompare(a.night)||(b.hours-a.hours)).slice(0,3);
-    const col=el("div");
-    const h=el("div"); h.style.display="flex"; h.style.alignItems="center"; h.style.gap="7px"; h.style.marginBottom="6px";
-    h.append(camDot(cm.id), el("b",null,cm.id));
-    if(ss.length) h.append(el("span","sub","last on "+fmtDY(ss[0].night)));
-    col.append(h);
-    if(!ss.length) col.append(el("div","sub","no sessions recorded"));
-    for(const s of ss){
-      const b=el("button","pcard");
-      b.append(el("div","p-t",s.target));
-      const m=el("div","p-m");
-      m.append(el("b",null,fmtDY(s.night)), el("span",null,"· "+(s.hours>0?fmtH(s.hours,2):"exposure unrecorded")+" · "+fmtI(s.frames)+" frame"+(s.frames===1?"":"s")));
-      const fl=Object.keys(s.filters||{}).filter(k=>k!=="unrecorded").map(filtLabel).join(", ");
-      if(fl) m.append(el("span",null,"· "+fl));
-      if(s.cal) m.append(el("span",null,"· "+calText(s.cal)));
-      b.append(m);
-      b.addEventListener("click",()=>openTarget(s.target));
-      col.append(b);
-    }
-    lsg.append(col);
-  }
-  ls.append(lsg);
-  root.append(ls);
 
   /* KPI row: the two that matter first, both a click away from the Pipeline */
   const kp=el("div","kpis");
