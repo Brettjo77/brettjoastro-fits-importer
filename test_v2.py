@@ -65,7 +65,7 @@ def summary(crash=None):
     if _SUMMARY_DONE:
         return
     _SUMMARY_DONE = True
-    print("\n═══════════════════════════════════════════════════")
+    print("\n" + "=" * 51)   # plain ASCII: a PowerShell pipe shows box characters as mojibake
     if crash:
         FAILURES.append(("CRASH: the suite stopped here, later checks did not run", crash))
     print(f"  {PASS} passed, {FAIL + (1 if crash else 0)} failed, {SKIPPED} skipped"

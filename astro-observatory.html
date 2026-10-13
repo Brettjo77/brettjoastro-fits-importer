@@ -631,6 +631,36 @@ RENDER.overview = function(root){
   q.append(qg);
   root.append(q);
 
+  /* what each scope captured last: the last three sessions per scope (a session is
+     one object on one night; with UK skies that can be days apart, so sessions, not nights) */
+  const ls=el("div","card"); ls.style.marginTop="14px";
+  ls.append(el("h2","sec","What each scope captured last"));
+  ls.append(el("div","sub","the last three sessions on each scope, newest first · a session is one object on one night · click one for the object"));
+  const lsg=el("div"); lsg.style.display="grid"; lsg.style.gridTemplateColumns="repeat(auto-fit,minmax(290px,1fr))"; lsg.style.gap="12px"; lsg.style.marginTop="12px";
+  for(const cm of CAMS){
+    const ss=SESS.filter(s=>s.camera===cm.id).sort((a,b)=>b.night.localeCompare(a.night)||(b.hours-a.hours)).slice(0,3);
+    const col=el("div");
+    const h=el("div"); h.style.display="flex"; h.style.alignItems="center"; h.style.gap="7px"; h.style.marginBottom="6px";
+    h.append(camDot(cm.id), el("b",null,cm.id));
+    if(ss.length) h.append(el("span","sub","last on "+fmtDY(ss[0].night)));
+    col.append(h);
+    if(!ss.length) col.append(el("div","sub","no sessions recorded"));
+    for(const s of ss){
+      const b=el("button","pcard");
+      b.append(el("div","p-t",s.target));
+      const m=el("div","p-m");
+      m.append(el("b",null,fmtDY(s.night)), el("span",null,"· "+(s.hours>0?fmtH(s.hours,2):"exposure unrecorded")+" · "+fmtI(s.frames)+" frame"+(s.frames===1?"":"s")));
+      const fl=Object.keys(s.filters||{}).filter(k=>k!=="unrecorded").map(filtLabel).join(", ");
+      if(fl) m.append(el("span",null,"· "+fl));
+      b.append(m);
+      b.addEventListener("click",()=>openTarget(s.target));
+      col.append(b);
+    }
+    lsg.append(col);
+  }
+  ls.append(lsg);
+  root.append(ls);
+
   /* KPI row: the two that matter first, both a click away from the Pipeline */
   const kp=el("div","kpis");
   function kpi(label,val,sub,onClick){ const k=el(onClick?"button":"div","kpi"); k.append(el("div","k-label",label), el("div","k-val",val)); if(sub) k.append(el("div","k-sub",sub)); if(onClick){ k.style.textAlign="left"; k.style.cursor="pointer"; k.addEventListener("click",onClick); } kp.append(k); }

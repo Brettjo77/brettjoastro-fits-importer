@@ -70,7 +70,7 @@ def summary(crash=None):
             show_panel_logs()
         except Exception:
             pass
-    print("\n═══════════════════════════════════════")
+    print("\n" + "=" * 51)   # plain ASCII: a PowerShell pipe shows box characters as mojibake
     print(f"  {PASS} passed, {FAIL + (1 if crash else 0)} failed"
           + (f", {SKIPPED} skipped" if SKIPPED else ""))
     for name, detail in FAILURES:
@@ -1739,7 +1739,8 @@ try:
           and code == 200 and xfo == "SAMEORIGIN" and "Astro Archive Observatory" in body and "__DATASET__" not in body
           and _dsn.get("schema") == "observatory/1" and [x["name"] for x in _dsn.get("targets", [])] == ["Andromeda Galaxy (M 31)"]
           and len(_dsn.get("sessions", [])) == 1 and _dsn["inputs"]["snapshot"]["machine"] == "Mac"
-          and _dsn["targets"][0]["statusCards"][0]["state"] == "stacked" and "<" not in _m.group(1),
+          and _dsn["targets"][0]["statusCards"][0]["state"] == "stacked" and "<" not in _m.group(1)
+          and "What each scope captured last" in body,
           f"{code} {xfo} rb={json.dumps(_rb)[:200]} " + (json.dumps(_dsn)[:400] if _dsn else body[:300]))
     # every script block of the page parses (node), so a slip in the template can't blank the tab
     import shutil as _sh2
