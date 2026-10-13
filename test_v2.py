@@ -5561,9 +5561,9 @@ check("PL a contract file of the wrong shape is a warning and an empty list, not
 shutil.rmtree(PL2.root, ignore_errors=True)
 shutil.rmtree(PL.root, ignore_errors=True)
 
-# ═══════════════ CHAIN OB: the Observatory, fed live (1.7.0) ═══════════════════
-print("\n── Chain OB: the Observatory page, fed from the same facts as projects.json ──")
-from datetime import date as _date, timedelta as _td
+# ═══════════════ CHAIN OB: the Observatory, fed from the same pass as projects.json ═══
+print("\n── Chain OB: the Observatory page, written with projects.json, served by the panel ──")
+from datetime import date as _date
 _ob_n = lambda back: (_date.today() - _td(days=back)).isoformat()   # nights relative to today: the
 OB_N = {"m1": _ob_n(5), "m2": _ob_n(4), "i1": _ob_n(70), "i2": _ob_n(69)}  # statuses stay the same all year
 OB = pl_pc_env("OB", {
@@ -5574,88 +5574,244 @@ OB = pl_pc_env("OB", {
                       exposureSeconds=20.0, archiveLocation="S50/NGC 7023 - Iris Nebula/Day 1/x.fit"),
     "b2": pl_snap_row("NGC 7023", "NGC 7023 - Iris Nebula", OB_N["i2"], "b2" * 32, scope="Seestar S50",
                       exposureSeconds=20.0),
+    # the Seestar's filter sits in the filename, never in a row field
+    "b3": dict(pl_snap_row("NGC 7023", "NGC 7023 - Iris Nebula", OB_N["i2"], "b3" * 32, scope="Seestar S50",
+                           exposureSeconds=20.0), filename=f"Light_NGC 7023_20.0s_IRCUT_{OB_N['i2'].replace('-', '')}-221000.fit"),
+    # two contract targets that share a plain name ('Spiral Galaxy'): never one on the page
+    "g1": pl_snap_row("M 106", "M 106 - Spiral Galaxy", OB_N["i1"], "g1" * 32),
+    "g2": pl_snap_row("NGC 2403", "NGC 2403 - Spiral Galaxy", OB_N["i1"], "g2" * 32),
     "c1": pl_snap_row("Nobody Knows", "Nobody Knows", OB_N["i2"], "c1" * 32),
-}, at=_dt.now(_tz.utc).isoformat(timespec="seconds"))
+    "c2": pl_snap_row("Odd <!--<script> \u2028 name", "Odd <!--<script> \u2028 name", OB_N["i2"], "c2" * 32),
+}, at=_dt.now(_tz.utc).isoformat(timespec="seconds"), machine="Mac<!--<script>")   # a hostile label reaches the page
 shutil.copy(os.path.join(PL_SRC, "astro-observatory.html"), os.path.join(OB.root, "astro-observatory.html"))
 OB.env.update({"ASTRO_OBSERVATORY_TEMPLATE": os.path.join(OB.root, "astro-observatory.html"),
-               "ASTRO_ARCHIVE_LABEL": "E:\\Astro Image Data"})
+               "ASTRO_ARCHIVE_LABEL": "E:\\Astro Image Data", "ASTRO_QUIET_PERIOD_DAYS": "14"})
 def ob_listing(root):
-    out = set()
+    """relpath -> sha256 of every file (folders too), so a rewrite in place shows."""
+    out = {}
     for dp, dn, fn in os.walk(root):
+        for d in dn:
+            out[os.path.relpath(os.path.join(dp, d), root) + os.sep] = "dir"
         for f in fn:
-            out.add(os.path.relpath(os.path.join(dp, f), root))
+            q = os.path.join(dp, f)
+            with open(q, "rb") as fh:
+                out[os.path.relpath(q, root)] = hashlib.sha256(fh.read()).hexdigest()
     return out
-_before = ob_listing(OB.root)
-r = OB.run("--observatory")
-_after = ob_listing(OB.root)
-_obf = os.path.join(OB.state, "observatory.html")
 def ob_dataset(path):
     html = open(path, encoding="utf-8").read()
     m = re.search(r'<script id="dataset" type="application/json">(.*?)</script>', html, re.S)
     return (json.loads(m.group(1)) if m else None), html
-_ds, _html = ob_dataset(_obf) if os.path.isfile(_obf) else (None, "")
-check("OB --observatory writes one standalone page in the state folder, and nothing else anywhere",
-      r.returncode == 0 and os.path.isfile(_obf) and "Observatory written" in r.stdout
-      and _after - _before == {os.path.relpath(_obf, OB.root)},
-      f"rc={r.returncode} new={sorted(_after - _before)} {r.stdout[-300:]}")
-check("OB the page carries the dataset in the Observatory's own shape, no slot left unfilled",
-      isinstance(_ds, dict) and _ds.get("schema") == "observatory/1" and "__DATASET__" not in _html
-      and all(k in _ds for k in ("scopes", "targets", "sessions", "totals", "health", "reconciliation",
-                                 "events", "shelves", "junk", "calibration", "generatedAt", "sourceNote")),
-      str(_ds)[:300] if _ds else _html[:300])
-_tg = {x["name"]: x for x in (_ds or {}).get("targets", [])}
-_m31, _iris = _tg.get("Andromeda Galaxy", {}), _tg.get("Iris Nebula", {})
-check("OB targets come from the contract: name, codes, type, constellation and the sky position",
-      _m31.get("codes") and "M 31" in _m31["codes"] and _m31.get("constellation") == "Andromeda"
-      and isinstance(_m31.get("ra"), float) and isinstance(_m31.get("dec"), float) and _m31.get("mosaic") is True
-      and _iris.get("codes") and "NGC 7023" in _iris["codes"] and "Nobody Knows" not in _tg,
-      json.dumps({k: v for k, v in _m31.items() if k not in ("programmes", "statusCards")}))
-check("OB the statuses are projects.json's, in the Observatory's words: a session two nights ago is "
-      "Capturing, August's frames are Ready to process",
-      _m31.get("state") == "captured" and _iris.get("state") == "stacked"
-      and _m31["statusCards"][0]["camera"] == "Seestar S30 Pro" and _iris["statusCards"][0]["camera"] == "Seestar S50"
-      and _iris["statusCards"][0]["action"] == "Process it" and "quiet period" in _iris["statusCards"][0]["evidence"]
-      and "on the archive" in _iris["statusCards"][0]["badges"],
-      json.dumps([_m31.get("statusCards"), _iris.get("statusCards")]))
-_sess = sorted((s["target"], s["camera"], s["night"], s["frames"], s["hours"]) for s in (_ds or {}).get("sessions", []))
-check("OB sessions are one target, one scope, one night, with frames and hours from the exposures",
-      _sess == [("Andromeda Galaxy", "Seestar S30 Pro", OB_N["m1"], 2, round(20 / 3600, 3)),
-                ("Andromeda Galaxy", "Seestar S30 Pro", OB_N["m2"], 1, round(10 / 3600, 3)),
-                ("Iris Nebula", "Seestar S50", OB_N["i1"], 1, round(20 / 3600, 3)),
-                ("Iris Nebula", "Seestar S50", OB_N["i2"], 1, round(20 / 3600, 3))]
-      and next(s for s in _ds["sessions"] if s["night"] == OB_N["m2"])["filters"] == {"LP": 1}
+_strict = lambda s: json.loads(s, parse_constant=lambda c: (_ for _ in ()).throw(ValueError(c)))
+
+# --projects writes projects.json AND observatory.json, from one pass
+_before = ob_listing(OB.root)
+r = OB.run("--projects")
+_after = ob_listing(OB.root)
+_changed = {k for k in set(_before) | set(_after) if _before.get(k) != _after.get(k)} - {os.path.join("state", "machine.json")}   # the identity, made on first run
+_pj_rel, _oj_rel = (os.path.relpath(os.path.join(OB.state, n), OB.root) for n in ("projects.json", "observatory.json"))
+_oj = json.load(open(os.path.join(OB.state, "observatory.json"))) if os.path.isfile(os.path.join(OB.state, "observatory.json")) else {}
+_pj = json.load(open(os.path.join(OB.state, "projects.json"))) if os.path.isfile(os.path.join(OB.state, "projects.json")) else {}
+check("OB --projects writes projects.json and observatory.json in the state folder, and changes nothing else",
+      lambda: r.returncode == 0 and _changed == {_pj_rel, _oj_rel} and "observatory.json" in r.stdout
+      and _oj.get("schema") == "observatory/1",
+      f"rc={r.returncode} changed={sorted(_changed)} {r.stdout[-300:]}")
+_tg = {x["id"]: x for x in _oj.get("targets", [])}
+_m31, _iris, _m106, _n2403 = (_tg.get(k, {}) for k in ("M31", "NGC7023", "M106", "NGC2403"))
+check("OB targets are keyed by the contract's id and named with their code: two 'Spiral Galaxy' "
+      "entries stay two targets, each with its own position",
+      lambda: _m106["name"] == "Spiral Galaxy (M 106)" and _n2403["name"] == "Spiral Galaxy (NGC 2403)"
+      and _m106["ra"] != _n2403["ra"] and _oj["totals"]["targets"] == 4
+      and _m31["name"] == "Andromeda Galaxy (M 31)" and "M 31" in _m31["codes"]
+      and _m31["constellation"] == "Andromeda" and isinstance(_m31["ra"], float) and _m31["mosaic"] is True
+      and "Nobody Knows" not in {x["name"] for x in _oj["targets"]},
+      json.dumps([_m106.get("name"), _n2403.get("name"), (_oj or {}).get("totals")]))
+_card = lambda tg: (tg.get("statusCards") or [{}])[0]
+check("OB the statuses are the project layer's, in the page's words, with a reason, a next step and "
+      "where the frames are; a frame 4 nights ago is Still capturing with its ready-from night",
+      lambda: _m31["state"] == "captured" and _iris["state"] == "stacked"
+      and _card(_m31)["camera"] == "Seestar S30 Pro" and _card(_iris)["camera"] == "Seestar S50"
+      and _card(_iris)["action"] == "Process it" and "no new frames since" in _card(_iris)["evidence"]
+      and f"({(_date.fromisoformat(_oj['asOfNight']) - _date.fromisoformat(OB_N['i2'])).days} nights)" in _card(_iris)["evidence"]
+      and _card(_iris)["badges"] == ["on the archive"]
+      and _card(_m31)["action"] == "Keep capturing" and "ready to process from" in _card(_m31)["evidence"]
+      and _card(_m31)["readyOn"] == (_date.fromisoformat(OB_N["m2"]) + _td(days=15)).isoformat()
+      and _card(_m31)["label"] == "Andromeda Galaxy (M 31) (mosaic)" and _m31["programmes"][0]["mosaic"] is True
+      and _card(_m31)["lights"] == 3,
+      json.dumps([_card(_m31), _card(_iris)]))
+_sess = sorted((s["target"], s["camera"], s["night"], s["frames"], s["hours"]) for s in _oj.get("sessions", []))
+check("OB sessions are one target, one scope, one night; filters add up to the frames (a Seestar's "
+      "filter read from its filename, the rest 'unrecorded'); exposures and bytes per dataset",
+      lambda: _sess == [("Andromeda Galaxy (M 31)", "Seestar S30 Pro", OB_N["m1"], 2, round(20 / 3600, 3)),
+                        ("Andromeda Galaxy (M 31)", "Seestar S30 Pro", OB_N["m2"], 1, round(10 / 3600, 3)),
+                        ("Iris Nebula (NGC 7023)", "Seestar S50", OB_N["i1"], 1, round(20 / 3600, 3)),
+                        ("Iris Nebula (NGC 7023)", "Seestar S50", OB_N["i2"], 2, round(40 / 3600, 3)),
+                        ("Spiral Galaxy (M 106)", "Seestar S30 Pro", OB_N["i1"], 1, round(10 / 3600, 3)),
+                        ("Spiral Galaxy (NGC 2403)", "Seestar S30 Pro", OB_N["i1"], 1, round(10 / 3600, 3))]
+      and next(s for s in _oj["sessions"] if s["night"] == OB_N["m2"] and s["target"].startswith("Andromeda"))["filters"] == {"LP": 1}
+      and _m31["programmes"][0]["filters"] == {"LP": 1, "unrecorded": 2}
+      and _iris["programmes"][0]["filters"] == {"IRCUT": 1, "unrecorded": 2}
       and _m31["programmes"][0]["exposures"] == {"10": 3} and _m31["programmes"][0]["bytes"] == 3000,
-      json.dumps(_sess) + json.dumps((_ds or {}).get("sessions")))
-_sc = {s["camera"]: s for s in (_ds or {}).get("scopes", [])}
-check("OB per-scope totals, the grand totals and the archive path the drawer shows",
-      _sc.get("Seestar S30 Pro", {}).get("frames") == 3 and _sc.get("Seestar S50", {}).get("nights") == 2
-      and _sc["Seestar S50"]["first"] == OB_N["i1"] and _ds["totals"]["lights"] == 5
-      and _ds["totals"]["nights"] == 4 and _ds["totals"]["targets"] == 2 and _ds["totals"]["sessions"] == 4
+      json.dumps(_sess) + json.dumps([_m31.get("programmes"), _iris.get("programmes")])[:600])
+_sc = {s["camera"]: s for s in _oj.get("scopes", [])}
+check("OB per-scope totals carry the contract colour; the grand totals; the archive path and rel the "
+      "drawer's buttons use; a dataset not on the archive says so",
+      lambda: _sc["Seestar S30 Pro"]["frames"] == 5 and _sc["Seestar S30 Pro"]["colour"] == "#eda100"
+      and _sc["Seestar S50"]["nights"] == 2 and _sc["Seestar S50"]["first"] == OB_N["i1"]
+      and _oj["totals"]["lights"] == 8 and _oj["totals"]["nights"] == 4 and _oj["totals"]["sessions"] == 6
       and _iris["programmes"][0]["path"] == "E:\\Astro Image Data\\S50\\NGC 7023 - Iris Nebula"
-      and _m31["programmes"][0]["path"] == "not yet on the archive",
-      json.dumps([_sc, _ds["totals"], _iris["programmes"][0]["path"], _m31["programmes"][0]["path"]]) if _ds else "")
-check("OB the project layer's warnings reach the page's Data health as warnings, and the unknown name is among them",
-      any(h["severity"] == "warn" and "contract doesn't know" in h["detail"] for h in (_ds or {}).get("health", []))
-      and (_ds or {}).get("health", [{}])[0].get("severity") == "info"
-      and all(x["ok"] for x in (_ds or {}).get("reconciliation", [])),
-      json.dumps((_ds or {}).get("health")))
-# a custom path inside the root; one outside is refused in test mode; no template is a clear stop
+      and _iris["programmes"][0]["rel"] == "S50/NGC 7023 - Iris Nebula"
+      and _m31["programmes"][0]["rel"] is None and _m31["programmes"][0]["path"] == "",
+      json.dumps([_sc, (_oj or {}).get("totals"), (_iris.get("programmes") or [{}])[0].get("path")]))
+check("OB Data health says what was read and what was not, the unknown names are a warning, and "
+      "'how the numbers add up' explains every row not counted (never a MATCH over different numbers)",
+      lambda: _oj["health"][0]["severity"] == "info" and "'s record" in _oj["health"][0]["detail"]
+      and "not checked here" in _oj["health"][0]["detail"]
+      and any(h["severity"] == "warn" and "contract doesn't know" in h["detail"] for h in _oj["health"])
+      and sum(1 for h in _oj["health"] if "snapshot is old" in h.get("title", "")) == 0
+      and _oj["reconciliation"][0]["expected"] == 10 and _oj["reconciliation"][0]["computed"] == 8
+      and "2 not counted: 2 names the contract doesn't know" in _oj["reconciliation"][0]["note"]
+      and all(x["ok"] for x in _oj["reconciliation"]) and len(_oj["reconciliation"]) == 3
+      and _oj["inputs"]["snapshot"]["rows"] == 10 and _oj["inputs"]["finals"] is False
+      and _pj["sources"]["dropped"] == {"unknown_names": 2, "no_scope": 0, "no_night": 0, "unreadable": 0, "duplicates": 0}
+      and all("key" in e for p in _pj["projects"] for e in p["datasets"]),
+      json.dumps([(_oj or {}).get("health"), (_oj or {}).get("reconciliation"), (_pj.get("sources") or {}).get("dropped")])[:900])
+
+# --observatory: the standalone page, and the dataset block as a browser reads it
+_before = ob_listing(OB.root)
+r = OB.run("--observatory")
+_after = ob_listing(OB.root)
+_changed = {k for k in set(_before) | set(_after) if _before.get(k) != _after.get(k)}
+_obf = os.path.join(OB.state, "observatory.html")
+_ds, _html = ob_dataset(_obf) if os.path.isfile(_obf) else (None, "")
+check("OB --observatory writes one standalone page in the state folder and changes nothing else",
+      lambda: r.returncode == 0 and _changed == {os.path.relpath(_obf, OB.root)} and "Observatory written" in r.stdout
+      and _ds["totals"]["lights"] == 8, f"rc={r.returncode} changed={sorted(_changed)} {r.stdout[-300:]}")
+_blob = re.search(r'<script id="dataset" type="application/json">(.*?)</script>', _html, re.S)
+_blob = _blob.group(1) if _blob else ""
+check("OB the dataset block can't end the script or open a comment (a hostile name from the other "
+      "computer's snapshot), is strict JSON (no NaN), and __DATASET__ is gone",
+      lambda: bool(_blob) and "<" not in _blob and ">" not in _blob and "&" not in _blob
+      and any("Mac<!--<script>" in h["detail"] for h in _strict(_blob)["health"]) and "__DATASET__" not in _html,
+      _blob[:300])
+# the output path: a custom file inside the root; never the archive, a record file, or a file that isn't a page
 _custom = os.path.join(OB.root, "out", "obs.html")
-r2 = OB.run("--observatory", _custom)
-r3 = OB.run("--observatory", os.path.join(tempfile.gettempdir(), "v2test-OB-outside.html"))
-r4 = OB.run("--observatory", extra_env={"ASTRO_OBSERVATORY_TEMPLATE": os.path.join(OB.root, "missing.html")})
-check("OB --observatory FILE writes where it is told (inside the root), refuses a file outside it, and "
-      "says plainly when the page template is missing",
-      r2.returncode == 0 and os.path.isfile(_custom) and ob_dataset(_custom)[0]["totals"]["lights"] == 5
-      and r3.returncode == 3 and not os.path.exists(os.path.join(tempfile.gettempdir(), "v2test-OB-outside.html"))
-      and r4.returncode != 0 and "astro-observatory.html" in (r4.stdout + r4.stderr)
-      and not os.path.exists(_obf + ".tmp"),
-      f"rc2={r2.returncode} rc3={r3.returncode} rc4={r4.returncode} " + (r4.stdout + r4.stderr)[-300:])
-_pr = probe(OB.env, "tpl = os.path.join(os.environ['ASTRO_OBSERVATORY_TEMPLATE'])\n"
-            "h = m.observatory_html({'a': '</script><b>', 'schema': 'x'}, tpl)\n"
-            "print(json.dumps({'closed': h.count('</script>'), 'esc': '<\\\\/script>' in h}))\n")
-check("OB a value that looks like a closing script tag can't break out of the dataset block",
-      _pr.get("esc") is True and _pr.get("closed") == _html.count("</script>"), str(_pr))
+_outx = OB.root + "-outside.html"
+_arc = os.path.join(OB.archive, "obs.html")
+_rec = os.path.join(OB.state, "ledger.json")
+_other = os.path.join(OB.root, "notes.txt")
+open(_other, "w").write("Brett's notes")
+try:
+    r2 = OB.run("--observatory", _custom)
+    r3 = OB.run("--observatory", _outx)
+    r4 = OB.run("--observatory", extra_env={"ASTRO_OBSERVATORY_TEMPLATE": os.path.join(OB.root, "missing.html")})
+    r5 = OB.run("--observatory", _arc)
+    r6 = OB.run("--observatory", _rec)
+    r7 = OB.run("--observatory", _other)
+    r8 = OB.run("--observatory", os.path.join(OB.root, "dry.html"), "--dry-run")
+    r9 = OB.run("--observatory", _custom)                       # replacing its own page is fine
+    check("OB --observatory FILE writes where it is told (inside the root), replaces only an Observatory page, "
+          "never writes under the archive or over a record file, refuses outside the root, honours --dry-run, "
+          "and says plainly when the page template is missing",
+          lambda: r2.returncode == 0 and os.path.isfile(_custom) and ob_dataset(_custom)[0]["totals"]["lights"] == 8
+          and r3.returncode == 3 and "outside the test root" in (r3.stdout + r3.stderr) and not os.path.exists(_outx)
+          and r4.returncode == 1 and "run the installer again" in (r4.stdout + r4.stderr)
+          and r5.returncode == 0 and "inside the archive" in (r5.stdout + r5.stderr) and not os.path.exists(_arc)
+          and r6.returncode == 0 and "own record files" in (r6.stdout + r6.stderr) and not os.path.exists(_rec)
+          and r7.returncode == 0 and "isn't an Observatory page" in (r7.stdout + r7.stderr)
+          and open(_other).read() == "Brett's notes"
+          and r8.returncode == 0 and "Dry run" in r8.stdout and not os.path.exists(os.path.join(OB.root, "dry.html"))
+          and r9.returncode == 0 and not any(f.endswith(".tmp") for f in os.listdir(os.path.dirname(_custom))),
+          " | ".join(f"rc{i}={x.returncode} {(x.stdout + x.stderr)[-120:]!r}" for i, x in
+                     enumerate((r2, r3, r4, r5, r6, r7, r8, r9), 2)))
+finally:
+    if os.path.exists(_outx):
+        os.remove(_outx)
+
+# every state from the facts, through build_observatory itself at a fixed night
+OB2 = pl_pc_env("OB2", {
+    "w1": pl_snap_row("NGC 7380", "NGC 7380 - Wizard Nebula", "2026-09-26", "w1" * 32, exposureSeconds=1800.0, here=True),
+    "w2": pl_snap_row("NGC 7380", "NGC 7380 - Wizard Nebula", "2026-09-26", "w2" * 32, exposureSeconds=1800.0, filter="Ha"),
+    "r1": pl_snap_row("NGC 2244", "NGC 2244 - Rosette Nebula", "2026-09-25", "r1" * 32, exposureSeconds=900.0,
+                      dest=os.path.join(tempfile.gettempdir(), "x")),
+    "p1": pl_snap_row("M 42", "M 42 - Orion Nebula", "2026-09-01", "p1" * 32,
+                      archiveLocation="S30P/Orion Nebula (M 42)/Day 1/p1.fit"),
+    "d1": pl_snap_row("NGC 7635", "NGC 7635 - Bubble Nebula", "2026-08-20", "d1" * 32),
+    "q1": pl_snap_row("M 45", "M 45 - Pleiades", "20260815", "q1" * 32, exposureSeconds=0),   # a bare night spelling, no exposure
+}, at="2026-10-01T08:00:00Z")
+_pc2 = os.path.join(OB2.archive, "_verify", "pc"); os.makedirs(_pc2, exist_ok=True)
+with open(os.path.join(_pc2, "inventory-E-20261009T033000Z.jsonl"), "w") as f:
+    f.write(json.dumps(pl_inv_row("S30P/Orion Nebula (M 42)/WBPP/master/masterLight.xisf", "S30P", "Orion Nebula (M 42)")) + "\n")
+with open(os.path.join(_pc2, "inventory-E.status.json"), "w") as f:
+    json.dump({"schema": "inventory-status/1", "generation": "20261009T033000Z"}, f)
+os.makedirs(os.path.join(OB2.root, "finals", "Seestar S30 Pro"))
+open(os.path.join(OB2.root, "finals", "Seestar S30 Pro", "NGC7635_Bubble_Nebula.jpg"), "w").write("x")
+_o = probe(OB2.env, "st = m.State()\nextra, names = m.projects_inputs(st)\n"
+           f"print(json.dumps(m.build_observatory(st, extra, today='{PL_TODAY}', custom_names=names)))\n")
+_by = {c: x for x in _o.get("targets", []) for c in x["codes"]}
+_cd = lambda c: _by[c]["statusCards"][0]
+check("OB2 all four states from the facts, with the page's actions, reasons, badges and real hours; a bare "
+      "night spelling is one night; the old snapshot is one warning, not two",
+      lambda: [_by[c]["state"] for c in ("NGC 7380", "NGC 2244", "M 42", "NGC 7635")] == ["captured", "stacked", "processing", "complete"]
+      and [_cd(c)["action"] for c in ("NGC 7380", "NGC 2244", "M 42", "NGC 7635")]
+          == ["Keep capturing", "Process it", "Finish it: process to a final", ""]
+      and _cd("M 42")["evidence"].startswith("master saved: masterLight.xisf")
+      and _cd("NGC 7635")["evidence"] == "finished picture NGC7635_Bubble_Nebula.jpg"
+      and _cd("NGC 7380")["badges"] == ["on the Mac"] and _cd("NGC 2244")["badges"] == ["on the Mac (per its ledger)"]
+      and _cd("M 42")["badges"] == ["on the archive"]
+      and _by["NGC 7380"]["programmes"][0]["hours"] == 1.0 and _cd("NGC 7380")["hours"] == 1.0
+      and _by["NGC 7380"]["programmes"][0]["filters"] == {"Ha": 1, "unrecorded": 1}
+      and _by["M 42"]["programmes"][0]["processedFiles"] == 1 and _by["NGC 7635"]["pendingProgrammes"] == 0
+      and _by["M 45"]["lastNight"] == "2026-08-15" and _by["M 45"]["statusCards"][0]["lights"] == 1
+      and sum(1 for h in _o["health"] if "snapshot is old" in h.get("title", "") or "day(s) old" in h.get("detail", "")) == 1
+      and _o["inputs"]["inventoryAt"] == "2026-10-09T03:30:00+00:00" and _o["inputs"]["finals"] is True
+      and "Final Astro Images" in _o["health"][0]["detail"] and "archive's inventory of 9 Oct 2026" in _o["health"][0]["detail"]
+      and _o["asOfNight"] == PL_TODAY and _o["quietPeriodDays"] == 14
+      and all(x["ok"] for x in _o["reconciliation"]),
+      json.dumps(_o)[:900] if isinstance(_o, dict) else str(_o))
+shutil.rmtree(OB2.root, ignore_errors=True)
+
+# the PC publishes its list in its own _verify folder; the Mac's panel prefers it while it is fresh
+OB3 = teh.Env("OB3", asiair=False, seestar=False)      # a Mac (ASTRO_SHIP_FOLDER=mac) with its own small ledger
+shutil.copytree(PL_CON if os.path.isdir(PL_CON) else os.path.join(PL_SRC, "contract"), os.path.join(OB3.root, "contract"))
+OB3.env.update({"ASTRO_CONTRACT_DIR": os.path.join(OB3.root, "contract"), "ASTRO_SHIP_FOLDER": "mac"})
+os.makedirs(OB3.state, exist_ok=True)
+with open(os.path.join(OB3.state, "ledger.json"), "w") as f:
+    json.dump({"version": 1, "calibration": {}, "files": {"w1": {
+        "filename": "Light_NGC 7380_20.0s_20260901-220000.fit", "target": "NGC 7380", "device": "seestar",
+        "scope": "Seestar S50 Pro", "sourceType": "sub", "night": "2026-09-01", "exposureSeconds": 20.0}}}, f)
+r = OB3.run("--projects")
+_own = json.load(open(os.path.join(OB3.state, "projects.json")))
+_pcdir = os.path.join(OB3.archive, "_verify", "pc"); os.makedirs(_pcdir, exist_ok=True)
+_pub = dict(_own); _pub["generated_at"] = _dt.now(_tz.utc).isoformat(timespec="seconds")
+_pub["projects"] = [{"target_id": "M42", "name": "Orion Nebula (M 42)", "status": "done", "to_process": False,
+                     "last_captured": "2026-09-01", "integration_seconds": 100,
+                     "datasets": [{"key": "M42|S30P|Shinfield", "scope": "S30P", "scope_name": "Seestar S30 Pro",
+                                   "site": "Shinfield", "status": "done", "nights": 1, "frames": 1,
+                                   "integration_seconds": 100, "first_session": "2026-09-01",
+                                   "last_session": "2026-09-01", "locations": ["chillblast_archive"],
+                                   "archive_rel": "S30P/Orion Nebula (M 42)", "finals": ["x.jpg"]}]}]
+json.dump(_pub, open(os.path.join(_pcdir, "projects.json"), "w"))
+_obs_pub = {"schema": "observatory/1", "generatedAtIso": _pub["generated_at"], "generatedAt": "now", "targets": [{"id": "M42"}],
+            "scopes": [], "sessions": [], "totals": {}, "health": [], "reconciliation": [], "warnings": [], "sources": {}}
+json.dump(_obs_pub, open(os.path.join(_pcdir, "observatory.json"), "w"))
+_pr = probe(OB3.env, "a = m.load_projects(); b = m.load_projects(prefer_published=True); c = m.load_observatory(prefer_published=True)\n"
+            "print(json.dumps({'own': [p['target_id'] for p in a['projects']], 'pref': [p['target_id'] for p in b['projects']],"
+            " 'by': (b.get('sources') or {}).get('published_by'), 'obs': (c or {}).get('servedFrom'), 'obsT': [t['id'] for t in (c or {}).get('targets', [])]}))\n")
+_old = dict(_pub); _old["generated_at"] = (_dt.now(_tz.utc) - _td(hours=72)).isoformat(timespec="seconds")
+json.dump(_old, open(os.path.join(_pcdir, "projects.json"), "w"))
+_pr2 = probe(OB3.env, "b = m.load_projects(prefer_published=True)\nprint(json.dumps({'pref': [p['target_id'] for p in b['projects']], 'by': (b.get('sources') or {}).get('published_by')}))\n")
+check("OB3 on the Mac, the PC's published list (its own _verify/pc folder on the archive) is preferred while "
+      "it is under 48 h old, and named as the PC's; an old one gives way to the Mac's own; the Observatory the same",
+      lambda: _pr["own"] == ["NGC7380"] and _pr["pref"] == ["M42"] and _pr["by"] == "pc"
+      and isinstance(_pr["obs"], dict) and _pr["obs"].get("machine") == "PC" and _pr["obsT"] == ["M42"]
+      and _pr2["pref"] == ["NGC7380"] and _pr2["by"] is None,
+      json.dumps([_pr, _pr2]))
+# the PC's nightly job publishes both files (chain PC runs the job; here the publisher alone)
+_pr3 = probe(OB.env, "n = m.publish_projects()\nimport os\n"
+             "print(json.dumps({'n': n, 'files': sorted(os.listdir(os.path.join(m.ARCHIVE_MOUNT, '_verify', 'pc')))}))\n")
+check("OB publish_projects puts projects.json and observatory.json in this computer's own _verify folder, nothing else",
+      lambda: _pr3["n"] == 2 and _pr3["files"] == ["observatory.json", "projects.json"], str(_pr3))
+shutil.rmtree(OB3.root, ignore_errors=True)
 shutil.rmtree(OB.root, ignore_errors=True)
 
 # ═══════════════ CHAIN IN: the installers and the suite itself (1.7.0) ════════

@@ -48,7 +48,7 @@ From 1.7.0 the PC's side is the importer itself, in Python: the old `sweep.ps1` 
 
 1. Install the importer on the PC: unzip it and double-click **Install on Windows.cmd** (see the Windows section of [INSTALL.md](INSTALL.md)). With `E:\Astro Image Data` in place it also:
    - makes the folders `_verify\pc` (only the PC writes there), `_verify\mac` and `_verify\mac\requests` (the Mac's), `_verify\lock` (the ship lock) and `_Quarantine\ship-incomplete`;
-   - sets up the scheduled task **Astro archive sweep**, at every logon and daily at 03:30. It checks every shipped frame (`--sweep`), lists the archive (`--inventory`), hashes new files (`--hash`) and rebuilds `projects.json`, all from this disk, and leaves its result in `_verify\pc\nightly-status.json`;
+   - sets up the scheduled task **Astro archive sweep**, at every logon and daily at 03:30. It checks every shipped frame (`--sweep`), lists the archive (`--inventory`), hashes new files (`--hash`), rebuilds the To process list and the Observatory's data (`--projects`) and publishes both into `_verify\pc` for the Mac's panel, all from this disk, and leaves its result in `_verify\pc\nightly-status.json`;
    - sets up **Astro sync requests**, every 5 minutes. It writes a heartbeat (`_verify\pc\pc-heartbeat.json`) so the Mac can tell the PC is awake, and does what the Mac asked for in `_verify\mac\requests`.
 
    Run the installer from a normal window, never one opened with "Run as administrator" (from 1.7.0 it refuses one). If any of the three tasks was set up from an administrator window before, the installer can't replace it and says so. Open PowerShell as administrator, run these three lines, close that window, and run the installer again from a normal one:
@@ -58,6 +58,8 @@ From 1.7.0 the PC's side is the importer itself, in Python: the old `sweep.ps1` 
        Unregister-ScheduledTask -TaskName 'Astro sync requests' -Confirm:$false
 
    The old script files (for example `_Index\sweep\sweep.ps1`) stay where they are. They are yours to delete.
+
+   Each Mac ship also leaves `_verify\mac\ledger-snapshot.json`; the PC's Dashboard, To process and Observatory tabs read the Mac's record from it.
 
 2. Run the sweep once now:
 

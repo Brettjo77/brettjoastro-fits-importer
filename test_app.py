@@ -1696,13 +1696,21 @@ try:
         with urllib.request.urlopen(URLN + "/observatory?t=1", timeout=30) as resp:
             return resp.status, resp.headers.get("X-Frame-Options"), resp.read().decode()
     code, xfo, body = get_obs()
-    check("OB the Observatory tab with nothing recorded anywhere is a plain sentence (200, framable)",
-          code == 200 and xfo == "SAMEORIGIN" and "Nothing to show yet" in body and "<script id=\"dataset\"" not in body,
-          f"{code} {xfo} {body[-200:]}")
+    check("OB the Observatory tab before anything was worked out is a plain sentence naming Refresh (200, framable)",
+          code == 200 and xfo == "SAMEORIGIN" and "hasn't been worked out" in body and "Refresh" in body
+          and "<script id=\"dataset\"" not in body, f"{code} {xfo} {body[-200:]}")
     with urllib.request.urlopen(URLN + "/", timeout=15) as resp:
         _pagen = resp.read().decode()
-    check("OB the panel has an Observatory tab that frames /observatory",
-          'data-tab="observatory"' in _pagen and 'id="obsFrame"' in _pagen and '"/observatory?t="' in _pagen)
+    check("OB the panel's tabs lead with the job (Panel, To process, Observatory, Dashboard, Report), each with a "
+          "tooltip; the Observatory tab frames /observatory, has its own Refresh, fills the window (flex), and "
+          "listens only to its own frame for open / show requests",
+          lambda: [m.group(1) for m in re.finditer(r'data-tab="([a-z]+)"[^>]*title="', _pagen)]
+                  == ["panel", "archive", "observatory", "dash", "report"]
+          and ">To process</button>" in _pagen and 'id="obsFrame"' in _pagen and '"/observatory?t="' in _pagen
+          and 'id="obsRefresh"' in _pagen and "#tab-observatory{flex:1;min-height:0" in _pagen
+          and "e.source!==fr.contentWindow" in _pagen and 'd.kind==="archive-open"' in _pagen
+          and 'd.kind==="archive-show"' in _pagen and 'd.kind==="observatory-ready"' in _pagen,
+          _pagen[:200])
     os.makedirs(os.path.join(envn.archive, "_verify", "mac"))
     with open(os.path.join(envn.archive, "_verify", "mac", "ledger-snapshot.json"), "w") as f:
         json.dump({"schema": "ledger-snapshot/1", "machine": "Mac", "machineId": "mac", "machineUid": "m",
@@ -1715,16 +1723,24 @@ try:
     check("NL with the Mac's snapshot on the archive the Dashboard shows the Mac's record, with a banner saying so and how old it is",
           code == 200 and xfo == "SAMEORIGIN" and "This is the Mac's record" in body and "2026-10-01" in body
           and "day(s) ago" in body and "M 31" in body and "__DATA__" not in body, f"{code} {xfo} {body[:300]}")
+    # the Refresh button's endpoint writes projects.json and observatory.json; the tab reads the file
+    load_token(URLN)
+    _rb = api("/api/projects/rebuild", {}, url=URLN)
     code, xfo, body = get_obs()
     _m = re.search(r'<script id="dataset" type="application/json">(.*?)</script>', body, re.S)
-    _dsn = json.loads(_m.group(1)) if _m else {}
-    check("OB with the Mac's snapshot on the archive the Observatory renders the Mac's record: the page, "
-          "its dataset, Andromeda from the contract, one session, the snapshot named",
-          code == 200 and xfo == "SAMEORIGIN" and "Astro Archive Observatory" in body and "__DATASET__" not in body
-          and _dsn.get("schema") == "observatory/1" and [x["name"] for x in _dsn.get("targets", [])] == ["Andromeda Galaxy"]
-          and len(_dsn.get("sessions", [])) == 1 and "snapshot" in _dsn.get("sourceNote", "")
-          and _dsn["targets"][0]["statusCards"][0]["state"] == "stacked",
-          f"{code} {xfo} " + (json.dumps(_dsn)[:400] if _dsn else body[:300]))
+    _dsn = {}
+    try:
+        _dsn = json.loads(_m.group(1)) if _m else {}
+    except ValueError as e:
+        _dsn = {"error": str(e)}
+    check("OB after Refresh the Observatory renders the Mac's record from observatory.json: the page, its "
+          "dataset, Andromeda by its code, one session, the snapshot named, no slot left",
+          lambda: _rb.get("ok") is True and os.path.isfile(os.path.join(envn.state, "observatory.json"))
+          and code == 200 and xfo == "SAMEORIGIN" and "Astro Archive Observatory" in body and "__DATASET__" not in body
+          and _dsn.get("schema") == "observatory/1" and [x["name"] for x in _dsn.get("targets", [])] == ["Andromeda Galaxy (M 31)"]
+          and len(_dsn.get("sessions", [])) == 1 and _dsn["inputs"]["snapshot"]["machine"] == "Mac"
+          and _dsn["targets"][0]["statusCards"][0]["state"] == "stacked" and "<" not in _m.group(1),
+          f"{code} {xfo} rb={json.dumps(_rb)[:200]} " + (json.dumps(_dsn)[:400] if _dsn else body[:300]))
     # every script block of the page parses (node), so a slip in the template can't blank the tab
     import shutil as _sh2
     _node = _sh2.which("node") or next((p for p in ("/opt/node22/bin/node", "/usr/local/bin/node")
@@ -1738,6 +1754,9 @@ try:
             if rp.returncode != 0:
                 _bad.append(f"block {i}: {rp.stderr[-200:]}")
         check(f"OB the Observatory page's {len(_blocks)} script blocks parse (node)", not _bad, "; ".join(_bad))
+        rj = subprocess.run([_node, "-e", "JSON.parse(require('fs').readFileSync(0,'utf8'))"],
+                            input=_m.group(1) if _m else "x", capture_output=True, text=True, timeout=30)
+        check("OB the dataset block parses with a browser's JSON.parse (node)", rj.returncode == 0, rj.stderr[-200:])
     else:
         skip("OB the Observatory page's script blocks parse (needs node)")
 finally:

@@ -57,8 +57,9 @@ Smart telescopes fill up fast, and hand-copying folders leaves you guessing. Mos
 - Full MyWorks semantics: `_sub` light frames into Day folders (one Day per observing night), one `Stacked_N` kept per stacking *session* — a later, higher stack of the same exposure and filter continues an earlier one; a filter change or a restarted stack is its own keeper — never pruned, `_mosaic_pt` panels into `panels/`, `(mosaic)` display suffixes
 - Simultaneous **Milky Way captures auto-pair** to the DSO session shot at the same moment, renamed and filed under the DSO's display name
 - S50-family (S50 / S50 Pro) Lunar / Solar / Planetary / Scenery photo and video import
-- **The Observatory tab** (1.7.0): the Astro Archive Observatory dashboard, rebuilt from the importer's own record every time it opens: overview, every target, a coverage matrix, the pipeline board, the nights heatmap, the sky map, the scopes and data health, with the project layer's four states. `--observatory [FILE]` writes it as one standalone page
-- **Astro Desk, the Archive tab** (1.6.0): what is still to process on the archive (captured, stacked or in processing, from the Observatory's dataset), biggest first. Click a target for its nights, masters, processed files and finished pictures, with **Open folder**, **Open** (a master opens in PixInsight, a picture in its usual app), **Start Siril here** and **Copy path**. Read-only: it never writes to the archive, and it only opens folders and image files inside it. `/archive?target=…` opens it on one target (AstroLog links there)
+- **To process, from the facts** (1.7.0): `projects.json` says per object and scope what is still capturing, to process, in progress or done, worked out from the ledgers, the archive inventory and the finished pictures. The **To process** tab opens on it, with Open in Explorer / Open in Finder; the PC's complete list is published on the archive for the Mac
+- **The Observatory tab** (1.7.0): the Astro Archive Observatory page, drawn from the same pass as the To process list: what to process next, every target, a coverage matrix, the pipeline board, the nights heatmap, the sky map and footprints, the scopes and data health. `--observatory [FILE]` saves it as one standalone page
+- **Astro Desk, the folder list** (1.6.0): every folder on the archive under the To process list, with the live state where known (else the August 2026 scan's), biggest first. Click a target for its nights, masters, processed files and finished pictures, with **Open folder**, **Open** (a master opens in PixInsight, a picture in its usual app), **Start Siril here** and **Copy path**. Read-only: it never writes to the archive, and it only opens folders and image files inside it. `/archive?target=…` opens it on one target (AstroLog links there)
 - **Space on this Mac** (1.5.5): the dashboard shows what on this computer is safe to delete. That means frames whose archive copy the PC's sweep has re-hashed and matched, which are grouped by target folder with a coloured bar and a verdict: the whole folder, which Day folders, or keep. Anything not yet checked, not in the archive, edited, or not filed by the importer (your processing) is kept, and a folder holding any of it is never called safe. `--space` prints it as text. The importer never deletes from your Mac: you delete green folders yourself in Finder
 - SAFE-aware cleanup: after an import — or any time, from **clear…** on a row the panel shows as backed up — it offers to clear source folders **only** when every single file in them is ledger-verified *for that camera* and unchanged since import — *every* file (the one exception: a JPEG preview whose FIT twin is proven) — with No as the default. After your Yes it checks the camera and every file **again** and deletes only what passed; clearing flags only that camera's own ledger entries. Each Seestar's ledger rows are its own, so two units shooting the same target in the same second never share one
 
@@ -213,8 +214,8 @@ The panel covers day-to-day use; everything is also scriptable:
 | `--inventory [--root DIR]` / `--hash [--root DIR] [--max-minutes N] [--rolling]` | List, or hash, every file under a folder: the archive on the PC (into `_verify\pc`), or your own frame folders (into the state folder) (1.7.0) |
 | `--pc-tick` / `--pc-nightly` | Archive PC's scheduled work: the heartbeat and the Mac's requests every 5 minutes; sweep, inventory and hash at logon and 03:30 (1.7.0) |
 | `--space` | Read-only: what on this computer is safe to delete (archive copy re-checked by the PC), what is waiting, and what to keep, with the paths of safe folders |
-| `--observatory [FILE]` | Read-only apart from the one page it writes: the Observatory as standalone HTML (default `observatory.html` in the state folder); the panel's Observatory tab shows the same page live (1.7.0) |
-| `--projects [--with-ledger FILE] [--dry-run]` | Changes nothing in your frames or the archive; writes one file, `projects.json`, in the state folder: per project and scope, what is ready to process, in progress, still capturing or done (1.7.0) |
+| `--observatory [FILE] [--with-ledger FILE] [--dry-run]` | Writes the Observatory as one standalone page (default `observatory.html` in the state folder) and nothing else; never under the archive or over another file. The panel's Observatory tab reads `observatory.json`, which `--projects` writes (1.7.0) |
+| `--projects [--with-ledger FILE] [--dry-run]` | Changes nothing in your frames or the archive; writes two files in the state folder from one pass, `projects.json` (per project and scope: still capturing, to process, in progress, done) and `observatory.json` (the Observatory tab's data) (1.7.0) |
 | `--targets-draft` | Writes `targets-draft.json` in the state folder: this ledger's target names against `contract/targets.json`, with the unknown ones listed to add (1.7.0) |
 | `--tidy-stacks [--dry-run]` | List archived Seestar stacks that a later stack of the same session continues, and offer removal (typed DELETE) |
 | `--refresh-metadata` | Back-fill ledger metadata after parser improvements (safe, repeatable) |
@@ -229,11 +230,11 @@ The panel covers day-to-day use; everything is also scriptable:
 
 ## Testing
 
-709 end-to-end checks run the real engine and the real panel against simulated cameras (hand-built minimal FITS files, every device layout, crash/rename/mosaic/Milky-Way/cleanup/consent/interruption/multi-Seestar scenarios — including that the destination preview must equal the folders the import then actually creates, that a folder holding any unproven file is never offered as SAFE, and that the panel refuses foreign-origin requests):
+713 end-to-end checks run the real engine and the real panel against simulated cameras (hand-built minimal FITS files, every device layout, crash/rename/mosaic/Milky-Way/cleanup/consent/interruption/multi-Seestar scenarios — including that the destination preview must equal the folders the import then actually creates, that a folder holding any unproven file is never offered as SAFE, and that the panel refuses foreign-origin requests):
 
 ```bash
-python3 test_v2.py     # 550 engine checks (chain W1 simulates the Windows drive layer)
-python3 test_app.py    # 159 panel checks (boots the real HTTP server)
+python3 test_v2.py     # 553 engine checks (chain W1 simulates the Windows drive layer)
+python3 test_app.py    # 160 panel checks (boots the real HTTP server)
 # on Windows:  py -3 -X utf8 selftest.py   then the two suites above with  py -3 -X utf8
 ```
 
@@ -252,6 +253,7 @@ Install … .command                   double-click installer (the no-terminal r
 astro-import.py                      the engine (all cameras, ledger, report, dashboard)
 astro-app.py                         the control panel (localhost:8765)
 contract/                            targets.json and scopes.json: the one list of object and scope names (1.7.0)
+astro-observatory.html               the Observatory tab's page, filled from observatory.json (1.7.0)
 astro-watch.sh                       drive watcher (one for both cameras)
 BrettjoAstro FITS Importer.app/      app wrapper — the panel's grantable macOS identity
 Restart FITS Importer.command        Desktop one-click restart (Terminal context)

@@ -792,10 +792,10 @@ def _split_hostport(raw):
     return host, port
 
 
-def _note_page(text):
-    """A one-sentence page in the panel's own colours, for the Dashboard frame."""
+def _note_page(text, title="Dashboard"):
+    """A one-sentence page in the panel's own colours, for a framed tab."""
     safe = text.replace("&", "&amp;").replace("<", "&lt;").replace(">", "&gt;")
-    return ("<!DOCTYPE html><html><head><meta charset='utf-8'><title>Dashboard</title>"
+    return (f"<!DOCTYPE html><html><head><meta charset='utf-8'><title>{title}</title>"
             "<style>body{margin:0;padding:28px;font:15px/1.5 system-ui,-apple-system,sans-serif;"
             "color:#1f2937;background:#f8fafc}@media(prefers-color-scheme:dark){body{color:#e5e7eb;"
             "background:#0b1220}}p{max-width:60ch}</style></head><body><p>" + safe + "</p></body></html>")
@@ -909,7 +909,7 @@ class Handler(BaseHTTPRequestHandler):
             # The project layer's own file (projects.json, written by
             # --projects). Read-only; None when it hasn't been built yet.
             try:
-                doc = eng.load_projects()
+                doc = eng.load_projects(prefer_published=True)
             except Exception:
                 doc = None
             why = None
@@ -933,27 +933,45 @@ class Handler(BaseHTTPRequestHandler):
                 self._json(listing)
         elif self.path == "/observatory" or self.path.startswith("/observatory?"):
             # The Observatory (1.7.0): the Astro Archive Observatory's page, filled
-            # live from the same facts as projects.json. Framed by its own tab, so
-            # always framable; a problem is a readable note, never a refused frame.
+            # from observatory.json, which --projects (and the Refresh button, the
+            # ship, the PC's nightly job) writes beside projects.json. On the Mac
+            # the PC's published copy wins while it is recent (it sees the masters
+            # and the finished pictures). Framed by its own tab, so always framable;
+            # a problem is a readable note, never a refused frame.
             try:
-                state = eng.State()
-                extra, names = eng.projects_inputs(state)
-                dataset = eng.build_observatory(state, extra, custom_names=names)
-                if not dataset["targets"]:
-                    here, there = eng.ship_sides()
+                dataset = eng.load_observatory(prefer_published=True)
+                if dataset is None:
+                    corrupt = False
+                    try:
+                        corrupt = bool(getattr(eng.State(), "ledger_corrupt", False))
+                    except Exception:
+                        pass
+                    self._html(_note_page(
+                        "This computer's ledger can't be read, so the Observatory can't be worked out; "
+                        "see the Activity log." if corrupt else
+                        "The Observatory hasn't been worked out on this computer yet. Press Refresh "
+                        "now (above), or run --projects in Terminal: it reads your records and writes "
+                        "the To process list and this page's data.", "Observatory"), frame_self=True)
+                    return
+                if not dataset.get("targets"):
+                    warns = [w for w in (dataset.get("warnings") or []) if isinstance(w, str)]
                     self._html(_note_page(
                         "Nothing to show yet: no light frames in this computer's ledger"
-                        + (f" and no snapshot from the {'PC' if there == 'pc' else 'Mac'} on the archive."
-                           if not (dataset.get("sourceNote") or "").count("snapshot") else ".")
-                        + " The Observatory fills in once frames have been imported and shipped."),
-                        frame_self=True)
+                        + ("" if dataset.get("snapshotRows") else
+                           f" and no snapshot from the {'PC' if eng.ship_sides()[1] == 'pc' else 'Mac'} on the archive")
+                        + ". The Observatory fills in once frames have been imported and shipped."
+                        + ((" Warnings: " + " ".join(warns)) if warns else ""), "Observatory"), frame_self=True)
                     return
-                self._html(eng.observatory_html(dataset), frame_self=True)
-            except OSError as e:
-                self._html(_note_page(f"The Observatory page (astro-observatory.html) isn't beside the "
-                                      f"engine: {e}. Run the installer again."), 500, frame_self=True)
+                try:
+                    page = eng.observatory_html(dataset)
+                except (OSError, ValueError) as e:
+                    self._html(_note_page(f"The Observatory page (astro-observatory.html) isn't beside the "
+                                          f"engine: {e}. Please {eng._template_fix_hint()}.", "Observatory"),
+                               500, frame_self=True)
+                    return
+                self._html(page, frame_self=True)
             except Exception as e:
-                self._html(_note_page(f"The Observatory couldn't be built ({e})."), 500, frame_self=True)
+                self._html(_note_page(f"The Observatory couldn't be shown ({e}).", "Observatory"), 500, frame_self=True)
         elif self.path == "/dashboard" or self.path.startswith("/dashboard?"):
             # Framable always (it lives in the panel's own Dashboard tab): a
             # reply that forbids framing shows as "refused to connect".
@@ -1233,7 +1251,9 @@ button.primary:hover:not(:disabled){color:var(--accent-ink);filter:brightness(1.
   #log{height:auto;flex:1;min-height:0}
   #tab-report{flex:1;min-height:0;overflow:auto}
   #tab-dash{flex:1;min-height:0}
-  #tab-dash iframe,#tab-observatory iframe{height:100%}
+  #tab-observatory{flex:1;min-height:0;display:flex;flex-direction:column}
+  #tab-observatory iframe{flex:1;min-height:0}
+  #tab-dash iframe{height:100%}
   .foot{margin-top:10px}
 }
 /* ── Archive tab (Astro Desk, 1.6.0) ── */
@@ -1484,11 +1504,11 @@ button.linkbtn:disabled{opacity:.5;cursor:default}
   <button id="btnEject">Eject</button>
 </header>
 <div class="tabs">
-  <button class="on" data-tab="panel">Panel</button>
-  <button data-tab="report">Report</button>
-  <button data-tab="dash">Dashboard</button>
-  <button data-tab="observatory">Observatory</button>
-  <button data-tab="archive">Archive</button>
+  <button class="on" data-tab="panel" title="Import from a camera; the activity log">Panel</button>
+  <button data-tab="archive" title="What is ready to process, in progress, still capturing or done, with Open in Explorer; and every folder on the archive">To process</button>
+  <button data-tab="observatory" title="The whole archive at a glance: targets, coverage, pipeline, nights, sky, scopes">Observatory</button>
+  <button data-tab="dash" title="This computer's imports, Day folders and space">Dashboard</button>
+  <button data-tab="report" title="The ledger's report">Report</button>
 </div>
 
 <div id="qbox" aria-live="assertive"></div>
@@ -1528,6 +1548,7 @@ button.linkbtn:disabled{opacity:.5;cursor:default}
   <iframe id="dashFrame" title="dashboard"></iframe>
 </div>
 <div id="tab-observatory" style="display:none">
+  <div class="ad-head" id="obsHead"><span class="ad-note" id="obsNote" aria-live="polite">Working it out…</span><button type="button" id="obsRefresh" title="Rebuild the To process list and this page from your records now">Refresh now</button></div>
   <iframe id="obsFrame" title="Observatory"></iframe>
 </div>
 <div id="tab-archive" style="display:none">
@@ -1569,7 +1590,7 @@ document.querySelectorAll(".tabs button").forEach(b=>b.addEventListener("click",
   b.classList.add("on");
   ["panel","report","dash","observatory","archive"].forEach(t=>$("#tab-"+t).style.display = b.dataset.tab===t?"":"none");
   if(b.dataset.tab==="dash") $("#dashFrame").src="/dashboard?t="+Date.now();
-  if(b.dataset.tab==="observatory") $("#obsFrame").src="/observatory?t="+Date.now();
+  if(b.dataset.tab==="observatory") loadObservatory();
   if(b.dataset.tab==="report") loadReport();
   if(b.dataset.tab==="archive") loadDesk();
 }));
@@ -1910,7 +1931,17 @@ async function loadReport(){
 //    for processing. Opens folders and image files; never changes anything. ──
 let desk=null, deskSel=null, deskWant=null;
 const DESK_TODO=new Set(["captured","stacked","processing"]);
-const deskState=s=>`<span class="ad-state ${esc(s||"none")}">${esc(s?(s==="processing"?"in processing":s):"no state")}</span>`;
+const deskState=s=>`<span class="ad-state ${esc(s||"none")}" title="from the August 2026 drive scan">${esc(s?(s==="processing"?"in processing":s):"no state")} (Aug scan)</span>`;
+// the live list's status for a folder on the archive (projects.json's archive_rel), when it has one
+function liveState(rel){
+  const doc=PJ&&PJ.ok&&PJ.projects; if(!doc||!rel) return "";
+  const want=String(rel).replace(/\\/g,"/").replace(/\/+$/,"").toLowerCase();
+  for(const p of (doc.projects||[])) for(const d of (p.datasets||[])){
+    if(d&&d.archive_rel&&String(d.archive_rel).replace(/\\/g,"/").replace(/\/+$/,"").toLowerCase()===want)
+      return `<span class="ad-state ${esc(d.status)}" title="from the live To process list">${esc(PROJ_STATUS[d.status]||d.status)}</span>`;
+  }
+  return "";
+}
 const fmtNight=iso=>{ if(!iso) return ""; const [y,m,d]=iso.split("-"); return `${+d} ${MONTHS[+m-1]} ${y}`; };
 const fmtSize=b=>b>=1073741824?(b/1073741824).toFixed(1)+" GB":b>=1048576?Math.round(b/1048576)+" MB":Math.max(1,Math.round(b/1024))+" KB";
 // The project layer (1.7): To process and In progress, from projects.json.
@@ -1975,7 +2006,8 @@ function projectsHtml(pj, opts){
   const soonest=cap.map(r=>readyFrom(r.d)).filter(Boolean).sort()[0];
   const tail=rows.length?`<p class="ad-note">${cap.length} still capturing${soonest?` (the first is ready from ${esc(fmtNight(soonest))})`:""}, ${done} done.</p>`
     :`<p class="ad-note">No captures were counted on this computer yet.</p>`;
-  return `<div class="ad-note" id="deskProjMsg" aria-live="polite">Worked out ${when?esc(fmtNight(when)):"at an unknown time"}${whenFull?` (${esc(whenFull)})`:""}${snapNote?` from ${snapNote}`:""}.</div>`
+  const pub=doc.sources&&doc.sources.published_by?` This is the ${esc(String(doc.sources.published_by).toUpperCase()==="PC"?"PC":"Mac")}'s complete list (it sees the masters and the finished pictures), published on the archive.`:"";
+  return `<div class="ad-note" id="deskProjMsg" aria-live="polite">Worked out ${when?esc(fmtNight(when)):"at an unknown time"}${whenFull?` (${esc(whenFull)})`:""}${snapNote?` from ${snapNote}`:""}.${pub}</div>`
     +head+legend+warns+(body||(rows.length?`<p class="ad-note">Nothing is waiting to process.</p>`:""))+tail;
 }
 let PJ=null, deskScopeSel="";
@@ -2010,6 +2042,36 @@ function renderProjects(){
     await loadProjects();
   });
 }
+function loadObservatory(){
+  $("#obsNote").textContent="Working it out…";
+  $("#obsFrame").src="/observatory?t="+Date.now();
+}
+$("#obsRefresh").addEventListener("click",async()=>{
+  const b=$("#obsRefresh"); b.disabled=true; $("#obsNote").textContent="Rebuilding from your records…";
+  let res; try{ res=await api("/api/projects/rebuild",{}); }catch(e){ res={ok:false,error:"The FITS Importer isn't answering."}; }
+  b.disabled=false;
+  if(res&&res.ok){ loadObservatory(); loadProjects(); }
+  else $("#obsNote").textContent=(res&&(res.error||res.said))?String(res.error||res.said).trim().split("\n").pop():"The list couldn't be rebuilt.";
+});
+// The Observatory page is framed from this same panel; it asks for two things
+// only: open a folder on the archive (the same archive-only open as the To
+// process list), or show a dataset on the To process tab. Nothing else is
+// accepted, and only from that frame.
+window.addEventListener("message",async e=>{
+  const fr=$("#obsFrame");
+  if(e.origin!==location.origin || !fr || e.source!==fr.contentWindow || !e.data || typeof e.data!=="object") return;
+  const d=e.data;
+  if(d.kind==="observatory-ready"){
+    const from=d.servedFrom&&d.servedFrom.machine?` · the ${esc(d.servedFrom.machine)}'s complete list`:"";
+    $("#obsNote").textContent=`Worked out ${d.generatedAt||"?"}${from}${d.warnings?` · ${d.warnings} warning${d.warnings===1?"":"s"} (see Data health)`:""}`;
+  } else if(d.kind==="archive-open" && typeof d.rel==="string"){
+    let res; try{ res=await api("/api/archive/open",{rel:d.rel}); }catch(err){ res={ok:false,error:"The FITS Importer isn't answering."}; }
+    try{ fr.contentWindow.postMessage({kind:"archive-opened",rel:d.rel,ok:!!(res&&res.ok),error:res&&res.error||""},location.origin); }catch(err){}
+  } else if(d.kind==="archive-show" && typeof d.rel==="string"){
+    const b=document.querySelector('.tabs button[data-tab="archive"]'); if(b) b.click();
+    deskSel=d.rel; try{ await deskOpen(d.rel); }catch(err){}
+  }
+});
 async function loadProjects(){
   try{ PJ=await api("/api/projects"); }catch(e){ PJ={ok:false,why:"unreadable"}; }
   renderProjects();
@@ -2022,8 +2084,8 @@ async function loadDesk(){
   if(desk.error){ $("#deskNote").textContent=desk.error; return; }
   const note=[];
   note.push(desk.reachable?`Archive: ${desk.archive}.`:`The archive isn't reachable at ${desk.archive}.`);
-  note.push(desk.datasetFound?`States and hours from the Observatory scan of ${desk.generatedAt||"?"}.`
-    :`No Observatory dataset at ${desk.datasetPath}, so folders are listed without states.`);
+  note.push(desk.datasetFound?`Folder states come from the live list above where the folder is known to it, otherwise from the August 2026 drive scan of ${desk.generatedAt||"?"} (older than the list above).`
+    :`Folder states come from the live list above where the folder is known to it; there is no August 2026 drive scan at ${desk.datasetPath}.`);
   $("#deskNote").textContent=note.join(" ");
   if(deskWant===null && location.pathname==="/archive"){
     const q=new URLSearchParams(location.search);
@@ -2053,12 +2115,12 @@ function renderDeskList(){
   let rows=desk.items.filter(it=>all||DESK_TODO.has(it.state));
   if(q) rows=rows.filter(it=>(it.target+" "+(it.codes||[]).join(" ")+" "+it.rel).toLowerCase().includes(q));
   rows.sort((a,b)=>(b.hours||0)-(a.hours||0)||a.target.localeCompare(b.target));
-  $("#deskListTitle").textContent=all?"Every folder":"Still to process";
+  $("#deskListTitle").textContent=all?"Every folder on the archive":"Folders still to process";
   const hours=rows.reduce((n,it)=>n+(it.hours||0),0);
   $("#deskCount").textContent=`${rows.length} · ${hours.toFixed(1)} h`;
   $("#deskList").innerHTML=rows.length?rows.map(it=>`<div class="ad-row${deskSel===it.rel?" on":""}" data-rel="${esc(it.rel)}" tabindex="0" role="button">
       <div class="tmain"><div class="tname">${esc(it.target)}</div>
-        <div class="tmeta"><span class="chip plain">${esc(it.root)}</span>${deskState(it.state)}${it.exists===false?'<span class="chip plain">folder missing</span>':""}</div></div>
+        <div class="tmeta"><span class="chip plain">${esc(it.root)}</span>${liveState(it.rel)||deskState(it.state)}${it.exists===false?'<span class="chip plain">folder missing</span>':""}</div></div>
       <div class="tstats"><div class="big">${it.hours?it.hours.toFixed(1)+" h":""}</div><div class="small">${it.nights?it.nights+" night"+(it.nights===1?"":"s"):""}</div></div>
     </div>`).join("")
     :`<p class="ad-note">${all?"No target folders found.":"Nothing waiting to process. Tick “Show every folder” to see the rest."}</p>`;

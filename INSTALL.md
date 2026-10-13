@@ -24,9 +24,10 @@ and `astropy`.
    release zip) and double-click it in Downloads to unpack it.
 5. In Terminal, paste (use the folder name you actually got):
 
-       cd ~/Downloads/importer-1.5.4 && bash install-scripts.sh
+       cd ~/Downloads/importer-1.7.0 && bash install-scripts.sh
 
-   It copies the engine, panel and camera watcher into `~/bin`, installs the
+   It copies the engine, panel, camera watcher, the Observatory page and the
+   `contract` folder into `~/bin`, installs the
    app wrapper and a **Restart FITS Importer** button on your Desktop, and
    loads the watcher that notices when a camera is plugged in. Your ledger and
    any `config.json` are never touched.
@@ -53,10 +54,15 @@ this tool.
 1. Quit the panel if it is running (or just carry on — the installer stops it).
 2. Download and unpack the new zip in Downloads, then in Terminal:
 
-       cd ~/Downloads/importer-1.5.4 && bash install-scripts.sh
+       cd ~/Downloads/importer-1.7.0 && bash install-scripts.sh
 
 3. Start the panel again: double-click **Restart FITS Importer** on your
    Desktop, or plug a camera in.
+4. From 1.7.0 the installer also updates `~/bin/contract/targets.json` and
+   `scopes.json` in place while they are the ones we shipped. A copy you
+   have edited is kept, and the newer one lands beside it as `targets.json.new`
+   for you to merge. The new **Observatory** tab needs one ship after the
+   update (it reads the record the ship leaves on the archive).
 
 Nothing in your ledger, config, or backed-up frames changes during an update.
 
@@ -93,7 +99,8 @@ Administrator window and prints what to do.
      Terminal (PowerShell):
 
          py -3 -m pip install --user astropy
-   - It copies the importer to `%LOCALAPPDATA%\BrettjoAstro\bin`.
+   - It copies the importer to `%LOCALAPPDATA%\BrettjoAstro\bin`, with the
+     Observatory page and the `contract` folder.
    - It starts the camera watcher now and at every logon.
    - It puts **Restart FITS Importer** on your Desktop.
    - When `E:\Astro Image Data` exists, it schedules the ship to it at 09:30

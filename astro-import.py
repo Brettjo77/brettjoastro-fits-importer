@@ -225,7 +225,8 @@ def _test_root_guard():
              ("ASIAIR_EQUIPMENT", EQUIPMENT_JSON), ("ASIAIR_RECEIPTS", RECEIPT_BASE),
              ("ASIAIR_LEGACY_NAMES", LEGACY_CUSTOM_NAMES),
              ("ASTRO_SIRIL_EXE", SIRIL_EXE), ("ASTRO_OBSERVATORY_DATASET", OBSERVATORY_DATASET),
-             ("ASTRO_CONTRACT_DIR", CONTRACT_DIR), ("ASTRO_FINALS_DIR", FINALS_DIR)]
+             ("ASTRO_CONTRACT_DIR", CONTRACT_DIR), ("ASTRO_FINALS_DIR", FINALS_DIR),
+             ("ASTRO_OBSERVATORY_TEMPLATE", OBSERVATORY_TEMPLATE)]
     paths += [("SEESTAR_VOLUME", v) for v in SEESTAR_VOLUMES]
     paths += [("ASTRO_DRIVE_ROOTS", r)
               for r in (os.environ.get("ASTRO_DRIVE_ROOTS") or "").split(os.pathsep)]
@@ -3459,7 +3460,7 @@ def ship_sides():
 # What the other computer's --projects needs of a ledger row, nothing more:
 # the snapshot is a few MB for thousands of frames, not a copy of the ledger.
 _SNAPSHOT_FIELDS = ("filename", "target", "displayName", "scope", "camera", "device",
-                    "sourceType", "night", "exposureSeconds", "size", "sha256", "origin",
+                    "sourceType", "night", "exposureSeconds", "filter", "size", "sha256", "origin",
                     "archiveLocation", "archivePath", "archiveShippedAt", "archiveVerifiedAt",
                     "identityGuessed")
 
@@ -6092,12 +6093,16 @@ def run_pc_nightly(mount=None, max_minutes=None):
     # The project layer (1.7): the list is rebuilt from the fresh inventory
     # NOW, before the hours of hashing, so the Desk's To-process list is never
     # older than last night even when the night runs long. Reads the ledger
-    # and the Mac's snapshot, writes only projects.json.
+    # and the Mac's snapshot, writes projects.json and observatory.json.
     step("projects", lambda: bool(run_projects(State())))
+    # ...and published in this PC's own _verify folder, so the Mac's panel can
+    # show the complete list (only the PC sees the masters and the finals)
+    step("publish", lambda: publish_projects(mount) > 0)
     step("hash", lambda: run_hash(mount, max_minutes=minutes, rolling=True))
     if isinstance(out.get("hash"), dict) and out["hash"].get("hashed"):
         step("inventory2", lambda: run_inventory(mount))
         step("projects2", lambda: bool(run_projects(State())))
+        step("publish2", lambda: publish_projects(mount) > 0)
     pj = load_projects() or {}
     status["projectsGeneratedAt"] = pj.get("generated_at")
     snaps = (pj.get("sources") or {}).get("snapshots") or []
@@ -9559,10 +9564,9 @@ def _row_night(row):
     if not isinstance(night, str):
         return None
     try:
-        date.fromisoformat(night)
+        return date.fromisoformat(night).isoformat()   # one spelling: 20261012 is 2026-10-12
     except ValueError:
         return None
-    return night
 
 def load_capture_state(verbose=False):
     """The one human-set fact (spec §4): per dataset, auto / open / complete,
@@ -9790,6 +9794,31 @@ def run_targets_draft(state):
              "as targets.json.new for you to merge.")
     return draft
 
+# A Seestar sub's filter sits in its filename (Light_M 31_10.0s_IRCUT_20250725-221553.fit);
+# the ledger row carries no filter field for Seestars, the ASIAir rows do
+_PL_FILTER_RE = re.compile(r"_\d+(?:\.\d+)?s_([A-Za-z][A-Za-z0-9+-]{0,11})_\d{8}-\d{6}\.", re.I)
+_PL_PANEL_RE = re.compile(r"\s·\s*\d+-\d+$")        # 'Andromeda · 1-2': an ASIAir mosaic panel
+
+def _row_filter(row):
+    flt = row.get("filter")
+    if isinstance(flt, str) and flt:
+        return flt
+    fn = row.get("filename")
+    m = _PL_FILTER_RE.search(fn) if isinstance(fn, str) else None
+    return m.group(1).upper() if m else ""
+
+def _row_mosaic(row):
+    """Is this frame part of a mosaic? A Seestar '(mosaic)' name, or an ASIAir panel."""
+    for x in (row.get("displayName"), row.get("target")):
+        if not isinstance(x, str):
+            continue
+        if "mosaic" in x.lower() or _PL_PANEL_RE.search(x):
+            return True
+        m = MOSAIC_RE.match(x)
+        if m and re.fullmatch(r"\d+-\d+", m.group(2)):
+            return True
+    return False
+
 def build_projects(state, extra_ledgers=(), today=None, custom_names=None, collect=None):
     """The whole project layer as one dict (spec §7): every dataset
     (target + scope + site) with its sessions, where its frames are, and a
@@ -9805,6 +9834,7 @@ def build_projects(state, extra_ledgers=(), today=None, custom_names=None, colle
     datasets = {}            # (tid, scope_id) -> working dict
     folder_names = {}        # (tid, root) -> a folder on the archive (for archive_rel)
     unresolved, no_scope, no_night, bad_rows, rows_read = set(), 0, 0, 0, 0
+    n_unresolved, n_dupes = 0, 0
     seen = {}                # frame ident -> (tid, sid) it was counted in
     here_cache = {}
     metas = []
@@ -9835,6 +9865,7 @@ def build_projects(state, extra_ledgers=(), today=None, custom_names=None, colle
                 nm = row.get("displayName") or row.get("target")
                 if isinstance(nm, str) and nm:
                     unresolved.add(nm)
+                n_unresolved += 1
                 continue
             s = resolve_scope(contract, row)
             if s is None:
@@ -9869,15 +9900,16 @@ def build_projects(state, extra_ledgers=(), today=None, custom_names=None, colle
                         n["bytes"] += sz
                 except (TypeError, ValueError, OverflowError):
                     pass
-                flt = row.get("filter")
-                if isinstance(flt, str) and flt:
+                flt = _row_filter(row)
+                if flt:
                     n["filters"][flt] = n["filters"].get(flt, 0) + 1
-                if any(isinstance(x, str) and "mosaic" in x.lower()
-                       for x in (row.get("displayName"), row.get("target"))) \
-                        or row.get("sourceType") == "panel":
+                if _row_mosaic(row):
                     d["mosaic"] = True
             else:
                 d = datasets[first]
+                n_dupes += 1
+                for i in idents:                 # a third copy at this path is the same frame
+                    seen.setdefault(i, first)
             arel = row.get("archiveLocation") or row.get("archivePath")
             if arel or row.get("archiveVerifiedAt"):
                 d["locations"].add("chillblast_archive")
@@ -9994,7 +10026,7 @@ def build_projects(state, extra_ledgers=(), today=None, custom_names=None, colle
                 status = "capturing" if days_since <= QUIET_PERIOD_DAYS else "ready_to_process"
 
             entry = {
-                "scope": sid, "scope_name": s.get("name"), "site": site,
+                "key": key, "scope": sid, "scope_name": s.get("name"), "site": site,
                 "status": status, "capture_state": cstate,
                 "nights": len(nights), "frames": sum(n["frames"] for n in d["nights"].values()),
                 "integration_seconds": round(sum(n["integration"] for n in d["nights"].values())),
@@ -10002,6 +10034,9 @@ def build_projects(state, extra_ledgers=(), today=None, custom_names=None, colle
                 "locations": sorted(d["locations"]),
                 "archive_rel": f"{root}/{folder}" if folder else None,
             }
+            if status == "capturing" and cstate != "open":
+                entry["ready_on"] = (date.fromisoformat(last)
+                                     + timedelta(days=QUIET_PERIOD_DAYS + 1)).isoformat()
             if own_masters:
                 entry["masters"] = sorted(own_masters)[:20]
             if done_files:
@@ -10032,6 +10067,9 @@ def build_projects(state, extra_ledgers=(), today=None, custom_names=None, colle
             "as_of_night": today.isoformat(),
             "quiet_period_days": QUIET_PERIOD_DAYS,
             "sources": {"ledgers": ledger_names, "rows": rows_read,
+                        "dropped": {"unknown_names": n_unresolved, "no_scope": no_scope,
+                                    "no_night": no_night, "unreadable": bad_rows,
+                                    "duplicates": n_dupes},
                         "snapshots": metas,
                         "inventory": os.path.basename(inv_path) if inv_path else None,
                         "finals_dir": FINALS_DIR or None,
@@ -10042,10 +10080,14 @@ def build_projects(state, extra_ledgers=(), today=None, custom_names=None, colle
 # The dataset shape is the artifact's (29 Aug 2026 build_dataset.py), so its
 # page renders unchanged: scopes[], targets[] with programmes[] and
 # statusCards[], sessions[] (one target, one scope, one night), totals,
-# health[] and reconciliation[]. Everything comes from one build_projects()
-# pass, so the two views never disagree. Pure read.
+# health[] and reconciliation[]. It is made in the SAME pass as projects.json
+# (run_projects writes both files), so the two views never disagree. Pure read.
 OBS_STATE = {"capturing": "captured", "ready_to_process": "stacked",
              "in_progress": "processing", "done": "complete"}
+OBS_COLOURS = {"yellow": "#eda100", "green": "#3cb554", "black": "#0a0a0a", "blue": "#3987e5",
+               "red": "#e05a5a", "pink": "#d66bc9", "purple": "#8f80ea", "orange": "#ec835a",
+               "grey": "#7a849b", "gray": "#7a849b", "white": "#edf1f8"}
+OBS_ATTRIBUTION = {"shared-folder": "shared Askar folder: the master may be the other Askar's"}
 
 def _obs_where(locs, here_label, there_label):
     out = []
@@ -10060,14 +10102,39 @@ def _obs_where(locs, here_label, there_label):
             out.append(f"on the {there_label}")
     return sorted(set(out))
 
-def build_observatory(state, extra_ledgers=(), today=None, custom_names=None):
-    """The Observatory's dataset, from the same facts as projects.json."""
-    collect = {}
-    doc = build_projects(state, extra_ledgers, today, custom_names, collect=collect)
-    datasets = collect.get("datasets") or {}
+def _obs_number(v):
+    """A real, finite number or None (a bool or NaN from a hand-edited file is not one)."""
+    return v if isinstance(v, (int, float)) and not isinstance(v, bool) and math.isfinite(v) else None
+
+def _obs_date(iso):
+    """'2026-09-12' as '12 Sep 2026'; anything else as it is."""
+    try:
+        return date.fromisoformat(str(iso)).strftime("%-d %b %Y") if not IS_WINDOWS \
+            else date.fromisoformat(str(iso)).strftime("%d %b %Y").lstrip("0")
+    except (TypeError, ValueError):
+        return str(iso or "?")
+
+def _obs_path(arel):
+    """The dataset's folder on the archive, written the way its label is
+    (E:\\Astro Image Data\\S30P\\…, or /Volumes/…/S30P/… on a Mac label)."""
+    label = str(ARCHIVE_LABEL or "")
+    sep = "/" if ("/" in label and "\\" not in label) else "\\"
+    return label.rstrip("\\/") + sep + arel.replace("/", sep)
+
+def _obs_inventory_at(name):
+    """The inventory generation's time, from its file name (inventory-E-20261009T033012Z.jsonl)."""
+    m = re.search(r"(\d{4})(\d{2})(\d{2})T(\d{2})(\d{2})(\d{2})Z", str(name or ""))
+    return f"{m.group(1)}-{m.group(2)}-{m.group(3)}T{m.group(4)}:{m.group(5)}:{m.group(6)}+00:00" if m else None
+
+def observatory_from(doc, collect, state=None, now=None):
+    """The Observatory's dataset from one build_projects() result and the
+    working dicts it collected. No I/O."""
+    datasets = (collect or {}).get("datasets") or {}
     here_side, there_side = ship_sides()
     here_label = "PC" if here_side == "pc" else "Mac"
     there_label = "PC" if there_side == "pc" else "Mac"
+    today = doc.get("as_of_night")
+    quiet = doc.get("quiet_period_days", QUIET_PERIOD_DAYS)
     by_key = {(p["target_id"], e["scope"]): (p, e)
               for p in doc["projects"] for e in p["datasets"]}
     scopes, sessions, targets = {}, [], {}
@@ -10078,57 +10145,72 @@ def build_observatory(state, extra_ledgers=(), today=None, custom_names=None):
             continue                            # a dataset with no counted night
         p, e = pe
         t, s = d["target"], d["scope"]
-        cam = s.get("name") or sid
-        name = t.get("name") or t["id"]
-        codes = [c for c in (t.get("codes") or []) if isinstance(c, str)]
+        cam = str(s.get("name") or sid)
+        name = str(target_display(t))           # 'Spiral Galaxy (M 106)': never two targets as one
+        codes = [c for c in (t.get("codes") or []) if isinstance(c, str)] \
+            if isinstance(t.get("codes"), list) else []
         nights = d["nights"]
         frames = sum(n["frames"] for n in nights.values())
         secs = sum(n["integration"] for n in nights.values())
         nbytes = sum(n.get("bytes", 0) for n in nights.values())
         hours = round(secs / 3600, 2)
-        sc = scopes.setdefault(cam, {"camera": cam, "frames": 0, "hours": 0.0, "nights": set(),
-                                     "bytes": 0, "first": None, "last": None})
+        sc = scopes.setdefault(cam, {"camera": cam, "id": sid, "frames": 0, "hours": 0.0,
+                                     "nights": set(), "bytes": 0, "first": None, "last": None,
+                                     "colour": OBS_COLOURS.get(str(s.get("colour") or "").lower())})
         sc["frames"] += frames; sc["hours"] += secs / 3600; sc["bytes"] += nbytes
         sc["nights"].update(nights)
-        for nt in nights:
-            nights_all.add(nt)
+        nights_all.update(nights)
         sc["first"] = min(x for x in (sc["first"], min(nights)) if x)
         sc["last"] = max(x for x in (sc["last"], max(nights)) if x)
         tot_bytes += nbytes; tot_frames += frames; tot_secs += secs
         filters, exps = {}, {}
         for nt, n in sorted(nights.items()):
-            for k, v in n.get("filters", {}).items():
+            nf = dict(n.get("filters", {}))
+            rest = n["frames"] - sum(nf.values())
+            if rest > 0:
+                nf["unrecorded"] = rest
+            for k, v in nf.items():
                 filters[k] = filters.get(k, 0) + v
             for k, v in n.get("exps", {}).items():
                 exps[k] = exps.get(k, 0) + v
             sessions.append({"target": name, "camera": cam, "night": nt, "frames": n["frames"],
                              "hours": round(n["integration"] / 3600, 3),
-                             "filters": dict(n.get("filters", {})), "exps": dict(n.get("exps", {})),
+                             "filters": nf, "exps": dict(n.get("exps", {})),
                              "askar": {}, "stackOnly": False})
-        if frames and not filters:
-            filters = {"unrecorded": frames}
         state_id = OBS_STATE.get(e["status"], "captured")
         where = _obs_where(e.get("locations"), here_label, there_label)
         masters, finals = e.get("masters") or [], e.get("finals") or []
+        last_txt = _obs_date(e["last_session"])
         if e["status"] == "done":
-            evidence = "finished picture: " + os.path.basename(finals[0]) if finals else "finished picture found"
+            evidence = ("finished picture " + os.path.basename(finals[0])) if finals else "a finished picture names it"
             action = ""
         elif e["status"] == "in_progress":
-            evidence = "master saved: " + os.path.basename(masters[0]) if masters else "a master is saved"
+            evidence = ("master saved: " + os.path.basename(masters[0])) if masters else "a master of yours is saved"
             action = "Finish it: process to a final"
         elif e["status"] == "ready_to_process":
-            evidence = (f"last session {e['last_session']}; the quiet period has passed"
-                        if e.get("capture_state") != "complete" else "marked complete by hand")
+            if e.get("capture_state") == "complete":
+                evidence = "marked complete by hand; nothing started"
+            else:
+                try:
+                    gap = (date.fromisoformat(today) - date.fromisoformat(e["last_session"])).days
+                    evidence = f"no new frames since {last_txt} ({gap} nights); nothing started"
+                except (TypeError, ValueError):
+                    evidence = f"no new frames since {last_txt}; nothing started"
             action = "Process it"
         else:
-            evidence = (f"last session {e['last_session']}" if e.get("capture_state") != "open"
-                        else "kept open by hand (capture-state.json)")
+            if e.get("capture_state") == "open":
+                evidence = "kept open by hand (capture-state.json)"
+            elif e.get("ready_on"):
+                evidence = f"last session {last_txt}; ready to process from {_obs_date(e['ready_on'])}"
+            else:
+                evidence = f"last session {last_txt}"
             action = "Keep capturing"
-        if e.get("attribution"):
-            evidence += "; " + ", ".join(e["attribution"])
+        notes = [OBS_ATTRIBUTION.get(a, a) for a in (e.get("attribution") or [])]
+        if notes:
+            evidence += "; " + ", ".join(notes)
         arel = e.get("archive_rel")
-        path = (ARCHIVE_LABEL.rstrip("\\/") + "\\" + arel.replace("/", "\\")) if arel else "not yet on the archive"
-        prog = {"camera": cam, "folder": arel.split("/")[-1] if arel else name, "path": path,
+        prog = {"camera": cam, "folder": arel.split("/")[-1] if arel else name,
+                "path": _obs_path(arel) if arel else "", "rel": arel,
                 "lights": frames, "autostacks": 0, "autostackFrames": 0,
                 "processedFiles": len(masters) + len(finals), "processedFinals": len(finals),
                 "masters": len(masters), "working": 0, "thumbs": 0, "other": 0,
@@ -10136,16 +10218,21 @@ def build_observatory(state, extra_ledgers=(), today=None, custom_names=None):
                 "hours": hours, "bytes": nbytes, "sizeAll": nbytes, "nights": len(nights),
                 "firstNight": e["first_session"], "lastNight": e["last_session"],
                 "filters": filters, "exposures": exps, "panels": [], "gains": {}, "askar": {},
-                "where": where, "status": e["status"]}
+                "where": where, "status": e["status"], "readyOn": e.get("ready_on"),
+                "evidence": evidence, "action": action}
         card = {"target": name, "label": name + (" (mosaic)" if d.get("mosaic") else ""),
                 "camera": cam, "state": state_id, "hours": hours, "nights": len(nights),
-                "evidence": evidence, "action": action, "source": "the importer's projects.json",
-                "badges": where}
-        tg = targets.setdefault(name, {
-            "name": name, "codes": codes, "type": t.get("type") or None,
-            "constellation": t.get("constellation") or None,
-            "ra": t.get("ra") if isinstance(t.get("ra"), (int, float)) else None,
-            "dec": t.get("dec") if isinstance(t.get("dec"), (int, float)) else None,
+                "lights": frames, "lastNight": e["last_session"], "readyOn": e.get("ready_on"),
+                "evidence": evidence, "action": action, "source": "worked out by the importer",
+                "badges": where, "rel": arel}
+        ra, dec = _obs_number(t.get("ra")), _obs_number(t.get("dec"))
+        if ra is None or dec is None:
+            ra = dec = None
+        tg = targets.setdefault(tid, {
+            "id": tid, "name": name, "codes": codes,
+            "type": str(t["type"]) if t.get("type") else None,
+            "constellation": str(t["constellation"]) if t.get("constellation") else None,
+            "ra": ra, "dec": dec,
             "mosaic": False, "programmes": [], "cameras": [], "lights": 0, "hours": 0.0,
             "nights": set(), "sessions": 0, "firstNight": None, "lastNight": None,
             "state": None, "pendingProgrammes": 0, "statusCards": [], "_rank": 99})
@@ -10170,81 +10257,172 @@ def build_observatory(state, extra_ledgers=(), today=None, custom_names=None):
     for sc in sorted(scopes.values(), key=lambda x: x["camera"]):
         sc["nights"] = len(sc["nights"]); sc["hours"] = round(sc["hours"], 1)
         out_scopes.append(sc)
-    snaps = (doc.get("sources") or {}).get("snapshots") or []
-    ledgers = (doc.get("sources") or {}).get("ledgers") or []
-    health = [{"severity": "info", "title": "Built live from the importer's own record",
-               "detail": f"This page is worked out on this {here_label} from "
-                         f"{', '.join(ledgers) if ledgers else 'no ledger'}"
-                         + (f" and the {there_label}'s ledger snapshot" if snaps else "")
-                         + f", {doc['sources'].get('rows', 0):,} ledger rows, the PC's archive "
-                           f"inventory and Final Astro Images. Nothing is typed in."}]
+    src = doc.get("sources") or {}
+    snaps_used = [m for m in (src.get("snapshots") or []) if isinstance(m, dict) and m.get("rows")]
+    ledgers = [l for l in (src.get("ledgers") or []) if l]
+    own_rows = bool(getattr(state, "ledger", None)) if state is not None else bool(ledgers)
+    corrupt = bool(getattr(state, "ledger_corrupt", False)) if state is not None else False
+    inv_name, inv_at = src.get("inventory"), _obs_inventory_at(src.get("inventory"))
+    finals_checked = bool(src.get("finals_dir")) and not any(
+        "finished pictures were not checked" in w for w in (doc.get("warnings") or []))
+    inputs = {"ledger": own_rows, "ledgerCorrupt": corrupt,
+              "snapshot": ({"machine": snaps_used[0].get("machine"), "at": snaps_used[0].get("at"),
+                            "ageHours": snaps_used[0].get("age_hours"), "rows": snaps_used[0].get("rows")}
+                           if snaps_used else None),
+              "inventory": inv_name, "inventoryAt": inv_at, "finals": finals_checked,
+              "asOfNight": today, "quietPeriodDays": quiet, "machine": here_label}
+    read_from = []
+    if own_rows:
+        read_from.append(f"this {here_label}'s ledger")
+    if snaps_used:
+        read_from.append(f"the {snaps_used[0].get('machine') or there_label}'s record "
+                         f"(its ledger snapshot of {_obs_date(str(snaps_used[0].get('at', ''))[:10])})")
+    if inv_name:
+        read_from.append("the archive's inventory" + (f" of {_obs_date(inv_at[:10])}" if inv_at else ""))
+    read_from.append("Final Astro Images" if finals_checked else "no finished pictures (not checked here)")
+    health = []
+    if corrupt:
+        health.append({"severity": "warn", "title": f"This {here_label}'s ledger can't be read",
+                       "detail": "Only the other computer's sessions are shown. See the panel's Activity log."})
+    health.append({"severity": "info", "title": "Built from the importer's own record, nothing typed in",
+                   "detail": f"Worked out on this {here_label} from " + ", ".join(read_from)
+                             + f": {src.get('rows', 0):,} ledger rows read. The one human-set fact is "
+                               f"capture-state.json (open / complete)."})
     for w in doc.get("warnings") or []:
         health.append({"severity": "warn", "title": "Warning from the project layer", "detail": w})
-    for m in snaps:
-        age = m.get("age_hours")
-        if isinstance(age, (int, float)) and age > SNAPSHOT_STALE_HOURS:
-            health.append({"severity": "warn", "title": f"The {m.get('machine') or there_label}'s snapshot is old",
-                           "detail": f"Its last ship left it {int(age // 24)} day(s) ago; the sessions since are not here yet."})
-    recon = [{"check": "Light frames counted, out of ledger rows read",
-              "expected": doc["sources"].get("rows", 0), "computed": tot_frames,
-              "ok": tot_frames <= doc["sources"].get("rows", 0)},
+    dropped = src.get("dropped") or {}
+    n_dropped = sum(int(v or 0) for v in dropped.values())
+    why = []
+    for k, label in (("unknown_names", "names the contract doesn't know"), ("no_scope", "no scope"),
+                     ("no_night", "no night"), ("unreadable", "unreadable rows"),
+                     ("duplicates", "copies already counted")):
+        if dropped.get(k):
+            why.append(f"{dropped[k]:,} {label}")
+    recon = [{"check": "Ledger rows read, light frames counted",
+              "expected": src.get("rows", 0), "computed": tot_frames,
+              "note": (f"{n_dropped:,} not counted: " + ", ".join(why)) if n_dropped else "every row counted",
+              "ok": tot_frames + n_dropped == src.get("rows", 0)},
              {"check": "Datasets on this page, against projects.json",
               "expected": sum(len(p["datasets"]) for p in doc["projects"]),
-              "computed": sum(len(t["programmes"]) for t in out_targets),
-              "ok": sum(len(p["datasets"]) for p in doc["projects"]) == sum(len(t["programmes"]) for t in out_targets)}]
-    when = datetime.now().strftime("%Y-%m-%d %H:%M")
+              "computed": sum(len(x["programmes"]) for x in out_targets),
+              "note": "one dataset is one object on one scope",
+              "ok": sum(len(p["datasets"]) for p in doc["projects"]) == sum(len(x["programmes"]) for x in out_targets)},
+             {"check": "Hours by scope, against the total",
+              "expected": round(tot_secs / 3600, 1), "computed": round(sum(x["hours"] for x in out_scopes), 1),
+              "note": "rounded per scope", "ok": abs(sum(x["hours"] for x in out_scopes) - tot_secs / 3600) < 0.1 * max(1, len(out_scopes))}]
+    now = now or datetime.now()
+    when_txt = _obs_date(now.date().isoformat()) + now.strftime(", %H:%M")
     return {
-        "schema": "observatory/1", "generatedAt": when,
+        "schema": "observatory/1", "generatedAt": when_txt, "generatedAtIso": _utc_iso(),
         "machine": f"{MACHINE_LABEL} · {ARCHIVE_LABEL} · live from the importer",
-        "sourceNote": f"Built on this {here_label} on {when} from the importer's ledger"
-                      + (f" and the {there_label}'s snapshot" if snaps else "")
-                      + f" ({doc['sources'].get('rows', 0):,} rows), projects.json's statuses, "
-                        f"the archive inventory and Final Astro Images.",
-        "provenance": "Statuses: capturing within the quiet period of "
-                      f"{doc.get('quiet_period_days', QUIET_PERIOD_DAYS)} observing nights; ready once it "
-                      "has passed; in progress when one of your masters sits in the target's folder on "
-                      "the archive; done when a finished picture names the target and the scope.",
-        "quietPeriodDays": doc.get("quiet_period_days", QUIET_PERIOD_DAYS),
-        "asOfNight": doc.get("as_of_night"),
+        "sourceNote": f"Worked out on this {here_label} on {when_txt} from " + ", ".join(read_from)
+                      + f" ({src.get('rows', 0):,} ledger rows). The statuses are the project layer's, the "
+                        f"same as the To process list.",
+        "provenance": f"Still capturing: a session within the quiet period of {quiet} observing nights, or "
+                      "kept open by hand. Ready to process: the quiet period has passed and nothing is "
+                      "started. In progress: one of your own masters sits in the object's folder on the "
+                      "archive. Done: a finished picture names the object and the scope.",
+        "quietPeriodDays": quiet, "asOfNight": today, "inputs": inputs,
+        "snapshotRows": sum(int(m.get("rows") or 0) for m in snaps_used),
         "scopes": out_scopes, "askarSplit": {}, "targets": out_targets, "sessions": sessions,
         "events": [], "calibration": {}, "shelves": {}, "quarantine": {},
         "junk": {"files": 0, "bytes": 0},
         "totals": {"files": tot_frames, "bytes": tot_bytes, "lights": tot_frames,
                    "hours": round(tot_secs / 3600, 1), "targets": len(out_targets),
                    "nights": len(nights_all), "sessions": len(sessions)},
-        "colourMeaning": {}, "parseFailures": {}, "ledgerMeta": {"rows": doc["sources"].get("rows", 0)},
+        "colourMeaning": {}, "parseFailures": {}, "ledgerMeta": {"rows": src.get("rows", 0)},
         "askarRigs": {}, "rigAttribution": {}, "health": health, "delta": None,
         "reconciliation": recon, "warnings": list(doc.get("warnings") or []),
     }
 
+def build_observatory(state, extra_ledgers=(), today=None, custom_names=None):
+    """The Observatory's dataset, from the same facts as projects.json (one pass)."""
+    collect = {}
+    doc = build_projects(state, extra_ledgers, today, custom_names, collect=collect)
+    return observatory_from(doc, collect, state)
+
 def observatory_html(dataset, template=None):
     """The Observatory page with the dataset in place of __DATASET__. Raises
-    OSError when the template isn't beside the engine."""
+    OSError when the template isn't beside the engine, ValueError when it has
+    no slot. Every <, > and & in the JSON is written as \\uXXXX, so no text
+    from a ledger, a snapshot or a file name can end or comment the block."""
     with open(template or OBSERVATORY_TEMPLATE, encoding="utf-8") as f:
         page = f.read()
     if "__DATASET__" not in page:
         raise ValueError("the Observatory page has no __DATASET__ slot")
-    blob = json.dumps(dataset, ensure_ascii=False).replace("</", "<\\/")
+    blob = (json.dumps(dataset, ensure_ascii=True, allow_nan=False)
+            .replace("<", "\\u003c").replace(">", "\\u003e").replace("&", "\\u0026"))
     return page.replace("__DATASET__", blob, 1)
 
-def run_observatory(state, out=None, extra_ledgers=()):
+OBSERVATORY_MARK = '<script id="dataset" type="application/json">'
+_OWN_RECORD_FILES = {"ledger.json", "projects.json", "observatory.json", "config.json",
+                     "custom-names.json", "capture-state.json", "equipment.json", "skiplist.json"}
+
+def _observatory_out_problem(out):
+    """Why `out` must not be written, or None. The archive and the finals folder
+    are never written (rule 5), the importer's own records never replaced, and
+    an existing file is replaced only when it is an Observatory page."""
+    if os.path.isdir(out):
+        return "is a folder; name a file"
+    for label, base in (("the archive", ARCHIVE_MOUNT), ("Final Astro Images", FINALS_DIR)):
+        if base and _within(out, base):
+            return f"is inside {label}, which this never writes"
+    low = os.path.basename(out).lower()
+    if low in _OWN_RECORD_FILES or low.startswith("ledger"):
+        return "is one of the importer's own record files"
+    if os.path.isfile(out):
+        try:
+            with open(out, "rb") as f:
+                head = f.read(512 * 1024)
+        except OSError as e:
+            return f"can't be read ({e.strerror or e})"
+        if OBSERVATORY_MARK.encode() not in head:
+            return "already exists and isn't an Observatory page; it is left alone"
+    return None
+
+def _template_fix_hint():
+    return "reinstall the app" if getattr(sys, "frozen", False) else "run the installer again"
+
+def run_observatory(state, out=None, extra_ledgers=(), dry_run=False):
     """--observatory [FILE]: write the Observatory as one standalone HTML file
-    (default: observatory.html in the state folder). Read-only otherwise."""
+    (default: observatory.html in the state folder). Writes nothing else; with
+    --dry-run nothing at all."""
+    if getattr(state, "ledger_corrupt", False):
+        error("The ledger can't be read, so the Observatory wasn't written (see the Activity log).")
+        return None
     extra, names = projects_inputs(state, extra_ledgers)
     dataset = build_observatory(state, extra, custom_names=names)
+    tt = dataset["totals"]
+    for w in dataset["warnings"]:
+        warn(w)
+    if not dataset["targets"]:
+        warn("Nothing to show yet: no light frames in this computer's ledger"
+             + ("" if dataset["snapshotRows"] else " and no snapshot from the other computer on the archive")
+             + ". The Observatory fills in once frames have been imported and shipped.")
+        return None
     out = os.path.abspath(os.path.expanduser(out or os.path.join(STATE_DIR, "observatory.html")))
     _confine(out, "--observatory")
+    if dry_run:
+        info(f"Dry run: {out} was not written ({tt['targets']} targets, {tt['lights']:,} lights, "
+             f"{tt['hours']} h, {tt['nights']} nights).")
+        return dataset
+    why = _observatory_out_problem(out)
+    if why:
+        error(f"{out} {why}.")
+        return None
     try:
         html = observatory_html(dataset)
     except (OSError, ValueError) as e:
-        error(f"The Observatory page (astro-observatory.html) isn't beside the engine: {e}. "
-              f"Run the installer again.")
+        error(f"The Observatory page (astro-observatory.html) isn't beside the engine: {e}; "
+              f"{_template_fix_hint()}.")
         sys.exit(1)
     os.makedirs(os.path.dirname(out), exist_ok=True)
-    tmp = out + ".tmp"
+    tmp = f"{out}.{os.getpid()}.{threading.get_ident()}.tmp"
     try:
-        with open(tmp, "w", encoding="utf-8") as f:
+        with open(tmp, "x", encoding="utf-8") as f:
             f.write(html)
+            f.flush()
+            os.fsync(f.fileno())
         os.replace(tmp, out)
     finally:
         if os.path.exists(tmp):
@@ -10252,18 +10430,89 @@ def run_observatory(state, out=None, extra_ledgers=()):
                 os.remove(tmp)
             except OSError:
                 pass
-    tt = dataset["totals"]
     success(f"Observatory written: {out} ({tt['targets']} targets, {tt['lights']:,} lights, "
-       f"{tt['hours']} h, {tt['nights']} nights)")
-    for w in dataset["warnings"]:
-        warn(w)
+            f"{tt['hours']} h, {tt['nights']} nights)")
     return out
 
-def load_projects():
-    """projects.json from the state folder, or None. The panel reads this."""
+def _published_other(name):
+    """The other computer's published copy of projects.json / observatory.json
+    in ITS _verify folder on the archive (the PC's nightly job publishes
+    there), or None. Read-only; never written by this computer (rule 6)."""
+    there = ship_sides()[1]
+    path = _verify_path(ARCHIVE_MOUNT, there, name)
+    if TEST_ROOT and not _within(path, TEST_ROOT):
+        return None, None
+    try:
+        if not os.path.isfile(path):
+            return None, None
+    except OSError:
+        return None, None
+    d = _read_json_file(path)
+    return (d, path) if d else (None, None)
+
+PUBLISHED_FRESH_HOURS = 48      # the PC's nightly list counts as current this long
+
+def _prefer_published(own, name, schema_key, stamp_key):
+    """The PC's published list beats this computer's own when it is recent:
+    the PC sees the archive's masters and the finished pictures, the Mac
+    doesn't. Marks where it came from."""
+    other, path = _published_other(name)
+    if not other or other.get(schema_key) is None:
+        return own
+    at = _parse_utc(other.get(stamp_key))
+    age = ((_utc_now() - at).total_seconds() / 3600) if at else None
+    if age is None or age > PUBLISHED_FRESH_HOURS:
+        return own
+    other = dict(other)
+    src = dict(other.get("sources") or {}) if isinstance(other.get("sources"), dict) else {}
+    src["published_by"] = ship_sides()[1]
+    src["published_from"] = path
+    src["published_age_hours"] = round(age, 1)
+    other["sources"] = src
+    return other
+
+def load_projects(prefer_published=False):
+    """projects.json from the state folder, or None. The panel reads this.
+    With prefer_published, the PC's recent published copy wins (see
+    _prefer_published)."""
     d = _read_json_file(os.path.join(STATE_DIR, "projects.json"))
-    return d if d.get("schema") == "projects/1" \
-        and isinstance(d.get("projects"), list) else None
+    own = d if d.get("schema") == "projects/1" and isinstance(d.get("projects"), list) else None
+    if not prefer_published:
+        return own
+    doc = _prefer_published(own, "projects.json", "schema", "generated_at")
+    return doc if doc and doc.get("schema") == "projects/1" and isinstance(doc.get("projects"), list) else own
+
+def load_observatory(prefer_published=False):
+    """observatory.json from the state folder (written with projects.json), or
+    None; with prefer_published, the PC's recent published copy wins."""
+    d = _read_json_file(os.path.join(STATE_DIR, "observatory.json"))
+    own = d if d.get("schema") == "observatory/1" and isinstance(d.get("targets"), list) else None
+    if not prefer_published:
+        return own
+    doc = _prefer_published(own, "observatory.json", "schema", "generatedAtIso")
+    if doc is not own and doc:
+        doc["servedFrom"] = {"machine": "PC" if ship_sides()[1] == "pc" else "Mac",
+                             "ageHours": (doc.get("sources") or {}).get("published_age_hours")}
+    return doc if doc and doc.get("schema") == "observatory/1" and isinstance(doc.get("targets"), list) else own
+
+def publish_projects(mount=None):
+    """The archive PC's nightly job: put this computer's projects.json and
+    observatory.json in ITS OWN _verify folder on the archive, so the Mac's
+    panel can show the complete list (masters and finals are the PC's to
+    see). Creates or replaces only these two files in this computer's folder."""
+    mount = mount or ARCHIVE_MOUNT
+    n = 0
+    for name in ("projects.json", "observatory.json"):
+        src = os.path.join(STATE_DIR, name)
+        d = _read_json_file(src) if os.path.isfile(src) else {}
+        if not d:
+            continue
+        dst = _verify_path(mount, ship_sides()[0], name)
+        _confine(dst, "publish")
+        os.makedirs(os.path.dirname(dst), exist_ok=True)
+        _atomic_write_json(dst, d)
+        n += 1
+    return n
 
 def rebuild_projects_quietly(state):
     """After a ship or an import: refresh projects.json without a word, when
@@ -10277,7 +10526,8 @@ def rebuild_projects_quietly(state):
         return None
 
 def run_projects(state, extra_ledgers=(), dry_run=False):
-    """--projects: rebuild projects.json. Safe to repeat; writes nothing else.
+    """--projects: rebuild projects.json and observatory.json (the Observatory's
+    dataset, from the same pass). Safe to repeat; writes nothing else.
     A ledger that can't be read writes nothing: an empty list must never
     replace a good one."""
     if getattr(state, "ledger_corrupt", False):
@@ -10290,7 +10540,8 @@ def run_projects(state, extra_ledgers=(), dry_run=False):
         warn("This computer has no ledger yet (nothing has been imported here): "
              "only the other computer's sessions can be listed.")
     extra, names = projects_inputs(state, extra_ledgers)
-    doc = build_projects(state, extra_ledgers=extra, custom_names=names)
+    collect = {}
+    doc = build_projects(state, extra_ledgers=extra, custom_names=names, collect=collect)
     previous = _read_json_file(out) if os.path.isfile(out) else {}
     if not doc["sources"]["rows"] and previous.get("projects"):
         warn("No ledger rows could be read from this computer or from the other computer's "
@@ -10318,7 +10569,11 @@ def run_projects(state, extra_ledgers=(), dry_run=False):
         return doc
     _confine(out, "--projects")
     _atomic_write_json(out, doc)
-    success(f"Wrote {out}")
+    # the Observatory's dataset, from the same pass: the two views never disagree
+    obs_out = os.path.join(STATE_DIR, "observatory.json")
+    _confine(obs_out, "--projects")
+    _atomic_write_json(obs_out, observatory_from(doc, collect, state))
+    success(f"Wrote {out} and observatory.json")
     # The mirror copy, only into a mirror this computer has already claimed
     # (publish_mirror claims; this never does — one writer per folder)
     ok, owner = mirror_owner_ok(MIRROR_DIR)
@@ -10378,8 +10633,9 @@ def main():
                         "copy re-checked by the PC), what is waiting, and what to keep")
     p.add_argument("--projects", action="store_true",
                    help="read-only: rebuild projects.json (what is ready to process, "
-                        "in progress, still capturing, done) from the ledger, the PC's "
-                        "archive inventory and Final Astro Images")
+                        "in progress, still capturing, done) and observatory.json (the "
+                        "Observatory's data) from the ledger, the PC's archive inventory "
+                        "and Final Astro Images")
     p.add_argument("--with-ledger", action="append", default=[], metavar="FILE",
                    help="with --projects: also read another computer's ledger.json "
                         "(a read-only snapshot; may repeat)")
@@ -10552,7 +10808,8 @@ def main():
         run_projects(state, extra_ledgers=args.with_ledger, dry_run=args.dry_run)
         return
     if args.observatory is not None:
-        run_observatory(state, out=args.observatory or None, extra_ledgers=args.with_ledger)
+        run_observatory(state, out=args.observatory or None, extra_ledgers=args.with_ledger,
+                        dry_run=args.dry_run)
         return
     if args.tidy_stacks:
         if args.dry_run:
