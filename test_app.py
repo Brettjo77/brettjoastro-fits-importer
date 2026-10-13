@@ -1550,12 +1550,13 @@ try:
                        {"scope": "S50P", "scope_name": "Seestar S50 Pro", "site": "Shinfield",
                         "status": "in_progress", "nights": 1, "integration_seconds": 100,
                         "last_session": "2026-09-10", "locations": ["chillblast_archive"],
-                        "archive_rel": "S50P/Wizard Nebula (NGC 7380)"},
+                        "archive_rel": "S50P/Wizard Nebula (NGC 7380)", "calibration": {"applies": False}},
                        {"scope": "S30P", "status": "capturing", "nights": 1, "integration_seconds": 100,
                         "last_session": "2026-10-08", "locations": ["mac-unchecked"], "archive_rel": None}]}]}}
         fixture["projects"]["sources"] = {"snapshots": [{"machine": "Mac", "at": "2026-10-01T08:00:00Z",
                                                           "rows": 5, "age_hours": 240.0}]}
         fixture["projects"]["projects"][0]["datasets"][1]["masters"] = ["masterLight_HOO.xisf"]
+        fixture["projects"]["projects"][0]["datasets"][0]["calibration"] = {"applies": True, "darks": 20, "flats": 0, "biases": 50, "shipped": 20, "nights_with": 2, "nights": 3, "missing": ["flats"]}
         fixture["projects"]["warnings"].append("43 target name(s) the contract doesn't know")
         harness = ("let deskSel=null;\n" + "\n".join(pieces) +
                    f"\nprocess.stdout.write(projectsHtml({json.dumps(fixture)}));\n"
@@ -1575,6 +1576,7 @@ try:
               and "⚠ one warning" in html and "Worked out 10 Oct 2026" in html
               and "ready from 23 Oct 2026" in html and "2 min" in html
               and "undefined" not in html and "To process · 1" in html
+              and "calibration: 20 darks · 50 bias · no flats" in html and html.count("calibration:") == 1
               and "In progress · 1" in html and "1 still capturing" in html,
               (r_html.stderr or html)[-500:])
         check("PL without projects.json the section says plainly what to run, and where",

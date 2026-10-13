@@ -652,6 +652,7 @@ RENDER.overview = function(root){
       m.append(el("b",null,fmtDY(s.night)), el("span",null,"· "+(s.hours>0?fmtH(s.hours,2):"exposure unrecorded")+" · "+fmtI(s.frames)+" frame"+(s.frames===1?"":"s")));
       const fl=Object.keys(s.filters||{}).filter(k=>k!=="unrecorded").map(filtLabel).join(", ");
       if(fl) m.append(el("span",null,"· "+fl));
+      if(s.cal) m.append(el("span",null,"· "+calText(s.cal)));
       b.append(m);
       b.addEventListener("click",()=>openTarget(s.target));
       col.append(b);
@@ -1054,7 +1055,7 @@ function openTarget(name){
           hoverable(r,box=>{
             box.append(el("div","tt-t",fmtDY(s.night)));
             ttRow(box,CAMSHORT[s.camera]||s.camera, s.stackOnly?"auto-stack only":fmtH(s.hours), s.camera);
-            if(!s.stackOnly){ ttRow(box,"frames",fmtI(s.frames)); const f=Object.keys(s.filters).join(", "); if(f) ttRow(box,"filter",f); }
+            if(!s.stackOnly){ ttRow(box,"frames",fmtI(s.frames)); const f=Object.keys(s.filters).join(", "); if(f) ttRow(box,"filter",f); if(s.cal) ttRow(box,"calibration",calText(s.cal)); }
             if(s.rig && s.camera==="ASIAir") ttRow(box,"rig",CAMSHORT[s.rig]||s.rig, s.rig);
           });
           const yr=s.night.slice(0,4);
@@ -1064,8 +1065,8 @@ function openTarget(name){
         c.append(svg);
         c.append(legendRow(CAMS.filter(cm=>ts.some(s=>s.camera===cm.id)).map(cm=>({label:cm.id,cam:cm.id,kind:"sw"}))));
       },
-      w=>simpleTable(w,["Night","Scope","Frames","Hours","Filters"],
-        ts.map(s=>[fmtDY(s.night),CAMSHORT[s.camera]||s.camera,s.stackOnly?"stack only":fmtI(s.frames),s.hours.toFixed(2),Object.keys(s.filters).join(", ")||"·"]))
+      w=>simpleTable(w,["Night","Scope","Frames","Hours","Filters","Calibration"],
+        ts.map(s=>[fmtDY(s.night),CAMSHORT[s.camera]||s.camera,s.stackOnly?"stack only":fmtI(s.frames),s.hours.toFixed(2),Object.keys(s.filters).join(", ")||"·",calText(s.cal)]))
     );
     cardC.style.marginTop="14px";
     drawer.append(cardC);
@@ -1093,6 +1094,7 @@ function openTarget(name){
     if(p.masters) stat("masters",p.masters);
     if(p.working) stat("working copies",p.working);
     if(p.panels && p.panels.length) stat("mosaic panels",p.panels.length);
+    if(p.calibration && p.calibration.applies!==false) stat("calibration", calText(p.calibration)+(p.calibration.nights?" over "+p.calibration.nights_with+" of "+p.calibration.nights+" night"+(p.calibration.nights===1?"":"s"):""));
     box.append(st);
     const fl=Object.entries(p.filters).sort((a,b)=>b[1]-a[1]).map(([k,v])=>filtLabel(k)+" x"+fmtI(v)).join(", ");
     if(fl){ const f2=el("div","p-stats"); const s3=el("span"); s3.append("filters "); s3.append(el("b",null,fl)); f2.append(s3);
@@ -1122,6 +1124,12 @@ function openTarget(name){
   scrim.style.display="block";
   drawer.classList.add("open");
   drawer.scrollTop=0;
+}
+/* what calibration a session has: null = the Seestar's own (none of ours needed) */
+function calText(c){
+  if(!c) return "Seestar: its own";
+  if(!c.darks&&!c.flats&&!c.biases) return "none linked";
+  return [c.darks?c.darks+" darks":"", c.flats?c.flats+" flats":"", c.biases?c.biases+" bias":""].filter(Boolean).join(" · ");
 }
 function filtLabel(f){ return f==="IRCUT"?"UV/IR Cut":f==="LP"?"LP dual-band":f==="wide-cam"?"wide camera":f; }
 function niceTicks(max,n){ if(!(max>0)||!(n>0)) return []; const step=Math.pow(10,Math.floor(Math.log10(max/n))); const cands=[step,2*step,2.5*step,5*step,10*step];

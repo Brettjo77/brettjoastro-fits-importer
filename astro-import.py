@@ -3506,11 +3506,13 @@ def write_ledger_snapshot(state, mount=None):
             dest, fn = row.get("dest"), row.get("filename")
             if isinstance(dest, str) and isinstance(fn, str):
                 slim["here"] = _dest_present(dest, fn, cache)
+                slim["dayKey"] = _day_key(dest)     # which Day folder: its calibration links by this
             rows[key] = slim
         _atomic_write_json(path, {"schema": "ledger-snapshot/1", "machine": MACHINE_LABEL,
                                   "machineId": machine_identity()["slug"],
                                   "machineUid": machine_id(), "at": _utc_iso(),
-                                  "files": rows, "customNames": state.custom_names or {}})
+                                  "files": rows, "customNames": state.custom_names or {},
+                                  "calibration": _calibration_links(state.ledger)})
         return path
     except OSError as e:
         warn(f"The ledger snapshot for the other computer could not be written ({e}); "
@@ -3519,13 +3521,73 @@ def write_ledger_snapshot(state, mount=None):
 
 SNAPSHOT_STALE_HOURS = 36       # the ship runs twice a day; older than this and the Mac hasn't reached the archive
 
+def _day_key(dest):
+    """A light row's Day folder, as the calibration links name it (linkedInto):
+    relative to the frame folder, '/'-separated. None when it isn't under it."""
+    try:
+        rel = _rel(dest, DEST_DIR)
+    except ValueError:
+        return None
+    return None if rel.startswith("..") else rel
+
+def _calibration_links(ledger):
+    """The ledger's calibration frames that are linked into a Day folder, slim:
+    what kind, which folders, and which copies the archive has verified. This
+    is what the project layer needs to say what calibration a session has."""
+    out = {}
+    for key, c in ((ledger or {}).get("calibration") or {}).items():
+        if not isinstance(c, dict) or c.get("frameType") not in LIB_SUBDIR:
+            continue
+        links = [l for l in (c.get("linkedInto") or []) if isinstance(l, str)]
+        if not links:
+            continue
+        copies = c.get("archive") if isinstance(c.get("archive"), dict) else {}
+        out[key] = {"frameType": c["frameType"], "filename": c.get("filename"), "linkedInto": links,
+                    "shipped": [l for l in links if isinstance(copies.get(l), dict) and copies[l].get("verifiedAt")]}
+    return out
+
+def _calibration_index(cal_maps):
+    """link (a Day folder key, or a target folder for a mosaic) -> counts per kind,
+    from this computer's ledger and the other's snapshot together."""
+    idx = {}
+    for cal in cal_maps:
+        for c in (cal or {}).values():
+            kind = LIB_SUBDIR.get(c.get("frameType")) if isinstance(c, dict) else None
+            if not kind:
+                continue
+            for link in c.get("linkedInto") or []:
+                if isinstance(link, str):
+                    n = idx.setdefault(link, {"biases": 0, "darks": 0, "flats": 0, "shipped": 0})
+                    n[kind] += 1
+                    if link in (c.get("shipped") or []):
+                        n["shipped"] += 1
+    return idx
+
+def _calibration_for(idx, day_keys):
+    """Counts for a set of Day folder keys: a link matches its own folder, or any
+    folder above it (a mosaic's shared calibration sits on the target folder)."""
+    tot = {"biases": 0, "darks": 0, "flats": 0, "shipped": 0}
+    seen = set()
+    for dk in day_keys:
+        if not isinstance(dk, str):
+            continue
+        parts = dk.split("/")
+        for i in range(1, len(parts) + 1):
+            link = "/".join(parts[:i])
+            if link in idx and link not in seen:
+                seen.add(link)
+                for k in tot:
+                    tot[k] += idx[link][k]
+    return tot
+
 def load_ledger_snapshot(path, warnings):
     """The other computer's snapshot: (rows, meta). Rows are {} when the file
     can't be used, and `warnings` says why; meta carries who wrote it, when,
     and how old it is, for projects.json and the panel."""
     d = _read_json_file(path)
     meta = {"file": os.path.basename(path), "machine": d.get("machine") if isinstance(d.get("machine"), str) else None,
-            "at": d.get("at") if isinstance(d.get("at"), str) else None, "rows": 0, "age_hours": None}
+            "at": d.get("at") if isinstance(d.get("at"), str) else None, "rows": 0, "age_hours": None,
+            "calibration": d.get("calibration") if isinstance(d.get("calibration"), dict) else {}}
     schema = d.get("schema")
     major = schema.split("/", 1)[1] if isinstance(schema, str) and schema.startswith("ledger-snapshot/") else "1"
     if not major.isdigit() or int(major) > 1:
@@ -9883,8 +9945,14 @@ def build_projects(state, extra_ledgers=(), today=None, custom_names=None, colle
                 d = datasets.setdefault(first, {"target": t, "scope": s, "nights": {},
                                                 "locations": set()})
                 n = d["nights"].setdefault(night, {"frames": 0, "integration": 0.0,
-                                                   "bytes": 0, "exps": {}, "filters": {}})
+                                                   "bytes": 0, "exps": {}, "filters": {}, "days": set()})
                 n["frames"] += 1
+                dk = row.get("dayKey") if isinstance(row.get("dayKey"), str) else \
+                    (_day_key(row["dest"]) if own and isinstance(row.get("dest"), str) else None)
+                if dk:
+                    n["days"].add(dk)
+                if row.get("device") == "seestar":
+                    d["seestar"] = True
                 try:
                     secs = float(row.get("exposureSeconds") or 0)
                     if math.isfinite(secs) and 0 <= secs <= 86400:
@@ -9929,6 +9997,14 @@ def build_projects(state, extra_ledgers=(), today=None, custom_names=None, colle
     bad_rows += stats.get("bad", 0)
     if bad_rows:
         warnings.append(f"{bad_rows} ledger row(s) could not be read and were not counted")
+    # the calibration frames linked into each session's Day folder: this computer's
+    # ledger and the other's snapshot together (a Seestar needs none of ours)
+    cal_idx = _calibration_index([_calibration_links(state.ledger)]
+                                 + [m.get("calibration") for m in metas if isinstance(m, dict)])
+    for d in datasets.values():
+        for n in d["nights"].values():
+            n["cal"] = _calibration_for(cal_idx, n["days"])
+            n["days"] = sorted(n["days"])
     if unresolved:
         warnings.append(f"{len(unresolved)} target name(s) the contract doesn't know "
                         f"(run --targets-draft to list them); their frames are not counted")
@@ -10037,6 +10113,20 @@ def build_projects(state, extra_ledgers=(), today=None, custom_names=None, colle
             if status == "capturing" and cstate != "open":
                 entry["ready_on"] = (date.fromisoformat(last)
                                      + timedelta(days=QUIET_PERIOD_DAYS + 1)).isoformat()
+            if d.get("seestar"):
+                entry["calibration"] = {"applies": False}    # the Seestar calibrates itself
+            else:
+                cal = {"biases": 0, "darks": 0, "flats": 0, "shipped": 0}
+                with_cal = 0
+                for n in d["nights"].values():
+                    c = n.get("cal") or {}
+                    for k in cal:
+                        cal[k] += c.get(k, 0)
+                    if c.get("darks") or c.get("flats"):
+                        with_cal += 1
+                entry["calibration"] = {"applies": True, **cal, "nights_with": with_cal,
+                                        "nights": len(nights),
+                                        "missing": [k for k in ("darks", "flats") if not cal[k]]}
             if own_masters:
                 entry["masters"] = sorted(own_masters)[:20]
             if done_files:
@@ -10176,7 +10266,9 @@ def observatory_from(doc, collect, state=None, now=None):
             sessions.append({"target": name, "camera": cam, "night": nt, "frames": n["frames"],
                              "hours": round(n["integration"] / 3600, 3),
                              "filters": nf, "exps": dict(n.get("exps", {})),
-                             "askar": {}, "stackOnly": False})
+                             "askar": {}, "stackOnly": False,
+                             "cal": None if d.get("seestar") else
+                             {k: (n.get("cal") or {}).get(k, 0) for k in ("darks", "flats", "biases")}})
         state_id = OBS_STATE.get(e["status"], "captured")
         where = _obs_where(e.get("locations"), here_label, there_label)
         masters, finals = e.get("masters") or [], e.get("finals") or []
@@ -10206,6 +10298,9 @@ def observatory_from(doc, collect, state=None, now=None):
                 evidence = f"last session {last_txt}"
             action = "Keep capturing"
         notes = [OBS_ATTRIBUTION.get(a, a) for a in (e.get("attribution") or [])]
+        calib = e.get("calibration") or {}
+        if calib.get("applies") and calib.get("missing") and e["status"] in ("ready_to_process", "capturing"):
+            notes.append("no " + " or ".join(calib["missing"]) + " linked to its lights")
         if notes:
             evidence += "; " + ", ".join(notes)
         arel = e.get("archive_rel")
@@ -10219,7 +10314,7 @@ def observatory_from(doc, collect, state=None, now=None):
                 "firstNight": e["first_session"], "lastNight": e["last_session"],
                 "filters": filters, "exposures": exps, "panels": [], "gains": {}, "askar": {},
                 "where": where, "status": e["status"], "readyOn": e.get("ready_on"),
-                "evidence": evidence, "action": action}
+                "evidence": evidence, "action": action, "calibration": e.get("calibration")}
         card = {"target": name, "label": name + (" (mosaic)" if d.get("mosaic") else ""),
                 "camera": cam, "state": state_id, "hours": hours, "nights": len(nights),
                 "lights": frames, "lastNight": e["last_session"], "readyOn": e.get("ready_on"),

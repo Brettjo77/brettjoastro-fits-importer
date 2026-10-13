@@ -1256,6 +1256,7 @@ button.primary:hover:not(:disabled){color:var(--accent-ink);filter:brightness(1.
   #tab-dash iframe{height:100%}
   .foot{margin-top:10px}
 }
+.ad-calmiss{color:var(--warn,#c65b32)}
 /* ── Archive tab (Astro Desk, 1.6.0) ── */
 .ad-cols{display:grid;grid-template-columns:minmax(340px,4fr) minmax(430px,7fr);gap:18px}
 @media(max-width:1000px){.ad-cols{grid-template-columns:minmax(0,1fr)}}
@@ -1970,6 +1971,11 @@ function projectsHtml(pj, opts){
   const scopes={}; rows.forEach(r=>{ const k=scopeOf(r.d); scopes[k]=(scopes[k]||0)+1; });
   const pick=opts.scope&&scopes[opts.scope]?opts.scope:"";
   const vis=pick?rows.filter(r=>scopeOf(r.d)===pick):rows;
+  const calText=d=>{ const c=d.calibration; if(!c||c.applies===false) return "";
+    if(!c.darks&&!c.flats&&!c.biases) return "no darks, flats or bias linked";
+    const bits=[c.darks?`${c.darks} dark${c.darks===1?"":"s"}`:"", c.flats?`${c.flats} flat${c.flats===1?"":"s"}`:"", c.biases?`${c.biases} bias`:""].filter(Boolean);
+    const miss=(c.missing||[]).length?` · no ${c.missing.join(" or ")}`:"";
+    return `calibration: ${bits.join(" · ")}${miss}`; };
   const reason=d=>{ const last=fmtNight(d.last_session), rf=readyFrom(d);
     if(d.status==="done") return `finished picture${d.finals&&d.finals[0]?": "+d.finals[0]:""}`;
     if(d.status==="in_progress") return `master saved on the archive${d.masters&&d.masters[0]?": "+d.masters[0]:""}${(d.attribution||[]).includes("shared-folder")?" (shared Askar folder: may be the other Askar's)":""}`;
@@ -1990,7 +1996,7 @@ function projectsHtml(pj, opts){
           :`<span class="ad-nowhere">${locs.length&&!locs.includes("chillblast_archive")?"not shipped to the archive yet":"no folder on the archive"}</span>`;
         const sel=d.archive_rel?` data-xsel="${esc(d.archive_rel)}" tabindex="0" role="button"`:"";
         return `<div class="ad-row${deskSel&&deskSel===d.archive_rel?" on":""}"${sel}>
-          <div class="tmain"><div class="tname">${esc(r.name)}</div><div class="tmeta">${esc(facts)}</div><div class="tnote">${esc(reason(d))}</div></div>
+          <div class="tmain"><div class="tname">${esc(r.name)}</div><div class="tmeta">${esc(facts)}</div><div class="tnote">${esc(reason(d))}${calText(d)?` · <span class="${(d.calibration.missing||[]).length||(!d.calibration.darks&&!d.calibration.flats)?"ad-calmiss":""}">${esc(calText(d))}</span>`:""}</div></div>
           <div class="tstats"><div class="big">${esc(fmtHours(d.integration_seconds))}</div><div class="small">${esc(nights+frames)}</div></div>${btn}</div>`;
       }).join("")+"</details>";
   };
@@ -2000,7 +2006,7 @@ function projectsHtml(pj, opts){
   const warns=(doc.warnings||[]).map(w=>/doesn't know|could not be read|day\(s\) old|newer importer/.test(w)?`<p class="ad-warn">⚠ ${esc(w)}</p>`:`<p class="ad-note">⚠ ${esc(w)}</p>`).join("");
   const scopeSel=`<select id="deskScope" aria-label="Scope"><option value="">All scopes (${rows.length})</option>${Object.keys(scopes).sort().map(k=>`<option value="${esc(k)}"${k===pick?" selected":""}>${esc(k)} (${scopes[k]})</option>`).join("")}</select>`;
   const head=`<div class="ad-head">${scopeSel}<button type="button" id="deskRefresh">Refresh now</button></div>`;
-  const legend=`<p class="ad-legend"><strong>To process</strong>: no new frames for ${quiet} nights and no master saved. <strong>In progress</strong>: a master of yours is in the object's folder on the archive. <strong>Still capturing</strong>: frames within the last ${quiet} nights, or kept open by you. <strong>Done</strong>: a finished picture in Final Astro Images names the object and the scope.</p>`;
+  const legend=`<p class="ad-legend">Each ASIAir row also says what calibration (darks, flats, bias) is linked to its lights; the Seestar calibrates itself. <strong>To process</strong>: no new frames for ${quiet} nights and no master saved. <strong>In progress</strong>: a master of yours is in the object's folder on the archive. <strong>Still capturing</strong>: frames within the last ${quiet} nights, or kept open by you. <strong>Done</strong>: a finished picture in Final Astro Images names the object and the scope.</p>`;
   const body=sect("ready_to_process",true)+sect("in_progress",false)+sect("capturing",false)+sect("done",false);
   const cap=rows.filter(r=>r.d.status==="capturing"), done=rows.filter(r=>r.d.status==="done").length;
   const soonest=cap.map(r=>readyFrom(r.d)).filter(Boolean).sort()[0];

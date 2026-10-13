@@ -5728,16 +5728,23 @@ finally:
         os.remove(_outx)
 
 # every state from the facts, through build_observatory itself at a fixed night
+OB2_DK = "ZWO ASI AIR/Wizard Nebula/2026-09-26 Day 1"
+OB2_ASI = dict(device="asiair", camera="ZWO ASI585MC Air", scope="Askar FRA400", sourceType="Plan", dayKey=OB2_DK)
 OB2 = pl_pc_env("OB2", {
-    "w1": pl_snap_row("NGC 7380", "NGC 7380 - Wizard Nebula", "2026-09-26", "w1" * 32, exposureSeconds=1800.0, here=True),
-    "w2": pl_snap_row("NGC 7380", "NGC 7380 - Wizard Nebula", "2026-09-26", "w2" * 32, exposureSeconds=1800.0, filter="Ha"),
+    "w1": pl_snap_row("NGC 7380", "NGC 7380 - Wizard Nebula", "2026-09-26", "w1" * 32, exposureSeconds=1800.0, here=True, **OB2_ASI),
+    "w2": pl_snap_row("NGC 7380", "NGC 7380 - Wizard Nebula", "2026-09-26", "w2" * 32, exposureSeconds=1800.0, filter="Ha", **OB2_ASI),
     "r1": pl_snap_row("NGC 2244", "NGC 2244 - Rosette Nebula", "2026-09-25", "r1" * 32, exposureSeconds=900.0,
                       dest=os.path.join(tempfile.gettempdir(), "x")),
     "p1": pl_snap_row("M 42", "M 42 - Orion Nebula", "2026-09-01", "p1" * 32,
                       archiveLocation="S30P/Orion Nebula (M 42)/Day 1/p1.fit"),
     "d1": pl_snap_row("NGC 7635", "NGC 7635 - Bubble Nebula", "2026-08-20", "d1" * 32),
     "q1": pl_snap_row("M 45", "M 45 - Pleiades", "20260815", "q1" * 32, exposureSeconds=0),   # a bare night spelling, no exposure
-}, at="2026-10-01T08:00:00Z")
+}, at="2026-10-01T08:00:00Z",
+   calibration={"d1": {"frameType": "Dark", "filename": "Dark_1800s.fit", "linkedInto": [OB2_DK], "shipped": [OB2_DK]},
+                "b1": {"frameType": "Bias", "filename": "Bias.fit", "linkedInto": [OB2_DK], "shipped": []},
+                "f1": {"frameType": "Flat", "filename": "Flat_1.fit", "linkedInto": ["ZWO ASI AIR/Wizard Nebula"], "shipped": []},
+                "f2": {"frameType": "Flat", "filename": "Flat_2.fit", "linkedInto": ["ZWO ASI AIR/Wizard Nebula"], "shipped": []},
+                "x1": {"frameType": "Flat", "filename": "Other.fit", "linkedInto": ["ZWO ASI AIR/Elsewhere/2026-09-26 Day 1"], "shipped": []}})
 _pc2 = os.path.join(OB2.archive, "_verify", "pc"); os.makedirs(_pc2, exist_ok=True)
 with open(os.path.join(_pc2, "inventory-E-20261009T033000Z.jsonl"), "w") as f:
     f.write(json.dumps(pl_inv_row("S30P/Orion Nebula (M 42)/WBPP/master/masterLight.xisf", "S30P", "Orion Nebula (M 42)")) + "\n")
@@ -5752,6 +5759,7 @@ _cd = lambda c: _by[c]["statusCards"][0]
 check("OB2 all four states from the facts, with the page's actions, reasons, badges and real hours; a bare "
       "night spelling is one night; the old snapshot is one warning, not two",
       lambda: [_by[c]["state"] for c in ("NGC 7380", "NGC 2244", "M 42", "NGC 7635")] == ["captured", "stacked", "processing", "complete"]
+      and _by["NGC 7380"]["cameras"] == ["Askar FRA400"]
       and [_cd(c)["action"] for c in ("NGC 7380", "NGC 2244", "M 42", "NGC 7635")]
           == ["Keep capturing", "Process it", "Finish it: process to a final", ""]
       and _cd("M 42")["evidence"].startswith("master saved: masterLight.xisf")
@@ -5768,6 +5776,35 @@ check("OB2 all four states from the facts, with the page's actions, reasons, bad
       and _o["asOfNight"] == PL_TODAY and _o["quietPeriodDays"] == 14
       and all(x["ok"] for x in _o["reconciliation"]),
       json.dumps(_o)[:900] if isinstance(_o, dict) else str(_o))
+_pr_cal = probe(OB2.env, "st = m.State()\nextra, names = m.projects_inputs(st)\n"
+                f"d = m.build_projects(st, extra, today='{PL_TODAY}', custom_names=names)\n"
+                "print(json.dumps({p['target_id']: [e.get('calibration') for e in p['datasets']] for p in d['projects']}))\n")
+check("OB2 calibration follows the lights: an ASIAir session counts the darks and bias linked into its "
+      "Day folder and the flats linked to the target folder above it (a mosaic's shared set), never "
+      "another target's; a Seestar dataset says none of ours applies",
+      lambda: _pr_cal["NGC7380"] == [{"applies": True, "biases": 1, "darks": 1, "flats": 2, "shipped": 1,
+                                      "nights_with": 1, "nights": 1, "missing": []}]
+      and _pr_cal["M42"] == [{"applies": False}]
+      and _pr_cal["NGC2237"][0]["applies"] is False     # the Rosette (its id is NGC 2237), a Seestar row: pl_snap_row's default device
+      and next(s for s in _o["sessions"] if s["target"].startswith("Wizard"))["cal"] == {"darks": 1, "flats": 2, "biases": 1}
+      and next(s for s in _o["sessions"] if s["target"].startswith("Orion"))["cal"] is None
+      and _by["NGC 7380"]["programmes"][0]["calibration"]["flats"] == 2
+      and "linked to its lights" not in _cd("NGC 7380")["evidence"],
+      json.dumps([_pr_cal, [s for s in _o["sessions"] if s["target"].startswith("Wizard")]]))
+# an ASIAir dataset with no calibration at all is flagged where it matters: when it is ready
+OB2b = pl_pc_env("OB2b", {
+    "n1": pl_snap_row("NGC 2244", "NGC 2244 - Rosette Nebula", "2026-08-20", "n1" * 32, exposureSeconds=300.0,
+                      **dict(OB2_ASI, dayKey="ZWO ASI AIR/Rosette Nebula/2026-08-20 Day 1")),
+}, at="2026-10-01T08:00:00Z")
+_o2 = probe(OB2b.env, "st = m.State()\nextra, names = m.projects_inputs(st)\n"
+            f"print(json.dumps(m.build_observatory(st, extra, today='{PL_TODAY}', custom_names=names)))\n")
+check("OB2b a ready ASIAir dataset with no darks or flats linked says so in its reason, and the "
+      "dataset's calibration names what is missing",
+      lambda: "no darks or flats linked to its lights" in _o2["targets"][0]["statusCards"][0]["evidence"]
+      and _o2["targets"][0]["programmes"][0]["calibration"]["missing"] == ["darks", "flats"]
+      and _o2["targets"][0]["statusCards"][0]["state"] == "stacked",
+      json.dumps(_o2.get("targets"))[:600])
+shutil.rmtree(OB2b.root, ignore_errors=True)
 shutil.rmtree(OB2.root, ignore_errors=True)
 
 # the PC publishes its list in its own _verify folder; the Mac's panel prefers it while it is fresh
@@ -5775,12 +5812,30 @@ OB3 = teh.Env("OB3", asiair=False, seestar=False)      # a Mac (ASTRO_SHIP_FOLDE
 shutil.copytree(PL_CON if os.path.isdir(PL_CON) else os.path.join(PL_SRC, "contract"), os.path.join(OB3.root, "contract"))
 OB3.env.update({"ASTRO_CONTRACT_DIR": os.path.join(OB3.root, "contract"), "ASTRO_SHIP_FOLDER": "mac"})
 os.makedirs(OB3.state, exist_ok=True)
+_ob3_day = os.path.join(OB3.env["ASIAIR_DEST"], "Wizard Nebula", "2026-09-01 Day 1")
 with open(os.path.join(OB3.state, "ledger.json"), "w") as f:
-    json.dump({"version": 1, "calibration": {}, "files": {"w1": {
-        "filename": "Light_NGC 7380_20.0s_20260901-220000.fit", "target": "NGC 7380", "device": "seestar",
-        "scope": "Seestar S50 Pro", "sourceType": "sub", "night": "2026-09-01", "exposureSeconds": 20.0}}}, f)
+    json.dump({"version": 1,
+               "calibration": {"Autorun/Dark/d.fit": {"frameType": "Dark", "filename": "d.fit", "sha256": "d" * 64,
+                                                      "verifiedAtImport": True, "linkedInto": ["Wizard Nebula/2026-09-01 Day 1"],
+                                                      "archive": {"Wizard Nebula/2026-09-01 Day 1": {"verifiedAt": "2026-09-02T090000"}}},
+                               "Autorun/Flat/f.fit": {"frameType": "Flat", "filename": "f.fit", "linkedInto": ["Wizard Nebula/2026-09-01 Day 1"]},
+                               "Autorun/Flat/unlinked.fit": {"frameType": "Flat", "filename": "u.fit", "linkedInto": []}},
+               "files": {"w1": {
+        "filename": "Light_NGC 7380_300.0s_Bin1_gain200_20260901-220000.fit", "target": "NGC 7380", "device": "asiair",
+        "camera": "ZWO ASI585MC Air", "scope": "Askar FRA400", "sourceType": "Plan", "night": "2026-09-01",
+        "exposureSeconds": 300.0, "dest": _ob3_day}}}, f)
 r = OB3.run("--projects")
 _own = json.load(open(os.path.join(OB3.state, "projects.json")))
+_pr_own = probe(OB3.env, "st = m.State()\nimport json\n"
+                "print(json.dumps({'links': m._calibration_links(st.ledger), 'day': m._day_key(st.ledger['files']['w1']['dest'])}))\n")
+check("OB3 this computer's own ledger: a light row's Day folder is keyed as the calibration links name "
+      "it, the linked dark (its archive copy verified) and flat count, the unlinked flat does not",
+      lambda: _pr_own["day"] == "Wizard Nebula/2026-09-01 Day 1"
+      and set(_pr_own["links"]) == {"Autorun/Dark/d.fit", "Autorun/Flat/f.fit"}
+      and _pr_own["links"]["Autorun/Dark/d.fit"]["shipped"] == ["Wizard Nebula/2026-09-01 Day 1"]
+      and _own["projects"][0]["datasets"][0]["calibration"] == {"applies": True, "biases": 0, "darks": 1, "flats": 1,
+                                                               "shipped": 1, "nights_with": 1, "nights": 1, "missing": []},
+      json.dumps([_pr_own, _own["projects"][0]["datasets"][0].get("calibration")]))
 _pcdir = os.path.join(OB3.archive, "_verify", "pc"); os.makedirs(_pcdir, exist_ok=True)
 _pub = dict(_own); _pub["generated_at"] = _dt.now(_tz.utc).isoformat(timespec="seconds")
 _pub["projects"] = [{"target_id": "M42", "name": "Orion Nebula (M 42)", "status": "done", "to_process": False,

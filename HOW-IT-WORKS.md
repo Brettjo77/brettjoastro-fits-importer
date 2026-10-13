@@ -252,6 +252,8 @@ A **project** is one object in the sky. A **dataset** is that object on one scop
 
 Nights are noon to noon, like the Day folders, and the quiet period is counted in those nights. To change the 14 days, put `"ASTRO_QUIET_PERIOD_DAYS": 21` (say) in config.json.
 
+**Calibration goes with the session** (Brett, 13 Oct). For an ASIAir dataset the To process row and the Observatory say what darks, flats and bias are linked to its lights (the frames the import paired with that night, in the Day folder's `calibration` folder, and a mosaic's shared set on the target folder), night by night in a target's drawer. A ready set with no darks or flats linked says so in its reason, because it can't be processed without them. The Seestar calibrates itself, so its rows say nothing about calibration. The Mac's calibration links travel to the PC in the ledger snapshot with the lights.
+
 **Where the data is** says "on this Mac" (or "on this PC") only when the frame is still in the importer's folder on this computer right now — you clear your own disks by hand, and the importer checks the disk, not its memory. "On the archive" means the ship has filed it. "On the PC (per its ledger)" means the other computer's ledger says so and this one can't look.
 
 The one fact you can set by hand is per dataset: **open** ("I'm keeping this going all season — leave it as capturing") or **complete** ("that's enough light — count it as ready now"). AstroLog will set it later; until then, make a file called `capture-state.json` in the same folder as `projects.json`, for example:
