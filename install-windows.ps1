@@ -92,7 +92,7 @@ $bin = Join-Path $env:LOCALAPPDATA 'BrettjoAstro\bin'
 New-Item -ItemType Directory -Force -Path $bin -ErrorAction Stop | Out-Null
 New-Item -ItemType Directory -Force -Path (Join-Path $bin 'pc') -ErrorAction Stop | Out-Null
 
-foreach ($f in @('astro-import.py', 'astro-app.py', 'astro-watch.py', 'selftest.py')) {
+foreach ($f in @('astro-import.py', 'astro-app.py', 'astro-watch.py', 'selftest.py', 'astro-observatory.html')) {
     $src = Join-Path $here $f
     if (-not (Test-Path -LiteralPath $src)) { Warn "Missing from the package: $f"; exit 1 }
     Copy-Item -LiteralPath $src -Destination $bin -Force -ErrorAction Stop

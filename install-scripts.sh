@@ -122,6 +122,7 @@ install_file "$SCRIPT_DIR/astro-import.py"  "$BIN_DIR/astro-import.py"  true
 install_file "$SCRIPT_DIR/astro-app.py"     "$BIN_DIR/astro-app.py"     true
 install_file "$SCRIPT_DIR/astro-watch.sh"   "$BIN_DIR/astro-watch.sh"   true
 install_file "$SCRIPT_DIR/selftest.py"      "$BIN_DIR/selftest.py"      true
+install_file "$SCRIPT_DIR/astro-observatory.html" "$BIN_DIR/astro-observatory.html" false
 # The contract (1.7): canonical targets and scopes, read by --projects. Brett may
 # edit the installed copy, so an edited file is never replaced: the newer shipped
 # copy lands beside it as <name>.new for him to merge. An installed copy that is

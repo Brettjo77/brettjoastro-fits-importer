@@ -34,9 +34,9 @@ RESULTS = {"PASS": 0, "WARN": 0, "FAIL": 0, "SKIP": 0}
 # install-scripts.sh and install-windows.ps1, so the two can't drift again.
 INSTALLED = {
     "mac": ("astro-import.py", "astro-app.py", "astro-watch.sh", "selftest.py",
-            "contract/targets.json", "contract/scopes.json"),
+            "astro-observatory.html", "contract/targets.json", "contract/scopes.json"),
     "windows": ("astro-import.py", "astro-app.py", "astro-watch.py", "selftest.py",
-                "contract/targets.json", "contract/scopes.json"),
+                "astro-observatory.html", "contract/targets.json", "contract/scopes.json"),
 }
 
 

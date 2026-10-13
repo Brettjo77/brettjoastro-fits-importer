@@ -5307,7 +5307,9 @@ check("PL ...and with no ledger and no snapshot the last good projects.json is l
 def pl_pc_env(name, snapshot_files, **snap_extra):
     """A PC that never imported, with the contract and the Mac's snapshot."""
     e = teh.Env(name, asiair=False, seestar=False)
-    shutil.copytree(PL_CON, os.path.join(e.root, "contract"))
+    # the shipped contract (PL_CON is gone once chain PL has cleaned up)
+    shutil.copytree(PL_CON if os.path.isdir(PL_CON) else os.path.join(PL_SRC, "contract"),
+                    os.path.join(e.root, "contract"))
     e.env.update({"ASTRO_CONTRACT_DIR": os.path.join(e.root, "contract"), "ASTRO_SHIP_FOLDER": "pc",
                   "ASTRO_FINALS_DIR": os.path.join(e.root, "finals")})
     os.makedirs(os.path.join(e.archive, "_verify", "mac"), exist_ok=True)
@@ -5558,6 +5560,103 @@ check("PL a contract file of the wrong shape is a warning and an empty list, not
       json.dumps(doc4.get("warnings") or doc4)[:300])
 shutil.rmtree(PL2.root, ignore_errors=True)
 shutil.rmtree(PL.root, ignore_errors=True)
+
+# ═══════════════ CHAIN OB: the Observatory, fed live (1.7.0) ═══════════════════
+print("\n── Chain OB: the Observatory page, fed from the same facts as projects.json ──")
+from datetime import date as _date, timedelta as _td
+_ob_n = lambda back: (_date.today() - _td(days=back)).isoformat()   # nights relative to today: the
+OB_N = {"m1": _ob_n(5), "m2": _ob_n(4), "i1": _ob_n(70), "i2": _ob_n(69)}  # statuses stay the same all year
+OB = pl_pc_env("OB", {
+    "a1": pl_snap_row("M 31", "Andromeda Galaxy (M 31) (mosaic)", OB_N["m1"], "a1" * 32, size=1000),
+    "a2": pl_snap_row("M 31", "Andromeda Galaxy (M 31) (mosaic)", OB_N["m1"], "a2" * 32, size=1000),
+    "a3": pl_snap_row("M 31", "Andromeda Galaxy (M 31) (mosaic)", OB_N["m2"], "a3" * 32, size=1000, filter="LP"),
+    "b1": pl_snap_row("NGC 7023", "NGC 7023 - Iris Nebula", OB_N["i1"], "b1" * 32, scope="Seestar S50",
+                      exposureSeconds=20.0, archiveLocation="S50/NGC 7023 - Iris Nebula/Day 1/x.fit"),
+    "b2": pl_snap_row("NGC 7023", "NGC 7023 - Iris Nebula", OB_N["i2"], "b2" * 32, scope="Seestar S50",
+                      exposureSeconds=20.0),
+    "c1": pl_snap_row("Nobody Knows", "Nobody Knows", OB_N["i2"], "c1" * 32),
+}, at=_dt.now(_tz.utc).isoformat(timespec="seconds"))
+shutil.copy(os.path.join(PL_SRC, "astro-observatory.html"), os.path.join(OB.root, "astro-observatory.html"))
+OB.env.update({"ASTRO_OBSERVATORY_TEMPLATE": os.path.join(OB.root, "astro-observatory.html"),
+               "ASTRO_ARCHIVE_LABEL": "E:\\Astro Image Data"})
+def ob_listing(root):
+    out = set()
+    for dp, dn, fn in os.walk(root):
+        for f in fn:
+            out.add(os.path.relpath(os.path.join(dp, f), root))
+    return out
+_before = ob_listing(OB.root)
+r = OB.run("--observatory")
+_after = ob_listing(OB.root)
+_obf = os.path.join(OB.state, "observatory.html")
+def ob_dataset(path):
+    html = open(path, encoding="utf-8").read()
+    m = re.search(r'<script id="dataset" type="application/json">(.*?)</script>', html, re.S)
+    return (json.loads(m.group(1)) if m else None), html
+_ds, _html = ob_dataset(_obf) if os.path.isfile(_obf) else (None, "")
+check("OB --observatory writes one standalone page in the state folder, and nothing else anywhere",
+      r.returncode == 0 and os.path.isfile(_obf) and "Observatory written" in r.stdout
+      and _after - _before == {os.path.relpath(_obf, OB.root)},
+      f"rc={r.returncode} new={sorted(_after - _before)} {r.stdout[-300:]}")
+check("OB the page carries the dataset in the Observatory's own shape, no slot left unfilled",
+      isinstance(_ds, dict) and _ds.get("schema") == "observatory/1" and "__DATASET__" not in _html
+      and all(k in _ds for k in ("scopes", "targets", "sessions", "totals", "health", "reconciliation",
+                                 "events", "shelves", "junk", "calibration", "generatedAt", "sourceNote")),
+      str(_ds)[:300] if _ds else _html[:300])
+_tg = {x["name"]: x for x in (_ds or {}).get("targets", [])}
+_m31, _iris = _tg.get("Andromeda Galaxy", {}), _tg.get("Iris Nebula", {})
+check("OB targets come from the contract: name, codes, type, constellation and the sky position",
+      _m31.get("codes") and "M 31" in _m31["codes"] and _m31.get("constellation") == "Andromeda"
+      and isinstance(_m31.get("ra"), float) and isinstance(_m31.get("dec"), float) and _m31.get("mosaic") is True
+      and _iris.get("codes") and "NGC 7023" in _iris["codes"] and "Nobody Knows" not in _tg,
+      json.dumps({k: v for k, v in _m31.items() if k not in ("programmes", "statusCards")}))
+check("OB the statuses are projects.json's, in the Observatory's words: a session two nights ago is "
+      "Capturing, August's frames are Ready to process",
+      _m31.get("state") == "captured" and _iris.get("state") == "stacked"
+      and _m31["statusCards"][0]["camera"] == "Seestar S30 Pro" and _iris["statusCards"][0]["camera"] == "Seestar S50"
+      and _iris["statusCards"][0]["action"] == "Process it" and "quiet period" in _iris["statusCards"][0]["evidence"]
+      and "on the archive" in _iris["statusCards"][0]["badges"],
+      json.dumps([_m31.get("statusCards"), _iris.get("statusCards")]))
+_sess = sorted((s["target"], s["camera"], s["night"], s["frames"], s["hours"]) for s in (_ds or {}).get("sessions", []))
+check("OB sessions are one target, one scope, one night, with frames and hours from the exposures",
+      _sess == [("Andromeda Galaxy", "Seestar S30 Pro", OB_N["m1"], 2, round(20 / 3600, 3)),
+                ("Andromeda Galaxy", "Seestar S30 Pro", OB_N["m2"], 1, round(10 / 3600, 3)),
+                ("Iris Nebula", "Seestar S50", OB_N["i1"], 1, round(20 / 3600, 3)),
+                ("Iris Nebula", "Seestar S50", OB_N["i2"], 1, round(20 / 3600, 3))]
+      and next(s for s in _ds["sessions"] if s["night"] == OB_N["m2"])["filters"] == {"LP": 1}
+      and _m31["programmes"][0]["exposures"] == {"10": 3} and _m31["programmes"][0]["bytes"] == 3000,
+      json.dumps(_sess) + json.dumps((_ds or {}).get("sessions")))
+_sc = {s["camera"]: s for s in (_ds or {}).get("scopes", [])}
+check("OB per-scope totals, the grand totals and the archive path the drawer shows",
+      _sc.get("Seestar S30 Pro", {}).get("frames") == 3 and _sc.get("Seestar S50", {}).get("nights") == 2
+      and _sc["Seestar S50"]["first"] == OB_N["i1"] and _ds["totals"]["lights"] == 5
+      and _ds["totals"]["nights"] == 4 and _ds["totals"]["targets"] == 2 and _ds["totals"]["sessions"] == 4
+      and _iris["programmes"][0]["path"] == "E:\\Astro Image Data\\S50\\NGC 7023 - Iris Nebula"
+      and _m31["programmes"][0]["path"] == "not yet on the archive",
+      json.dumps([_sc, _ds["totals"], _iris["programmes"][0]["path"], _m31["programmes"][0]["path"]]) if _ds else "")
+check("OB the project layer's warnings reach the page's Data health as warnings, and the unknown name is among them",
+      any(h["severity"] == "warn" and "contract doesn't know" in h["detail"] for h in (_ds or {}).get("health", []))
+      and (_ds or {}).get("health", [{}])[0].get("severity") == "info"
+      and all(x["ok"] for x in (_ds or {}).get("reconciliation", [])),
+      json.dumps((_ds or {}).get("health")))
+# a custom path inside the root; one outside is refused in test mode; no template is a clear stop
+_custom = os.path.join(OB.root, "out", "obs.html")
+r2 = OB.run("--observatory", _custom)
+r3 = OB.run("--observatory", os.path.join(tempfile.gettempdir(), "v2test-OB-outside.html"))
+r4 = OB.run("--observatory", extra_env={"ASTRO_OBSERVATORY_TEMPLATE": os.path.join(OB.root, "missing.html")})
+check("OB --observatory FILE writes where it is told (inside the root), refuses a file outside it, and "
+      "says plainly when the page template is missing",
+      r2.returncode == 0 and os.path.isfile(_custom) and ob_dataset(_custom)[0]["totals"]["lights"] == 5
+      and r3.returncode == 3 and not os.path.exists(os.path.join(tempfile.gettempdir(), "v2test-OB-outside.html"))
+      and r4.returncode != 0 and "astro-observatory.html" in (r4.stdout + r4.stderr)
+      and not os.path.exists(_obf + ".tmp"),
+      f"rc2={r2.returncode} rc3={r3.returncode} rc4={r4.returncode} " + (r4.stdout + r4.stderr)[-300:])
+_pr = probe(OB.env, "tpl = os.path.join(os.environ['ASTRO_OBSERVATORY_TEMPLATE'])\n"
+            "h = m.observatory_html({'a': '</script><b>', 'schema': 'x'}, tpl)\n"
+            "print(json.dumps({'closed': h.count('</script>'), 'esc': '<\\\\/script>' in h}))\n")
+check("OB a value that looks like a closing script tag can't break out of the dataset block",
+      _pr.get("esc") is True and _pr.get("closed") == _html.count("</script>"), str(_pr))
+shutil.rmtree(OB.root, ignore_errors=True)
 
 # ═══════════════ CHAIN IN: the installers and the suite itself (1.7.0) ════════
 print("\n── Chain IN: the installers and the suite itself (1.7.0, ten-reviewer pass) ──")

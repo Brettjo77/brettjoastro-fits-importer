@@ -280,6 +280,14 @@ On the Mac, "done" isn't checked unless `E:\Final Astro Images` is shared and `"
 
 On the Archive tab, **To process** and **In progress** now sit at the top, newest capture first, with the date the list was worked out and any warnings. Each row shows the scope, where the data is, hours and nights, and has an **Open in Explorer** (**Open in Finder** on the Mac) button straight to that object's folder on the archive. A row not yet on the archive says so instead. The folder list below it is the Observatory's view, for everything else.
 
+## The Observatory: the whole archive at a glance
+
+The panel's **Observatory** tab is the Astro Archive Observatory, the page built in August 2026 from a one-off scan of the drive, now fed live by the importer. It opens on an overview (hours by scope, where the hours went, what deserves the PC next) and has tabs for every target, a coverage matrix (every target against every scope), the pipeline board, the nights heatmap, the sky map and footprints, the scopes, and data health. Click a target anywhere for its story: sessions night by night, and each dataset with where it is on the archive.
+
+Everything on it comes from the same facts as `projects.json`, worked out afresh each time the tab opens: the ledgers (this computer's, and the other's snapshot on the archive), the PC's inventory and `Final Astro Images`, with names, codes and sky positions from `contract/targets.json`. The four states are the project layer's: capturing, ready to process, in progress, done. Nothing is typed in and nothing on the archive is touched. On the PC it shows the Mac's sessions through the snapshot, so it is complete there; on the Mac it is the same page from the Mac's own ledger.
+
+To keep a copy as one file (to open on another computer, or to send), run `--observatory` (optionally with a file name); it writes `observatory.html` in the state folder. Targets without coordinates in the contract are listed but sit off the sky map; add `ra` and `dec` to their entries to place them.
+
 ## When things go wrong
 
 Interruptions are expected, not exceptional. A copy that dies mid-file leaves

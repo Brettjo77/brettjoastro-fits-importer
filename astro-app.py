@@ -931,6 +931,29 @@ class Handler(BaseHTTPRequestHandler):
                 self._json({"error": "not a folder in the archive"}, 404)
             else:
                 self._json(listing)
+        elif self.path == "/observatory" or self.path.startswith("/observatory?"):
+            # The Observatory (1.7.0): the Astro Archive Observatory's page, filled
+            # live from the same facts as projects.json. Framed by its own tab, so
+            # always framable; a problem is a readable note, never a refused frame.
+            try:
+                state = eng.State()
+                extra, names = eng.projects_inputs(state)
+                dataset = eng.build_observatory(state, extra, custom_names=names)
+                if not dataset["targets"]:
+                    here, there = eng.ship_sides()
+                    self._html(_note_page(
+                        "Nothing to show yet: no light frames in this computer's ledger"
+                        + (f" and no snapshot from the {'PC' if there == 'pc' else 'Mac'} on the archive."
+                           if not (dataset.get("sourceNote") or "").count("snapshot") else ".")
+                        + " The Observatory fills in once frames have been imported and shipped."),
+                        frame_self=True)
+                    return
+                self._html(eng.observatory_html(dataset), frame_self=True)
+            except OSError as e:
+                self._html(_note_page(f"The Observatory page (astro-observatory.html) isn't beside the "
+                                      f"engine: {e}. Run the installer again."), 500, frame_self=True)
+            except Exception as e:
+                self._html(_note_page(f"The Observatory couldn't be built ({e})."), 500, frame_self=True)
         elif self.path == "/dashboard" or self.path.startswith("/dashboard?"):
             # Framable always (it lives in the panel's own Dashboard tab): a
             # reply that forbids framing shows as "refused to connect".
@@ -1210,7 +1233,7 @@ button.primary:hover:not(:disabled){color:var(--accent-ink);filter:brightness(1.
   #log{height:auto;flex:1;min-height:0}
   #tab-report{flex:1;min-height:0;overflow:auto}
   #tab-dash{flex:1;min-height:0}
-  #tab-dash iframe{height:100%}
+  #tab-dash iframe,#tab-observatory iframe{height:100%}
   .foot{margin-top:10px}
 }
 /* ── Archive tab (Astro Desk, 1.6.0) ── */
@@ -1464,6 +1487,7 @@ button.linkbtn:disabled{opacity:.5;cursor:default}
   <button class="on" data-tab="panel">Panel</button>
   <button data-tab="report">Report</button>
   <button data-tab="dash">Dashboard</button>
+  <button data-tab="observatory">Observatory</button>
   <button data-tab="archive">Archive</button>
 </div>
 
@@ -1503,6 +1527,9 @@ button.linkbtn:disabled{opacity:.5;cursor:default}
 <div id="tab-dash" style="display:none">
   <iframe id="dashFrame" title="dashboard"></iframe>
 </div>
+<div id="tab-observatory" style="display:none">
+  <iframe id="obsFrame" title="Observatory"></iframe>
+</div>
 <div id="tab-archive" style="display:none">
   <div class="ad-cols">
     <div class="card">
@@ -1540,8 +1567,9 @@ let busy=false, lastLogSig="", lastScanStamp="", curScan=null;
 document.querySelectorAll(".tabs button").forEach(b=>b.addEventListener("click",()=>{
   document.querySelectorAll(".tabs button").forEach(x=>x.classList.remove("on"));
   b.classList.add("on");
-  ["panel","report","dash","archive"].forEach(t=>$("#tab-"+t).style.display = b.dataset.tab===t?"":"none");
+  ["panel","report","dash","observatory","archive"].forEach(t=>$("#tab-"+t).style.display = b.dataset.tab===t?"":"none");
   if(b.dataset.tab==="dash") $("#dashFrame").src="/dashboard?t="+Date.now();
+  if(b.dataset.tab==="observatory") $("#obsFrame").src="/observatory?t="+Date.now();
   if(b.dataset.tab==="report") loadReport();
   if(b.dataset.tab==="archive") loadDesk();
 }));

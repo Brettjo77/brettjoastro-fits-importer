@@ -837,6 +837,11 @@ OBSERVATORY_DATASET = _env_path(
 # empty and --projects says finals were not checked).
 CONTRACT_DIR = _env_path("ASTRO_CONTRACT_DIR",
                          os.path.join(os.path.dirname(os.path.abspath(__file__)), "contract"))
+# The Observatory page (1.7.0): the Astro Archive Observatory's design, filled
+# by build_observatory() and served by the panel's Observatory tab
+OBSERVATORY_TEMPLATE = _env_path("ASTRO_OBSERVATORY_TEMPLATE",
+                                 os.path.join(os.path.dirname(os.path.abspath(__file__)),
+                                              "astro-observatory.html"))
 FINALS_DIR = _env_path(
     "ASTRO_FINALS_DIR",
     os.path.join(os.path.splitdrive(ARCHIVE_MOUNT)[0] + "\\", "Final Astro Images")
@@ -9785,7 +9790,7 @@ def run_targets_draft(state):
              "as targets.json.new for you to merge.")
     return draft
 
-def build_projects(state, extra_ledgers=(), today=None, custom_names=None):
+def build_projects(state, extra_ledgers=(), today=None, custom_names=None, collect=None):
     """The whole project layer as one dict (spec §7): every dataset
     (target + scope + site) with its sessions, where its frames are, and a
     status derived from the facts — never typed in. Pure read."""
@@ -9846,14 +9851,31 @@ def build_projects(state, extra_ledgers=(), today=None, custom_names=None):
                     seen[i] = first
                 d = datasets.setdefault(first, {"target": t, "scope": s, "nights": {},
                                                 "locations": set()})
-                n = d["nights"].setdefault(night, {"frames": 0, "integration": 0.0})
+                n = d["nights"].setdefault(night, {"frames": 0, "integration": 0.0,
+                                                   "bytes": 0, "exps": {}, "filters": {}})
                 n["frames"] += 1
                 try:
                     secs = float(row.get("exposureSeconds") or 0)
                     if math.isfinite(secs) and 0 <= secs <= 86400:
                         n["integration"] += secs
+                        if secs > 0:                      # for the Observatory's drawer
+                            ek = f"{secs:g}"
+                            n["exps"][ek] = n["exps"].get(ek, 0) + 1
                 except (TypeError, ValueError, OverflowError):
                     pass
+                try:
+                    sz = int(row.get("size") or 0)
+                    if 0 < sz < 10 ** 12:
+                        n["bytes"] += sz
+                except (TypeError, ValueError, OverflowError):
+                    pass
+                flt = row.get("filter")
+                if isinstance(flt, str) and flt:
+                    n["filters"][flt] = n["filters"].get(flt, 0) + 1
+                if any(isinstance(x, str) and "mosaic" in x.lower()
+                       for x in (row.get("displayName"), row.get("target"))) \
+                        or row.get("sourceType") == "panel":
+                    d["mosaic"] = True
             else:
                 d = datasets[first]
             arel = row.get("archiveLocation") or row.get("archivePath")
@@ -10002,6 +10024,9 @@ def build_projects(state, extra_ledgers=(), today=None, custom_names=None):
         p["integration_seconds"] = sum(e["integration_seconds"] for e in ds)
         projects.append(p)
     projects.sort(key=lambda p: p["last_captured"], reverse=True)
+    if isinstance(collect, dict):               # build_observatory reads the working dicts
+        collect["datasets"] = datasets
+        collect["contract"] = contract
 
     return {"schema": "projects/1", "generated_at": _utc_iso(),
             "as_of_night": today.isoformat(),
@@ -10012,6 +10037,227 @@ def build_projects(state, extra_ledgers=(), today=None, custom_names=None):
                         "finals_dir": FINALS_DIR or None,
                         "capture_state": bool(capture_state)},
             "warnings": warnings, "projects": projects}
+
+# ── The Observatory (1.7.0): the Astro Archive Observatory's page, fed live ──
+# The dataset shape is the artifact's (29 Aug 2026 build_dataset.py), so its
+# page renders unchanged: scopes[], targets[] with programmes[] and
+# statusCards[], sessions[] (one target, one scope, one night), totals,
+# health[] and reconciliation[]. Everything comes from one build_projects()
+# pass, so the two views never disagree. Pure read.
+OBS_STATE = {"capturing": "captured", "ready_to_process": "stacked",
+             "in_progress": "processing", "done": "complete"}
+
+def _obs_where(locs, here_label, there_label):
+    out = []
+    for l in locs or ():
+        if l == "chillblast_archive":
+            out.append("on the archive")
+        elif l.endswith("-unchecked"):
+            out.append(f"on the {there_label} (per its ledger)")
+        elif l == ship_sides()[0]:
+            out.append(f"on this {here_label}")
+        else:
+            out.append(f"on the {there_label}")
+    return sorted(set(out))
+
+def build_observatory(state, extra_ledgers=(), today=None, custom_names=None):
+    """The Observatory's dataset, from the same facts as projects.json."""
+    collect = {}
+    doc = build_projects(state, extra_ledgers, today, custom_names, collect=collect)
+    datasets = collect.get("datasets") or {}
+    here_side, there_side = ship_sides()
+    here_label = "PC" if here_side == "pc" else "Mac"
+    there_label = "PC" if there_side == "pc" else "Mac"
+    by_key = {(p["target_id"], e["scope"]): (p, e)
+              for p in doc["projects"] for e in p["datasets"]}
+    scopes, sessions, targets = {}, [], {}
+    nights_all, tot_bytes, tot_frames, tot_secs = set(), 0, 0, 0.0
+    for (tid, sid), d in sorted(datasets.items()):
+        pe = by_key.get((tid, sid))
+        if pe is None:
+            continue                            # a dataset with no counted night
+        p, e = pe
+        t, s = d["target"], d["scope"]
+        cam = s.get("name") or sid
+        name = t.get("name") or t["id"]
+        codes = [c for c in (t.get("codes") or []) if isinstance(c, str)]
+        nights = d["nights"]
+        frames = sum(n["frames"] for n in nights.values())
+        secs = sum(n["integration"] for n in nights.values())
+        nbytes = sum(n.get("bytes", 0) for n in nights.values())
+        hours = round(secs / 3600, 2)
+        sc = scopes.setdefault(cam, {"camera": cam, "frames": 0, "hours": 0.0, "nights": set(),
+                                     "bytes": 0, "first": None, "last": None})
+        sc["frames"] += frames; sc["hours"] += secs / 3600; sc["bytes"] += nbytes
+        sc["nights"].update(nights)
+        for nt in nights:
+            nights_all.add(nt)
+        sc["first"] = min(x for x in (sc["first"], min(nights)) if x)
+        sc["last"] = max(x for x in (sc["last"], max(nights)) if x)
+        tot_bytes += nbytes; tot_frames += frames; tot_secs += secs
+        filters, exps = {}, {}
+        for nt, n in sorted(nights.items()):
+            for k, v in n.get("filters", {}).items():
+                filters[k] = filters.get(k, 0) + v
+            for k, v in n.get("exps", {}).items():
+                exps[k] = exps.get(k, 0) + v
+            sessions.append({"target": name, "camera": cam, "night": nt, "frames": n["frames"],
+                             "hours": round(n["integration"] / 3600, 3),
+                             "filters": dict(n.get("filters", {})), "exps": dict(n.get("exps", {})),
+                             "askar": {}, "stackOnly": False})
+        if frames and not filters:
+            filters = {"unrecorded": frames}
+        state_id = OBS_STATE.get(e["status"], "captured")
+        where = _obs_where(e.get("locations"), here_label, there_label)
+        masters, finals = e.get("masters") or [], e.get("finals") or []
+        if e["status"] == "done":
+            evidence = "finished picture: " + os.path.basename(finals[0]) if finals else "finished picture found"
+            action = ""
+        elif e["status"] == "in_progress":
+            evidence = "master saved: " + os.path.basename(masters[0]) if masters else "a master is saved"
+            action = "Finish it: process to a final"
+        elif e["status"] == "ready_to_process":
+            evidence = (f"last session {e['last_session']}; the quiet period has passed"
+                        if e.get("capture_state") != "complete" else "marked complete by hand")
+            action = "Process it"
+        else:
+            evidence = (f"last session {e['last_session']}" if e.get("capture_state") != "open"
+                        else "kept open by hand (capture-state.json)")
+            action = "Keep capturing"
+        if e.get("attribution"):
+            evidence += "; " + ", ".join(e["attribution"])
+        arel = e.get("archive_rel")
+        path = (ARCHIVE_LABEL.rstrip("\\/") + "\\" + arel.replace("/", "\\")) if arel else "not yet on the archive"
+        prog = {"camera": cam, "folder": arel.split("/")[-1] if arel else name, "path": path,
+                "lights": frames, "autostacks": 0, "autostackFrames": 0,
+                "processedFiles": len(masters) + len(finals), "processedFinals": len(finals),
+                "masters": len(masters), "working": 0, "thumbs": 0, "other": 0,
+                "mosaic": bool(d.get("mosaic")), "collectFiles": 0, "collected": False,
+                "hours": hours, "bytes": nbytes, "sizeAll": nbytes, "nights": len(nights),
+                "firstNight": e["first_session"], "lastNight": e["last_session"],
+                "filters": filters, "exposures": exps, "panels": [], "gains": {}, "askar": {},
+                "where": where, "status": e["status"]}
+        card = {"target": name, "label": name + (" (mosaic)" if d.get("mosaic") else ""),
+                "camera": cam, "state": state_id, "hours": hours, "nights": len(nights),
+                "evidence": evidence, "action": action, "source": "the importer's projects.json",
+                "badges": where}
+        tg = targets.setdefault(name, {
+            "name": name, "codes": codes, "type": t.get("type") or None,
+            "constellation": t.get("constellation") or None,
+            "ra": t.get("ra") if isinstance(t.get("ra"), (int, float)) else None,
+            "dec": t.get("dec") if isinstance(t.get("dec"), (int, float)) else None,
+            "mosaic": False, "programmes": [], "cameras": [], "lights": 0, "hours": 0.0,
+            "nights": set(), "sessions": 0, "firstNight": None, "lastNight": None,
+            "state": None, "pendingProgrammes": 0, "statusCards": [], "_rank": 99})
+        tg["programmes"].append(prog); tg["statusCards"].append(card)
+        if cam not in tg["cameras"]:
+            tg["cameras"].append(cam)
+        tg["mosaic"] = tg["mosaic"] or bool(d.get("mosaic"))
+        tg["lights"] += frames; tg["hours"] += secs / 3600; tg["nights"].update(nights)
+        tg["sessions"] += len(nights)
+        tg["firstNight"] = min(x for x in (tg["firstNight"], e["first_session"]) if x)
+        tg["lastNight"] = max(x for x in (tg["lastNight"], e["last_session"]) if x)
+        if e["status"] != "done":
+            tg["pendingProgrammes"] += 1
+        rank = PROJECT_STATUS_ORDER.index(e["status"])
+        if rank < tg["_rank"]:                      # the project's state: its least advanced dataset
+            tg["_rank"], tg["state"] = rank, state_id
+    out_targets = []
+    for tg in sorted(targets.values(), key=lambda x: x["name"].lower()):
+        tg["nights"] = len(tg["nights"]); tg["hours"] = round(tg["hours"], 2); tg.pop("_rank")
+        out_targets.append(tg)
+    out_scopes = []
+    for sc in sorted(scopes.values(), key=lambda x: x["camera"]):
+        sc["nights"] = len(sc["nights"]); sc["hours"] = round(sc["hours"], 1)
+        out_scopes.append(sc)
+    snaps = (doc.get("sources") or {}).get("snapshots") or []
+    ledgers = (doc.get("sources") or {}).get("ledgers") or []
+    health = [{"severity": "info", "title": "Built live from the importer's own record",
+               "detail": f"This page is worked out on this {here_label} from "
+                         f"{', '.join(ledgers) if ledgers else 'no ledger'}"
+                         + (f" and the {there_label}'s ledger snapshot" if snaps else "")
+                         + f", {doc['sources'].get('rows', 0):,} ledger rows, the PC's archive "
+                           f"inventory and Final Astro Images. Nothing is typed in."}]
+    for w in doc.get("warnings") or []:
+        health.append({"severity": "warn", "title": "Warning from the project layer", "detail": w})
+    for m in snaps:
+        age = m.get("age_hours")
+        if isinstance(age, (int, float)) and age > SNAPSHOT_STALE_HOURS:
+            health.append({"severity": "warn", "title": f"The {m.get('machine') or there_label}'s snapshot is old",
+                           "detail": f"Its last ship left it {int(age // 24)} day(s) ago; the sessions since are not here yet."})
+    recon = [{"check": "Light frames counted, out of ledger rows read",
+              "expected": doc["sources"].get("rows", 0), "computed": tot_frames,
+              "ok": tot_frames <= doc["sources"].get("rows", 0)},
+             {"check": "Datasets on this page, against projects.json",
+              "expected": sum(len(p["datasets"]) for p in doc["projects"]),
+              "computed": sum(len(t["programmes"]) for t in out_targets),
+              "ok": sum(len(p["datasets"]) for p in doc["projects"]) == sum(len(t["programmes"]) for t in out_targets)}]
+    when = datetime.now().strftime("%Y-%m-%d %H:%M")
+    return {
+        "schema": "observatory/1", "generatedAt": when,
+        "machine": f"{MACHINE_LABEL} · {ARCHIVE_LABEL} · live from the importer",
+        "sourceNote": f"Built on this {here_label} on {when} from the importer's ledger"
+                      + (f" and the {there_label}'s snapshot" if snaps else "")
+                      + f" ({doc['sources'].get('rows', 0):,} rows), projects.json's statuses, "
+                        f"the archive inventory and Final Astro Images.",
+        "provenance": "Statuses: capturing within the quiet period of "
+                      f"{doc.get('quiet_period_days', QUIET_PERIOD_DAYS)} observing nights; ready once it "
+                      "has passed; in progress when one of your masters sits in the target's folder on "
+                      "the archive; done when a finished picture names the target and the scope.",
+        "quietPeriodDays": doc.get("quiet_period_days", QUIET_PERIOD_DAYS),
+        "asOfNight": doc.get("as_of_night"),
+        "scopes": out_scopes, "askarSplit": {}, "targets": out_targets, "sessions": sessions,
+        "events": [], "calibration": {}, "shelves": {}, "quarantine": {},
+        "junk": {"files": 0, "bytes": 0},
+        "totals": {"files": tot_frames, "bytes": tot_bytes, "lights": tot_frames,
+                   "hours": round(tot_secs / 3600, 1), "targets": len(out_targets),
+                   "nights": len(nights_all), "sessions": len(sessions)},
+        "colourMeaning": {}, "parseFailures": {}, "ledgerMeta": {"rows": doc["sources"].get("rows", 0)},
+        "askarRigs": {}, "rigAttribution": {}, "health": health, "delta": None,
+        "reconciliation": recon, "warnings": list(doc.get("warnings") or []),
+    }
+
+def observatory_html(dataset, template=None):
+    """The Observatory page with the dataset in place of __DATASET__. Raises
+    OSError when the template isn't beside the engine."""
+    with open(template or OBSERVATORY_TEMPLATE, encoding="utf-8") as f:
+        page = f.read()
+    if "__DATASET__" not in page:
+        raise ValueError("the Observatory page has no __DATASET__ slot")
+    blob = json.dumps(dataset, ensure_ascii=False).replace("</", "<\\/")
+    return page.replace("__DATASET__", blob, 1)
+
+def run_observatory(state, out=None, extra_ledgers=()):
+    """--observatory [FILE]: write the Observatory as one standalone HTML file
+    (default: observatory.html in the state folder). Read-only otherwise."""
+    extra, names = projects_inputs(state, extra_ledgers)
+    dataset = build_observatory(state, extra, custom_names=names)
+    out = os.path.abspath(os.path.expanduser(out or os.path.join(STATE_DIR, "observatory.html")))
+    _confine(out, "--observatory")
+    try:
+        html = observatory_html(dataset)
+    except (OSError, ValueError) as e:
+        error(f"The Observatory page (astro-observatory.html) isn't beside the engine: {e}. "
+              f"Run the installer again.")
+        sys.exit(1)
+    os.makedirs(os.path.dirname(out), exist_ok=True)
+    tmp = out + ".tmp"
+    try:
+        with open(tmp, "w", encoding="utf-8") as f:
+            f.write(html)
+        os.replace(tmp, out)
+    finally:
+        if os.path.exists(tmp):
+            try:
+                os.remove(tmp)
+            except OSError:
+                pass
+    tt = dataset["totals"]
+    success(f"Observatory written: {out} ({tt['targets']} targets, {tt['lights']:,} lights, "
+       f"{tt['hours']} h, {tt['nights']} nights)")
+    for w in dataset["warnings"]:
+        warn(w)
+    return out
 
 def load_projects():
     """projects.json from the state folder, or None. The panel reads this."""
@@ -10137,6 +10383,11 @@ def main():
     p.add_argument("--with-ledger", action="append", default=[], metavar="FILE",
                    help="with --projects: also read another computer's ledger.json "
                         "(a read-only snapshot; may repeat)")
+    p.add_argument("--observatory", nargs="?", const="", metavar="FILE",
+                   help="read-only: write the Observatory (the archive's story as one page: "
+                        "targets, pipeline, nights, sky, scopes) as a standalone HTML file; "
+                        "FILE defaults to observatory.html in the state folder. The panel's "
+                        "Observatory tab shows the same page live")
     p.add_argument("--targets-draft", action="store_true",
                    help="read-only: list this ledger's target names against "
                         "contract/targets.json and write targets-draft.json with "
@@ -10299,6 +10550,9 @@ def main():
         return
     if args.projects:
         run_projects(state, extra_ledgers=args.with_ledger, dry_run=args.dry_run)
+        return
+    if args.observatory is not None:
+        run_observatory(state, out=args.observatory or None, extra_ledgers=args.with_ledger)
         return
     if args.tidy_stacks:
         if args.dry_run:

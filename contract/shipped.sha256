@@ -7,3 +7,4 @@
 23738d2463ed6fc63dc3ae4a7bdc29f352d97ce951382fe02b2f20863248a791  scopes.json    (1.7.0 seed, 11 Oct 2026)
 615fcee459636c6b046e2d0d79c3aaaf6d06cb0f6f1d96f25a0d093f65bef4fb  targets.json   (1.7.0, 12 Oct 2026)
 8ddb4cacf45c1c96816279f8cf673b5ed367ad8867acec518246b422053f40d6  scopes.json    (1.7.0, 12 Oct 2026)
+a98a9e53b38d455c537f8d65f1903f80df456a2d56d4478bb0aed53a1ecdbe2f  targets.json   (1.7.0, 13 Oct 2026: type, constellation, ra, dec for the Observatory)

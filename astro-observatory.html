@@ -1,0 +1,1692 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<!-- Astro Archive Observatory, served by the BrettjoAstro FITS Importer panel (1.7.0).
+     Design: the Astro Archive Observatory artifact (Aug 2026). Data: the dataset slot is
+     filled by the engine (build_observatory) from projects.json, the ledgers and
+     the contract. Fonts are the system's: the panel loads nothing from the web. -->
+<title>Astro Archive Observatory</title>
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<style>
+:root{
+  /* dark-first: the bare root carries the full night palette */
+  --page:#0b0e15; --card:#131720; --card2:#181d29; --line:#283041; --grid:#212837;
+  --ink:#edf1f8; --ink2:#a9b3c6; --muted:#7a849b;
+  --cam-s30p:#eda100; --cam-asiair:#3cb554; --cam-s50:#0a0a0a; --cam-s30:#3987e5; --cam-fra:#e05a5a; --cam-s50p:#d66bc9; --edge:rgba(255,255,255,.55);
+  --st-captured:#5f4fbe; --st-stacked:#8f80ea; --st-processing:#beb3fa;
+  --st-complete:#0ca30c; --st-quarantined:#ec835a; --st-todo:#7a849b;
+  --good:#0ca30c; --warn-c:#ec835a;
+  --heat0:var(--card); --heat1:#0d366b; --heat2:#1c5cab; --heat3:#2a78d6; --heat4:#5598e7; --heat5:#9ec5f4;
+  --focus:#5598e7; --wash:rgba(255,255,255,.05); --wash2:rgba(255,255,255,.09);
+}
+@media (prefers-color-scheme: light){
+  :root:not([data-theme="dark"]){
+    --page:#f2f4f8; --card:#fcfdfe; --card2:#f5f7fb; --line:#dde3ec; --grid:#e8ecf3;
+    --ink:#151b28; --ink2:#4d586e; --muted:#8791a6;
+    --cam-s30p:#e0a000; --cam-asiair:#0f8f2f; --cam-s50:#0a0a0a; --cam-s30:#2a78d6; --cam-fra:#d23a3a; --cam-s50p:#b84ea8; --edge:rgba(11,17,32,.55);
+    --st-captured:#a99df0; --st-stacked:#7a68dd; --st-processing:#4a3aa7;
+    --st-complete:#0ca30c; --st-quarantined:#ec835a; --st-todo:#8791a6;
+    --good:#006300; --warn-c:#c65b32;
+    --heat0:var(--card); --heat1:#cde2fb; --heat2:#9ec5f4; --heat3:#5598e7; --heat4:#2a78d6; --heat5:#184f95;
+    --focus:#2a78d6; --wash:rgba(21,27,40,.045); --wash2:rgba(21,27,40,.08);
+  }
+}
+:root[data-theme="light"]{
+  --page:#f2f4f8; --card:#fcfdfe; --card2:#f5f7fb; --line:#dde3ec; --grid:#e8ecf3;
+  --ink:#151b28; --ink2:#4d586e; --muted:#8791a6;
+  --cam-s30p:#e0a000; --cam-asiair:#0f8f2f; --cam-s50:#0a0a0a; --cam-s30:#2a78d6; --cam-fra:#d23a3a; --cam-s50p:#b84ea8; --edge:rgba(11,17,32,.55);
+  --st-captured:#a99df0; --st-stacked:#7a68dd; --st-processing:#4a3aa7;
+  --st-complete:#0ca30c; --st-quarantined:#ec835a; --st-todo:#8791a6;
+  --good:#006300; --warn-c:#c65b32;
+  --heat0:var(--card); --heat1:#cde2fb; --heat2:#9ec5f4; --heat3:#5598e7; --heat4:#2a78d6; --heat5:#184f95;
+  --focus:#2a78d6; --wash:rgba(21,27,40,.045); --wash2:rgba(21,27,40,.08);
+}
+*{box-sizing:border-box;margin:0;padding:0}
+html{color-scheme:dark light}
+body{background:var(--page);color:var(--ink);font:400 15px/1.55 "IBM Plex Sans",system-ui,-apple-system,"Segoe UI",sans-serif;-webkit-font-smoothing:antialiased}
+.mono{font-family:"IBM Plex Mono",ui-monospace,SFMono-Regular,Menlo,Consolas,monospace}
+.wrap{max-width:1240px;margin:0 auto;padding:0 22px}
+a{color:inherit}
+button{font:inherit;color:inherit;background:none;border:none;cursor:pointer}
+:focus-visible{outline:2px solid var(--focus);outline-offset:2px;border-radius:4px}
+@media (prefers-reduced-motion: reduce){*,*::before,*::after{transition:none !important;animation:none !important}}
+
+/* ---------- header ---------- */
+header.top{border-bottom:1px solid var(--line);padding:20px 0 0;background:var(--page)}
+.masthead{display:flex;justify-content:space-between;align-items:flex-end;gap:16px;flex-wrap:wrap;padding-bottom:16px}
+.eyebrow{font-family:"IBM Plex Mono",monospace;font-size:11px;font-weight:500;letter-spacing:.1em;text-transform:uppercase;color:var(--muted)}
+h1.wordmark{font-size:26px;font-weight:700;letter-spacing:-.02em;line-height:1.15;text-wrap:balance}
+.mast-right{text-align:right;font-family:"IBM Plex Mono",monospace;font-size:11.5px;color:var(--ink2);line-height:1.7}
+.mast-right b{color:var(--ink);font-weight:600}
+nav.tabs{display:flex;gap:2px;overflow-x:auto;scrollbar-width:none}
+nav.tabs::-webkit-scrollbar{display:none}
+nav.tabs button{padding:9px 14px 11px;font-size:13.5px;font-weight:500;color:var(--ink2);border-bottom:2px solid transparent;white-space:nowrap;border-radius:6px 6px 0 0}
+nav.tabs button:hover{color:var(--ink);background:var(--wash)}
+nav.tabs button[aria-selected="true"]{color:var(--ink);font-weight:600;border-bottom-color:var(--ink)}
+main{padding:26px 0 20px}
+section.view{display:none}
+section.view.on{display:block}
+
+/* ---------- cards & layout ---------- */
+.card{background:var(--card);border:1px solid var(--line);border-radius:10px;padding:18px 20px}
+.card + .card{margin-top:14px}
+.grid{display:grid;gap:14px}
+h2.sec{font-size:13px;font-weight:600;letter-spacing:.02em;color:var(--ink);margin-bottom:2px}
+.sub{font-size:12.5px;color:var(--muted)}
+.cardhead{display:flex;justify-content:space-between;align-items:baseline;gap:12px;margin-bottom:14px;flex-wrap:wrap}
+.tbtn{font-size:11.5px;font-family:"IBM Plex Mono",monospace;color:var(--muted);border:1px solid var(--line);border-radius:6px;padding:3px 9px}
+.tbtn:hover{color:var(--ink);background:var(--wash)}
+.tbtn[aria-pressed="true"]{color:var(--ink);background:var(--wash2);border-color:var(--muted)}
+
+/* ---------- hero + KPIs ---------- */
+.hero{display:flex;align-items:flex-end;justify-content:space-between;gap:24px;flex-wrap:wrap;padding:26px 24px}
+.hero .big{font-size:56px;font-weight:700;letter-spacing:-.03em;line-height:1;white-space:nowrap}
+.hero .big small{font-size:24px;font-weight:600;color:var(--ink2);letter-spacing:0}
+.hero .lede{max-width:56ch;color:var(--ink2);font-size:14px}
+.hero .lede b{color:var(--ink);font-weight:600}
+.kpis{display:grid;grid-template-columns:repeat(auto-fit,minmax(150px,1fr));gap:14px;margin-top:14px}
+.kpi{background:var(--card);border:1px solid var(--line);border-radius:10px;padding:14px 16px}
+.kpi .k-label{font-size:12px;color:var(--muted)}
+.kpi .k-val{font-size:24px;font-weight:600;letter-spacing:-.01em;margin-top:2px}
+.kpi .k-sub{font-size:11.5px;color:var(--muted);margin-top:2px}
+
+/* ---------- chips, dots, badges ---------- */
+.hashfill{background:repeating-linear-gradient(45deg,#ffffff 0 3px,#101010 3px 6px) !important}
+.edged{box-shadow:inset 0 0 0 1px var(--edge)}
+.dot{display:inline-block;width:9px;height:9px;border-radius:50%;flex:none}
+.chip{display:inline-flex;align-items:center;gap:6px;font-size:12px;font-weight:500;color:var(--ink2);border:1px solid var(--line);border-radius:999px;padding:2.5px 10px;white-space:nowrap}
+.chip.sel{color:var(--ink);background:var(--wash2);border-color:var(--muted)}
+.stchip{display:inline-flex;align-items:center;gap:6px;font-size:11.5px;font-weight:500;border-radius:999px;padding:2px 9px;border:1px solid var(--line);color:var(--ink2);white-space:nowrap}
+.badge{display:inline-block;font-size:10.5px;font-family:"IBM Plex Mono",monospace;color:var(--ink2);background:var(--wash);border:1px solid var(--line);border-radius:5px;padding:1px 6px}
+.legend{display:flex;gap:14px;flex-wrap:wrap;font-size:12px;color:var(--ink2);align-items:center}
+.legend .li{display:inline-flex;align-items:center;gap:6px}
+.legend .sw{width:11px;height:11px;border-radius:3px;flex:none}
+.legend .lk{width:14px;height:2.5px;border-radius:2px;flex:none}
+
+/* ---------- charts ---------- */
+.chart{position:relative}
+svg text{font-family:"IBM Plex Sans",system-ui,sans-serif}
+svg .axis{font-size:11px;fill:var(--muted)}
+svg .axis.mono,svg text.mono{font-family:"IBM Plex Mono",monospace}
+svg .gridline{stroke:var(--grid);stroke-width:1}
+svg .baseline{stroke:var(--line);stroke-width:1}
+svg .dlabel{font-size:11.5px;fill:var(--ink2)}
+svg .dlabel.strong{fill:var(--ink);font-weight:600}
+.tt{position:fixed;z-index:50;pointer-events:none;background:var(--card2);border:1px solid var(--line);border-radius:8px;padding:9px 12px;font-size:12.5px;max-width:320px;box-shadow:0 6px 24px rgba(0,0,0,.28);display:none}
+.tt .tt-t{font-weight:600;margin-bottom:4px}
+.tt .row{display:flex;align-items:center;gap:7px;margin-top:2px;color:var(--ink2)}
+.tt .row b{color:var(--ink);font-weight:600;font-variant-numeric:tabular-nums}
+.tt .lk{display:inline-block;width:12px;height:2.5px;border-radius:2px;flex:none}
+table.dt{width:100%;border-collapse:collapse;font-size:12.5px}
+table.dt th{text-align:left;font-weight:600;color:var(--ink2);border-bottom:1px solid var(--line);padding:6px 10px 6px 0;white-space:nowrap}
+table.dt td{border-bottom:1px solid var(--grid);padding:5.5px 10px 5.5px 0;color:var(--ink2);font-variant-numeric:tabular-nums}
+table.dt td:first-child{color:var(--ink)}
+table.dt tr:last-child td{border-bottom:none}
+.tablewrap{overflow-x:auto}
+
+/* ---------- targets ---------- */
+.toolbar{display:flex;gap:10px;align-items:center;flex-wrap:wrap;margin-bottom:14px}
+.toolbar input[type="search"]{background:var(--card);border:1px solid var(--line);border-radius:8px;color:var(--ink);padding:7px 12px;font:inherit;font-size:13.5px;width:230px}
+.toolbar input[type="search"]::placeholder{color:var(--muted)}
+.toolbar select{background:var(--card);border:1px solid var(--line);border-radius:8px;color:var(--ink);padding:7px 9px;font:inherit;font-size:13px}
+.tcount{font-size:12px;color:var(--muted);margin-left:auto;font-family:"IBM Plex Mono",monospace}
+.trows{display:flex;flex-direction:column;gap:8px}
+.trow{display:grid;grid-template-columns:minmax(210px,1.5fr) minmax(140px,1fr) 110px 130px 76px 68px 84px 100px;gap:10px;align-items:center;background:var(--card);border:1px solid var(--line);border-radius:10px;padding:11px 16px;text-align:left;width:100%}
+.trow:hover{background:var(--card2)}
+.trow .tname{font-weight:600;font-size:14px}
+.trow .tcodes{font-family:"IBM Plex Mono",monospace;font-size:10.5px;color:var(--muted);margin-top:1px}
+.trow .tmeta{font-size:12px;color:var(--ink2)}
+.trow .num{font-variant-numeric:tabular-nums;font-size:13px;color:var(--ink2);text-align:right}
+.trow .num b{color:var(--ink);font-weight:600}
+.thead{display:grid;grid-template-columns:minmax(210px,1.5fr) minmax(140px,1fr) 110px 130px 76px 68px 84px 100px;gap:10px;padding:0 16px 6px;font-size:11px;color:var(--muted);font-family:"IBM Plex Mono",monospace;letter-spacing:.05em;text-transform:uppercase}
+.thead .num{text-align:right}
+@media (max-width:900px){.thead{display:none}.trow{grid-template-columns:1fr 1fr;grid-auto-rows:auto}}
+
+/* ---------- drawer ---------- */
+.drawer-scrim{position:fixed;inset:0;background:rgba(4,6,10,.55);z-index:39;display:none}
+.drawer{position:fixed;top:0;right:0;bottom:0;width:min(720px,96vw);background:var(--page);border-left:1px solid var(--line);z-index:40;transform:translateX(102%);transition:transform .22s ease;overflow-y:auto;padding:24px 26px 40px}
+.drawer.open{transform:none}
+.drawer .close{position:sticky;top:0;float:right;background:var(--card);border:1px solid var(--line);border-radius:8px;padding:4px 12px;font-size:13px;color:var(--ink2);z-index:2}
+.drawer h3{font-size:22px;font-weight:700;letter-spacing:-.015em;margin:4px 0 2px;text-wrap:balance}
+.answer{font-size:14.5px;color:var(--ink2);max-width:62ch;margin:10px 0 4px}
+.answer b{color:var(--ink);font-weight:600}
+.prog{border:1px solid var(--line);border-radius:10px;padding:13px 16px;background:var(--card);margin-top:10px}
+.prog .p-h{display:flex;align-items:center;gap:8px;flex-wrap:wrap;font-weight:600;font-size:13.5px}
+.prog .p-path{font-family:"IBM Plex Mono",monospace;font-size:10.5px;color:var(--muted);margin-top:6px;word-break:break-all}
+.prog .p-stats{display:flex;gap:16px;flex-wrap:wrap;margin-top:8px;font-size:12.5px;color:var(--ink2)}
+.prog .p-stats b{color:var(--ink);font-weight:600;font-variant-numeric:tabular-nums}
+.spot{border:1px solid var(--line);border-left:3px solid var(--st-stacked);border-radius:10px;background:var(--card2);padding:14px 16px;margin-top:12px;font-size:13px;color:var(--ink2)}
+.spot b{color:var(--ink)}
+
+/* ---------- pipeline board ---------- */
+.board{display:grid;grid-template-columns:repeat(auto-fit,minmax(215px,1fr));gap:12px;align-items:start}
+.col{background:var(--card);border:1px solid var(--line);border-radius:10px;padding:12px}
+.col h3{display:flex;align-items:center;gap:7px;font-size:12.5px;font-weight:600}
+.col .colsum{font-family:"IBM Plex Mono",monospace;font-size:11px;color:var(--muted);margin:3px 0 10px}
+.pcard{border:1px solid var(--line);border-radius:8px;background:var(--card2);padding:9px 11px;margin-top:8px;text-align:left;width:100%;display:block}
+.pcard:hover{border-color:var(--muted)}
+.pcard .p-t{font-weight:600;font-size:13px;line-height:1.3}
+.pcard .p-m{display:flex;gap:8px;align-items:center;margin-top:4px;font-size:11.5px;color:var(--ink2);flex-wrap:wrap}
+.pcard .p-ev{font-size:11px;color:var(--muted);margin-top:5px}
+.pcard .p-act{font-size:11.5px;color:var(--ink2);font-style:italic;margin-top:4px}
+
+/* ---------- nights heatmap ---------- */
+.hm-year{margin-top:16px}
+.hm-scroll{overflow-x:auto;padding-bottom:4px}
+.hm-stats{display:flex;gap:20px;flex-wrap:wrap;font-size:12.5px;color:var(--ink2);margin-top:12px}
+.hm-stats b{color:var(--ink);font-weight:600}
+.hm-legend{display:flex;align-items:center;gap:4px;font-size:11px;color:var(--muted)}
+.hm-legend .cell{width:11px;height:11px;border-radius:2.5px;border:1px solid var(--grid)}
+
+/* ---------- sky ---------- */
+.skywrap{overflow-x:auto}
+.skynote{font-size:12px;color:var(--muted);margin-top:10px;max-width:80ch}
+
+/* ---------- equipment ---------- */
+.scopes{display:grid;grid-template-columns:repeat(auto-fit,minmax(250px,1fr));gap:14px}
+.scard{background:var(--card);border:1px solid var(--line);border-radius:10px;padding:16px 18px}
+.scard h3{display:flex;align-items:center;gap:8px;font-size:14.5px;font-weight:600}
+.scard .s-nums{display:flex;gap:18px;margin:10px 0 2px}
+.scard .s-nums .n b{display:block;font-size:20px;font-weight:600;letter-spacing:-.01em}
+.scard .s-nums .n span{font-size:11px;color:var(--muted)}
+.scard .s-line{font-size:12px;color:var(--ink2);margin-top:7px}
+.minibar{display:flex;height:8px;border-radius:4px;overflow:hidden;gap:2px;margin-top:6px;background:transparent}
+.minibar i{display:block;height:100%}
+
+/* ---------- health ---------- */
+.hlist{display:flex;flex-direction:column;gap:10px}
+.hitem{display:flex;gap:14px;background:var(--card);border:1px solid var(--line);border-radius:10px;padding:13px 16px}
+.hitem .stripe{width:3px;border-radius:2px;flex:none}
+.hitem h4{font-size:13.5px;font-weight:600}
+.hitem p{font-size:12.5px;color:var(--ink2);margin-top:3px;max-width:90ch}
+.okbadge{font-family:"IBM Plex Mono",monospace;font-size:11px;font-weight:600;border-radius:5px;padding:1px 7px}
+.okbadge.ok{color:var(--good);background:color-mix(in srgb,var(--good) 12%,transparent)}
+.okbadge.diff{color:var(--warn-c);background:color-mix(in srgb,var(--warn-c) 14%,transparent)}
+
+/* ---------- coverage matrix ---------- */
+.mxwrap{overflow-x:auto;padding-bottom:4px}
+.mx{min-width:820px}
+.mxhead{display:grid;gap:6px;padding:0 12px 8px;font-size:11px;color:var(--muted);font-family:"IBM Plex Mono",monospace;letter-spacing:.05em;text-transform:uppercase;align-items:end}
+.mxhead .mxcol{display:flex;align-items:center;gap:6px;justify-content:center;text-align:center}
+.mxhead .end{text-align:right;justify-content:flex-end}
+.mxrow{display:grid;gap:6px;align-items:center;width:100%;text-align:left;background:var(--card);border:1px solid var(--line);border-radius:10px;padding:8px 12px;margin-top:6px}
+.mxrow:hover{background:var(--card2)}
+.mxcell{display:flex;align-items:center;gap:6px;justify-content:center;border-radius:7px;padding:5px 4px;font-size:12px;font-variant-numeric:tabular-nums;color:var(--ink);min-height:29px}
+.mxcell b{font-weight:600}
+.mxcell.off{color:var(--muted)}
+.mxn{font-family:"IBM Plex Mono",monospace;font-size:11px;color:var(--muted);text-align:right}
+.mxsum{display:flex;gap:8px;flex-wrap:wrap;margin:0 0 12px}
+.igchip{display:inline-flex;align-items:center;justify-content:center;gap:4px;font-family:"IBM Plex Mono",monospace;font-size:10.5px;font-weight:600;border-radius:999px;border:1px dashed var(--line);color:var(--muted);padding:3px 9px;cursor:pointer;user-select:none;white-space:nowrap}
+.igchip:hover{border-color:var(--muted);color:var(--ink2)}
+.igchip.on{border:1px solid color-mix(in srgb,var(--good) 55%,var(--line));color:var(--good);background:color-mix(in srgb,var(--good) 11%,transparent)}
+.igchip.dead{cursor:default;border-style:dotted}
+.igchip.dead:hover{border-color:var(--line);color:var(--muted)}
+
+/* ---------- footprints ---------- */
+.fp-grid{display:grid;grid-template-columns:minmax(0,1.15fr) minmax(320px,1fr);gap:14px;align-items:start}
+@media (max-width:900px){.fp-grid{grid-template-columns:1fr}}
+.fp-list{display:flex;flex-wrap:wrap;gap:6px;margin-top:12px;max-height:260px;overflow:auto;padding-right:4px}
+.fp-list button{font-size:12px;color:var(--ink2);border:1px solid var(--line);border-radius:6px;padding:4px 9px}
+.fp-list button:hover{background:var(--wash);color:var(--ink)}
+.fp-list button[aria-current="true"]{color:var(--ink);background:var(--wash2);border-color:var(--muted)}
+.fp-rows{display:flex;flex-direction:column;gap:9px;margin-top:14px}
+.fp-row{display:grid;grid-template-columns:11px 1fr;gap:10px;align-items:center}
+.fp-row .sw{width:11px;height:11px;border-radius:3px}
+.fp-row .l{display:flex;justify-content:space-between;gap:8px;font-size:12.5px}
+.fp-row .l span:last-child{font-family:"IBM Plex Mono",monospace;font-size:11.5px;color:var(--ink2);font-variant-numeric:tabular-nums}
+.fp-row .bar{height:7px;border-radius:4px;background:var(--grid);margin-top:4px;overflow:hidden}
+.fp-row .bar i{display:block;height:100%;border-radius:4px}
+.fp-tonight{margin-top:16px;border-top:1px solid var(--line);padding-top:12px}
+.fp-chips{display:flex;flex-wrap:wrap;gap:6px;margin:8px 0}
+.fp-verdict{margin-top:8px;padding:10px 12px;border-radius:8px;background:var(--card2);border-left:3px solid var(--st-stacked);font-size:13px;color:var(--ink2)}
+.fp-verdict.new{border-left-color:var(--good)}
+.fp-verdict b{color:var(--ink)}
+svg.fp text.fl{font-family:"IBM Plex Mono",monospace;font-size:10.5px;fill:var(--ink)}
+footer.foot{border-top:1px solid var(--line);margin-top:34px;padding:16px 0 26px;font-size:11.5px;color:var(--muted);font-family:"IBM Plex Mono",monospace;line-height:1.8}
+</style>
+
+</head>
+<body>
+<svg width="0" height="0" style="position:absolute" aria-hidden="true"><defs>
+<pattern id="hatchS30" patternUnits="userSpaceOnUse" width="7" height="7" patternTransform="rotate(45)"><rect width="7" height="7" fill="#ffffff"/><rect width="7" height="3.2" fill="#101010"/></pattern>
+</defs></svg>
+<div id="app">
+  <header class="top">
+    <div class="wrap">
+      <div class="masthead">
+        <div>
+          <div class="eyebrow" id="mastEyebrow">live from the importer</div>
+          <h1 class="wordmark">Astro Archive Observatory</h1>
+        </div>
+        <div class="mast-right" id="mastStats"></div>
+      </div>
+      <nav class="tabs" role="tablist" id="tabs"></nav>
+    </div>
+  </header>
+  <main class="wrap" id="main"></main>
+  <footer class="foot"><div class="wrap" id="footNote"></div></footer>
+</div>
+<div class="tt" id="tt" role="status" aria-live="polite"></div>
+<div class="drawer-scrim" id="scrim"></div>
+<aside class="drawer" id="drawer" aria-label="Target detail"></aside>
+
+<script id="dataset" type="application/json">__DATASET__</script>
+<script>
+"use strict";
+const D = JSON.parse(document.getElementById("dataset").textContent);
+
+/* ---------- constants ---------- */
+/* Fixed identity order (validated palette slots); CAMS shows only the scopes
+   present in the dataset, so the same page handles the split and unsplit
+   Askar worlds. Colour follows the entity in every mode. */
+const CAMORDER = [
+  {id:"Seestar S30 Pro", short:"S30 Pro", v:"--cam-s30p"},
+  {id:"ASIAir",          short:"Askar rigs", v:"--cam-asiair"},
+  {id:"Askar 107PHQ",    short:"107PHQ", v:"--cam-asiair"},
+  {id:"Seestar S50",     short:"S50", v:"--cam-s50"},
+  {id:"Seestar S30",     short:"S30", v:"--cam-s30"},
+  {id:"Askar FRA400",    short:"FRA400", v:"--cam-fra"},
+  {id:"Seestar S50 Pro", short:"S50 Pro", v:"--cam-s50p"},
+];
+const CAMS = CAMORDER.filter(c=>D.scopes.some(s=>s.camera===c.id));
+const CAMV = Object.fromEntries(CAMORDER.map(c=>[c.id,c.v]));
+const CAMSHORT = Object.fromEntries(CAMORDER.map(c=>[c.id,c.short]));
+CAMV["Askar (unattributed)"]="--muted"; CAMSHORT["Askar (unattributed)"]="Askar, rig unrecorded";
+/* Brett's palette: S30 Pro yellow, 107PHQ green, S50 black, S30 blue, FRA400 red.
+   The black S50 marks carry a fine contrasting edge so they hold on the dark theme. */
+const CAMFILL = {
+  "Seestar S30 Pro": {v:"--cam-s30p"},
+  "ASIAir":          {v:"--cam-asiair"},
+  "Askar 107PHQ":    {v:"--cam-asiair"},
+  "Seestar S50":     {v:"--cam-s50", edge:true},
+  "Seestar S30":     {v:"--cam-s30"},
+  "Askar FRA400":    {v:"--cam-fra"},
+  "Seestar S50 Pro": {v:"--cam-s50p"},
+  "Askar (unattributed)": {v:"--muted"},
+};
+function svgCamFill(node, camId){
+  const f=CAMFILL[camId]||{v:"--muted"};
+  node.setAttribute("fill", f.hash ? "url(#hatchS30)" : "var("+f.v+")");
+  if(f.edge){ node.setAttribute("stroke","var(--edge)"); node.setAttribute("stroke-width","1"); }
+  return node;
+}
+function paintSwatch(node, camId){
+  const f=CAMFILL[camId]||{v:"--muted"};
+  if(f.hash) node.classList.add("hashfill"); else node.style.background="var("+f.v+")";
+  if(f.edge) node.classList.add("edged");
+  return node;
+}
+const STAGES = [
+  {id:"todo",        label:"To do",        v:"--st-todo",        outline:true},
+  {id:"captured",    label:"Capturing",    v:"--st-captured"},
+  {id:"stacked",     label:"Ready to process", v:"--st-stacked"},
+  {id:"processing",  label:"In progress",  v:"--st-processing"},
+  {id:"complete",    label:"Done",         v:"--st-complete"},
+  {id:"quarantined", label:"Quarantined",  v:"--st-quarantined"},
+];
+const STAGE = Object.fromEntries(STAGES.map(s=>[s.id,s]));
+const css = v => getComputedStyle(document.documentElement).getPropertyValue(v).trim();
+
+/* ---------- state (remembered per viewer, best-effort) ---------- */
+let mem = {};
+try { mem = JSON.parse(localStorage.getItem("aao") || "{}") || {}; } catch(e) { mem = {}; }
+function remember(){ try { localStorage.setItem("aao", JSON.stringify(mem)); } catch(e){} }
+
+/* ---------- tiny DOM + format helpers ---------- */
+function el(tag, cls, text){ const n=document.createElement(tag); if(cls) n.className=cls; if(text!=null) n.textContent=text; return n; }
+function frag(...kids){ const f=document.createDocumentFragment(); kids.forEach(k=>k&&f.append(k)); return f; }
+const fmtI = n => (n==null?"?":n.toLocaleString("en-GB"));
+const fmtH = (h,dp=1) => h==null?"?":h.toLocaleString("en-GB",{minimumFractionDigits:dp,maximumFractionDigits:dp})+" h";
+const fmtGB = b => b>=1e12 ? (b/1e12).toLocaleString("en-GB",{maximumFractionDigits:2})+" TB" : b>=1e9 ? (b/1e9).toLocaleString("en-GB",{maximumFractionDigits:1})+" GB" : (b/1e6).toLocaleString("en-GB",{maximumFractionDigits:0})+" MB";
+const MONTHS=["Jan","Feb","Mar","Apr","May","Jun","Jul","Aug","Sep","Oct","Nov","Dec"];
+function fmtD(iso){ if(!iso) return "?"; const [y,m,d]=iso.split("-"); return (+d)+" "+MONTHS[+m-1]+" "+(y.slice(2)?y:y); }
+function fmtDY(iso){ if(!iso) return "?"; const [y,m,d]=iso.split("-"); return (+d)+" "+MONTHS[+m-1]+" "+y; }
+function svgEl(tag, attrs){ const n=document.createElementNS("http://www.w3.org/2000/svg",tag); for(const k in attrs) n.setAttribute(k,attrs[k]); return n; }
+function camDot(camId){ const d=el("span","dot"); paintSwatch(d,camId); d.title=camId; return d; }
+function stageChip(stId){
+  const s=STAGE[stId]||STAGE.captured, c=el("span","stchip");
+  const d=el("span","dot"); d.style.background=s.outline?"transparent":"var("+s.v+")";
+  if(s.outline) d.style.border="1.5px solid var("+s.v+")";
+  c.append(d, s.label); return c;
+}
+
+/* ---------- tooltip ---------- */
+const tt = document.getElementById("tt");
+function ttShow(evt, build){
+  tt.replaceChildren(); build(tt); tt.style.display="block";
+  const pad=14, w=tt.offsetWidth, h=tt.offsetHeight;
+  let x=evt.clientX+pad, y=evt.clientY+pad;
+  if(x+w>innerWidth-8) x=evt.clientX-w-pad;
+  if(y+h>innerHeight-8) y=evt.clientY-h-pad;
+  tt.style.left=x+"px"; tt.style.top=y+"px";
+}
+function ttHide(){ tt.style.display="none"; }
+function ttRow(parent, label, val, colorVar){
+  const r=el("div","row");
+  if(colorVar){ const k=el("span","lk");
+    if(CAMFILL[colorVar]) paintSwatch(k,colorVar);
+    else k.style.background="var("+colorVar+")";
+    r.append(k); }
+  r.append(el("span",null,label));
+  const b=el("b",null,val); r.append(b); return parent.appendChild(r);
+}
+function hoverable(node, build){
+  node.addEventListener("pointermove", e=>ttShow(e,build));
+  node.addEventListener("pointerleave", ttHide);
+  node.addEventListener("focus", e=>{ const r=node.getBoundingClientRect(); ttShow({clientX:r.right,clientY:r.top}, build); });
+  node.addEventListener("blur", ttHide);
+}
+
+/* ---------- chart card scaffold with table twin ---------- */
+function chartCard(title, sub, renderChart, renderTable){
+  const card=el("div","card");
+  const head=el("div","cardhead");
+  const left=el("div"); left.append(el("h2","sec",title)); if(sub) left.append(el("div","sub",sub));
+  head.append(left);
+  const btn=el("button","tbtn","view as table"); btn.setAttribute("aria-pressed","false");
+  head.append(btn); card.append(head);
+  const body=el("div"); card.append(body);
+  let mode="chart";
+  function paint(){
+    body.replaceChildren();
+    if(mode==="chart"){ const c=el("div","chart"); renderChart(c); body.append(c); btn.textContent="view as table"; btn.setAttribute("aria-pressed","false"); }
+    else { const w=el("div","tablewrap"); renderTable(w); body.append(w); btn.textContent="view as chart"; btn.setAttribute("aria-pressed","true"); }
+  }
+  btn.addEventListener("click", ()=>{ mode = mode==="chart" ? "table":"chart"; paint(); });
+  paint();
+  return card;
+}
+function simpleTable(wrap, headers, rows){
+  const t=el("table","dt"), tr=el("tr");
+  headers.forEach(h=>tr.append(el("th",null,h)));
+  const thead=el("thead"); thead.append(tr); t.append(thead);
+  const tb=el("tbody");
+  rows.forEach(r=>{ const x=el("tr"); r.forEach(c=>x.append(el("td",null,String(c)))); tb.append(x); });
+  t.append(tb); wrap.append(t);
+}
+
+/* ---------- derived data ---------- */
+const TG = D.targets.slice();
+const byName = Object.fromEntries(TG.map(t=>[t.name,t]));
+const SESS = D.sessions;
+const totalHours = D.totals.hours;
+const camOrderIdx = Object.fromEntries(CAMS.map((c,i)=>[c.id,i]));
+
+/* per-target per-camera hour split, from sessions so a rig split flows through */
+for(const t of TG) t.camHours = {};
+for(const s of SESS){
+  const t=byName[s.target]; if(!t) continue;
+  t.camHours[s.camera]=(t.camHours[s.camera]||0)+s.hours;
+}
+/* nightly map: night -> {frames, seconds, perCam, targets} */
+const nightly = new Map();
+for(const s of SESS){
+  let n = nightly.get(s.night);
+  if(!n){ n={frames:0,hours:0,perCam:{},targets:new Set()}; nightly.set(s.night,n); }
+  n.frames+=s.frames; n.hours+=s.hours;
+  n.perCam[s.camera]=n.perCam[s.camera]||{frames:0,hours:0};
+  n.perCam[s.camera].frames+=s.frames; n.perCam[s.camera].hours+=s.hours;
+  n.targets.add(s.target);
+}
+/* all status cards flattened */
+const CARDS=[];
+for(const t of TG) for(const c of t.statusCards) CARDS.push(c);
+CARDS.push = undefined;
+
+/* ---------- tabs ---------- */
+const VIEWS=[
+  ["overview","Overview"],["targets","Targets"],["coverage","Coverage"],["pipeline","Pipeline"],
+  ["nights","Nights"],["sky","Sky"],["footprints","Footprints"],["equipment","Equipment"],["health","Data health"]
+];
+const tabsNav=document.getElementById("tabs");
+const mainEl=document.getElementById("main");
+const sections={};
+for(const [id,label] of VIEWS){
+  const b=el("button",null,label);
+  b.id="tab-"+id; b.setAttribute("role","tab"); b.setAttribute("aria-selected","false");
+  b.addEventListener("click",()=>go(id));
+  tabsNav.append(b);
+  const s=el("section","view"); s.id="view-"+id; s.setAttribute("role","tabpanel");
+  s.setAttribute("aria-labelledby","tab-"+id);
+  mainEl.append(s); sections[id]=s;
+}
+tabsNav.addEventListener("keydown",e=>{
+  if(e.key!=="ArrowRight"&&e.key!=="ArrowLeft")return;
+  const ids=VIEWS.map(v=>v[0]); let i=ids.indexOf(current);
+  i=(i+(e.key==="ArrowRight"?1:-1)+ids.length)%ids.length; go(ids[i]);
+  document.getElementById("tab-"+ids[i]).focus();
+});
+let current=null;
+const painted={};
+function go(id){
+  current=id; mem.tab=id; remember();
+  for(const [vid] of VIEWS){
+    sections[vid].classList.toggle("on", vid===id);
+    document.getElementById("tab-"+vid).setAttribute("aria-selected", vid===id?"true":"false");
+  }
+  if(!painted[id]){ RENDER[id](sections[id]); painted[id]=true; }
+}
+
+/* ---------- masthead + footer ---------- */
+(function(){
+  const m=document.getElementById("mastStats");
+  m.append(frag(
+    el("div",null,""), // spacing shim replaced below
+  ));
+  m.replaceChildren();
+  const l1=el("div"); l1.append(el("b",null,fmtH(totalHours))); l1.append(document.createTextNode(" integration · "));
+  l1.append(el("b",null,fmtI(D.totals.lights))); l1.append(document.createTextNode(" lights"));
+  const l2=el("div",null,"worked out "+D.generatedAt);
+  const eb=document.getElementById("mastEyebrow"); if(eb && D.machine) eb.textContent=D.machine;
+  m.append(l1,l2);
+  const f=document.getElementById("footNote");
+  f.append(el("div",null,D.sourceNote));
+  f.append(el("div",null,"Nothing on the archive is touched by this page. It is rebuilt every time the tab opens; the facts behind it refresh with each ship and each nightly sweep, or with --projects."));
+})();
+</script>
+<script>
+"use strict";
+const RENDER = {};
+
+/* ================= OVERVIEW ================= */
+RENDER.overview = function(root){
+  /* hero */
+  const hero=el("div","card hero");
+  const hl=el("div");
+  const big=el("div","big"); big.append(fmtH(totalHours,1).replace(" h",""), el("small",null," hours of integration"));
+  hl.append(big);
+  const lede=el("p","lede");
+  lede.append("Every light frame the importer has recorded, on both computers: ",
+    el("b",null,fmtI(D.totals.lights)+" frames"), " across ",
+    el("b",null,D.totals.targets+" targets"), " on ",
+    el("b",null,fmtI(D.totals.nights)+" nights"), ", ",
+    el("b",null,(CAMS.length===4?"four":CAMS.length===5?"five":String(CAMS.length))+" scopes"), ".");
+  hl.append(lede);
+  hero.append(hl);
+  const heroR=el("div");
+  const camsBox=el("div"); camsBox.style.display="flex"; camsBox.style.flexDirection="column"; camsBox.style.gap="7px";
+  for(const c of CAMS){
+    const s=D.scopes.find(x=>x.camera===c.id); if(!s) continue;
+    const row=el("div"); row.style.display="flex"; row.style.alignItems="center"; row.style.gap="9px"; row.style.fontSize="12.5px";
+    row.append(camDot(c.id));
+    const lab=el("span",null,c.short); lab.style.width="86px"; lab.style.color="var(--ink2)"; row.append(lab);
+    const b=el("b",null,fmtH(s.hours)); b.style.width="76px"; b.style.textAlign="right"; b.style.fontVariantNumeric="tabular-nums"; row.append(b);
+    const sub=el("span",null,fmtI(s.frames)+" frames · "+s.nights+" nights"); sub.style.color="var(--muted)"; sub.style.fontSize="11.5px"; row.append(sub);
+    camsBox.append(row);
+  }
+  heroR.append(camsBox); hero.append(heroR);
+  root.append(hero);
+
+  /* what's new since the previous snapshot */
+  if(D.delta && D.delta.addedFrames>0){
+    const dl=D.delta;
+    const nc=el("div","card"); nc.style.marginTop="14px";
+    nc.style.borderLeft="3px solid var(--st-stacked)";
+    nc.append(el("h2","sec","New since the previous snapshot"+(dl.prevGeneratedAt?" ("+dl.prevGeneratedAt+")":"")));
+    const line=el("p"); line.style.fontSize="13.5px"; line.style.color="var(--ink2)"; line.style.marginTop="6px";
+    line.append(el("b",null,"+"+fmtI(dl.addedFrames)+" light frames"), " and ",
+      el("b",null,"+"+fmtH(dl.addedHours)), " across ",
+      el("b",null,dl.newNights+" new nights"),
+      ", latest night now "+fmtDY(dl.nowLatest)+".");
+    for(const b of line.querySelectorAll("b")) b.style.color="var(--ink)";
+    nc.append(line);
+    const perScope=Object.entries(dl.addedByScope||{});
+    if(perScope.length){
+      const row=el("div"); row.style.display="flex"; row.style.gap="14px"; row.style.flexWrap="wrap"; row.style.margin="8px 0 2px";
+      for(const [cam,n] of perScope){
+        const li=el("span","li"); li.style.display="inline-flex"; li.style.alignItems="center"; li.style.gap="6px"; li.style.fontSize="12.5px"; li.style.color="var(--ink2)";
+        li.append(camDot(cam), (CAMSHORT[cam]||cam)+" +"+fmtI(n));
+        row.append(li);
+      }
+      nc.append(row);
+    }
+    if(dl.newTargets && dl.newTargets.length){
+      const tl=el("div"); tl.style.display="flex"; tl.style.gap="7px"; tl.style.flexWrap="wrap"; tl.style.marginTop="10px";
+      tl.append(el("span","sub",dl.newTargets.length+" new targets:"));
+      for(const name of dl.newTargets){
+        const ch=el("button","chip",name);
+        ch.addEventListener("click",()=>openTarget(name));
+        tl.append(ch);
+      }
+      nc.append(tl);
+    }
+    root.append(nc);
+  }
+
+  /* KPI row */
+  const kp=el("div","kpis");
+  function kpi(label,val,sub){ const k=el("div","kpi"); k.append(el("div","k-label",label), el("div","k-val",val)); if(sub) k.append(el("div","k-sub",sub)); kp.append(k); }
+  kpi("Light frames", fmtI(D.totals.lights), fmtGB(D.totals.bytes)+" of lights");
+  kpi("Targets", String(D.totals.targets), TG.filter(t=>t.mosaic).length+" shot as mosaics");
+  kpi("Nights out", String(D.totals.nights), fmtDY(D.scopes.reduce((a,s)=>a&&a<s.first?a:s.first,null))+" to "+fmtDY(D.scopes.reduce((a,s)=>a&&a>s.last?a:s.last,null)));
+  kpi("Sessions", String(D.totals.sessions), "one target, one scope, one night");
+  kpi("Ready to process", String(CARDS.filter(c=>c.state==="stacked").length), "datasets the quiet period has passed on");
+  if(D.events.length) kpi("Sun, Moon, planets", String(D.events.filter(e=>e.date).length)+" days", "solar, lunar and planetary captures");
+  root.append(kp);
+
+  /* integration by scope, stacked */
+  root.append(spacer(14));
+  root.append(chartCard("Integration by scope", "hours of light-frame exposure per camera",
+    c=>{
+      const W=980,H=96,pad=8,bw=22;
+      const svg=svgEl("svg",{viewBox:"0 0 "+W+" "+H,width:"100%",role:"img","aria-label":"Stacked bar of integration hours by scope"});
+      let x=pad; const total=D.scopes.reduce((a,s)=>a+s.hours,0);
+      const scale=(W-2*pad-3*2)/total;
+      const y=18;
+      for(const cam of CAMS){
+        const s=D.scopes.find(z=>z.camera===cam.id); if(!s) continue;
+        const w=Math.max(1.5,s.hours*scale);
+        const r=svgEl("rect",{x:x,y:y,width:w,height:bw,rx:3});
+        svgCamFill(r,cam.id);
+        svg.append(r);
+        hoverable(r,box=>{ box.append(el("div","tt-t",cam.id)); ttRow(box,"integration",fmtH(s.hours),cam.id); ttRow(box,"share",Math.round(s.hours/total*100)+"%"); ttRow(box,"frames",fmtI(s.frames)); ttRow(box,"nights",String(s.nights)); });
+        if(w>90){
+          const t1=svgEl("text",{x:x+8,y:y+bw+20,class:"dlabel strong"}); t1.textContent=cam.short; svg.append(t1);
+          const t2=svgEl("text",{x:x+8,y:y+bw+36,class:"dlabel"}); t2.textContent=fmtH(s.hours); svg.append(t2);
+        }
+        x+=w+2;
+      }
+      c.append(svg);
+      c.append(legendRow(CAMS.map(cm=>({label:cm.id,cam:cm.id,kind:"sw"}))));
+    },
+    w=>simpleTable(w,["Scope","Hours","Frames","Nights","First night","Latest night","Lights on disk"],
+      CAMS.map(cm=>{const s=D.scopes.find(z=>z.camera===cm.id);return s?[cm.id,s.hours.toFixed(1),fmtI(s.frames),s.nights,fmtDY(s.first),fmtDY(s.last),fmtGB(s.bytes)]:null}).filter(Boolean))
+  ));
+
+  /* top targets */
+  const top=TG.slice().sort((a,b)=>b.hours-a.hours).slice(0,12);
+  root.append(chartCard("Where the hours went", "top 12 targets by total integration, split by scope",
+    c=>{
+      const W=980,rowH=31,padL=196,padR=86,H=top.length*rowH+16;
+      const svg=svgEl("svg",{viewBox:"0 0 "+W+" "+H,width:"100%",role:"img","aria-label":"Top targets by hours"});
+      const max=top[0].hours, scale=(W-padL-padR)/max;
+      top.forEach((t,i)=>{
+        const y=8+i*rowH;
+        const name=svgEl("text",{x:padL-10,y:y+14.5,"text-anchor":"end",class:"dlabel strong"});
+        name.textContent=t.name.length>26?t.name.slice(0,25)+"…":t.name; svg.append(name);
+        let x=padL;
+        for(const cam of CAMS){
+          const h=t.camHours[cam.id]||0; if(h<=0.01) continue;
+          const w=Math.max(1.5,h*scale-2);
+          const r=svgEl("rect",{x:x,y:y,width:w,height:20,rx:3,tabindex:"0"});
+          svgCamFill(r,cam.id);
+          svg.append(r);
+          hoverable(r,box=>{ box.append(el("div","tt-t",t.name)); ttRow(box,cam.id,fmtH(h),cam.id); ttRow(box,"total",fmtH(t.hours)); ttRow(box,"nights",String(t.nights)); });
+          r.addEventListener("click",()=>openTarget(t.name));
+          r.style.cursor="pointer";
+          x+=w+2;
+        }
+        const v=svgEl("text",{x:x+7,y:y+14.5,class:"dlabel"}); v.textContent=t.hours.toFixed(1)+" h"; svg.append(v);
+      });
+      c.append(svg);
+      c.append(legendRow(CAMS.map(cm=>({label:cm.id,cam:cm.id,kind:"sw"}))));
+    },
+    w=>simpleTable(w,["Target","Hours","Nights","Frames","Scopes"],
+      top.map(t=>[t.name,t.hours.toFixed(1),t.nights,fmtI(t.lights),t.cameras.map(c=>CAMSHORT[c]||c).join(", ")]))
+  ));
+
+  /* processing queue */
+  const q=el("div","card");
+  q.append(el("h2","sec","What deserves the PC next"));
+  q.append(el("div","sub","from projects.json: the biggest invested hours that are not yet finished"));
+  const qg=el("div"); qg.style.display="grid"; qg.style.gridTemplateColumns="repeat(auto-fit,minmax(230px,1fr))"; qg.style.gap="12px"; qg.style.marginTop="12px";
+  function qcol(title, stId, verb){
+    const cardsQ=CARDS.filter(c=>c.state===stId && c.hours).sort((a,b)=>b.hours-a.hours).slice(0,4);
+    if(!cardsQ.length) return;
+    const col=el("div");
+    const h=el("div"); h.style.display="flex"; h.style.alignItems="center"; h.style.gap="7px"; h.style.marginBottom="6px";
+    h.append(stageChip(stId), el("span","sub",verb)); col.append(h);
+    for(const cd of cardsQ){
+      const b=el("button","pcard");
+      b.append(el("div","p-t",cd.target));
+      const m=el("div","p-m"); m.append(camDot(cd.camera), el("span",null,CAMSHORT[cd.camera]||cd.camera), el("b",null,fmtH(cd.hours)));
+      if(cd.nights) m.append(el("span",null,"· "+cd.nights+" nights"));
+      b.append(m);
+      if(cd.action) b.append(el("div","p-act",cd.action));
+      b.addEventListener("click",()=>openTarget(cd.target));
+      col.append(b);
+    }
+    qg.append(col);
+  }
+  qcol("stacked","stacked","ready: the quiet period has passed");
+  qcol("processing","processing","started: a master is saved, no final yet");
+  qcol("captured","captured","still capturing");
+  q.append(qg);
+  root.append(q);
+
+  /* events strip */
+  if(!D.events.length) return;
+  const ev=el("div","card");
+  ev.append(el("h2","sec","Sun, Moon and planets"));
+  const evLine=el("div","sub");
+  const solar=D.events.filter(e=>e.kind==="Solar"&&e.date).length;
+  const lunar=D.events.filter(e=>e.kind==="Lunar"&&e.date).length;
+  const planets=[...new Set(D.events.filter(e=>e.kind==="Planetary"&&e.body!=="Planetary").map(e=>e.body))];
+  const pDays=D.events.filter(e=>e.kind==="Planetary"&&e.date).length;
+  evLine.textContent="Outside deep sky: "+solar+" solar days (S50 and S30 Pro), "+lunar+" lunar days, and "+pDays+" planetary days ("+planets.join(", ")+"), kept as video and stills alongside the archives.";
+  ev.append(evLine);
+  root.append(ev);
+};
+function spacer(px){ const s=el("div"); s.style.height=px+"px"; return s; }
+function legendRow(items){
+  const lg=el("div","legend"); lg.style.marginTop="10px";
+  for(const it of items){
+    const li=el("span","li");
+    const sw=el("span",it.kind==="lk"?"lk":"sw");
+    if(it.cam) paintSwatch(sw,it.cam); else sw.style.background="var("+it.v+")";
+    li.append(sw, it.label); lg.append(li);
+  }
+  return lg;
+}
+
+/* ================= TARGETS ================= */
+RENDER.targets = function(root){
+  const tb=el("div","toolbar");
+  const search=el("input"); search.type="search"; search.placeholder="Search targets or codes"; search.setAttribute("aria-label","Search targets");
+  tb.append(search);
+  const camSel=new Set(), stSel=new Set();
+  const chipBox=el("div"); chipBox.style.display="flex"; chipBox.style.gap="6px"; chipBox.style.flexWrap="wrap";
+  for(const cm of CAMS){
+    const ch=el("button","chip"); ch.append(camDot(cm.id), cm.short);
+    ch.setAttribute("aria-pressed","false");
+    ch.addEventListener("click",()=>{ camSel.has(cm.id)?camSel.delete(cm.id):camSel.add(cm.id); ch.classList.toggle("sel"); ch.setAttribute("aria-pressed",ch.classList.contains("sel")); paint(); });
+    chipBox.append(ch);
+  }
+  for(const st of STAGES){
+    if(st.id==="todo") continue;
+    const ch=el("button","chip"); const d=el("span","dot"); d.style.background="var("+st.v+")"; ch.append(d, st.label);
+    ch.setAttribute("aria-pressed","false");
+    ch.addEventListener("click",()=>{ stSel.has(st.id)?stSel.delete(st.id):stSel.add(st.id); ch.classList.toggle("sel"); ch.setAttribute("aria-pressed",ch.classList.contains("sel")); paint(); });
+    chipBox.append(ch);
+  }
+  tb.append(chipBox);
+  const sort=el("select"); sort.setAttribute("aria-label","Sort targets");
+  [["hours","Sort: hours"],["nights","Sort: nights"],["lights","Sort: frames"],["last","Sort: most recent"],["name","Sort: name"]].forEach(([v,l])=>{const o=el("option",null,l);o.value=v;sort.append(o);});
+  tb.append(sort);
+  const count=el("span","tcount"); tb.append(count);
+  root.append(tb);
+
+  const head=el("div","thead");
+  ["Target","Type · constellation","Scopes","Furthest state","Hours","Nights","Frames","Latest"].forEach((h,i)=>{
+    const s=el("span",i>=4?"num":null,h); head.append(s);
+  });
+  root.append(head);
+  const list=el("div","trows"); root.append(list);
+
+  function paint(){
+    const qy=search.value.trim().toLowerCase();
+    let rows=TG.filter(t=>{
+      if(qy && !(t.name.toLowerCase().includes(qy) || t.codes.join(" ").toLowerCase().includes(qy))) return false;
+      if(camSel.size && !t.cameras.some(c=>camSel.has(c))) return false;
+      if(stSel.size && !t.statusCards.some(c=>stSel.has(c.state))) return false;
+      return true;
+    });
+    const k=sort.value;
+    rows.sort((a,b)=> k==="name" ? a.name.localeCompare(b.name)
+      : k==="last" ? String(b.lastNight).localeCompare(String(a.lastNight))
+      : (b[k]||0)-(a[k]||0));
+    list.replaceChildren();
+    count.textContent=rows.length+" of "+TG.length+" targets";
+    for(const t of rows){
+      const r=el("button","trow");
+      const c1=el("div"); c1.append(el("div","tname",t.name));
+      if(t.codes.length||t.mosaic){ const cd=el("div","tcodes",[...t.codes, ...(t.mosaic?["mosaic programme"]:[])].join(" · ")); c1.append(cd); }
+      r.append(c1);
+      r.append(el("div","tmeta",[t.type,t.constellation].filter(Boolean).join(" · ")||"·"));
+      const dots=el("div"); dots.style.display="flex"; dots.style.gap="5px";
+      for(const cm of CAMS) if(t.cameras.includes(cm.id)) dots.append(camDot(cm.id));
+      r.append(dots);
+      const stc=el("div"); stc.append(stageChip(t.state)); r.append(stc);
+      const n1=el("div","num"); n1.append(el("b",null,t.hours.toFixed(1))); r.append(n1);
+      r.append(el("div","num",String(t.nights)));
+      r.append(el("div","num",fmtI(t.lights)));
+      r.append(el("div","num",fmtD? fmtDY(t.lastNight):t.lastNight));
+      r.addEventListener("click",()=>openTarget(t.name));
+      list.append(r);
+    }
+  }
+  search.addEventListener("input",paint);
+  sort.addEventListener("change",paint);
+  paint();
+};
+
+/* ================= INSTAGRAM POSTED TRACKER =================
+   Shared, durable posted-per-target state via the artifact db capability.
+   Brett ticks a target when it goes on instagram.com/brettjoastro; every
+   view of this page sees the same list, it survives republishes, and a
+   session can read it back to sync AstroLog. Degrades to read-only marks
+   when the capability is absent (local preview, no grant). */
+const IG={ map:{}, ready:false, canWrite:true, busy:new Set(), db:null, listeners:new Set() };
+function igSlug(name){ return name.toLowerCase().replace(/[^a-z0-9]+/g,"-").replace(/^-+|-+$/g,"").slice(0,80); }
+function igPing(){ IG.listeners.forEach(f=>{ try{ f(); }catch(e){} }); }
+(function(){
+  if(!(window.claude && window.claude.use)){ IG.ready=null; return; }
+  window.claude.use("db").then(db=>{
+    if(!db){ IG.ready=null; igPing(); return; }
+    IG.db=db;
+    db.collection("published").onSnapshot(snap=>{
+      const m={};
+      for(const d of snap.docs){ const b=d.data(); if(b && b.posted) m[b.target||d.id]={ at:b.at||null }; }
+      IG.map=m; IG.ready=true; igPing();
+    }, err=>{ IG.ready=null; igPing(); });
+  }).catch(()=>{ IG.ready=null; igPing(); });
+})();
+async function igToggle(name){
+  if(!IG.db || !IG.canWrite || IG.busy.has(name)) return;
+  IG.busy.add(name); igPing();
+  const ref=IG.db.doc("published/"+igSlug(name));
+  try{
+    if(IG.map[name]) await ref.delete();
+    else await ref.set({ target:name, posted:true, at:new Date().toISOString().slice(0,10) });
+  }catch(e){
+    if(e && e.code==="invalid_argument") IG.canWrite=false;
+  }finally{
+    IG.busy.delete(name); igPing();
+  }
+}
+
+/* ================= COVERAGE MATRIX =================
+   One glance answers: have I shot this target with this scope?
+   Cells aggregate the session list, so the Askar rig split flows through. */
+RENDER.coverage = function(root){
+  const AGG=new Map();
+  for(const s of SESS){
+    let m=AGG.get(s.target); if(!m){ m={}; AGG.set(s.target,m); }
+    const a=m[s.camera]||(m[s.camera]={hours:0,frames:0,nights:new Set(),first:s.night,last:s.night});
+    a.hours+=s.hours; a.frames+=s.frames; a.nights.add(s.night);
+    if(s.night<a.first)a.first=s.night; if(s.night>a.last)a.last=s.night;
+  }
+  const cols=CAMS;
+  const gridCols="minmax(210px,1.5fr) repeat("+cols.length+",minmax(92px,1fr)) 56px 66px";
+
+  const intro=el("div","sub");
+  intro.style.marginBottom="12px";
+  intro.textContent="Every target against every scope, one glance. A filled cell means light frames exist: integration hours, or the frame count where the exposure went unrecorded. The chips count each scope's targets. Click a row for the full story.";
+  root.append(intro);
+
+  const summ=el("div","mxsum");
+  for(const cm of cols){
+    const n=TG.filter(t=>AGG.get(t.name)&&AGG.get(t.name)[cm.id]).length;
+    const ch=el("span","chip"); ch.append(camDot(cm.id), CAMSHORT[cm.id]+" "+n+" of "+TG.length);
+    summ.append(ch);
+  }
+  const igSumm=el("span","chip"); igSumm.textContent="IG …"; summ.append(igSumm);
+  root.append(summ);
+
+  const tb=el("div","toolbar");
+  const search=el("input"); search.type="search"; search.placeholder="Search targets or codes"; search.setAttribute("aria-label","Search coverage matrix");
+  tb.append(search);
+  const gaps=el("button","tbtn","gaps only"); gaps.setAttribute("aria-pressed","false");
+  gaps.addEventListener("click",()=>{ const on=gaps.getAttribute("aria-pressed")!=="true"; gaps.setAttribute("aria-pressed",String(on)); paint(); });
+  tb.append(gaps);
+  let igFilter="";
+  const igOn=el("button","tbtn","posted"), igOff=el("button","tbtn","not posted");
+  igOn.setAttribute("aria-pressed","false"); igOff.setAttribute("aria-pressed","false");
+  function setIgFilter(v){
+    igFilter = igFilter===v ? "" : v;
+    igOn.setAttribute("aria-pressed",String(igFilter==="on"));
+    igOff.setAttribute("aria-pressed",String(igFilter==="off"));
+    paint();
+  }
+  igOn.addEventListener("click",()=>setIgFilter("on"));
+  igOff.addEventListener("click",()=>setIgFilter("off"));
+  tb.append(igOn,igOff);
+  const sort=el("select"); sort.setAttribute("aria-label","Sort coverage matrix");
+  [["name","Sort: name"],["hours","Sort: hours"],["most","Sort: most scopes"],["fewest","Sort: fewest scopes"],["last","Sort: most recent"]].forEach(([v,l])=>{const o=el("option",null,l);o.value=v;sort.append(o);});
+  tb.append(sort);
+  const count=el("span","tcount"); tb.append(count);
+  root.append(tb);
+
+  const wrap=el("div","mxwrap"), mx=el("div","mx");
+  const head=el("div","mxhead"); head.style.gridTemplateColumns=gridCols;
+  head.append(el("span",null,"Target"));
+  for(const cm of cols){ const c=el("span","mxcol"); c.append(camDot(cm.id), CAMSHORT[cm.id]); head.append(c); }
+  head.append(el("span","mxcol end","of "+cols.length));
+  head.append(el("span","mxcol end","IG"));
+  mx.append(head);
+  const list=el("div"); mx.append(list); wrap.append(mx); root.append(wrap);
+
+  function covOf(t){ const m=AGG.get(t.name)||{}; return cols.filter(cm=>m[cm.id]).length; }
+  function paint(){
+    const qy=search.value.trim().toLowerCase(), gOn=gaps.getAttribute("aria-pressed")==="true";
+    let rows=TG.filter(t=>{
+      if(qy && !(t.name.toLowerCase().includes(qy)||t.codes.join(" ").toLowerCase().includes(qy))) return false;
+      if(gOn && covOf(t)>=cols.length) return false;
+      if(igFilter==="on" && !IG.map[t.name]) return false;
+      if(igFilter==="off" && IG.map[t.name]) return false;
+      return true;
+    });
+    const k=sort.value;
+    rows.sort((a,b)=> k==="name" ? a.name.localeCompare(b.name)
+      : k==="hours" ? (b.hours||0)-(a.hours||0)
+      : k==="most" ? covOf(b)-covOf(a)||(b.hours||0)-(a.hours||0)
+      : k==="fewest" ? covOf(a)-covOf(b)||(b.hours||0)-(a.hours||0)
+      : String(b.lastNight).localeCompare(String(a.lastNight)));
+    list.replaceChildren();
+    let shot=0; rows.forEach(t=>shot+=covOf(t));
+    count.textContent=rows.length+" of "+TG.length+" targets · "+shot+" of "+(rows.length*cols.length)+" cells filled";
+    const igN=Object.keys(IG.map).length;
+    igSumm.textContent = IG.ready===true ? ("IG "+igN+" of "+TG.length+" posted")
+      : IG.ready===null ? "IG tracker off in this view" : "IG …";
+    for(const t of rows){
+      const m=AGG.get(t.name)||{};
+      const r=el("button","mxrow"); r.style.gridTemplateColumns=gridCols;
+      const c1=el("div"); c1.append(el("div","tname",t.name));
+      if(t.codes.length){ c1.append(el("div","tcodes",t.codes.join(" · "))); }
+      r.append(c1);
+      const said=[];
+      for(const cm of cols){
+        const a=m[cm.id];
+        const cell=el("span","mxcell"+(a?"":" off"));
+        if(a){
+          const f=CAMFILL[cm.id]||{v:"--muted"};
+          cell.style.background="color-mix(in srgb, var("+f.v+") 14%, transparent)";
+          const d=el("span","dot"); paintSwatch(d,cm.id); cell.append(d);
+          const label=a.hours>0 ? (a.hours>=100?Math.round(a.hours)+" h":a.hours.toFixed(1)+" h") : (a.frames>0 ? fmtI(a.frames)+" fr" : "stacks");
+          cell.append(el("b",null,label));
+          said.push(CAMSHORT[cm.id]+" "+label);
+          hoverable(cell, box=>{
+            box.append(el("div","tt-t",t.name+" · "+cm.id));
+            ttRow(box,"integration", a.hours>0?fmtH(a.hours):"exposure unrecorded", cm.id);
+            ttRow(box,"frames", fmtI(a.frames));
+            ttRow(box,"nights", String(a.nights.size));
+            ttRow(box,"span", fmtDY(a.first)+(a.last!==a.first?" to "+fmtDY(a.last):""));
+          });
+        }else{
+          cell.textContent="·";
+          hoverable(cell, box=>{
+            box.append(el("div","tt-t",t.name));
+            ttRow(box,"not shot with", CAMSHORT[cm.id], cm.id);
+          });
+        }
+        r.append(cell);
+      }
+      r.append(el("span","mxn",covOf(t)+"/"+cols.length));
+      const posted=IG.map[t.name];
+      const ig=el("span","igchip"+(posted?" on":"")+((IG.ready!==true||!IG.canWrite)?" dead":""));
+      ig.textContent = posted ? "IG \u2713" : "IG";
+      if(IG.ready===true && IG.canWrite){
+        ig.setAttribute("role","button"); ig.setAttribute("tabindex","0");
+        ig.setAttribute("aria-pressed",String(!!posted));
+        ig.setAttribute("aria-label",(posted?"Posted to Instagram":"Not posted to Instagram")+": "+t.name+". Activate to change.");
+        ig.title = posted ? ("Posted"+(posted.at?" "+fmtDY(posted.at):"")+". Click to clear.") : "Not posted. Click to mark as posted on Instagram.";
+        if(IG.busy.has(t.name)) ig.style.opacity=".45";
+        const flip=e=>{ e.stopPropagation(); e.preventDefault(); igToggle(t.name); };
+        ig.addEventListener("click",flip);
+        ig.addEventListener("keydown",e=>{ if(e.key==="Enter"||e.key===" ") flip(e); });
+      }else{
+        ig.title = IG.ready===false ? "Posting tracker loading" : "Posting tracker unavailable in this view";
+      }
+      r.append(ig);
+      r.setAttribute("aria-label", t.name+": "+(said.length?said.join(", "):"no data")+"; "+covOf(t)+" of "+cols.length+" scopes"+(posted?"; posted to Instagram":""));
+      r.addEventListener("click",()=>openTarget(t.name));
+      list.append(r);
+    }
+  }
+  search.addEventListener("input",paint);
+  sort.addEventListener("change",paint);
+  IG.listeners.add(paint);
+  paint();
+};
+</script>
+<script>
+"use strict";
+/* ================= TARGET DRAWER ================= */
+const drawer=document.getElementById("drawer"), scrim=document.getElementById("scrim");
+function closeDrawer(){ drawer.classList.remove("open"); scrim.style.display="none"; ttHide(); }
+scrim.addEventListener("click",closeDrawer);
+document.addEventListener("keydown",e=>{ if(e.key==="Escape") closeDrawer(); });
+
+function openTarget(name){
+  const t=byName[name]; if(!t) return;
+  drawer.replaceChildren();
+  const close=el("button","close","Close"); close.addEventListener("click",closeDrawer); drawer.append(close);
+  drawer.append(el("div","eyebrow",[t.type||"target",t.constellation,...t.codes].filter(Boolean).join(" · ")));
+  drawer.append(el("h3",null,t.name));
+
+  const scopeNames=t.cameras.map(c=>CAMSHORT[c]||c);
+  const ans=el("p","answer");
+  ans.append("Imaged on ", el("b",null,t.nights+" night"+(t.nights===1?"":"s")),
+    " with ", el("b",null,scopeNames.length+" scope"+(scopeNames.length===1?"":"s")),
+    " ("+scopeNames.join(", ")+"): ",
+    el("b",null,fmtI(t.lights)+" light frames"), ", ",
+    el("b",null,fmtH(t.hours)), " of integration, ",
+    String(t.sessions)+" sessions, first night "+fmtDY(t.firstNight)+", latest "+fmtDY(t.lastNight)+".");
+  drawer.append(ans);
+  const chips=el("div"); chips.style.display="flex"; chips.style.gap="7px"; chips.style.flexWrap="wrap"; chips.style.margin="6px 0 2px";
+  chips.append(stageChip(t.state));
+  if(t.mosaic){ const b=el("span","badge","mosaic programme"); chips.append(b); }
+  if(t.ra==null) chips.append(el("span","badge","moving target, not on the sky map"));
+  drawer.append(chips);
+
+  /* per-night sessions chart */
+  const ts=SESS.filter(s=>s.target===t.name).sort((a,b)=>a.night.localeCompare(b.night));
+  if(ts.length){
+    const cardC=chartCard("Sessions, night by night","each bar is one scope on one night; height is hours",
+      c=>{
+        const n=ts.length, W=650, padL=40, padB=34, padT=12;
+        const bw=Math.max(4,Math.min(20,(W-padL-10)/n-2));
+        const plotW=n*(bw+2), Wv=Math.max(W,padL+plotW+12);
+        const maxH=Math.max(...ts.map(s=>s.hours), 0.2);
+        const Hpl=150, Hv=Hpl+padT+padB;
+        const svg=svgEl("svg",{viewBox:"0 0 "+Wv+" "+Hv,width:"100%",role:"img","aria-label":"Session hours for "+t.name});
+        for(const gv of niceTicks(maxH,3)){
+          const y=padT+Hpl-gv/maxH*Hpl;
+          svg.append(svgEl("line",{x1:padL,x2:padL+plotW,y1:y,y2:y,class:"gridline"}));
+          const tx=svgEl("text",{x:padL-6,y:y+3.5,"text-anchor":"end",class:"axis mono"}); tx.textContent=gv; svg.append(tx);
+        }
+        svg.append(svgEl("line",{x1:padL,x2:padL+plotW,y1:padT+Hpl,y2:padT+Hpl,class:"baseline"}));
+        let lastYr="";
+        ts.forEach((s,i)=>{
+          const x=padL+i*(bw+2);
+          const h=Math.max(1.5,s.hours/maxH*Hpl);
+          const r=svgEl("rect",{x:x,y:padT+Hpl-h,width:bw,height:h,rx:Math.min(3,bw/3),tabindex:"0"});
+          svgCamFill(r,s.camera);
+          if(s.stackOnly) r.setAttribute("opacity","0.45");
+          svg.append(r);
+          hoverable(r,box=>{
+            box.append(el("div","tt-t",fmtDY(s.night)));
+            ttRow(box,CAMSHORT[s.camera]||s.camera, s.stackOnly?"auto-stack only":fmtH(s.hours), s.camera);
+            if(!s.stackOnly){ ttRow(box,"frames",fmtI(s.frames)); const f=Object.keys(s.filters).join(", "); if(f) ttRow(box,"filter",f); }
+            if(s.rig && s.camera==="ASIAir") ttRow(box,"rig",CAMSHORT[s.rig]||s.rig, s.rig);
+          });
+          const yr=s.night.slice(0,4);
+          if(yr!==lastYr){ lastYr=yr; const tx=svgEl("text",{x:x,y:padT+Hpl+16,class:"axis mono"}); tx.textContent=yr; svg.append(tx);
+            const mk=svgEl("line",{x1:x-1,x2:x-1,y1:padT+Hpl,y2:padT+Hpl+5,class:"baseline"}); svg.append(mk); }
+        });
+        c.append(svg);
+        c.append(legendRow(CAMS.filter(cm=>ts.some(s=>s.camera===cm.id)).map(cm=>({label:cm.id,cam:cm.id,kind:"sw"}))));
+      },
+      w=>simpleTable(w,["Night","Scope","Frames","Hours","Filters"],
+        ts.map(s=>[fmtDY(s.night),CAMSHORT[s.camera]||s.camera,s.stackOnly?"stack only":fmtI(s.frames),s.hours.toFixed(2),Object.keys(s.filters).join(", ")||"·"]))
+    );
+    cardC.style.marginTop="14px";
+    drawer.append(cardC);
+  }
+
+  /* programmes */
+  const ph=el("h2","sec","Datasets"); ph.style.margin="16px 0 2px"; drawer.append(ph);
+  for(const p of t.programmes.slice().sort((a,b)=>b.hours-a.hours)){
+    const box=el("div","prog");
+    const h=el("div","p-h");
+    h.append(camDot(p.camera), el("span",null,p.camera));
+    if(p.mosaic) h.append(el("span","badge","mosaic"));
+    const card=t.statusCards.find(c=>c.camera===p.camera);
+    if(card) h.append(stageChip(card.state));
+    if(p.collected) h.append(el("span","badge","Collect Lights: collected"));
+    box.append(h);
+    const st=el("div","p-stats");
+    function stat(lbl,val){ if(val==null||val==="")return; const s2=el("span"); s2.append(lbl+" "); s2.append(el("b",null,String(val))); st.append(s2); }
+    stat("lights",fmtI(p.lights));
+    if(p.hours>0) stat("hours",p.hours.toFixed(1));
+    stat("nights",p.nights);
+    if(p.firstNight) stat("span",fmtDY(p.firstNight)+" to "+fmtDY(p.lastNight));
+    if(p.autostacks) stat("auto-stacks",p.autostacks+(p.autostackFrames?" ("+fmtI(p.autostackFrames)+" frames)":""));
+    if(p.processedFiles) stat("processed files",p.processedFiles);
+    if(p.masters) stat("masters",p.masters);
+    if(p.working) stat("working copies",p.working);
+    if(p.panels && p.panels.length) stat("mosaic panels",p.panels.length);
+    box.append(st);
+    const fl=Object.entries(p.filters).sort((a,b)=>b[1]-a[1]).map(([k,v])=>filtLabel(k)+" x"+fmtI(v)).join(", ");
+    if(fl){ const f2=el("div","p-stats"); const s3=el("span"); s3.append("filters "); s3.append(el("b",null,fl)); f2.append(s3);
+      const ex=Object.entries(p.exposures).sort((a,b)=>(+b[0])-(+a[0])).filter(([k])=>+k>0).map(([k,v])=>(+k)+"s x"+fmtI(v)).join(", ");
+      if(ex){ const s4=el("span"); s4.append("exposures "); s4.append(el("b",null,ex)); f2.append(s4); }
+      box.append(f2);
+    }
+    if(p.camera==="ASIAir" && p.askar){
+      const parts=Object.entries(p.askar).sort((a,b)=>b[1]-a[1]).map(([k,v])=>k+" x"+fmtI(v)).join(", ");
+      if(parts){ const a2=el("div","p-stats"); const s5=el("span"); s5.append("rig "); s5.append(el("b",null,parts)); a2.append(s5); box.append(a2); }
+    }
+    if(card && card.evidence){ const evd=el("div","p-path"); evd.style.fontFamily="inherit"; evd.style.fontSize="11.5px"; evd.textContent="evidence: "+card.evidence+(card.action?" · next: "+card.action:""); box.append(evd); }
+    box.append(el("div","p-path",p.path));
+    drawer.append(box);
+  }
+  scrim.style.display="block";
+  drawer.classList.add("open");
+  drawer.scrollTop=0;
+}
+function filtLabel(f){ return f==="IRCUT"?"UV/IR Cut":f==="LP"?"LP dual-band":f==="wide-cam"?"wide camera":f; }
+function niceTicks(max,n){ const step=Math.pow(10,Math.floor(Math.log10(max/n))); const cands=[step,2*step,2.5*step,5*step,10*step];
+  const s=cands.find(c=>max/c<=n)||10*step; const out=[]; for(let v=s;v<=max;v+=s) out.push(+v.toFixed(2)); return out; }
+
+/* ================= PIPELINE ================= */
+RENDER.pipeline = function(root){
+  const intro=el("div","sub");
+  intro.textContent="Every dataset (one object on one scope), placed by the facts the importer has: the sessions in the ledgers, the masters the PC's inventory found in the target's folder, and the finished pictures in Final Astro Images. Click a card for the full target.";
+  intro.style.marginBottom="12px";
+  root.append(intro);
+  const camSel=new Set();
+  const tb=el("div","toolbar");
+  for(const cm of CAMS){
+    const ch=el("button","chip"); ch.append(camDot(cm.id), cm.short); ch.setAttribute("aria-pressed","false");
+    ch.addEventListener("click",()=>{ camSel.has(cm.id)?camSel.delete(cm.id):camSel.add(cm.id); ch.classList.toggle("sel"); ch.setAttribute("aria-pressed",ch.classList.contains("sel")); paint(); });
+    tb.append(ch);
+  }
+  root.append(tb);
+  const board=el("div","board"); root.append(board);
+  const ORDER=["captured","stacked","processing","complete","todo","quarantined"];
+  function paint(){
+    board.replaceChildren();
+    for(const stId of ORDER){
+      let cds=CARDS.filter(c=>c.state===stId && (!camSel.size||camSel.has(c.camera)));
+      if(!cds.length) continue;
+      cds.sort((a,b)=>(b.hours||0)-(a.hours||0));
+      const col=el("div","col");
+      const h=el("h3"); h.append(stageChip(stId)); col.append(h);
+      const hrs=cds.reduce((a,c)=>a+(c.hours||0),0);
+      col.append(el("div","colsum",cds.length+" programmes · "+hrs.toFixed(1)+" h invested"));
+      for(const cd of cds){
+        const b=el("button","pcard");
+        b.append(el("div","p-t",cd.target));
+        const m=el("div","p-m");
+        m.append(camDot(cd.camera), el("span",null,CAMSHORT[cd.camera]||cd.camera));
+        if(cd.hours!=null) m.append(el("b",null,fmtH(cd.hours)));
+        if(cd.nights!=null) m.append(el("span",null,"· "+cd.nights+" n"));
+        b.append(m);
+        for(const bg of cd.badges||[]) { const bb=el("div"); bb.append(el("span","badge",bg)); bb.style.marginTop="4px"; b.append(bb); }
+        if(cd.evidence) b.append(el("div","p-ev",cd.evidence));
+        if(cd.action) b.append(el("div","p-act",cd.action));
+        b.addEventListener("click",()=>{ if(byName[cd.target]) openTarget(cd.target); });
+        col.append(b);
+      }
+      board.append(col);
+    }
+  }
+  paint();
+  const src=el("div","sub");
+  src.style.marginTop="12px";
+  src.textContent="Capturing: a session within the quiet period ("+(D.quietPeriodDays||14)+" observing nights) or kept open by hand. Ready to process: the quiet period has passed and nothing is started. In progress: one of your own masters is saved in the target's folder on the archive. Done: a finished picture names the target and the scope.";
+  root.append(src);
+};
+
+/* ================= NIGHTS ================= */
+RENDER.nights = function(root){
+  const camSel=new Set(); let metric="hours";
+  const tb=el("div","toolbar");
+  for(const cm of CAMS){
+    const ch=el("button","chip"); ch.append(camDot(cm.id), cm.short); ch.setAttribute("aria-pressed","false");
+    ch.addEventListener("click",()=>{ camSel.has(cm.id)?camSel.delete(cm.id):camSel.add(cm.id); ch.classList.toggle("sel"); ch.setAttribute("aria-pressed",ch.classList.contains("sel")); paint(); });
+    tb.append(ch);
+  }
+  const mt=el("button","tbtn","colour by frames"); mt.setAttribute("aria-pressed","false");
+  mt.addEventListener("click",()=>{ metric = metric==="hours"?"frames":"hours"; mt.textContent = metric==="hours"?"colour by frames":"colour by hours"; mt.setAttribute("aria-pressed", metric==="frames"); paint(); });
+  tb.append(mt);
+  root.append(tb);
+  const holder=el("div"); root.append(holder);
+
+  function valOf(nightRec){
+    let h=0,f=0;
+    for(const [cam,x] of Object.entries(nightRec.perCam)){
+      if(camSel.size && !camSel.has(cam)) continue;
+      h+=x.hours; f+=x.frames;
+    }
+    return {h,f,v:metric==="hours"?h:f};
+  }
+  const HB=[0.5,1.5,3,5], FB=[100,300,700,1200];
+  function binVar(v){
+    if(v<=0) return "--heat0";
+    const bins=metric==="hours"?HB:FB;
+    for(let i=0;i<bins.length;i++) if(v<=bins[i]) return "--heat"+(i+1);
+    return "--heat5";
+  }
+  function paint(){
+    holder.replaceChildren();
+    const years=[...new Set([...nightly.keys()].map(n=>+n.slice(0,4)))].sort(); if(!years.length) years.push(new Date().getFullYear());
+    const cell=12, gap=2.5, step=cell+gap;
+    let totalNights=0, totalH=0, best=null, streak=0, bestStreak=0, prev=null, gapBest=0, gapPrev=null;
+    const monthAgg={};
+    const active=[];
+    for(const [night,recN] of [...nightly.entries()].sort()){
+      const {h,f,v}=valOf(recN);
+      if(v>0){ active.push(night); totalNights++; totalH+=h;
+        if(!best||h>best.h) best={night,h,f};
+        const mkey=night.slice(0,7); monthAgg[mkey]=(monthAgg[mkey]||0)+h;
+      }
+    }
+    for(const n of active){
+      if(prev){
+        const d=(Date.parse(n)-Date.parse(prev))/86400000;
+        if(d===1) streak++; else streak=1;
+        if(d-1>gapBest) gapBest=d-1;
+      } else streak=1;
+      bestStreak=Math.max(bestStreak,streak); prev=n;
+    }
+    const bestMonth=Object.entries(monthAgg).sort((a,b)=>b[1]-a[1])[0];
+    const card=el("div","card");
+    card.append(el("h2","sec","Imaging nights"));
+    card.append(el("div","sub","one cell per calendar night, coloured by "+(metric==="hours"?"hours captured":"frames captured")+(camSel.size?" on the selected scopes":" across all scopes")));
+    for(const yr of years){
+      const ywrap=el("div","hm-year");
+      const lab=el("div","eyebrow",String(yr)); lab.style.marginBottom="6px"; ywrap.append(lab);
+      const scroll=el("div","hm-scroll");
+      const jan1=new Date(Date.UTC(yr,0,1));
+      const startDow=(jan1.getUTCDay()+6)%7; /* Monday=0 */
+      const start=new Date(jan1); start.setUTCDate(start.getUTCDate()-startDow);
+      const end=new Date(Date.UTC(yr,11,31));
+      const weeks=Math.ceil(((end-start)/86400000+1)/7);
+      const W=weeks*step+34, H=7*step+22;
+      const svg=svgEl("svg",{viewBox:"0 0 "+W+" "+H,width:W,height:H,role:"img","aria-label":"Imaging nights "+yr});
+      ["Mon","Wed","Fri","Sun"].forEach((d2,i)=>{
+        const tx=svgEl("text",{x:0,y:16+step*[0,2,4,6][i]+9,class:"axis mono","font-size":"9.5"}); tx.textContent=d2; svg.append(tx);
+      });
+      let lastMon=-1;
+      for(let w=0;w<weeks;w++){
+        for(let dow=0;dow<7;dow++){
+          const d=new Date(start); d.setUTCDate(d.getUTCDate()+w*7+dow);
+          if(d.getUTCFullYear()!==yr) continue;
+          const iso=d.toISOString().slice(0,10);
+          if(d.getUTCDate()<=7 && dow===0 && d.getUTCMonth()!==lastMon){
+            lastMon=d.getUTCMonth();
+            const tx=svgEl("text",{x:34+w*step,y:9,class:"axis mono","font-size":"9.5"}); tx.textContent=MONTHS[lastMon]; svg.append(tx);
+          }
+          const recN=nightly.get(iso);
+          const res=recN?valOf(recN):{h:0,f:0,v:0};
+          const r=svgEl("rect",{x:34+w*step,y:14+dow*step,width:cell,height:cell,rx:2.5,fill:"var("+binVar(res.v)+")"});
+          if(res.v<=0) r.setAttribute("stroke","var(--grid)");
+          if(recN&&res.v>0){
+            r.setAttribute("tabindex","0"); r.style.cursor="pointer";
+            hoverable(r,box=>{
+              box.append(el("div","tt-t",fmtDY(iso)));
+              ttRow(box,"hours",res.h.toFixed(2)); ttRow(box,"frames",fmtI(res.f));
+              const tgs=[...recN.targets]; ttRow(box,"targets",tgs.slice(0,3).join(", ")+(tgs.length>3?" +"+(tgs.length-3):""));
+              for(const cm of CAMS){ const x=recN.perCam[cm.id]; if(x&&(!camSel.size||camSel.has(cm.id))&&x.hours>0) ttRow(box,cm.short,x.hours.toFixed(2)+" h",cm.id); }
+            });
+          }
+          svg.append(r);
+        }
+      }
+      scroll.append(svg); ywrap.append(scroll); card.append(ywrap);
+    }
+    const lg=el("div","hm-legend"); lg.style.marginTop="10px";
+    lg.append(el("span",null,"quiet"));
+    ["--heat0","--heat1","--heat2","--heat3","--heat4","--heat5"].forEach(v=>{ const c2=el("span","cell"); c2.style.background="var("+v+")"; lg.append(c2); });
+    lg.append(el("span",null,"big night"));
+    card.append(lg);
+    const stx=el("div","hm-stats");
+    function s6(lbl,val){ const s7=el("span"); s7.append(lbl+" "); s7.append(el("b",null,val)); stx.append(s7); }
+    s6("nights with light frames",fmtI(totalNights)); s6("hours",totalH.toFixed(1));
+    if(best) s6("biggest night",fmtDY(best.night)+" ("+best.h.toFixed(1)+" h)");
+    s6("longest run",bestStreak+" nights in a row");
+    s6("longest dry spell",Math.round(gapBest)+" nights");
+    if(bestMonth) s6("busiest month",fmtMonth(bestMonth[0])+" ("+bestMonth[1].toFixed(0)+" h)");
+    card.append(stx);
+    holder.append(card);
+  }
+  paint();
+};
+function fmtMonth(ym){ const [y,m]=ym.split("-"); return MONTHS[+m-1]+" "+y; }
+</script>
+<script>
+"use strict";
+/* ================= SKY ================= */
+RENDER.sky = function(root){
+  const card=el("div","card");
+  card.append(el("h2","sec","Sky coverage"));
+  card.append(el("div","sub","every target at its catalogue position · dot area is total integration · colour is how far the data has come · click a dot to open the target"));
+  const wrapS=el("div","skywrap"); card.append(wrapS);
+
+  const W=1000,H=600,padL=46,padR=16,padT=26,padB=34;
+  const plotW=W-padL-padR, plotH=H-padT-padB;
+  const DEC0=90, DEC1=-35;
+  const X=ra=>padL+((24-ra)%24)/24*plotW;
+  const Y=dec=>padT+(DEC0-dec)/(DEC0-DEC1)*plotH;
+  const svg=svgEl("svg",{viewBox:"0 0 "+W+" "+H,width:"100%",style:"min-width:760px",role:"img","aria-label":"Sky map of imaged targets"});
+  svg.append(svgEl("rect",{x:padL,y:padT,width:plotW,height:plotH,fill:"var(--card2)",rx:8}));
+  for(let ra=0;ra<=24;ra+=2){
+    const x=X(ra===0?0.0001:ra);
+    svg.append(svgEl("line",{x1:x,x2:x,y1:padT,y2:padT+plotH,class:"gridline"}));
+    if(ra>0&&ra<24){ const t=svgEl("text",{x:x,y:padT+plotH+18,"text-anchor":"middle",class:"axis mono"}); t.textContent=ra+"h"; svg.append(t); }
+  }
+  for(let dec=75;dec>=-30;dec-=15){
+    const y=Y(dec);
+    svg.append(svgEl("line",{x1:padL,x2:padL+plotW,y1:y,y2:y,class:"gridline"}));
+    const t=svgEl("text",{x:padL-7,y:y+3.5,"text-anchor":"end",class:"axis mono"}); t.textContent=(dec>0?"+":"")+dec+"°"; svg.append(t);
+  }
+  const pts=TG.filter(t=>t.ra!=null).map(t=>({t,ra:t.ra,dec:t.dec,h:t.hours,state:t.state,name:t.name}));
+  pts.sort((a,b)=>b.h-a.h);
+  const R=h=>Math.min(24, 3.2+Math.sqrt(Math.max(h,0.05))*2.15);
+  const labelSet=new Set(pts.slice(0,9).map(p=>p.name));
+  const labelJobs=[];
+  for(const p of pts){
+    const r=R(p.h), cx=X(p.ra), cy=Y(p.dec);
+    const isDone=p.state==="complete";
+    const isTodo=p.state==="todo";
+    const fillVar = p.state==="quarantined" ? "--st-quarantined"
+      : p.state==="processing" ? "--st-processing"
+      : p.state==="stacked" ? "--st-stacked"
+      : p.state==="captured" ? "--st-captured" : "--muted";
+    const c=svgEl("circle",{cx:cx,cy:cy,r:r,fill:isTodo?"transparent":"var("+fillVar+")",
+      stroke:isTodo?"var(--st-todo)":"var(--card)","stroke-width":isTodo?"1.6":"2",
+      opacity:isDone?"0.5":"0.92",tabindex:"0"});
+    c.style.cursor=p.t?"pointer":"default";
+    hoverable(c,box=>{
+      box.append(el("div","tt-t",p.name));
+      if(p.t){ ttRow(box,"integration",fmtH(p.t.hours)); ttRow(box,"nights",String(p.t.nights));
+        ttRow(box,"scopes",p.t.cameras.map(x=>CAMSHORT[x]||x).join(", "));
+        ttRow(box,"state",STAGE[p.state].label);
+        if(p.t.type) ttRow(box,"type",p.t.type+(p.t.constellation?" · "+p.t.constellation:""));
+      } else { ttRow(box,"state","quarantined, awaiting identification"); ttRow(box,"integration","about 4 h"); }
+    });
+    if(p.t) c.addEventListener("click",()=>openTarget(p.name));
+    svg.append(c);
+    if(labelSet.has(p.name)) labelJobs.push({p,cx,cy,r});
+  }
+  /* collision-aware labels, drawn after every dot */
+  const placedL=pts.filter(q=>R(q.h)>=9).map(q=>({x:X(q.ra)-R(q.h),y:Y(q.dec)-R(q.h),w:2*R(q.h),h:2*R(q.h),dot:true}));
+  for(const job of labelJobs){
+    const name=job.p.name.replace(" (unidentified)","");
+    const w=name.length*6.6, h=13;
+    const cands=[[job.cx-w/2,job.cy-job.r-17],[job.cx-w/2,job.cy+job.r+5],[job.cx+job.r+7,job.cy-h/2],[job.cx-job.r-7-w,job.cy-h/2]];
+    for(const [lx,ly] of cands){
+      if(lx<padL+3||lx+w>padL+plotW-3||ly<padT+3||ly+h>padT+plotH-3) continue;
+      if(placedL.some(q=>!(lx+w<q.x||q.x+q.w<lx||ly+h<q.y||q.y+q.h<ly))) continue;
+      placedL.push({x:lx,y:ly,w:w,h:h});
+      const lab=svgEl("text",{x:lx,y:ly+10,class:"dlabel"});
+      lab.textContent=name; svg.append(lab);
+      break;
+    }
+  }
+  wrapS.append(svg);
+  const lg=el("div","legend"); lg.style.marginTop="12px";
+  [["captured"],["stacked"],["processing"]].map(([id])=>[STAGE[id].label.toLowerCase(),STAGE[id].v]).forEach(([l,v])=>{
+    const li=el("span","li"); const sw=el("span","sw"); sw.style.borderRadius="50%"; sw.style.background="var("+v+")"; li.append(sw,l); lg.append(li);
+  });
+  const liD=el("span","li"); const swD=el("span","sw"); swD.style.borderRadius="50%"; swD.style.background="var(--muted)"; swD.style.opacity="0.5"; liD.append(swD,"done (recedes)"); lg.append(liD);
+  const liT=el("span","li"); const swT=el("span","sw"); swT.style.borderRadius="50%"; swT.style.background="transparent"; swT.style.border="1.6px solid var(--st-todo)"; liT.append(swT,"to do"); lg.append(liT);
+  const liQ=el("span","li"); const swQ=el("span","sw"); swQ.style.borderRadius="50%"; swQ.style.background="var(--st-quarantined)"; liQ.append(swQ,"quarantined"); lg.append(liQ);
+  const sz=el("span","li"); sz.append(el("span","sub","dot area: 1 h · 10 h · 50 h")); lg.append(sz);
+  card.append(lg);
+  const note=el("p","skynote");
+  note.textContent="Right ascension runs atlas-style, increasing to the left. Positions are the contract's catalogue coordinates (contract/targets.json), good for coverage rather than pointing. A target with no coordinates there, or a moving one like a comet, is listed but sits off the map.";
+  card.append(note);
+  root.append(card);
+
+  /* table twin for the sky */
+  root.append(chartCard("Coverage list","the same map as a list, north to south",
+    c=>{ const t2=el("div","sub"); t2.textContent="Use the table view button."; c.append(t2); },
+    w=>simpleTable(w,["Target","RA","Dec","Constellation","Hours","State"],
+      pts.filter(p=>p.t).sort((a,b)=>b.dec-a.dec).map(p=>[p.name, p.ra.toFixed(2)+"h",(p.dec>0?"+":"")+p.dec.toFixed(1)+"°",p.t.constellation||"·",p.t.hours.toFixed(1),STAGE[p.state].label]))
+  ));
+};
+
+/* ================= EQUIPMENT ================= */
+RENDER.equipment = function(root){
+  const sc=el("div","scopes");
+  for(const cm of CAMS){
+    const s=D.scopes.find(z=>z.camera===cm.id); if(!s) continue;
+    const cardS=el("div","scard");
+    const h=el("h3");
+    const title = cm.id==="ASIAir" ? "ASI585MC Air · Askar rigs"
+      : (cm.id==="Askar 107PHQ"||cm.id==="Askar FRA400") ? cm.id+" · ASI585MC Air" : cm.id;
+    h.append(camDot(cm.id), title); cardS.append(h);
+    const nums=el("div","s-nums");
+    [["hours",fmtH(s.hours).replace(" h","")],["frames",fmtI(s.frames)],["nights",String(s.nights)]].forEach(([l,v])=>{
+      const n=el("div","n"); n.append(el("b",null,v), el("span",null,l)); nums.append(n);
+    });
+    cardS.append(nums);
+    cardS.append(el("div","s-line","On the sky "+fmtDY(s.first)+" to "+fmtDY(s.last)+" · "+fmtGB(s.bytes)+" of lights"));
+    /* filter mix */
+    const mix={};
+    for(const t of TG) for(const p of t.programmes) if(p.camera===cm.id)
+      for(const [f,n2] of Object.entries(p.filters)) mix[f]=(mix[f]||0)+n2;
+    const tot=Object.values(mix).reduce((a,b)=>a+b,0);
+    if(tot){
+      const mb=el("div","minibar");
+      const FCOL={"IRCUT":"--heat4","LP":"--heat2","wide-cam":"--muted","unrecorded":"--grid"};
+      const parts=Object.entries(mix).sort((a,b)=>b[1]-a[1]);
+      for(const [f,n2] of parts){ const i=el("i"); i.style.width=(n2/tot*100)+"%"; i.style.background="var("+(FCOL[f]||"--muted")+")"; mb.append(i); }
+      cardS.append(mb);
+      cardS.append(el("div","s-line",parts.map(([f,n2])=>filtLabel(f)+" "+Math.round(n2/tot*100)+"%").join(" · ")));
+    }
+    if(cm.id==="ASIAir"||cm.id==="Askar 107PHQ"||cm.id==="Askar FRA400"){
+      cardS.append(el("div","s-line","ASIAir filenames never carry the filter, so the L-Ultimate and L-eNhance mix is unrecorded here."));
+    }
+    if(cm.id==="Seestar S30 Pro"){
+      cardS.append(el("div","s-line","Includes the wide-angle Milky Way camera: those frames carry no exposure in their filenames, so they count as frames and nights but not hours."));
+    }
+    sc.append(cardS);
+  }
+  root.append(sc);
+
+  /* Askar rig breakdown (shown while the rigs still share one series) */
+  const rigs=D.askarRigs||{};
+  const rigKeys=Object.keys(rigs);
+  if(rigKeys.length && CAMS.some(c=>c.id==="ASIAir")){
+    root.append(spacer(14));
+    const rc=el("div","card");
+    rc.append(el("h2","sec","The Askar rigs, by scope"));
+    const att=D.rigAttribution||{};
+    rc.append(el("div","sub","one ASI585MC Air moves between the two Askars; attribution comes from the ledger snapshot plus safe per-session inheritance (no session has ever mixed rigs)"));
+    const order=["Askar 107PHQ","Askar FRA400","Askar (unattributed)"];
+    const totalH=order.reduce((a,k)=>a+(rigs[k]?rigs[k].hours:0),0)||1;
+    const box=el("div"); box.style.marginTop="12px"; box.style.display="flex"; box.style.flexDirection="column"; box.style.gap="10px";
+    for(const k of order){
+      const r=rigs[k]; if(!r) continue;
+      const row=el("div"); row.style.display="flex"; row.style.alignItems="center"; row.style.gap="10px"; row.style.flexWrap="wrap";
+      const d=el("span","dot"); paintSwatch(d,k); row.append(d);
+      const lab=el("span",null,k==="Askar (unattributed)"?"Rig unrecorded (Dec 2025 to May 2026)":k);
+      lab.style.width="270px"; lab.style.fontWeight="600"; lab.style.fontSize="13px"; row.append(lab);
+      const bar=el("span"); bar.style.flex="1 1 160px"; bar.style.height="8px"; bar.style.borderRadius="4px"; bar.style.background="var(--grid)"; bar.style.overflow="hidden"; bar.style.display="block";
+      const fill=el("i"); fill.style.display="block"; fill.style.height="100%"; fill.style.width=Math.max(2,r.hours/totalH*100)+"%"; paintSwatch(fill,k); bar.append(fill); row.append(bar);
+      const nums=el("span","sub",fmtH(r.hours)+" · "+fmtI(r.frames)+" frames · "+r.nights+" nights · "+r.targets+" targets");
+      nums.style.fontVariantNumeric="tabular-nums"; row.append(nums);
+      box.append(row);
+    }
+    rc.append(box);
+    const note=el("p","sub");
+    note.style.marginTop="12px"; note.style.maxWidth="95ch";
+    note.textContent="To attribute the remainder: run probe_askar_rigs.ps1 at the root of the drive (it reads one FITS header per night folder and writes _verify\\askar_rig_map.csv in seconds), then refresh this page. With the map in place the two rigs become first-class scopes in every chart. The MacBook backfill receipts do the same job when they reach AstroLog.";
+    rc.append(note);
+    root.append(rc);
+  }
+  root.append(spacer(14));
+
+  /* monthly stacked columns */
+  const byMonth=new Map();
+  for(const s of SESS){
+    const m=s.night.slice(0,7);
+    let rec2=byMonth.get(m); if(!rec2){ rec2={}; byMonth.set(m,rec2); }
+    rec2[s.camera]=(rec2[s.camera]||0)+s.hours;
+  }
+  const monthsAll=[...byMonth.keys()].sort();
+  root.append(chartCard("The rhythm of the hobby","integration hours per calendar month, stacked by scope",
+    c=>{
+      const W=1000,padL2=44,padR2=12,padT2=14,padB2=40;
+      const plotW2=W-padL2-padR2, Hpl=210, Hv=Hpl+padT2+padB2;
+      const svg=svgEl("svg",{viewBox:"0 0 "+W+" "+Hv,width:"100%",role:"img","aria-label":"Hours per month by scope"});
+      const colW=Math.min(24, plotW2/monthsAll.length-8);
+      const maxM=Math.max(...monthsAll.map(m=>Object.values(byMonth.get(m)).reduce((a,b)=>a+b,0)));
+      for(const gv of niceTicks(maxM,4)){
+        const y=padT2+Hpl-gv/maxM*Hpl;
+        svg.append(svgEl("line",{x1:padL2,x2:W-padR2,y1:y,y2:y,class:"gridline"}));
+        const t3=svgEl("text",{x:padL2-6,y:y+3.5,"text-anchor":"end",class:"axis mono"}); t3.textContent=gv; svg.append(t3);
+      }
+      svg.append(svgEl("line",{x1:padL2,x2:W-padR2,y1:padT2+Hpl,y2:padT2+Hpl,class:"baseline"}));
+      monthsAll.forEach((m,i)=>{
+        const x=padL2+(i+0.5)*(plotW2/monthsAll.length)-colW/2;
+        let y=padT2+Hpl;
+        const rec2=byMonth.get(m);
+        for(const cm of CAMS){
+          const h=rec2[cm.id]||0; if(h<=0.02) continue;
+          const hh=Math.max(1.5,h/maxM*Hpl-2);
+          y-=hh;
+          const r=svgEl("rect",{x:x,y:y,width:colW,height:hh,rx:2.5,tabindex:"0"});
+          svgCamFill(r,cm.id);
+          hoverable(r,box=>{
+            box.append(el("div","tt-t",fmtMonth(m)));
+            for(const cm2 of CAMS){ const h2=rec2[cm2.id]; if(h2>0.02) ttRow(box,cm2.short,h2.toFixed(1)+" h",cm2.id); }
+            ttRow(box,"total",Object.values(rec2).reduce((a,b)=>a+b,0).toFixed(1)+" h");
+          });
+          svg.append(r);
+          y-=2;
+        }
+        if(m.endsWith("-01")||i===0){
+          const t4=svgEl("text",{x:x+colW/2,y:padT2+Hpl+18,"text-anchor":"middle",class:"axis mono"}); t4.textContent=m.slice(0,4); svg.append(t4);
+        } else if(["-04","-07","-10"].some(s2=>m.endsWith(s2))){
+          const t4=svgEl("text",{x:x+colW/2,y:padT2+Hpl+18,"text-anchor":"middle",class:"axis"}); t4.textContent=MONTHS[+m.slice(5,7)-1]; svg.append(t4);
+        }
+      });
+      c.append(svg);
+      c.append(legendRow(CAMS.map(cm=>({label:cm.id,cam:cm.id,kind:"sw"}))));
+    },
+    w=>simpleTable(w,["Month",...CAMS.map(c2=>c2.short),"Total"],
+      monthsAll.map(m=>{ const rec2=byMonth.get(m); const vals=CAMS.map(c2=>(rec2[c2.id]||0)); return [fmtMonth(m),...vals.map(v=>v?v.toFixed(1):"·"),vals.reduce((a,b)=>a+b,0).toFixed(1)];}))
+  ));
+
+  /* exposure histogram */
+  const expAgg={};
+  for(const s of SESS) for(const [e,n2] of Object.entries(s.exps)){ const k=+e; if(k>0) expAgg[k]=(expAgg[k]||0)+n2; }
+  const expKeys=Object.keys(expAgg).map(Number).sort((a,b)=>a-b);
+  root.append(chartCard("Exposure lengths","light frames per exposure time, all scopes",
+    c=>{
+      const W=1000,padL2=52,padT2=14,padB2=34,Hpl=170,Hv=Hpl+padT2+padB2;
+      const svg=svgEl("svg",{viewBox:"0 0 "+W+" "+Hv,width:"100%",role:"img","aria-label":"Frames per exposure length"});
+      const maxV=Math.max(...expKeys.map(k=>expAgg[k]));
+      const slot=(W-padL2-14)/expKeys.length, colW=Math.min(24,slot-10);
+      for(const gv of niceTicks(maxV,3)){
+        const y=padT2+Hpl-gv/maxV*Hpl;
+        svg.append(svgEl("line",{x1:padL2,x2:W-14,y1:y,y2:y,class:"gridline"}));
+        const t3=svgEl("text",{x:padL2-6,y:y+3.5,"text-anchor":"end",class:"axis mono"}); t3.textContent=gv>=1000?(gv/1000)+"k":gv; svg.append(t3);
+      }
+      svg.append(svgEl("line",{x1:padL2,x2:W-14,y1:padT2+Hpl,y2:padT2+Hpl,class:"baseline"}));
+      expKeys.forEach((k,i)=>{
+        const v=expAgg[k], x=padL2+(i+0.5)*slot-colW/2;
+        const hh=Math.max(1.5,v/maxV*Hpl);
+        const r=svgEl("rect",{x:x,y:padT2+Hpl-hh,width:colW,height:hh,rx:3,fill:"var(--heat3)",tabindex:"0"});
+        hoverable(r,box=>{ box.append(el("div","tt-t",k+" second subs")); ttRow(box,"frames",fmtI(v)); ttRow(box,"integration",(v*k/3600).toFixed(1)+" h"); });
+        svg.append(r);
+        const t5=svgEl("text",{x:x+colW/2,y:padT2+Hpl+18,"text-anchor":"middle",class:"axis mono"}); t5.textContent=k+"s"; svg.append(t5);
+        if(v===maxV){ const t6=svgEl("text",{x:x+colW/2,y:padT2+Hpl-hh-6,"text-anchor":"middle",class:"dlabel strong"}); t6.textContent=fmtI(v); svg.append(t6); }
+      });
+      c.append(svg);
+    },
+    w=>simpleTable(w,["Exposure","Frames","Hours"],expKeys.map(k=>[k+" s",fmtI(expAgg[k]),(expAgg[k]*k/3600).toFixed(1)]))
+  ));
+
+  /* calibration */
+  const cl=Object.entries(D.calibration||{});
+  if(cl.length){
+    const cal=el("div","card");
+    cal.append(el("h2","sec","Calibration library"));
+    cal.append(el("div","sub",cl.map(([k,v])=>k+" "+fmtI(v.files)+" files ("+fmtGB(v.bytes)+")").join(" · ")));
+    root.append(spacer(14)); root.append(cal);
+  }
+};
+
+/* ================= HEALTH ================= */
+
+/* ================= FOOTPRINTS ================= */
+/* Field of view per scope in degrees (width x height), from vendor sensor and
+   focal-length specs with 2.9 um pixels. Seestar mosaic mode is drawn at twice
+   the single frame. Rotation is not yet read from FITS headers, so every
+   footprint sits sky-up on the catalogue position. */
+const FOV = {"Seestar S30":[2.13,1.20],"Seestar S30 Pro":[3.99,2.24],"Seestar S50":[1.29,0.73],
+             "Seestar S50 Pro":[2.45,1.38],"Askar FRA400":[1.59,0.89],"Askar 107PHQ":[0.85,0.48]};
+const FPORDER = ["Seestar S30 Pro","Seestar S50 Pro","Seestar S50","Seestar S30","Askar FRA400","Askar 107PHQ"];
+function fpProgrammes(t){
+  /* one entry per scope per target; the ASIAir programme splits into its rigs by frame share */
+  const out=[];
+  for(const p of t.programmes){
+    if(!p.lights && !p.hours) continue;
+    if(p.camera==="ASIAir"){
+      const tot=Object.values(p.askar||{}).reduce((a,b)=>a+b,0)||1;
+      for(const rig in (p.askar||{})){ if(!FOV[rig]) continue;
+        const share=p.askar[rig]/tot;
+        out.push({scope:rig,mosaic:p.mosaic,hours:p.hours*share,nights:p.nights,lights:Math.round(p.lights*share),last:p.lastNight});
+      }
+      if(!Object.keys(p.askar||{}).length) out.push({scope:"Askar FRA400",mosaic:p.mosaic,hours:p.hours,nights:p.nights,lights:p.lights,last:p.lastNight,unattributed:true});
+    } else if(FOV[p.camera]) out.push({scope:p.camera,mosaic:!!p.mosaic,hours:p.hours,nights:p.nights,lights:p.lights,last:p.lastNight});
+  }
+  /* merge same scope+mosaic (e.g. ASIAir mosaic panels reported as separate programmes) */
+  const m=new Map();
+  for(const o of out){ const k=o.scope+"|"+o.mosaic; const e=m.get(k);
+    if(e){ e.hours+=o.hours; e.nights+=o.nights; e.lights+=o.lights; if(o.last>e.last) e.last=o.last; } else m.set(k,{...o}); }
+  return [...m.values()].sort((a,b)=>b.hours-a.hours);
+}
+RENDER.footprints = function(root){
+  const placed=TG.filter(t=>t.ra!=null && fpProgrammes(t).length).sort((a,b)=>b.hours-a.hours);
+  let cur = placed.find(t=>t.name===mem.fpTarget) || placed[0];
+  let tonight = null;
+
+  const grid=el("div","fp-grid"); root.append(grid);
+  const left=el("div","card"), right=el("div","card"); grid.append(left,right);
+
+  /* ---- left: every footprint on the sky ---- */
+  left.append(el("h2","sec","Every field of view you have put on the sky"));
+  left.append(el("div","sub","one rectangle per scope per target, drawn to scale · nights deepen the fill · dashed means mosaic · click a footprint"));
+  const W=1000,H=520,padL=46,padR=16,padT=22,padB=34, plotW=W-padL-padR, plotH=H-padT-padB;
+  const DEC0=90, DEC1=-35;
+  const X=ra=>padL+((24-ra)%24)/24*plotW, Y=dec=>padT+(DEC0-dec)/(DEC0-DEC1)*plotH;
+  const degX=plotW/360, degY=plotH/(DEC0-DEC1), EXAG=2.2;
+  const skyWrap=el("div","skywrap"); left.append(skyWrap);
+  const svg=svgEl("svg",{viewBox:"0 0 "+W+" "+H,width:"100%",style:"min-width:720px",role:"img","aria-label":"Sky map of every field of view imaged"});
+  skyWrap.append(svg);
+  function drawSky(){
+    svg.replaceChildren();
+    svg.append(svgEl("rect",{x:padL,y:padT,width:plotW,height:plotH,fill:"var(--card2)",rx:8}));
+    for(let ra=0;ra<=24;ra+=2){ const x=X(ra===0?0.0001:ra);
+      svg.append(svgEl("line",{x1:x,x2:x,y1:padT,y2:padT+plotH,class:"gridline"}));
+      if(ra>0&&ra<24){ const t=svgEl("text",{x:x,y:padT+plotH+18,"text-anchor":"middle",class:"axis mono"}); t.textContent=ra+"h"; svg.append(t); } }
+    for(let dec=75;dec>=-30;dec-=15){ const y=Y(dec);
+      svg.append(svgEl("line",{x1:padL,x2:padL+plotW,y1:y,y2:y,class:"gridline"}));
+      const t=svgEl("text",{x:padL-7,y:y+3.5,"text-anchor":"end",class:"axis mono"}); t.textContent=(dec>0?"+":"")+dec+"°"; svg.append(t); }
+    for(const t of placed){
+      const ps=fpProgrammes(t).sort((a,b)=>(b.mosaic?2:1)*FOV[b.scope][0]-(a.mosaic?2:1)*FOV[a.scope][0]);
+      for(const p of ps){
+        const f=FOV[p.scope], m=p.mosaic?2:1;
+        const w=Math.max(f[0]*m*degX*EXAG,6), h=Math.max(f[1]*m*degY*EXAG,4);
+        const r=svgEl("rect",{x:X(t.ra)-w/2,y:Y(t.dec)-h/2,width:w,height:h,rx:1.5,
+          "fill-opacity":Math.min(.14+p.nights*.04,.6),"stroke-width":"1.2","stroke-dasharray":p.mosaic?"4 2.5":"none",style:"cursor:pointer",tabindex:"0",role:"button"});
+        svgCamFill(r,p.scope); r.setAttribute("stroke","var("+CAMV[p.scope]+")");
+        hoverable(r,()=>{ tt.replaceChildren(); tt.append(el("div","tt-t",t.name));
+          ttRow(tt,(CAMSHORT[p.scope]||p.scope)+(p.mosaic?" mosaic":""),fmtH(p.hours)+" · "+p.nights+" night"+(p.nights===1?"":"s"),CAMV[p.scope]); });
+        r.addEventListener("click",()=>{ select(t); });
+        r.addEventListener("keydown",e=>{ if(e.key==="Enter"||e.key===" "){ e.preventDefault(); select(t);} });
+        svg.append(r);
+      }
+      if(t===cur) svg.append(svgEl("circle",{cx:X(t.ra),cy:Y(t.dec),r:11,fill:"none",stroke:"var(--ink)","stroke-width":"1.3","stroke-dasharray":"2 2"}));
+    }
+  }
+  const lg=el("div","legend"); lg.style.marginTop="10px"; left.append(lg);
+  for(const id of FPORDER.filter(id=>D.scopes.some(s=>s.camera===id)||id==="Seestar S50 Pro")){
+    const li=el("span","li"); const sw=el("span","sw"); paintSwatch(sw,id); li.append(sw, (CAMSHORT[id]||id)+" ");
+    const mono=el("span","mono",FOV[id][0]+"×"+FOV[id][1]+"°"); mono.style.color="var(--muted)"; mono.style.fontSize="11px"; li.append(mono); lg.append(li); }
+  const lim=el("span","li"); const dsw=el("span","sw"); dsw.style.border="1px dashed var(--ink2)"; lim.append(dsw,"mosaic"); lg.append(lim);
+  const note=el("div","skynote","Footprints are exaggerated 2.2× on the all-sky map so the S30 Pro's 4° field is visible; the target panel is to scale. Rotation is not yet read from FITS headers, so every field sits sky-up on its catalogue position, and Seestar mosaics are drawn at twice the single frame. "+(TG.length-placed.length)+" targets have no catalogue position and are not drawn.");
+  left.append(note);
+  const list=el("div","fp-list"); left.append(list);
+
+  /* ---- right: one target, to scale ---- */
+  const rHead=el("div"); right.append(rHead);
+  const fsvg=svgEl("svg",{class:"fp",viewBox:"0 0 420 320",width:"100%",role:"img","aria-label":"Footprints on the selected target"}); right.append(fsvg);
+  const rows=el("div","fp-rows"); right.append(rows);
+  const tonightBox=el("div","fp-tonight"); right.append(tonightBox);
+
+  function drawTarget(){
+    rHead.replaceChildren();
+    rHead.append(el("div","eyebrow",[cur.type||"target",cur.constellation,...cur.codes].filter(Boolean).join(" · ")));
+    const h=el("h2","sec",cur.name); h.style.fontSize="20px"; h.style.fontWeight="700"; h.style.letterSpacing="-.015em"; rHead.append(h);
+    const ps=fpProgrammes(cur);
+    const sub=el("div","sub",fmtH(cur.hours)+" · "+cur.nights+" nights · "+ps.length+" scope programme"+(ps.length===1?"":"s")+" · "+fmtDY(cur.firstNight)+" to "+fmtDY(cur.lastNight));
+    rHead.append(sub);
+    const open=el("button","tbtn","open target"); open.style.marginTop="8px"; open.addEventListener("click",()=>openTarget(cur.name)); rHead.append(open);
+
+    fsvg.replaceChildren();
+    let maxd=0.6; for(const p of ps){ const f=FOV[p.scope],m=p.mosaic?2:1; maxd=Math.max(maxd,f[0]*m/2,f[1]*m/2); }
+    if(tonight){ const f=FOV[tonight]; maxd=Math.max(maxd,f[0]/2,f[1]/2); }
+    const span=maxd*2*1.25, sc=320/span, cx=210, cy=160;
+    fsvg.append(svgEl("rect",{x:0,y:0,width:420,height:320,fill:"var(--card2)",rx:8}));
+    for(let d=-Math.ceil(span/2);d<=span/2;d+=1){ if(d===0) continue;
+      fsvg.append(svgEl("line",{x1:cx+d*sc,x2:cx+d*sc,y1:0,y2:320,class:"gridline"}));
+      fsvg.append(svgEl("line",{y1:cy-d*sc,y2:cy-d*sc,x1:0,x2:420,class:"gridline"})); }
+    fsvg.append(svgEl("line",{x1:14,x2:14+sc,y1:306,y2:306,stroke:"var(--ink2)","stroke-width":"1.5"}));
+    const st=svgEl("text",{x:14,y:299,class:"axis mono"}); st.textContent="1°"; fsvg.append(st);
+    const sorted=[...ps].sort((a,b)=>(b.mosaic?2:1)*FOV[b.scope][0]-(a.mosaic?2:1)*FOV[a.scope][0]);
+    const bigW = sorted.length ? FOV[sorted[0].scope][0]*(sorted[0].mosaic?2:1)*sc : 0;
+    sorted.forEach((p,i)=>{
+      const f=FOV[p.scope],m=p.mosaic?2:1,w=f[0]*m*sc,h=f[1]*m*sc;
+      const r=svgEl("rect",{x:cx-w/2,y:cy-h/2,width:w,height:h,rx:2,"fill-opacity":Math.min(.12+p.nights*.035,.5),"stroke-width":"1.6","stroke-dasharray":p.mosaic?"5 3":"none"});
+      svgCamFill(r,p.scope); r.setAttribute("stroke","var("+CAMV[p.scope]+")"); fsvg.append(r);
+      if(p.mosaic){ fsvg.append(svgEl("line",{x1:cx,x2:cx,y1:cy-h/2,y2:cy+h/2,stroke:"var("+CAMV[p.scope]+")","stroke-opacity":".35"}));
+                    fsvg.append(svgEl("line",{y1:cy,y2:cy,x1:cx-w/2,x2:cx+w/2,stroke:"var("+CAMV[p.scope]+")","stroke-opacity":".35"})); }
+      const small = w<130 || h<40;
+      const lx = small ? 12 : cx-w/2+6, ly = small ? 18+i*13 : cy-h/2+13;
+      if(small) fsvg.append(svgEl("line",{x1:cx-w/2,y1:cy-h/2+2,x2:lx+120,y2:ly-3,stroke:"var("+CAMV[p.scope]+")","stroke-opacity":".45"}));
+      const lbl=svgEl("text",{x:lx,y:ly,class:"fl"}); lbl.textContent=(CAMSHORT[p.scope]||p.scope)+(p.mosaic?" mosaic":"")+" · "+fmtH(p.hours); fsvg.append(lbl);
+    });
+    if(tonight){ const f=FOV[tonight],w=f[0]*sc,h=f[1]*sc;
+      fsvg.append(svgEl("rect",{x:cx-w/2,y:cy-h/2,width:w,height:h,rx:2,fill:"none",stroke:"var(--ink)","stroke-width":"2","stroke-dasharray":"2 3"}));
+      const l=svgEl("text",{x:cx,y:cy+h/2+13,"text-anchor":"middle",class:"fl"}); l.textContent="tonight · "+(CAMSHORT[tonight]||tonight); fsvg.append(l); }
+    fsvg.append(svgEl("circle",{cx,cy,r:2.5,fill:"var(--ink)"}));
+
+    rows.replaceChildren();
+    const mx=Math.max(...ps.map(p=>p.hours),0.1);
+    for(const p of ps){
+      const row=el("div","fp-row"); const sw=el("span","sw"); paintSwatch(sw,p.scope); row.append(sw);
+      const body=el("div"); const l=el("div","l");
+      l.append(el("span",null,(CAMSHORT[p.scope]||p.scope)+(p.mosaic?" mosaic":"")+(p.unattributed?" (rig unrecorded)":"")));
+      l.append(el("span",null,fmtH(p.hours)+" · "+p.nights+" n · last "+fmtD(p.last)));
+      const bar=el("div","bar"); const fill=el("i"); fill.style.width=(p.hours/mx*100)+"%"; paintSwatch(fill,p.scope); bar.append(fill);
+      body.append(l,bar); row.append(body); rows.append(row);
+    }
+
+    tonightBox.replaceChildren();
+    tonightBox.append(el("div","eyebrow","Frame for tonight"));
+    const chips=el("div","fp-chips"); tonightBox.append(chips);
+    for(const id of FPORDER){ const b=el("button","chip",CAMSHORT[id]||id); if(tonight===id) b.classList.add("sel");
+      b.setAttribute("aria-pressed",tonight===id?"true":"false"); b.addEventListener("click",()=>{ tonight = tonight===id?null:id; drawTarget(); }); chips.append(b); }
+    const v=el("div","fp-verdict"); tonightBox.append(v);
+    if(!tonight){ v.textContent="Pick a scope to see whether tonight adds new sky, more depth on sky you already have, or resolution on a field a bigger scope already covers."; return; }
+    const f=FOV[tonight]; const shot=ps.filter(p=>p.scope===tonight);
+    const cover=ps.filter(p=>{ const g=FOV[p.scope],m=p.mosaic?2:1; return g[0]*m>=f[0]*.95 && g[1]*m>=f[1]*.95; });
+    if(shot.length){ const hrs=shot.reduce((s,p)=>s+p.hours,0); const last=shot.map(p=>p.last).sort().pop();
+      v.replaceChildren(); v.append("You already have ",el("b",null,fmtH(hrs))," on ",el("b",null,cur.name)," with the "+(CAMSHORT[tonight]||tonight)+" (last "+fmtDY(last)+"). Tonight adds depth, not new sky. Mosaic mode would roughly double the field."); }
+    else if(cover.length){ v.replaceChildren(); v.append("New scope, but this sky is already covered: ",el("b",null,cover.map(p=>(CAMSHORT[p.scope]||p.scope)+(p.mosaic?" mosaic":"")).join(", "))," span the "+(CAMSHORT[tonight]||tonight)+" field. Worth it for resolution or depth, not for coverage."); }
+    else { v.classList.add("new"); v.replaceChildren(); v.append(el("b",null,"New framing. "),"The "+(CAMSHORT[tonight]||tonight)+" field ("+f[0]+"° × "+f[1]+"°) is larger than anything you have on "+cur.name+". Tonight adds sky nobody has shot."); }
+  }
+  function drawList(){
+    list.replaceChildren();
+    for(const t of placed){ const b=el("button",null,t.name); b.setAttribute("aria-current",t===cur?"true":"false"); b.addEventListener("click",()=>select(t)); list.append(b); }
+  }
+  function select(t){ cur=t; tonight=null; mem.fpTarget=t.name; remember(); drawSky(); drawList(); drawTarget(); }
+  drawSky(); drawList(); drawTarget();
+};
+
+RENDER.health = function(root){
+  const rec=el("div","card");
+  rec.append(el("h2","sec","Reconciliation against the audits"));
+  rec.append(el("div","sub","this page recomputed everything from the manifest, then checked itself against the numbers the drive audits proved"));
+  const w=el("div","tablewrap"); rec.append(w);
+  const t2=el("table","dt");
+  const thead=el("thead"); const hr=el("tr");
+  ["Check","Audited","Recomputed",""].forEach(h=>hr.append(el("th",null,h))); thead.append(hr); t2.append(thead);
+  const tb=el("tbody");
+  for(const r of D.reconciliation){
+    const tr=el("tr");
+    tr.append(el("td",null,r.check));
+    tr.append(el("td",null,String(typeof r.expected==="number"?r.expected.toLocaleString("en-GB"):r.expected)));
+    tr.append(el("td",null,String(typeof r.computed==="number"?r.computed.toLocaleString("en-GB"):r.computed)));
+    const td=el("td"); td.append(el("span","okbadge "+(r.ok?"ok":"diff"), r.ok?"MATCH":"CHECK")); tr.append(td);
+    tb.append(tr);
+  }
+  t2.append(tb); w.append(t2);
+  root.append(rec);
+
+  const hl=el("div","hlist"); hl.style.marginTop="14px";
+  for(const h of D.health){
+    const it=el("div","hitem");
+    const st=el("div","stripe"); st.style.background=h.severity==="warn"?"var(--st-quarantined)":"var(--line)";
+    it.append(st);
+    const bx=el("div"); bx.append(el("h4",null,h.title), el("p",null,h.detail)); it.append(bx);
+    hl.append(it);
+  }
+  root.append(hl);
+
+  /* shelves */
+  if(!Object.keys(D.shelves||{}).length) { const p0=el("p","sub"); p0.style.marginTop="14px"; p0.textContent=D.sourceNote+" "+(D.provenance||""); root.append(p0); return; }
+  const sh=el("div","card"); sh.style.marginTop="14px";
+  sh.append(el("h2","sec","Shelves and side rooms"));
+  sh.append(el("div","sub","everything on the archive that is not a camera tree; lights never count these"));
+  const w2=el("div","tablewrap"); sh.append(w2);
+  const rows=Object.entries(D.shelves)
+    .filter(([k])=>k!=="(root)")
+    .sort((a,b)=>b[1].bytes-a[1].bytes)
+    .map(([k,v])=>[k.replace("_Seestar S30 Pro Data\\","S30 Pro side · ").replace("_ZWO ASI585MC Data\\","ZWO side · "),fmtI(v.files),fmtGB(v.bytes)]);
+  rows.push(["Mac '._' and .DS_Store junk, everywhere",fmtI(D.junk.files),fmtGB(D.junk.bytes)]);
+  simpleTable(w2,["Shelf","Files","Size"],rows);
+  root.append(sh);
+
+  const lg=el("div","card"); lg.style.marginTop="14px";
+  lg.append(el("h2","sec","Where this snapshot came from"));
+  const p=el("p"); p.style.fontSize="12.5px"; p.style.color="var(--ink2)"; p.style.maxWidth="90ch";
+  p.textContent=D.sourceNote+" "+(D.provenance||"");
+  lg.append(p);
+  root.append(lg);
+};
+
+/* ================= INIT ================= */
+go((mem.tab && RENDER[mem.tab]) ? mem.tab : "overview");
+</script>
+
+</body></html>

@@ -1676,7 +1676,9 @@ finally:
 print("\n── Chain NL: a panel on a computer that never imported (the archive PC) ──")
 envn = teh.Env("NL", asiair=False, seestar=False)
 shutil.copytree(os.path.join(BUILD, "contract"), os.path.join(envn.root, "contract"))
-envn.env.update({"ASTRO_CONTRACT_DIR": os.path.join(envn.root, "contract"), "ASTRO_SHIP_FOLDER": "pc"})
+shutil.copy(os.path.join(BUILD, "astro-observatory.html"), os.path.join(envn.root, "astro-observatory.html"))
+envn.env.update({"ASTRO_CONTRACT_DIR": os.path.join(envn.root, "contract"), "ASTRO_SHIP_FOLDER": "pc",
+                 "ASTRO_OBSERVATORY_TEMPLATE": os.path.join(envn.root, "astro-observatory.html")})
 os.makedirs(os.path.join(envn.archive, "S30P"), exist_ok=True)
 PORTN = int(envn.env["ASTRO_PANEL_PORT"])
 URLN = f"http://127.0.0.1:{PORTN}"
@@ -1690,6 +1692,17 @@ try:
     check("NL the Dashboard tab on a computer with no ledger is a plain sentence (200, framable), not a browser error page",
           code == 200 and xfo == "SAMEORIGIN" and "Nothing has been imported on this" in body
           and "NoneType" not in body, f"{code} {xfo} {body[-200:]}")
+    def get_obs():
+        with urllib.request.urlopen(URLN + "/observatory?t=1", timeout=30) as resp:
+            return resp.status, resp.headers.get("X-Frame-Options"), resp.read().decode()
+    code, xfo, body = get_obs()
+    check("OB the Observatory tab with nothing recorded anywhere is a plain sentence (200, framable)",
+          code == 200 and xfo == "SAMEORIGIN" and "Nothing to show yet" in body and "<script id=\"dataset\"" not in body,
+          f"{code} {xfo} {body[-200:]}")
+    with urllib.request.urlopen(URLN + "/", timeout=15) as resp:
+        _pagen = resp.read().decode()
+    check("OB the panel has an Observatory tab that frames /observatory",
+          'data-tab="observatory"' in _pagen and 'id="obsFrame"' in _pagen and '"/observatory?t="' in _pagen)
     os.makedirs(os.path.join(envn.archive, "_verify", "mac"))
     with open(os.path.join(envn.archive, "_verify", "mac", "ledger-snapshot.json"), "w") as f:
         json.dump({"schema": "ledger-snapshot/1", "machine": "Mac", "machineId": "mac", "machineUid": "m",
@@ -1702,6 +1715,31 @@ try:
     check("NL with the Mac's snapshot on the archive the Dashboard shows the Mac's record, with a banner saying so and how old it is",
           code == 200 and xfo == "SAMEORIGIN" and "This is the Mac's record" in body and "2026-10-01" in body
           and "day(s) ago" in body and "M 31" in body and "__DATA__" not in body, f"{code} {xfo} {body[:300]}")
+    code, xfo, body = get_obs()
+    _m = re.search(r'<script id="dataset" type="application/json">(.*?)</script>', body, re.S)
+    _dsn = json.loads(_m.group(1)) if _m else {}
+    check("OB with the Mac's snapshot on the archive the Observatory renders the Mac's record: the page, "
+          "its dataset, Andromeda from the contract, one session, the snapshot named",
+          code == 200 and xfo == "SAMEORIGIN" and "Astro Archive Observatory" in body and "__DATASET__" not in body
+          and _dsn.get("schema") == "observatory/1" and [x["name"] for x in _dsn.get("targets", [])] == ["Andromeda Galaxy"]
+          and len(_dsn.get("sessions", [])) == 1 and "snapshot" in _dsn.get("sourceNote", "")
+          and _dsn["targets"][0]["statusCards"][0]["state"] == "stacked",
+          f"{code} {xfo} " + (json.dumps(_dsn)[:400] if _dsn else body[:300]))
+    # every script block of the page parses (node), so a slip in the template can't blank the tab
+    import shutil as _sh2
+    _node = _sh2.which("node") or next((p for p in ("/opt/node22/bin/node", "/usr/local/bin/node")
+                                        if os.path.isfile(p)), None)
+    _blocks = re.findall(r"<script>(.*?)</script>", body, re.S)
+    if _node and _blocks:
+        _bad = []
+        for i, b in enumerate(_blocks):
+            rp = subprocess.run([_node, "-e", "new Function(require('fs').readFileSync(0,'utf8'))"],
+                                input=b, capture_output=True, text=True, timeout=30)
+            if rp.returncode != 0:
+                _bad.append(f"block {i}: {rp.stderr[-200:]}")
+        check(f"OB the Observatory page's {len(_blocks)} script blocks parse (node)", not _bad, "; ".join(_bad))
+    else:
+        skip("OB the Observatory page's script blocks parse (needs node)")
 finally:
     procn.terminate()
     procn.wait(timeout=30)
