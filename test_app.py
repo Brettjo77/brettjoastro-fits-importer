@@ -1744,6 +1744,14 @@ try:
           and _dsn["targets"][0]["statusCards"][0]["state"] == "stacked" and "<" not in _m.group(1)
           and "What each scope captured last" in body,
           f"{code} {xfo} rb={json.dumps(_rb)[:200]} " + (json.dumps(_dsn)[:400] if _dsn else body[:300]))
+    check("OB the first card has two faces: each scope's name is a button to its timeline of projects "
+          "(paintScopeCard, 90 nights / a year / all time, the quiet-period band), the hero rows and the "
+          "Equipment cards open it too (openScope), and 'all scopes' comes back",
+          lambda: "function paintScopeCard(cam)" in body and "function openScope(cam)" in body
+          and body.count("openScope(c") >= 2 and 'el("button","scopebtn")' in body
+          and "all scopes" in body and '["90","90 nights",90],["365","a year",365],["all","all time",' in body
+          and "quiet period: the last " in body and "has been doing" in body,
+          body[:200])
     # every script block of the page parses (node), so a slip in the template can't blank the tab
     import shutil as _sh2
     _node = _sh2.which("node") or next((p for p in ("/opt/node22/bin/node", "/usr/local/bin/node")

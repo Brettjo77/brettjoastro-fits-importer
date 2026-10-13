@@ -181,6 +181,18 @@ table.dt tr:last-child td{border-bottom:none}
 
 /* ---------- sky ---------- */
 .skywrap{overflow-x:auto}
+/* scope timeline (click a scope on the Overview): dots grow in once, left to right */
+.scopehead{display:flex;align-items:center;gap:10px;flex-wrap:wrap;margin-top:10px}
+.scopehead .sname{display:inline-flex;align-items:center;gap:7px;font-weight:600;font-size:14px}
+.scopehead .range{display:flex;gap:4px;margin-left:auto}
+.scopebtn{display:inline-flex;align-items:center;gap:7px;font-weight:600;border-radius:6px;padding:2px 6px 2px 2px;margin-left:-2px}
+.scopebtn:hover{background:var(--wash2)}
+.scopebtn .arrow{color:var(--muted);font-weight:400;font-size:11.5px}
+svg .tl-dot{transform-box:fill-box;transform-origin:center;animation:tlgrow .4s cubic-bezier(.2,.8,.2,1) both}
+svg .tl-dot:hover,svg .tl-dot:focus{stroke:var(--ink);stroke-width:1.5}
+svg .tl-lane{cursor:pointer}
+svg .tl-lane:hover text.dlabel{fill:var(--ink)}
+@keyframes tlgrow{from{transform:scale(0);opacity:0}}
 .skynote{font-size:12px;color:var(--muted);margin-top:10px;max-width:80ch}
 
 /* ---------- equipment ---------- */
@@ -525,39 +537,216 @@ function go(id){
 const RENDER = {};
 
 /* ================= OVERVIEW ================= */
+/* The first card has two faces. All scopes: the last three sessions on each.
+   One scope (click its name): a calendar timeline of that scope's projects.
+   SCOPECARD holds the card's parts so Equipment and the hero can open it too. */
+let SCOPECARD=null;
+const dayMs=864e5;
+const nightIdx=(iso,start)=>Math.round((Date.parse(iso+"T12:00:00Z")-Date.parse(start+"T12:00:00Z"))/dayMs);
+const nightAdd=(iso,n)=>new Date(Date.parse(iso+"T12:00:00Z")+n*dayMs).toISOString().slice(0,10);
+function openScope(cam){
+  go("overview");
+  if(!SCOPECARD) return;
+  paintScopeCard(cam);
+  SCOPECARD.card.scrollIntoView({block:"start",behavior:"smooth"});
+}
+function paintScopeCard(cam){
+  const {head,sub,body}=SCOPECARD;
+  body.replaceChildren();
+  if(!cam){
+    head.textContent="What each scope captured last";
+    sub.textContent="the last three sessions on each scope, newest first · a session is one object on one night · click one for the object, or a scope's name for its timeline";
+    body.style.display="grid"; body.style.gridTemplateColumns="repeat(auto-fit,minmax(290px,1fr))"; body.style.gap="12px";
+    for(const cm of CAMS){
+      const ss=SESS.filter(s=>s.camera===cm.id).sort((a,b)=>b.night.localeCompare(a.night)||(b.hours-a.hours)).slice(0,3);
+      const col=el("div");
+      const h=el("div"); h.style.display="flex"; h.style.alignItems="center"; h.style.gap="7px"; h.style.marginBottom="6px"; h.style.flexWrap="wrap";
+      const nb=el("button","scopebtn"); nb.append(camDot(cm.id), cm.id, el("span","arrow","timeline ›"));
+      nb.title="Show this scope's timeline"; nb.setAttribute("aria-label",cm.id+": show its timeline");
+      nb.addEventListener("click",()=>paintScopeCard(cm.id));
+      h.append(nb);
+      if(ss.length) h.append(el("span","sub","last on "+fmtDY(ss[0].night)));
+      col.append(h);
+      if(!ss.length) col.append(el("div","sub","no sessions recorded"));
+      for(const s of ss){
+        const b=el("button","pcard");
+        b.append(el("div","p-t",s.target));
+        const m=el("div","p-m");
+        m.append(el("b",null,fmtDY(s.night)), el("span",null,"· "+(s.hours>0?fmtH(s.hours,2):"exposure unrecorded")+" · "+fmtI(s.frames)+" frame"+(s.frames===1?"":"s")));
+        const fl=Object.keys(s.filters||{}).filter(k=>k!=="unrecorded").map(filtLabel).join(", ");
+        if(fl) m.append(el("span",null,"· "+fl));
+        if(s.cal) m.append(el("span",null,"· "+calText(s.cal)));
+        b.append(m);
+        b.addEventListener("click",()=>openTarget(s.target));
+        col.append(b);
+      }
+      body.append(col);
+    }
+    return;
+  }
+  /* one scope: its projects on a real calendar */
+  const cm=CAMORDER.find(c=>c.id===cam)||{id:cam,short:cam};
+  head.textContent="What the "+cm.id+" has been doing";
+  sub.textContent="one row per object, a dot per session (bigger is more hours) · the shaded band is the quiet period: a dataset whose last dot leaves it becomes To process · click an object for its story";
+  body.style.display="block";
+  const all=SESS.filter(s=>s.camera===cam).sort((a,b)=>a.night.localeCompare(b.night));
+  const bar=el("div","scopehead");
+  const back=el("button","tbtn","‹ all scopes"); back.addEventListener("click",()=>paintScopeCard(null)); bar.append(back);
+  const nm=el("span","sname"); nm.append(camDot(cam), cm.id); bar.append(nm);
+  const sc=D.scopes.find(z=>z.camera===cam);
+  if(sc) bar.append(el("span","sub",fmtH(sc.hours)+" · "+fmtI(sc.frames)+" frames · "+sc.nights+" nights · on the sky "+fmtDY(sc.first)+" to "+fmtDY(sc.last)));
+  const rangeBox=el("div","range"); bar.append(rangeBox);
+  body.append(bar);
+  const plot=el("div","skywrap"); plot.style.marginTop="10px"; body.append(plot);
+  if(!all.length){ plot.append(el("p","sub","No sessions recorded on this scope.")); return; }
+  const end=D.asOfNight||all[all.length-1].night;
+  const first=all[0].night;
+  const spanAll=Math.max(30, nightIdx(end,first)+1);
+  const RANGES=[["90","90 nights",90],["365","a year",365],["all","all time",spanAll]];
+  let range=mem.scopeRange||"90";
+  if(!RANGES.some(r=>r[0]===range)) range="90";
+  for(const [id,label] of RANGES){
+    const b=el("button","tbtn",label); b.setAttribute("aria-pressed",id===range?"true":"false");
+    b.addEventListener("click",()=>{ range=id; mem.scopeRange=id; remember(); for(const x of rangeBox.children) x.setAttribute("aria-pressed",x===b?"true":"false"); draw(); });
+    rangeBox.append(b);
+  }
+  function draw(){
+    plot.replaceChildren();
+    const N=RANGES.find(r=>r[0]===range)[2];
+    const start=nightAdd(end,-(N-1));
+    const inRange=all.filter(s=>s.night>=start);
+    if(!inRange.length){
+      const latest=all[all.length-1];
+      const p=el("p","sub","Nothing in the last "+N+" nights on this scope. The latest session is "+latest.target+" on "+fmtDY(latest.night)+".");
+      const b=el("button","tbtn","show all time"); b.style.marginLeft="8px";
+      b.addEventListener("click",()=>{ range="all"; mem.scopeRange="all"; remember(); for(const x of rangeBox.children) x.setAttribute("aria-pressed",x.textContent==="all time"?"true":"false"); draw(); });
+      p.append(b); plot.append(p); return;
+    }
+    /* lanes: each object, newest session first; the top lane is the scope's activity night by night */
+    const byT=new Map();
+    for(const s of inRange){ let a=byT.get(s.target); if(!a){ a=[]; byT.set(s.target,a); } a.push(s); }
+    const lanes=[...byT.entries()].map(([name,ss])=>({name,ss,last:ss[ss.length-1].night,hours:ss.reduce((a,b)=>a+b.hours,0)}))
+      .sort((a,b)=>b.last.localeCompare(a.last)||b.hours-a.hours);
+    const MAXL=40, shown=lanes.slice(0,MAXL);
+    const W=1000, x0=176, x1=986, laneH=30, topH=58, actH=44;
+    const dayW=(x1-x0)/N;
+    const X=i=>x0+i*dayW+dayW/2;
+    const yA=topH, yL=yA+actH+8;
+    const H=yL+shown.length*laneH+22;
+    const svg=svgEl("svg",{viewBox:"0 0 "+W+" "+H,width:"100%",role:"img","aria-label":"Sessions on the "+cm.id+" by object, last "+N+" nights"});
+    svg.style.minWidth=(N>120?760:560)+"px";
+    const quiet=D.quietPeriodDays||14;
+    const qx=X(Math.max(0,N-quiet))-dayW/2;
+    svg.append(svgEl("rect",{x:qx,y:yA-6,width:x1-qx,height:H-yA-10,fill:"var(--wash)",rx:3}));
+    const qt=svgEl("text",{x:x1,y:yA-28,"text-anchor":"end",class:"axis mono"}); qt.textContent="quiet period: the last "+quiet+" nights"; svg.append(qt);
+    /* month lines and labels */
+    let lastM="";
+    for(let i=0;i<N;i++){
+      const iso=nightAdd(start,i), ym=iso.slice(0,7);
+      if(ym===lastM) continue;
+      lastM=ym;
+      if(i>0||N<=120){
+        const x=X(i)-dayW/2;
+        svg.append(svgEl("line",{x1:x,x2:x,y1:yA-6,y2:H-12,class:"gridline"}));
+        if(N<=120 || iso.slice(8)==="01" || i===0){
+          const t=svgEl("text",{x:x+3,y:yA-10,class:"axis mono"});
+          t.textContent=MONTHS[+iso.slice(5,7)-1]+(iso.slice(5,7)==="01"||i===0?" "+iso.slice(0,4):""); svg.append(t);
+        }
+      }
+    }
+    const nowX=X(N-1)+dayW/2;
+    svg.append(svgEl("line",{x1:nowX,x2:nowX,y1:yA-6,y2:H-12,stroke:"var(--ink2)","stroke-dasharray":"2 3"}));
+    const nt=svgEl("text",{x:nowX-3,y:H-2,"text-anchor":"end",class:"axis mono"}); nt.textContent=fmtDY(end); svg.append(nt);
+    const st0=svgEl("text",{x:x0,y:H-2,class:"axis mono"}); st0.textContent=fmtDY(start); svg.append(st0);
+    /* activity lane: hours per night */
+    const perN=new Map();
+    for(const s of inRange){ const a=perN.get(s.night)||{hours:0,frames:0,targets:[]}; a.hours+=s.hours; a.frames+=s.frames; a.targets.push(s); perN.set(s.night,a); }
+    const maxN=Math.max(...[...perN.values()].map(a=>a.hours),0.1);
+    const la=svgEl("text",{x:8,y:yA+actH/2+4,class:"dlabel strong"}); la.textContent="Every night"; svg.append(la);
+    const la2=svgEl("text",{x:8,y:yA+actH/2+18,class:"axis mono"}); la2.textContent=perN.size+" night"+(perN.size===1?"":"s")+" · "+fmtH(inRange.reduce((a,b)=>a+b.hours,0)); svg.append(la2);
+    svg.append(svgEl("line",{x1:x0,x2:x1,y1:yA+actH,y2:yA+actH,class:"baseline"}));
+    let di=0;
+    for(const [night,a] of [...perN.entries()].sort()){
+      const i=nightIdx(night,start), bw=Math.max(2,dayW-1.5);
+      const h=Math.max(2,a.hours/maxN*(actH-6));
+      const r=svgEl("rect",{x:X(i)-bw/2,y:yA+actH-h,width:bw,height:h,rx:1,class:"tl-dot",tabindex:"0"});
+      r.style.animationDelay=(di++*6)+"ms";
+      svgCamFill(r,cam);
+      hoverable(r,box=>{
+        box.append(el("div","tt-t",fmtDY(night)));
+        ttRow(box,"this scope",(a.hours>0?fmtH(a.hours,2):"exposure unrecorded")+" · "+fmtI(a.frames)+" frames",cam);
+        for(const s of a.targets) ttRow(box,s.target,s.hours>0?fmtH(s.hours,2):fmtI(s.frames)+" frames");
+      });
+      r.addEventListener("click",()=>openTarget(a.targets.sort((p,q)=>q.hours-p.hours)[0].target));
+      svg.append(r);
+    }
+    /* object lanes */
+    const maxH=Math.max(...inRange.map(s=>s.hours),0.1);
+    const rMax=Math.min(11,laneH/2-3);
+    const rOf=h=>h>0?2.5+(rMax-2.5)*Math.sqrt(Math.min(h,maxH)/maxH):3.5;
+    shown.forEach((ln,li)=>{
+      const y=yL+li*laneH, mid=y+laneH/2;
+      const g=svgEl("g",{class:"tl-lane",tabindex:"0",role:"button","aria-label":ln.name+": "+ln.ss.length+" session"+(ln.ss.length===1?"":"s")+", "+fmtH(ln.hours)+", latest "+fmtDY(ln.last)});
+      if(li%2===0) g.append(svgEl("rect",{x:0,y:y,width:W,height:laneH,fill:"var(--wash)",rx:4}));
+      const t=byName[ln.name], cd=t&&t.statusCards.find(c=>c.camera===cam);
+      const lab=svgEl("text",{x:8,y:mid+4,class:"dlabel strong"});
+      lab.textContent=ln.name.length>24?ln.name.slice(0,23)+"…":ln.name; g.append(lab);
+      if(ln.name.length>24){ const ti=svgEl("title"); ti.textContent=ln.name; lab.append(ti); }
+      g.append(svgEl("line",{x1:x0,x2:x1,y1:mid,y2:mid,class:"gridline"}));
+      /* a thin line joins the sessions, so a project's span reads at a glance */
+      if(ln.ss.length>1){
+        const sp=svgEl("line",{x1:X(nightIdx(ln.ss[0].night,start)),x2:X(nightIdx(ln.last,start)),y1:mid,y2:mid,"stroke-width":"2"});
+        svgCamFill(sp,cam); sp.setAttribute("stroke",sp.getAttribute("fill")); sp.setAttribute("opacity","0.45"); g.append(sp);
+      }
+      for(const s of ln.ss){
+        const i=nightIdx(s.night,start);
+        const c=svgEl("circle",{cx:X(i),cy:mid,r:rOf(s.hours),class:"tl-dot",tabindex:"0"});
+        c.style.animationDelay=Math.round(i/N*420)+"ms";
+        svgCamFill(c,cam);
+        if(!(s.hours>0)){ c.setAttribute("fill","none"); c.setAttribute("stroke",camFillOf(cam).hex||"var("+(camFillOf(cam).v||"--muted")+")"); c.setAttribute("stroke-width","1.5"); }
+        hoverable(c,box=>{
+          box.append(el("div","tt-t",s.target+" · "+fmtDY(s.night)));
+          ttRow(box,CAMSHORT[cam]||cam,s.hours>0?fmtH(s.hours,2):"exposure unrecorded",cam);
+          ttRow(box,"frames",fmtI(s.frames));
+          const f=Object.keys(s.filters||{}).filter(k=>k!=="unrecorded").map(filtLabel).join(", "); if(f) ttRow(box,"filter",f);
+          if(s.cal) ttRow(box,"calibration",calText(s.cal));
+        });
+        g.append(c);
+      }
+      /* the dataset's state, at the right */
+      if(cd){
+        const stg=STAGE[cd.state]||STAGE.captured;
+        const dot=svgEl("circle",{cx:x1+4,cy:mid,r:4,fill:stg.outline?"none":"var("+stg.v+")"});
+        if(stg.outline) { dot.setAttribute("stroke","var("+stg.v+")"); dot.setAttribute("stroke-width","1.5"); }
+        const ti=svgEl("title"); ti.textContent=stg.label+(cd.readyOn&&cd.state==="captured"?" · ready from "+fmtDY(cd.readyOn):"")+(cd.evidence?" · "+cd.evidence:""); dot.append(ti);
+        g.append(dot);
+      }
+      const open=()=>openTarget(ln.name);
+      g.addEventListener("click",open);
+      g.addEventListener("keydown",e=>{ if(e.key==="Enter"||e.key===" "){ e.preventDefault(); open(); } });
+      svg.append(g);
+    });
+    plot.append(svg);
+    const foot=el("div","sub"); foot.style.marginTop="8px";
+    foot.textContent=lanes.length+" object"+(lanes.length===1?"":"s")+" on this scope in the last "+N+" nights"+(lanes.length>MAXL?" (the "+MAXL+" most recent shown; the Targets tab lists them all)":"")+" · the dot at the right is the dataset's state: "+STAGES.filter(s=>["captured","stacked","processing","complete"].includes(s.id)).map(s=>s.label).join(", ");
+    plot.append(foot);
+    plot.append(legendRow([{label:"Still capturing",v:"--st-captured"},{label:"To process",v:"--st-stacked"},{label:"In progress",v:"--st-processing"},{label:"Done",v:"--st-complete"}]));
+  }
+  draw();
+}
+
 RENDER.overview = function(root){
   if(!TG.length){ root.append(el("p","sub","Nothing to show yet: no light frames were counted. Once frames have been imported and shipped, the Observatory fills in.")); return; }
   /* what each scope captured last: the last three sessions per scope (a session is
      one object on one night; with UK skies that can be days apart, so sessions, not nights) */
-  const ls=el("div","card");
-  ls.append(el("h2","sec","What each scope captured last"));
-  ls.append(el("div","sub","the last three sessions on each scope, newest first · a session is one object on one night · click one for the object"));
-  const lsg=el("div"); lsg.style.display="grid"; lsg.style.gridTemplateColumns="repeat(auto-fit,minmax(290px,1fr))"; lsg.style.gap="12px"; lsg.style.marginTop="12px";
-  for(const cm of CAMS){
-    const ss=SESS.filter(s=>s.camera===cm.id).sort((a,b)=>b.night.localeCompare(a.night)||(b.hours-a.hours)).slice(0,3);
-    const col=el("div");
-    const h=el("div"); h.style.display="flex"; h.style.alignItems="center"; h.style.gap="7px"; h.style.marginBottom="6px";
-    h.append(camDot(cm.id), el("b",null,cm.id));
-    if(ss.length) h.append(el("span","sub","last on "+fmtDY(ss[0].night)));
-    col.append(h);
-    if(!ss.length) col.append(el("div","sub","no sessions recorded"));
-    for(const s of ss){
-      const b=el("button","pcard");
-      b.append(el("div","p-t",s.target));
-      const m=el("div","p-m");
-      m.append(el("b",null,fmtDY(s.night)), el("span",null,"· "+(s.hours>0?fmtH(s.hours,2):"exposure unrecorded")+" · "+fmtI(s.frames)+" frame"+(s.frames===1?"":"s")));
-      const fl=Object.keys(s.filters||{}).filter(k=>k!=="unrecorded").map(filtLabel).join(", ");
-      if(fl) m.append(el("span",null,"· "+fl));
-      if(s.cal) m.append(el("span",null,"· "+calText(s.cal)));
-      b.append(m);
-      b.addEventListener("click",()=>openTarget(s.target));
-      col.append(b);
-    }
-    lsg.append(col);
-  }
-  ls.append(lsg);
+  const ls=el("div","card"); ls.id="scopecard";
+  const lsHead=el("h2","sec","What each scope captured last");
+  const lsSub=el("div","sub","the last three sessions on each scope, newest first · a session is one object on one night · click one for the object, or a scope's name for its timeline");
+  ls.append(lsHead, lsSub);
+  const lsg=el("div"); lsg.style.marginTop="12px"; ls.append(lsg);
+  SCOPECARD={card:ls, head:lsHead, sub:lsSub, body:lsg};
+  paintScopeCard(null);
   root.append(ls);
-
   /* what to process next: first, under the hero */
   const q=el("div","card"); q.style.marginTop="14px";
   q.append(el("h2","sec","What to process next on the PC"));
@@ -616,7 +805,8 @@ RENDER.overview = function(root){
   const camsBox=el("div"); camsBox.style.display="flex"; camsBox.style.flexDirection="column"; camsBox.style.gap="7px";
   for(const c of CAMS){
     const s=D.scopes.find(x=>x.camera===c.id); if(!s) continue;
-    const row=el("div"); row.style.display="flex"; row.style.alignItems="center"; row.style.gap="9px"; row.style.fontSize="12.5px";
+    const row=el("button"); row.style.display="flex"; row.style.alignItems="center"; row.style.gap="9px"; row.style.fontSize="12.5px"; row.style.textAlign="left";
+    row.title="Show this scope's timeline"; row.addEventListener("click",()=>openScope(c.id));
     row.append(camDot(c.id));
     const lab=el("span",null,c.short); lab.style.width="86px"; lab.style.color="var(--ink2)"; row.append(lab);
     const b=el("b",null,fmtH(s.hours)); b.style.width="76px"; b.style.textAlign="right"; b.style.fontVariantNumeric="tabular-nums"; row.append(b);
@@ -1409,6 +1599,8 @@ RENDER.equipment = function(root){
     });
     cardS.append(nums);
     cardS.append(el("div","s-line","On the sky "+fmtDY(s.first)+" to "+fmtDY(s.last)+" · "+fmtGB(s.bytes)+" of lights"));
+    const tlb=el("button","tbtn","timeline of its projects ›"); tlb.style.marginTop="8px";
+    tlb.addEventListener("click",()=>openScope(cm.id)); cardS.append(tlb);
     /* filter mix */
     const mix={};
     for(const t of TG) for(const p of t.programmes) if(p.camera===cm.id)
