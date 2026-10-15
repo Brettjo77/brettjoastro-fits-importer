@@ -17,6 +17,7 @@ own window. The watcher opens/focuses the panel when the camera is plugged in.
 
 import argparse
 import contextlib
+import io
 import hashlib
 import importlib.util
 import json
@@ -506,6 +507,10 @@ class App:
                     state.seestar_seen(s)
                     totals = eng.run_seestar_import(state, s, args, only_targets=ssel)
                     total_t += totals["targets"]; total_f += totals["files"]
+            # then straight into the archive when the share is already up,
+            # as a Terminal import does (1.7.0); quiet when it isn't, and
+            # never asks Finder to connect from here
+            eng.ship_after_import(state, mount_share=False)
             self.last_result = (f"Imported {total_f} frame(s) across "
                                 f"{total_t} target(s).")
             dur = int(time.time() - t0)
@@ -762,6 +767,10 @@ STATUS = SafeStatus()
 # it nor (without a CORS preflight this server never answers) send the header
 # (1.4.3 review finding V1).
 TOKEN = secrets.token_urlsafe(24)
+# ...and a boot id the page can compare against /api/state: a tab left open
+# across a restart or an update would otherwise press buttons that are all
+# refused (403) with no word why (1.7.0, found on the PC 12 Oct)
+BOOT = secrets.token_hex(8)
 # Which panel this is (a hash of its state folder, sent by /api/ping): a test
 # checks it is talking to its OWN panel before it trusts the token (1.5.2)
 INSTANCE = hashlib.sha256(os.path.realpath(eng.STATE_DIR).encode("utf-8")).hexdigest()[:16]
@@ -782,6 +791,14 @@ def _split_hostport(raw):
         host, _, port = raw.partition(":")
     return host, port
 
+
+def _note_page(text, title="Dashboard"):
+    """A one-sentence page in the panel's own colours, for a framed tab."""
+    safe = text.replace("&", "&amp;").replace("<", "&lt;").replace(">", "&gt;")
+    return (f"<!DOCTYPE html><html><head><meta charset='utf-8'><title>{title}</title>"
+            "<style>body{margin:0;padding:28px;font:15px/1.5 system-ui,-apple-system,sans-serif;"
+            "color:#1f2937;background:#f8fafc}@media(prefers-color-scheme:dark){body{color:#e5e7eb;"
+            "background:#0b1220}}p{max-width:60ch}</style></head><body><p>" + safe + "</p></body></html>")
 
 class Handler(BaseHTTPRequestHandler):
     timeout = 15                              # a stalled client can't hold a thread
@@ -868,13 +885,16 @@ class Handler(BaseHTTPRequestHandler):
             self._json({"error": "forbidden"}, 403)
             return
         if self.path == "/" or self.path.startswith("/index"):
-            self._html(PAGE.replace("__ASTRO_TOKEN__", TOKEN)
+            self._html(PAGE.replace("__ASTRO_TOKEN__", TOKEN).replace("__ASTRO_BOOT__", BOOT)
                        .replace("__STATUS_TIP__", STATUS_TIP))
         elif self.path == "/api/ping":
             self._json({"ok": True, "app": "astro-import", "version": APP_VERSION,
                         "instance": INSTANCE})
         elif self.path == "/api/state":
-            self._json(APP.snapshot())
+            snap = APP.snapshot()
+            snap["boot"] = BOOT
+            snap["version"] = APP_VERSION
+            self._json(snap)
         elif self.path == "/api/status":
             STATUS.ready.wait(5)               # just after start: the first computation
             self._json(STATUS.value)
@@ -883,8 +903,22 @@ class Handler(BaseHTTPRequestHandler):
         elif self.path == "/archive" or self.path.startswith("/archive?"):
             # Astro Desk: the same page, opened on its Archive tab (AstroLog's
             # "Open in Astro Desk" link lands here with ?target=&code=&scope=)
-            self._html(PAGE.replace("__ASTRO_TOKEN__", TOKEN)
+            self._html(PAGE.replace("__ASTRO_TOKEN__", TOKEN).replace("__ASTRO_BOOT__", BOOT)
                        .replace("__STATUS_TIP__", STATUS_TIP))
+        elif self.path == "/api/projects":
+            # The project layer's own file (projects.json, written by
+            # --projects). Read-only; None when it hasn't been built yet.
+            try:
+                doc = eng.load_projects(prefer_published=True)
+            except Exception:
+                doc = None
+            why = None
+            if doc is None:
+                why = "missing" if not os.path.exists(
+                    os.path.join(eng.STATE_DIR, "projects.json")) else "unreadable"
+            self._json({"ok": doc is not None, "why": why, "projects": doc,
+                        "opener": "Explorer" if eng.IS_WINDOWS else "Finder",
+                        "command": eng.PROJECTS_COMMAND_HINT})
         elif self.path == "/api/archive/index":
             try:
                 self._json(eng.archive_index())
@@ -897,14 +931,86 @@ class Handler(BaseHTTPRequestHandler):
                 self._json({"error": "not a folder in the archive"}, 404)
             else:
                 self._json(listing)
+        elif self.path == "/observatory" or self.path.startswith("/observatory?"):
+            # The Observatory (1.7.0): the Astro Archive Observatory's page, filled
+            # from observatory.json, which --projects (and the Refresh button, the
+            # ship, the PC's nightly job) writes beside projects.json. On the Mac
+            # the PC's published copy wins while it is recent (it sees the masters
+            # and the finished pictures). Framed by its own tab, so always framable;
+            # a problem is a readable note, never a refused frame.
+            try:
+                dataset = eng.load_observatory(prefer_published=True)
+                if dataset is None:
+                    corrupt = False
+                    try:
+                        corrupt = bool(getattr(eng.State(), "ledger_corrupt", False))
+                    except Exception:
+                        pass
+                    self._html(_note_page(
+                        "This computer's ledger can't be read, so the Observatory can't be worked out; "
+                        "see the Activity log." if corrupt else
+                        "The Observatory hasn't been worked out on this computer yet. Press Refresh "
+                        "now (above), or run --projects in Terminal: it reads your records and writes "
+                        "the To process list and this page's data.", "Observatory"), frame_self=True)
+                    return
+                if not dataset.get("targets"):
+                    warns = [w for w in (dataset.get("warnings") or []) if isinstance(w, str)]
+                    self._html(_note_page(
+                        "Nothing to show yet: no light frames in this computer's ledger"
+                        + ("" if dataset.get("snapshotRows") else
+                           f" and no snapshot from the {'PC' if eng.ship_sides()[1] == 'pc' else 'Mac'} on the archive")
+                        + ". The Observatory fills in once frames have been imported and shipped."
+                        + ((" Warnings: " + " ".join(warns)) if warns else ""), "Observatory"), frame_self=True)
+                    return
+                try:
+                    page = eng.observatory_html(dataset)
+                except (OSError, ValueError) as e:
+                    self._html(_note_page(f"The Observatory page (astro-observatory.html) isn't beside the "
+                                          f"engine: {e}. Please {eng._template_fix_hint()}.", "Observatory"),
+                               500, frame_self=True)
+                    return
+                self._html(page, frame_self=True)
+            except Exception as e:
+                self._html(_note_page(f"The Observatory couldn't be shown ({e}).", "Observatory"), 500, frame_self=True)
         elif self.path == "/dashboard" or self.path.startswith("/dashboard?"):
+            # Framable always (it lives in the panel's own Dashboard tab): a
+            # reply that forbids framing shows as "refused to connect".
             try:
                 state = eng.State()
-                path = eng.generate_dashboard(state)
-                with open(path) as f:
+                path = None
+                if state.has_ledger():
+                    path = eng.generate_dashboard(state)
+                else:
+                    here_side, there_side = eng.ship_sides()
+                    here = "PC" if here_side == "pc" else "Mac"
+                    other = "PC" if there_side == "pc" else "Mac"
+                    snap = eng.other_ledger_snapshot()
+                    files, meta = (eng.load_ledger_snapshot(snap, []) if snap else ({}, {}))
+                    if files:
+                        age = meta.get("age_hours")
+                        when = (meta.get("at") or "")[:10]
+                        path = eng.generate_dashboard(
+                            state, files=files,
+                            banner=f"Nothing has been imported on this {here}. This is the {other}'s "
+                                   f"record, as its last ship left it on the archive on {when}"
+                                   + (f" ({int(age // 24)} day(s) ago)" if isinstance(age, float) and age >= 24 else "")
+                                   + ". Space figures are this computer's.")
+                    else:
+                        self._html(_note_page(
+                            f"Nothing has been imported on this {here}, so there is no dashboard "
+                            f"of its own here. The dashboard is drawn from the imports, and they "
+                            f"happen on the {other}. Once the {other} has shipped to the archive "
+                            f"with 1.7.0, its record shows here. Meanwhile the Archive tab lists "
+                            f"what is ready to process."), frame_self=True)
+                        return
+                if not path:
+                    self._html(_note_page("The dashboard couldn't be saved in the state folder; "
+                                          "see the Activity log."), frame_self=True)
+                    return
+                with open(path, encoding="utf-8") as f:
                     self._html(f.read(), frame_self=True)
             except Exception as e:
-                self._html(f"<pre>dashboard unavailable: {e}</pre>", 500)
+                self._html(_note_page(f"The dashboard couldn't be built ({e})."), 500, frame_self=True)
         else:
             self._json({"error": "not found"}, 404)
 
@@ -974,8 +1080,34 @@ class Handler(BaseHTTPRequestHandler):
             elif not (os.path.isdir(path) or os.path.isfile(path)):
                 self._json({"ok": False, "error": "not a folder or file"}, 400)
             else:
-                eng.open_path(path)
-                self._json({"ok": True})
+                if eng.open_path(path):
+                    self._json({"ok": True, "abs": path})
+                else:
+                    self._json({"ok": False, "error": f"{'Windows' if eng.IS_WINDOWS else 'macOS'} "
+                                f"couldn't open {os.path.basename(path)}; see the Activity log."}, 500)
+        elif self.path == "/api/projects/rebuild":
+            # The Refresh button: rebuild projects.json here and now. The
+            # engine's own command, in this process; reads, writes that one
+            # file. One at a time, never while an import or ship runs.
+            if not APP.oplock.acquire(blocking=False):
+                self._json({"ok": False, "error": "The importer is busy with another job; try again "
+                            "when it has finished."}, 409)
+                return
+            try:
+                buf = io.StringIO()
+                with contextlib.redirect_stdout(buf), contextlib.redirect_stderr(buf):
+                    try:
+                        got = eng.run_projects(eng.State())
+                    except SystemExit as e:
+                        got = None
+                        buf.write(f"stopped: {e}\n")
+                said = buf.getvalue()
+                APP.write(said)
+                self._json({"ok": got is not None, "said": said[-2000:]})
+            except Exception as e:
+                self._json({"ok": False, "error": f"The list couldn't be rebuilt: {e}"}, 500)
+            finally:
+                APP.oplock.release()
         elif self.path == "/api/answer":
             qid, value = body.get("id"), body.get("value", "")
             if qid is None or not isinstance(value, (str, int, float)):
@@ -1119,9 +1251,12 @@ button.primary:hover:not(:disabled){color:var(--accent-ink);filter:brightness(1.
   #log{height:auto;flex:1;min-height:0}
   #tab-report{flex:1;min-height:0;overflow:auto}
   #tab-dash{flex:1;min-height:0}
+  #tab-observatory{flex:1;min-height:0;display:flex;flex-direction:column}
+  #tab-observatory iframe{flex:1;min-height:0}
   #tab-dash iframe{height:100%}
   .foot{margin-top:10px}
 }
+.ad-calmiss{color:var(--warn,#c65b32)}
 /* ── Archive tab (Astro Desk, 1.6.0) ── */
 .ad-cols{display:grid;grid-template-columns:minmax(340px,4fr) minmax(430px,7fr);gap:18px}
 @media(max-width:1000px){.ad-cols{grid-template-columns:minmax(0,1fr)}}
@@ -1130,6 +1265,19 @@ button.primary:hover:not(:disabled){color:var(--accent-ink);filter:brightness(1.
   .ad-cols{flex:1;min-height:0}
   .ad-cols>.card{min-height:0;overflow-y:auto}
 }
+.ad-rowmsg{font-size:12.5px;margin:-4px 10px 8px;color:var(--muted)}
+.ad-rowmsg.bad{color:var(--serious,#dc2626)}
+.ad-legend{font-size:12px;color:var(--muted);margin:4px 0 8px;line-height:1.45}
+.ad-warn{font-size:13px;margin:6px 0;padding:7px 10px;border-radius:8px;background:rgba(245,158,11,.14);border:1px solid rgba(245,158,11,.5)}
+.ad-head{display:flex;flex-wrap:wrap;gap:8px 12px;align-items:center;margin:2px 0 6px}
+.ad-head select{font:inherit;padding:4px 8px;border-radius:8px;border:1px solid var(--line2);background:var(--surface2);color:var(--ink)}
+details.ad-sec>summary{cursor:pointer;list-style:none}
+details.ad-sec>summary::-webkit-details-marker{display:none}
+details.ad-sec>summary::before{content:"▸ ";opacity:.6}
+details.ad-sec[open]>summary::before{content:"▾ "}
+.tnote{font-size:12px;color:var(--muted);margin-top:2px}
+#staleBar{position:sticky;top:0;z-index:50;padding:10px 14px;background:#fde68a;color:#422006;font-size:14px;display:flex;gap:12px;align-items:center}
+#staleBar button{font:inherit;padding:5px 10px;border-radius:8px;border:1px solid #92400e;background:#fff;color:#422006;cursor:pointer}
 .ad-search{width:100%;font:inherit;padding:8px 11px;border-radius:9px;border:1px solid var(--line2);
   background:var(--surface2);color:var(--ink);margin:6px 0 8px}
 .ad-opt{display:flex;align-items:center;gap:7px;font-size:12.5px;color:var(--ink2);margin-bottom:8px}
@@ -1157,6 +1305,9 @@ button.primary:hover:not(:disabled){color:var(--accent-ink);filter:brightness(1.
 .ad-file .nm{flex:1;min-width:0;overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
 .ad-file .mt{color:var(--muted);font-size:12px;font-variant-numeric:tabular-nums;white-space:nowrap}
 .ad-file button{padding:4px 11px;font-size:12px;border-radius:8px}
+.ad-row>button{flex:none;padding:4px 11px;font-size:12px;border-radius:8px}
+.ad-nowhere{flex:none;font-size:11.5px;color:var(--muted)}
+#deskProjects .ad-sec:first-of-type{margin-top:8px}
 #deskMsg{min-height:18px;font-size:12.5px;margin-top:6px}
 #deskCount{text-transform:none;letter-spacing:.02em;font-variant-numeric:tabular-nums}
 #deskMsg.bad{color:color-mix(in srgb, var(--serious) 80%, var(--ink))}
@@ -1354,10 +1505,11 @@ button.linkbtn:disabled{opacity:.5;cursor:default}
   <button id="btnEject">Eject</button>
 </header>
 <div class="tabs">
-  <button class="on" data-tab="panel">Panel</button>
-  <button data-tab="report">Report</button>
-  <button data-tab="dash">Dashboard</button>
-  <button data-tab="archive">Archive</button>
+  <button class="on" data-tab="panel" title="Import from a camera; the activity log">Panel</button>
+  <button data-tab="archive" title="What is ready to process, in progress, still capturing or done, with Open in Explorer; and every folder on the archive">To process</button>
+  <button data-tab="observatory" title="The whole archive at a glance: targets, coverage, pipeline, nights, sky, scopes">Observatory</button>
+  <button data-tab="dash" title="This computer's imports, Day folders and space">Dashboard</button>
+  <button data-tab="report" title="The ledger's report">Report</button>
 </div>
 
 <div id="qbox" aria-live="assertive"></div>
@@ -1396,14 +1548,21 @@ button.linkbtn:disabled{opacity:.5;cursor:default}
 <div id="tab-dash" style="display:none">
   <iframe id="dashFrame" title="dashboard"></iframe>
 </div>
+<div id="tab-observatory" style="display:none">
+  <div class="ad-head" id="obsHead"><span class="ad-note" id="obsNote" aria-live="polite">Working it out…</span><button type="button" id="obsRefresh" title="Rebuild the To process list and this page from your records now">Refresh now</button></div>
+  <iframe id="obsFrame" title="Observatory"></iframe>
+</div>
 <div id="tab-archive" style="display:none">
   <div class="ad-cols">
     <div class="card">
-      <div class="eyebrow" style="display:flex;justify-content:space-between"><span id="deskListTitle">Still to process</span><span id="deskCount"></span></div>
-      <div class="ad-note" id="deskNote">Reading the archive…</div>
-      <input class="ad-search" id="deskSearch" type="search" placeholder="Find a target" aria-label="Find a target">
-      <label class="ad-opt"><input type="checkbox" id="deskAll"> Show every folder, finished ones too</label>
-      <div id="deskList"></div>
+      <div id="deskProjects"><p class="ad-note">Working out what's ready…</p></div>
+      <div class="ad-sec">
+        <div class="eyebrow" style="display:flex;justify-content:space-between"><span id="deskListTitle">Folders on the archive</span><span id="deskCount"></span></div>
+        <div class="ad-note" id="deskNote">Reading the archive…</div>
+        <input class="ad-search" id="deskSearch" type="search" placeholder="Find a target" aria-label="Find a target">
+        <label class="ad-opt"><input type="checkbox" id="deskAll"> Show every folder, finished ones too</label>
+        <div id="deskList"></div>
+      </div>
     </div>
     <div class="card" id="deskDetail">
       <div class="eyebrow">Archive</div>
@@ -1430,19 +1589,32 @@ let busy=false, lastLogSig="", lastScanStamp="", curScan=null;
 document.querySelectorAll(".tabs button").forEach(b=>b.addEventListener("click",()=>{
   document.querySelectorAll(".tabs button").forEach(x=>x.classList.remove("on"));
   b.classList.add("on");
-  ["panel","report","dash","archive"].forEach(t=>$("#tab-"+t).style.display = b.dataset.tab===t?"":"none");
+  ["panel","report","dash","observatory","archive"].forEach(t=>$("#tab-"+t).style.display = b.dataset.tab===t?"":"none");
   if(b.dataset.tab==="dash") $("#dashFrame").src="/dashboard?t="+Date.now();
+  if(b.dataset.tab==="observatory") loadObservatory();
   if(b.dataset.tab==="report") loadReport();
   if(b.dataset.tab==="archive") loadDesk();
 }));
 
 const TOKEN="__ASTRO_TOKEN__";
+const BOOT="__ASTRO_BOOT__";
 const STATUS_TIP="__STATUS_TIP__";
+// The importer was restarted or updated since this page opened (its token is
+// gone): say so once, at the top, instead of every button failing silently.
+function showStale(){
+  if($("#staleBar")) return;
+  const d=document.createElement("div"); d.id="staleBar"; d.setAttribute("role","alert");
+  d.innerHTML='The FITS Importer was restarted or updated since this page opened, so its buttons won\'t work here. <button type="button" onclick="location.reload()">Reload this page</button>';
+  document.body.prepend(d);
+}
 async function api(path, body){
   const r=await fetch(path,{method:body!==undefined?"POST":"GET",
     headers:{"Content-Type":"application/json","X-Astro-Token":TOKEN},
     body:body!==undefined?JSON.stringify(body):undefined});
-  return r.json();
+  if(r.status===403&&body!==undefined){ showStale(); return {ok:false,error:"This page is out of date: reload it (the importer was restarted)."}; }
+  let j; try{ j=await r.json(); }catch(e){ j={ok:false,error:`The importer answered with something that isn't JSON (${r.status}).`}; }
+  if(j&&typeof j==="object"&&!("_status" in j)) j._status=r.status;
+  return j;
 }
 
 function scopeChip(t){
@@ -1760,18 +1932,166 @@ async function loadReport(){
 //    for processing. Opens folders and image files; never changes anything. ──
 let desk=null, deskSel=null, deskWant=null;
 const DESK_TODO=new Set(["captured","stacked","processing"]);
-const deskState=s=>`<span class="ad-state ${esc(s||"none")}">${esc(s?(s==="processing"?"in processing":s):"no state")}</span>`;
+const deskState=s=>`<span class="ad-state ${esc(s||"none")}" title="from the August 2026 drive scan">${esc(s?(s==="processing"?"in processing":s):"no state")} (Aug scan)</span>`;
+// the live list's status for a folder on the archive (projects.json's archive_rel), when it has one
+function liveState(rel){
+  const doc=PJ&&PJ.ok&&PJ.projects; if(!doc||!rel) return "";
+  const want=String(rel).replace(/\\/g,"/").replace(/\/+$/,"").toLowerCase();
+  for(const p of (doc.projects||[])) for(const d of (p.datasets||[])){
+    if(d&&d.archive_rel&&String(d.archive_rel).replace(/\\/g,"/").replace(/\/+$/,"").toLowerCase()===want)
+      return `<span class="ad-state ${esc(d.status)}" title="from the live To process list">${esc(PROJ_STATUS[d.status]||d.status)}</span>`;
+  }
+  return "";
+}
 const fmtNight=iso=>{ if(!iso) return ""; const [y,m,d]=iso.split("-"); return `${+d} ${MONTHS[+m-1]} ${y}`; };
 const fmtSize=b=>b>=1073741824?(b/1073741824).toFixed(1)+" GB":b>=1048576?Math.round(b/1048576)+" MB":Math.max(1,Math.round(b/1024))+" KB";
+// The project layer (1.7): To process and In progress, from projects.json.
+// projectsHtml is pure (no DOM), so a test can render the fixture and look.
+const PROJ_WHERE={chillblast_archive:"on the archive",mac:"on the Mac",pc:"on this PC",
+  "mac-unchecked":"on the Mac (per its ledger)","pc-unchecked":"on the PC (per its ledger)"};
+const fmtHours=s=>!s?"":s<360?Math.round(s/60)+" min":(s/3600).toFixed(1)+" h";
+const fmtWhen=iso=>{ const t=new Date(String(iso||"")); if(isNaN(t)) return ""; const d=t.getDate(), m=MONTHS[t.getMonth()], y=t.getFullYear(); return `${d} ${m} ${y} at ${String(t.getHours()).padStart(2,"0")}:${String(t.getMinutes()).padStart(2,"0")}`; };
+const PROJ_STATUS={ready_to_process:"To process",in_progress:"In progress",capturing:"Still capturing",done:"Done"};
+function projectsHtml(pj, opts){
+  opts=opts||{};
+  if(!pj||!pj.ok||!pj.projects){
+    const cmd=pj&&pj.command?` In Terminal: <code>${esc(pj.command)}</code>, or press <strong>Refresh now</strong> below.`:"";
+    return `<div class="ad-head"><button type="button" id="deskRefresh">Refresh now</button></div><p class="ad-note">${pj&&pj.why==="unreadable"
+      ?"The To-process list on this computer couldn't be read. Rebuild it: it only reads your records and writes this one list."
+      :"The To-process list hasn't been worked out on this computer yet. Build it: it only reads your records and writes this one list. Until then, use the folder list below."}${cmd}</p>`;
+  }
+  const label=`Open in ${esc(pj.opener||"Explorer")}`;
+  const doc=pj.projects, rows=[];
+  for(const p of (Array.isArray(doc.projects)?doc.projects:[])) for(const d of (Array.isArray(p.datasets)?p.datasets:[]))
+    if(d&&typeof d==="object") rows.push({name:p.name||p.target_id||"Unnamed target", d});
+  const quiet=Number.isFinite(+doc.quiet_period_days)?+doc.quiet_period_days:14;
+  const readyFrom=d=>{ const t=Date.parse(String(d.last_session||"")+"T12:00:00Z"); if(isNaN(t)) return "";
+    return new Date(t+(quiet+1)*864e5).toISOString().slice(0,10); };
+  const scopeOf=d=>d.scope_name||d.scope||"?";
+  const scopes={}; rows.forEach(r=>{ const k=scopeOf(r.d); scopes[k]=(scopes[k]||0)+1; });
+  const pick=opts.scope&&scopes[opts.scope]?opts.scope:"";
+  const vis=pick?rows.filter(r=>scopeOf(r.d)===pick):rows;
+  const calText=d=>{ const c=d.calibration; if(!c||c.applies===false) return "";
+    if(!c.darks&&!c.flats&&!c.biases) return "no darks, flats or bias linked";
+    const bits=[c.darks?`${c.darks} dark${c.darks===1?"":"s"}`:"", c.flats?`${c.flats} flat${c.flats===1?"":"s"}`:"", c.biases?`${c.biases} bias`:""].filter(Boolean);
+    const miss=(c.missing||[]).length?` · no ${c.missing.join(" or ")}`:"";
+    return `calibration: ${bits.join(" · ")}${miss}`; };
+  const reason=d=>{ const last=fmtNight(d.last_session), rf=readyFrom(d);
+    if(d.status==="done") return `finished picture${d.finals&&d.finals[0]?": "+d.finals[0]:""}`;
+    if(d.status==="in_progress") return `master saved on the archive${d.masters&&d.masters[0]?": "+d.masters[0]:""}${(d.attribution||[]).includes("shared-folder")?" (shared Askar folder: may be the other Askar's)":""}`;
+    if(d.status==="capturing") return `last night ${last}${d.capture_state==="open"?" · kept open by you":rf?" · ready from "+fmtNight(rf):""}`;
+    return `nothing new since ${last}${d.capture_state==="complete"?" · marked complete by you":""}`; };
+  const sect=(status,open)=>{
+    const list=vis.filter(r=>r.d.status===status)
+      .sort((a,b)=>String(b.d.last_session||"").localeCompare(String(a.d.last_session||"")));
+    if(!list.length) return "";
+    return `<details class="ad-sec"${open?" open":""}><summary class="eyebrow">${PROJ_STATUS[status]} · ${list.length}</summary>`+
+      list.map(r=>{
+        const d=r.d, locs=Array.isArray(d.locations)?d.locations:[];
+        const where=locs.map(l=>PROJ_WHERE[l]||l).join(" and ");
+        const facts=[scopeOf(d), where].filter(Boolean).join(" · ");
+        const nights=d.nights?d.nights+" night"+(d.nights===1?"":"s"):"";
+        const frames=d.frames?` · ${d.frames} frames`:"";
+        const btn=d.archive_rel?`<button type="button" data-xopen="${esc(d.archive_rel)}">${label}</button>`
+          :`<span class="ad-nowhere">${locs.length&&!locs.includes("chillblast_archive")?"not shipped to the archive yet":"no folder on the archive"}</span>`;
+        const sel=d.archive_rel?` data-xsel="${esc(d.archive_rel)}" tabindex="0" role="button"`:"";
+        return `<div class="ad-row${deskSel&&deskSel===d.archive_rel?" on":""}"${sel}>
+          <div class="tmain"><div class="tname">${esc(r.name)}</div><div class="tmeta">${esc(facts)}</div><div class="tnote">${esc(reason(d))}${calText(d)?` · <span class="${(d.calibration.missing||[]).length||(!d.calibration.darks&&!d.calibration.flats)?"ad-calmiss":""}">${esc(calText(d))}</span>`:""}</div></div>
+          <div class="tstats"><div class="big">${esc(fmtHours(d.integration_seconds))}</div><div class="small">${esc(nights+frames)}</div></div>${btn}</div>`;
+      }).join("")+"</details>";
+  };
+  const when=(doc.generated_at||"").slice(0,10), whenFull=fmtWhen(doc.generated_at);
+  const snaps=(doc.sources&&Array.isArray(doc.sources.snapshots))?doc.sources.snapshots.filter(m=>m&&m.rows):[];
+  const snapNote=snaps.map(m=>`${esc(m.machine||"the other computer")}'s record as of ${esc(fmtNight(String(m.at||"").slice(0,10))||"an unknown time")}${typeof m.age_hours==="number"&&m.age_hours>=36?` (${Math.floor(m.age_hours/24)} day${Math.floor(m.age_hours/24)===1?"":"s"} old)`:""}`).join("; ");
+  const warns=(doc.warnings||[]).map(w=>/doesn't know|could not be read|day\(s\) old|newer importer/.test(w)?`<p class="ad-warn">⚠ ${esc(w)}</p>`:`<p class="ad-note">⚠ ${esc(w)}</p>`).join("");
+  const scopeSel=`<select id="deskScope" aria-label="Scope"><option value="">All scopes (${rows.length})</option>${Object.keys(scopes).sort().map(k=>`<option value="${esc(k)}"${k===pick?" selected":""}>${esc(k)} (${scopes[k]})</option>`).join("")}</select>`;
+  const head=`<div class="ad-head">${scopeSel}<button type="button" id="deskRefresh">Refresh now</button></div>`;
+  const legend=`<p class="ad-legend">Each ASIAir row also says what calibration (darks, flats, bias) is linked to its lights; the Seestar calibrates itself. <strong>To process</strong>: no new frames for ${quiet} nights and no master saved. <strong>In progress</strong>: a master of yours is in the object's folder on the archive. <strong>Still capturing</strong>: frames within the last ${quiet} nights, or kept open by you. <strong>Done</strong>: a finished picture in Final Astro Images names the object and the scope.</p>`;
+  const body=sect("ready_to_process",true)+sect("in_progress",false)+sect("capturing",false)+sect("done",false);
+  const cap=rows.filter(r=>r.d.status==="capturing"), done=rows.filter(r=>r.d.status==="done").length;
+  const soonest=cap.map(r=>readyFrom(r.d)).filter(Boolean).sort()[0];
+  const tail=rows.length?`<p class="ad-note">${cap.length} still capturing${soonest?` (the first is ready from ${esc(fmtNight(soonest))})`:""}, ${done} done.</p>`
+    :`<p class="ad-note">No captures were counted on this computer yet.</p>`;
+  const pub=doc.sources&&doc.sources.published_by?` This is the ${esc(String(doc.sources.published_by).toUpperCase()==="PC"?"PC":"Mac")}'s complete list (it sees the masters and the finished pictures), published on the archive.`:"";
+  return `<div class="ad-note" id="deskProjMsg" aria-live="polite">Worked out ${when?esc(fmtNight(when)):"at an unknown time"}${whenFull?` (${esc(whenFull)})`:""}${snapNote?` from ${snapNote}`:""}.${pub}</div>`
+    +head+legend+warns+(body||(rows.length?`<p class="ad-note">Nothing is waiting to process.</p>`:""))+tail;
+}
+let PJ=null, deskScopeSel="";
+function renderProjects(){
+  const box=$("#deskProjects");
+  try{ box.innerHTML=projectsHtml(PJ,{scope:deskScopeSel}); }
+  catch(e){ box.innerHTML=`<p class="ad-note">The To-process list couldn't be shown (${esc(String(e))}). Press Refresh now, or run the importer with --projects.</p>`; return; }
+  // feedback lands right under the row that was pressed, never at the top of the list
+  const rowSay=(b,t,bad)=>{ const row=b.closest(".ad-row"); if(!row) return;
+    let m=row.nextElementSibling; if(!m||!m.classList.contains("ad-rowmsg")){
+      m=document.createElement("div"); m.className="ad-rowmsg"; m.setAttribute("aria-live","polite"); row.after(m); }
+    m.textContent=t; m.classList.toggle("bad",!!bad); try{ m.scrollIntoView({block:"nearest"}); }catch(e){} };
+  box.querySelectorAll("[data-xopen]").forEach(b=>b.addEventListener("click",async ev=>{
+    ev.stopPropagation(); const lbl=b.textContent; b.disabled=true; b.textContent="Opening…";
+    let res; try{ res=await api("/api/archive/open",{rel:b.dataset.xopen}); }
+    catch(e){ res={error:"The FITS Importer isn't answering. Use Restart FITS Importer on the Desktop."}; }
+    b.disabled=false; b.textContent=lbl;
+    rowSay(b, res.ok?`Opened in ${PJ&&PJ.opener||"Explorer"}. If you can't see it, it is behind this window: look for it on the taskbar (the Dock on a Mac).`
+      :res.error==="not in the archive"?"That folder isn't on the archive right now. Is the archive drive (or share) connected, or was the folder renamed?"
+      :(res.error||"Couldn't open that folder."), !res.ok);
+  }));
+  box.querySelectorAll("[data-xsel]").forEach(r=>{
+    r.addEventListener("click",()=>deskOpen(r.dataset.xsel));
+    r.addEventListener("keydown",e=>{ if(e.key==="Enter"&&e.target===r) deskOpen(r.dataset.xsel); });
+  });
+  const sel=$("#deskScope"); if(sel) sel.addEventListener("change",()=>{ deskScopeSel=sel.value; renderProjects(); });
+  const rb=$("#deskRefresh"); if(rb) rb.addEventListener("click",async()=>{
+    rb.disabled=true; const lbl=rb.textContent; rb.textContent="Working it out…";
+    let res; try{ res=await api("/api/projects/rebuild",{}); }catch(e){ res={ok:false,error:"The FITS Importer isn't answering."}; }
+    rb.disabled=false; rb.textContent=lbl;
+    if(!res.ok){ const m=$("#deskProjMsg"); if(m) m.textContent=res.error||"The list couldn't be rebuilt; see the Activity log."; return; }
+    await loadProjects();
+  });
+}
+function loadObservatory(){
+  $("#obsNote").textContent="Working it out…";
+  $("#obsFrame").src="/observatory?t="+Date.now();
+}
+$("#obsRefresh").addEventListener("click",async()=>{
+  const b=$("#obsRefresh"); b.disabled=true; $("#obsNote").textContent="Rebuilding from your records…";
+  let res; try{ res=await api("/api/projects/rebuild",{}); }catch(e){ res={ok:false,error:"The FITS Importer isn't answering."}; }
+  b.disabled=false;
+  if(res&&res.ok){ loadObservatory(); loadProjects(); }
+  else $("#obsNote").textContent=(res&&(res.error||res.said))?String(res.error||res.said).trim().split("\n").pop():"The list couldn't be rebuilt.";
+});
+// The Observatory page is framed from this same panel; it asks for two things
+// only: open a folder on the archive (the same archive-only open as the To
+// process list), or show a dataset on the To process tab. Nothing else is
+// accepted, and only from that frame.
+window.addEventListener("message",async e=>{
+  const fr=$("#obsFrame");
+  if(e.origin!==location.origin || !fr || e.source!==fr.contentWindow || !e.data || typeof e.data!=="object") return;
+  const d=e.data;
+  if(d.kind==="observatory-ready"){
+    const from=d.servedFrom&&d.servedFrom.machine?` · the ${esc(d.servedFrom.machine)}'s complete list`:"";
+    $("#obsNote").textContent=`Worked out ${d.generatedAt||"?"}${from}${d.warnings?` · ${d.warnings} warning${d.warnings===1?"":"s"} (see Data health)`:""}`;
+  } else if(d.kind==="archive-open" && typeof d.rel==="string"){
+    let res; try{ res=await api("/api/archive/open",{rel:d.rel}); }catch(err){ res={ok:false,error:"The FITS Importer isn't answering."}; }
+    try{ fr.contentWindow.postMessage({kind:"archive-opened",rel:d.rel,ok:!!(res&&res.ok),error:res&&res.error||""},location.origin); }catch(err){}
+  } else if(d.kind==="archive-show" && typeof d.rel==="string"){
+    const b=document.querySelector('.tabs button[data-tab="archive"]'); if(b) b.click();
+    deskSel=d.rel; try{ await deskOpen(d.rel); }catch(err){}
+  }
+});
+async function loadProjects(){
+  try{ PJ=await api("/api/projects"); }catch(e){ PJ={ok:false,why:"unreadable"}; }
+  renderProjects();
+}
 async function loadDesk(){
+  loadProjects();
   try{
     desk=await api("/api/archive/index");
   }catch(e){ desk={error:String(e)}; }
   if(desk.error){ $("#deskNote").textContent=desk.error; return; }
   const note=[];
   note.push(desk.reachable?`Archive: ${desk.archive}.`:`The archive isn't reachable at ${desk.archive}.`);
-  note.push(desk.datasetFound?`States and hours from the Observatory scan of ${desk.generatedAt||"?"}.`
-    :`No Observatory dataset at ${desk.datasetPath}, so folders are listed without states.`);
+  note.push(desk.datasetFound?`Folder states come from the live list above where the folder is known to it, otherwise from the August 2026 drive scan of ${desk.generatedAt||"?"} (older than the list above).`
+    :`Folder states come from the live list above where the folder is known to it; there is no August 2026 drive scan at ${desk.datasetPath}.`);
   $("#deskNote").textContent=note.join(" ");
   if(deskWant===null && location.pathname==="/archive"){
     const q=new URLSearchParams(location.search);
@@ -1801,12 +2121,12 @@ function renderDeskList(){
   let rows=desk.items.filter(it=>all||DESK_TODO.has(it.state));
   if(q) rows=rows.filter(it=>(it.target+" "+(it.codes||[]).join(" ")+" "+it.rel).toLowerCase().includes(q));
   rows.sort((a,b)=>(b.hours||0)-(a.hours||0)||a.target.localeCompare(b.target));
-  $("#deskListTitle").textContent=all?"Every folder":"Still to process";
+  $("#deskListTitle").textContent=all?"Every folder on the archive":"Folders still to process";
   const hours=rows.reduce((n,it)=>n+(it.hours||0),0);
   $("#deskCount").textContent=`${rows.length} · ${hours.toFixed(1)} h`;
   $("#deskList").innerHTML=rows.length?rows.map(it=>`<div class="ad-row${deskSel===it.rel?" on":""}" data-rel="${esc(it.rel)}" tabindex="0" role="button">
       <div class="tmain"><div class="tname">${esc(it.target)}</div>
-        <div class="tmeta"><span class="chip plain">${esc(it.root)}</span>${deskState(it.state)}${it.exists===false?'<span class="chip plain">folder missing</span>':""}</div></div>
+        <div class="tmeta"><span class="chip plain">${esc(it.root)}</span>${liveState(it.rel)||deskState(it.state)}${it.exists===false?'<span class="chip plain">folder missing</span>':""}</div></div>
       <div class="tstats"><div class="big">${it.hours?it.hours.toFixed(1)+" h":""}</div><div class="small">${it.nights?it.nights+" night"+(it.nights===1?"":"s"):""}</div></div>
     </div>`).join("")
     :`<p class="ad-note">${all?"No target folders found.":"Nothing waiting to process. Tick “Show every folder” to see the rest."}</p>`;
@@ -1817,7 +2137,8 @@ function renderDeskList(){
 }
 async function deskOpen(rel){
   deskSel=rel; renderDeskList();
-  const it=(desk.items||[]).find(x=>x.rel===rel)||{target:rel.split("/").pop(),rel};
+  document.querySelectorAll("#deskProjects [data-xsel]").forEach(r=>r.classList.toggle("on",r.dataset.xsel===rel));
+  const it=((desk&&desk.items)||[]).find(x=>x.rel===rel)||{target:rel.split("/").pop(),rel};
   const box=$("#deskDetail");
   box.innerHTML=`<div class="eyebrow">${esc(it.root||"Archive")}</div><div class="ad-title">${esc(it.target)}</div><p class="ad-note">Reading the folder…</p>`;
   const r=await fetch("/api/archive/list?rel="+encodeURIComponent(rel)).then(x=>x.json()).catch(e=>({error:String(e)}));
@@ -1835,7 +2156,7 @@ async function deskOpen(rel){
     ${facts?`<div class="ad-facts">${facts}</div>`:""}
     <div class="ad-path"><code id="deskPath">${esc(r.abs)}</code><button id="deskCopy">Copy path</button></div>
     <div class="ad-btns"><button class="primary" data-open="${esc(r.rel)}">Open folder</button>
-      <button id="deskSiril"${desk.sirilFound?"":` title="Siril not found at ${esc(desk.sirilPath)}"`}>Start Siril here</button></div>
+      <button id="deskSiril"${desk&&desk.sirilFound?"":` title="Siril not found at ${esc((desk&&desk.sirilPath)||"")}"`}>Start Siril here</button></div>
     <div id="deskMsg" aria-live="polite"></div>
     <p class="ad-hint">For PixInsight WBPP, SyQon or Lightroom: open the folder and drag the nights in. A master opens in PixInsight and a finished picture in its usual app, from the lists below.</p>
     ${folderRows(r.nights,"Nights")}
@@ -1849,8 +2170,9 @@ async function deskOpen(rel){
     ${r.frames===0&&!r.nights.length?`<p class="ad-note">No light frames found in this folder.</p>`:""}`;
   const msg=(t,bad)=>{ const m=$("#deskMsg"); m.textContent=t; m.className=bad?"bad":""; };
   box.querySelectorAll("[data-open]").forEach(b=>b.addEventListener("click",async()=>{
-    const res=await api("/api/archive/open",{rel:b.dataset.open});
-    msg(res.ok?"Opened.":(res.error||"Couldn't open that."),!res.ok);
+    let res; try{ res=await api("/api/archive/open",{rel:b.dataset.open}); }
+    catch(e){ res={error:"The FITS Importer isn't answering."}; }
+    msg(res.ok?"Opened. If you can't see it, it is behind this window.":(res.error||"Couldn't open that."),!res.ok);
   }));
   $("#deskSiril").addEventListener("click",async()=>{
     const res=await api("/api/archive/siril",{rel:r.rel});
@@ -1872,6 +2194,7 @@ if(location.pathname==="/archive"){
 async function tick(){
   try{
     const s=await api("/api/state");
+    if(s.boot&&s.boot!==BOOT) showStale();
     $("#camDot").className="dot"+(s.cameraPresent?" on":"");
     $("#camText").textContent=s.cameraPresent?((s.devices||[]).join(" + ")||"camera")+" connected":"no camera connected";
     busy = s.status!=="idle";

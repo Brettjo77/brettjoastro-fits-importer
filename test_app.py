@@ -12,6 +12,7 @@ import io
 import json
 import os
 import re
+import shutil
 import socket
 import subprocess
 import threading
@@ -25,15 +26,63 @@ import test_env_helper as teh  # noqa: E402
 teh.isolate_runner()   # test mode for this process too
 
 BUILD = os.path.dirname(os.path.abspath(__file__))
-PASS = FAIL = 0
+PASS = FAIL = SKIPPED = 0
+FAILURES = []
+DETAIL_CAP = 8000
+import atexit, traceback
+try:
+    sys.stdout.reconfigure(encoding="utf-8", errors="replace")
+    sys.stderr.reconfigure(encoding="utf-8", errors="replace")
+except (AttributeError, ValueError):
+    pass
 
 def check(name, cond, detail=""):
+    """One check; a callable `cond` is called here and an exception is a FAIL, not a
+    crash. Failures are listed again in the summary, whole (1.7.0)."""
     global PASS, FAIL
-    print(("  PASS  " if cond else "  FAIL  ") + name + ("" if cond else f"   {detail}"))
+    if callable(cond):
+        try:
+            cond = cond()
+        except Exception:
+            cond, detail = False, traceback.format_exc() + (f"\n{detail}" if detail else "")
+    print(("  PASS  " if cond else "  FAIL  ") + name + ("" if cond else f"   {str(detail)[:400]}"))
     if cond:
         PASS += 1
     else:
         FAIL += 1
+        FAILURES.append((f"{name}  [test_app.py:{sys._getframe(1).f_lineno}]", str(detail)))
+
+def skip(name):
+    global SKIPPED
+    SKIPPED += 1
+    skip(f"{name}")
+
+_SUMMARY_DONE = False
+def summary(crash=None):
+    global _SUMMARY_DONE
+    if _SUMMARY_DONE:
+        return
+    _SUMMARY_DONE = True
+    if crash:
+        FAILURES.append(("CRASH: the suite stopped here, later checks did not run", crash))
+    if FAILURES:
+        try:
+            show_panel_logs()
+        except Exception:
+            pass
+    print("\n" + "=" * 51)   # plain ASCII: a PowerShell pipe shows box characters as mojibake
+    print(f"  {PASS} passed, {FAIL + (1 if crash else 0)} failed"
+          + (f", {SKIPPED} skipped" if SKIPPED else ""))
+    for name, detail in FAILURES:
+        d = detail if len(detail) <= DETAIL_CAP else detail[:DETAIL_CAP] + f"… [{len(detail) - DETAIL_CAP} more]"
+        print(f"  ✗ {name}: {d}")
+    sys.stdout.flush()
+
+def _excepthook(tp, val, tb):
+    summary("".join(traceback.format_exception(tp, val, tb)))
+    sys.exit(1)
+sys.excepthook = _excepthook
+atexit.register(lambda: summary() if not _SUMMARY_DONE and (PASS or FAIL) else None)
 
 TOKEN = {"v": ""}   # the per-launch token, read from the page like a browser would
 
@@ -767,6 +816,7 @@ env2.add_seestar_sub("M 33", "20260924-213000")
 env2.add_seestar_sub("M 33", "20260924-213100")
 PORT2 = int(env2.env["ASTRO_PANEL_PORT"])
 URL2 = f"http://127.0.0.1:{PORT2}"
+env2.env["ASTRO_ARCHIVE_URL"] = "smb://astro@TESTPC/AstroImageData"   # test mode only records a mount
 proc2 = start_panel(env2, PORT2)
 try:
     own_panel(URL2, env2, proc2, "T14 the second panel answers with its own instance id")
@@ -796,6 +846,47 @@ try:
           len(copied) == 2 and any(os.path.isdir(os.path.join(env2.sdest30, d))
                                    for d in os.listdir(env2.sdest30)),
           json.dumps(s.get("lastResult")))
+
+    # ── fix c (1.7.0): the panel's import ships straight away when the share
+    #    is already up, as a Terminal import does; it never asks Finder to connect ──
+    log1 = [str(x) for x in s.get("log") or []]
+    check("T14 with the share down the panel's import says nothing about the archive and "
+          "doesn't ask Finder to connect (1.7.0)",
+          not any(w in x for x in log1 for w in ("not reachable", "Finder", "Shipped"))
+          and not teh.os_calls(env2.root, "mount"),
+          json.dumps(log1[-4:]) + json.dumps(teh.os_calls(env2.root))[:300])
+    os.makedirs(os.path.join(env2.archive, "S30P"))
+    env2.add_seestar_sub("M 33", "20260925-213000")
+    api("/api/scan", {}, url=URL2)
+    t0 = time.time()
+    while time.time() - t0 < 60:
+        s = api("/api/state", url=URL2)
+        if s["status"] == "idle" and s["scan"]:
+            break
+        time.sleep(0.3)
+    api("/api/import", {"names": ["M 33"]}, url=URL2)
+    t0 = time.time()
+    while time.time() - t0 < 90:
+        s = api("/api/state", url=URL2)
+        if s.get("question"):
+            api("/api/answer", {"id": s["question"]["id"], "value": "n"}, url=URL2)
+        elif s["status"] == "idle" and time.time() - t0 > 1:
+            break
+        time.sleep(0.3)
+    ship_log = os.path.join(env2.archive, "_verify", *(("pc", "shipped-pc.jsonl") if os.name == "nt"
+                                                      else ("mac", "shipped.jsonl")))
+    try:
+        with open(ship_log, encoding="utf-8") as f:
+            shipped = [r for r in (json.loads(x) for x in f if x.strip()) if r.get("state") == "shipped"]
+    except OSError:
+        shipped = []
+    on_e = [f for _dp, _dn, fs in os.walk(os.path.join(env2.archive, "S30P")) for f in fs]
+    check("T14 with the share up the panel's import files every frame not yet shipped into the "
+          "archive straight away, and says so (fix c, 1.7.0)",
+          len(shipped) == 3 and len(on_e) == 3
+          and any("Shipped 3 file(s)" in str(x) for x in s.get("log") or [])
+          and not teh.os_calls(env2.root, "mount"),
+          json.dumps([str(x) for x in s.get("log") or []][-6:]) + str(on_e))
 finally:
     proc2.terminate()
     proc2.wait(timeout=30)
@@ -1429,14 +1520,259 @@ try:
           r_nosiril.get("ok") is False and "ASTRO_SIRIL_EXE" in (r_nosiril.get("error") or "")
           and r_sfile.get("_status") == 400 and len(teh.os_calls(envd.root, "launch")) == 1,
           json.dumps([r_nosiril, r_sfile]))
+    # ── the project layer on the Archive tab (1.7) ─────────────────────────
+    check("PL the Archive tab carries the To-process section and its loader",
+          'id="deskProjects"' in page and "loadProjects" in page and "data-xopen" in page)
+    # The page's script, parse-checked and the new section rendered, in node
+    # (a syntax slip anywhere in the inline script would blank every tab)
+    import shutil as _sh
+    node = _sh.which("node") or next((p for p in ("/opt/node22/bin/node", "/usr/local/bin/node")
+                                      if os.path.isfile(p)), None)
+    script = re.search(r"<script>(.*?)</script>", page, re.S)
+    if node and script:
+        r_parse = subprocess.run([node, "-e", "new Function(require('fs').readFileSync(0,'utf8'))"],
+                                 input=script.group(1), capture_output=True, text=True, timeout=30)
+        check("PL the panel's inline script parses (node)", r_parse.returncode == 0,
+              r_parse.stderr[-300:])
+        js = script.group(1)
+        pieces = [re.search(p_, js, re.S).group(0) for p_ in
+                  (r"const MONTHS=[^\n]*", r"const esc=[^\n]*", r"const fmtNight=[^\n]*",
+                   r"const PROJ_WHERE=.*?\nfunction projectsHtml\(pj, opts\)\{.*?\n\}\n")]
+        fixture = {"ok": True, "opener": "Finder", "command": "python3 ~/bin/astro-import.py --projects",
+                   "projects": {"schema": "projects/1", "generated_at": "2026-10-10T08:00:00+00:00",
+                                "quiet_period_days": 14, "warnings": ["one warning"],
+                                "projects": [{"target_id": "NGC7380", "name": "Wizard <b>Nebula</b>",
+                                              "datasets": [
+                       {"scope": "FRA400", "scope_name": "Askar FRA400", "site": "Shinfield",
+                        "status": "ready_to_process", "nights": 3, "integration_seconds": 27000,
+                        "last_session": "2026-09-01", "locations": ["chillblast_archive"],
+                        "archive_rel": "/".join(ad_wiz)},
+                       {"scope": "S50P", "scope_name": "Seestar S50 Pro", "site": "Shinfield",
+                        "status": "in_progress", "nights": 1, "integration_seconds": 100,
+                        "last_session": "2026-09-10", "locations": ["chillblast_archive"],
+                        "archive_rel": "S50P/Wizard Nebula (NGC 7380)", "calibration": {"applies": False}},
+                       {"scope": "S30P", "status": "capturing", "nights": 1, "integration_seconds": 100,
+                        "last_session": "2026-10-08", "locations": ["mac-unchecked"], "archive_rel": None}]}]}}
+        fixture["projects"]["sources"] = {"snapshots": [{"machine": "Mac", "at": "2026-10-01T08:00:00Z",
+                                                          "rows": 5, "age_hours": 240.0}]}
+        fixture["projects"]["projects"][0]["datasets"][1]["masters"] = ["masterLight_HOO.xisf"]
+        fixture["projects"]["projects"][0]["datasets"][0]["calibration"] = {"applies": True, "darks": 20, "flats": 0, "biases": 50, "shipped": 20, "nights_with": 2, "nights": 3, "missing": ["flats"]}
+        fixture["projects"]["warnings"].append("43 target name(s) the contract doesn't know")
+        harness = ("let deskSel=null;\n" + "\n".join(pieces) +
+                   f"\nprocess.stdout.write(projectsHtml({json.dumps(fixture)}));\n"
+                   f"process.stdout.write('\\n---\\n'+projectsHtml({{ok:false,why:'missing',command:'py -3 x'}}));\n"
+                   f"process.stdout.write('\\n---\\n'+projectsHtml({json.dumps(fixture)}, {{scope:'Askar FRA400'}}));\n"
+                   f"process.stdout.write('\\n---\\n'+projectsHtml({{ok:false,why:'unreadable'}}));\n")
+        r_html = subprocess.run([node, "-e", harness], capture_output=True, text=True, timeout=30)
+        html, _, rest = r_html.stdout.partition("\n---\n")
+        missing, _, rest = rest.partition("\n---\n")
+        filtered, _, unreadable = rest.partition("\n---\n")
+        check("PL projectsHtml renders the fixture: the name escaped, the dataset's folder on the "
+              "button labelled for this computer, hours and nights, the warning, when it was worked "
+              "out, and the capturing one's ready-from date; nothing reads 'undefined'",
+              r_html.returncode == 0 and "Wizard &lt;b&gt;Nebula&lt;/b&gt;" in html
+              and "<b>" not in html and f'data-xopen="{"/".join(ad_wiz)}"' in html
+              and "Open in Finder" in html and "7.5 h" in html and "3 nights" in html
+              and "⚠ one warning" in html and "Worked out 10 Oct 2026" in html
+              and "ready from 23 Oct 2026" in html and "2 min" in html
+              and "undefined" not in html and "To process · 1" in html
+              and "calibration: 20 darks · 50 bias · no flats" in html and html.count("calibration:") == 1
+              and "In progress · 1" in html and "1 still capturing" in html,
+              (r_html.stderr or html)[-500:])
+        check("PL without projects.json the section says plainly what to run, and where",
+              "hasn't been worked out on this computer yet" in missing and "py -3 x" in missing
+              and 'id="deskRefresh"' in missing, missing[-300:])
+        check("PL (12 Oct) each row says why it is where it is, the sections are collapsible with "
+              "To process open, there is a legend, a scope filter with counts, a Refresh button, the "
+              "Mac's record and its age, the unknown-names warning stands out, and 'per its ledger' "
+              "is said for a frame the Mac's snapshot could not vouch for",
+              "nothing new since 1 Sep 2026" in html and "master saved on the archive: masterLight_HOO.xisf" in html
+              and "last night 8 Oct 2026 · ready from 23 Oct 2026" in html
+              and '<details class="ad-sec" open><summary class="eyebrow">To process · 1' in html
+              and '<details class="ad-sec"><summary class="eyebrow">In progress · 1' in html
+              and "Still capturing · 1" in html and 'class="ad-legend"' in html
+              and '<select id="deskScope"' in html and "All scopes (3)" in html and "Askar FRA400 (1)" in html
+              and 'id="deskRefresh"' in html and "from Mac's record as of 1 Oct 2026 (10 days old)" in html
+              and '<p class="ad-warn">⚠ 43 target name(s)' in html and "on the Mac (per its ledger)" in html,
+              html[-1200:])
+        check("PL the scope filter keeps only that scope's rows, and an unreadable list says so without a crash",
+              "To process · 1" in filtered and "In progress · " not in filtered and "Still capturing · " not in filtered
+              and "couldn't be read" in unreadable and 'id="deskRefresh"' in unreadable,
+              filtered[-300:] + unreadable[-300:])
+    else:
+        skip("PL node isn't installed: the inline script's parse check and the rendered "
+              "To-process section")
+    statuses = set(re.findall(r'sect\("[^"]+","([a-z_]+)"\)', page)) | \
+        set(re.findall(r'status==="([a-z_]+)"', page))
+    check("PL every status string the page uses is one the engine writes",
+          statuses and statuses <= {"capturing", "ready_to_process", "in_progress", "done"},
+          str(statuses))
+    pj0 = api("/api/projects", url=URLD)
+    check("PL /api/projects before --projects has run: ok false, so the tab says to run it "
+          "and falls back to the Observatory list",
+          pj0.get("ok") is False and pj0.get("projects") is None, json.dumps(pj0))
+    os.makedirs(envd.state, exist_ok=True)
+    with open(os.path.join(envd.state, "projects.json"), "w", encoding="utf-8") as f:
+        json.dump({"schema": "projects/1", "generated_at": "2026-10-10T08:00:00+00:00",
+                   "quiet_period_days": 14, "sources": {}, "warnings": [],
+                   "projects": [{"target_id": "NGC7380", "name": "Wizard Nebula",
+                                 "status": "ready_to_process", "to_process": True,
+                                 "last_captured": "2026-09-01", "integration_seconds": 27000,
+                                 "datasets": [
+                       {"scope": "FRA400", "scope_name": "Askar FRA400", "site": "Shinfield",
+                        "status": "ready_to_process", "capture_state": "auto", "nights": 3,
+                        "frames": 90, "integration_seconds": 27000,
+                        "first_session": "2026-08-20", "last_session": "2026-09-01",
+                        "locations": ["chillblast_archive"],
+                        "archive_rel": "/".join(ad_wiz)},
+                       {"scope": "S30P", "scope_name": "Seestar S30 Pro", "site": "Shinfield",
+                        "status": "capturing", "capture_state": "auto", "nights": 1,
+                        "frames": 10, "integration_seconds": 100,
+                        "first_session": "2026-10-08", "last_session": "2026-10-08",
+                        "locations": ["mac"], "archive_rel": None}]}]}, f)
+    pj = api("/api/projects", url=URLD)
+    pj_ds = (pj.get("projects") or {}).get("projects", [{}])[0].get("datasets", [{}])[0]
+    check("PL /api/projects serves projects.json once it exists, with the opener's name "
+          "for the button",
+          pj.get("ok") is True and pj.get("opener") in ("Explorer", "Finder")
+          and pj_ds.get("archive_rel") == "/".join(ad_wiz), json.dumps(pj)[:300])
+    opens_before = len(teh.os_calls(envd.root, "open"))
+    r_open = api("/api/archive/open", {"rel": pj_ds["archive_rel"]}, url=URLD)
+    opens_now = teh.os_calls(envd.root, "open")
+    check("PL Open in Explorer/Finder from a To-process row opens the dataset's target "
+          "folder on the archive (recorded in test mode)",
+          r_open.get("ok") is True and len(opens_now) == opens_before + 1
+          and opens_now[-1].get("target") == os.path.join(ad_arch, *ad_wiz),
+          json.dumps([r_open, opens_now[-2:]]))
+    with open(os.path.join(envd.state, "projects.json"), "w", encoding="utf-8") as f:
+        json.dump({"schema": "projects/1", "generated_at": "x", "quiet_period_days": 14,
+                   "sources": {}, "warnings": [], "projects": [
+                       {"target_id": "X", "name": "X", "status": "ready_to_process",
+                        "to_process": True, "last_captured": "2026-09-01",
+                        "integration_seconds": 0, "datasets": [
+                            {"scope": "S30P", "status": "ready_to_process",
+                             "archive_rel": "../state"}]}]}, f)
+    r_bad = api("/api/archive/open", {"rel": "../state"}, url=URLD)
+    check("PL a hand-edited projects.json cannot point the open outside the archive",
+          r_bad.get("_status") == 400 and len(teh.os_calls(envd.root, "open")) == opens_before + 1,
+          json.dumps(r_bad))
+    os.remove(os.path.join(envd.state, "projects.json"))
+    # (12 Oct) the page knows when it is stale; a failed open never reads "Opened"
+    st = api("/api/state", url=URLD)
+    check("PL /api/state carries the panel's boot id and version, and the page carries the same boot id",
+          isinstance(st.get("boot"), str) and len(st["boot"]) == 16 and st.get("version") == api("/api/ping", url=URLD).get("version")
+          and f'const BOOT="{st["boot"]}"' in page and "function showStale" in page
+          and "s.boot!==BOOT" in page, json.dumps([st.get("boot"), st.get("version")]))
+    r_rebuild = api("/api/projects/rebuild", {}, url=URLD)
+    check("PL the Refresh button rebuilds projects.json in the panel (the engine's own --projects, one at a time)",
+          r_rebuild.get("ok") is True and os.path.isfile(os.path.join(envd.state, "projects.json"))
+          and "Wrote" in (r_rebuild.get("said") or ""), json.dumps(r_rebuild)[-400:])
+    os.remove(os.path.join(envd.state, "projects.json"))
     check("AD read-only: after all of it the archive is exactly as it was (no _verify probe)",
           ad_tree() == tree0 and not os.path.exists(os.path.join(ad_arch, "_verify")))
 finally:
     procd.terminate()
     procd.wait(timeout=30)
 
-if FAIL:
-    show_panel_logs()
-print("\n═══════════════════════════════════════")
-print(f"  {PASS} passed, {FAIL} failed")
+
+print("\n── Chain NL: a panel on a computer that never imported (the archive PC) ──")
+envn = teh.Env("NL", asiair=False, seestar=False)
+shutil.copytree(os.path.join(BUILD, "contract"), os.path.join(envn.root, "contract"))
+shutil.copy(os.path.join(BUILD, "astro-observatory.html"), os.path.join(envn.root, "astro-observatory.html"))
+envn.env.update({"ASTRO_CONTRACT_DIR": os.path.join(envn.root, "contract"), "ASTRO_SHIP_FOLDER": "pc",
+                 "ASTRO_OBSERVATORY_TEMPLATE": os.path.join(envn.root, "astro-observatory.html")})
+os.makedirs(os.path.join(envn.archive, "S30P"), exist_ok=True)
+PORTN = int(envn.env["ASTRO_PANEL_PORT"])
+URLN = f"http://127.0.0.1:{PORTN}"
+procn = start_panel(envn, PORTN)
+try:
+    own_panel(URLN, envn, procn, "NL the no-ledger panel answers with its own instance id")
+    def get_dash():
+        with urllib.request.urlopen(URLN + "/dashboard?t=1", timeout=15) as resp:
+            return resp.status, resp.headers.get("X-Frame-Options"), resp.read().decode()
+    code, xfo, body = get_dash()
+    check("NL the Dashboard tab on a computer with no ledger is a plain sentence (200, framable), not a browser error page",
+          code == 200 and xfo == "SAMEORIGIN" and "Nothing has been imported on this" in body
+          and "NoneType" not in body, f"{code} {xfo} {body[-200:]}")
+    def get_obs():
+        with urllib.request.urlopen(URLN + "/observatory?t=1", timeout=30) as resp:
+            return resp.status, resp.headers.get("X-Frame-Options"), resp.read().decode()
+    code, xfo, body = get_obs()
+    check("OB the Observatory tab before anything was worked out is a plain sentence naming Refresh (200, framable)",
+          code == 200 and xfo == "SAMEORIGIN" and "hasn't been worked out" in body and "Refresh" in body
+          and "<script id=\"dataset\"" not in body, f"{code} {xfo} {body[-200:]}")
+    with urllib.request.urlopen(URLN + "/", timeout=15) as resp:
+        _pagen = resp.read().decode()
+    check("OB the panel's tabs lead with the job (Panel, To process, Observatory, Dashboard, Report), each with a "
+          "tooltip; the Observatory tab frames /observatory, has its own Refresh, fills the window (flex), and "
+          "listens only to its own frame for open / show requests",
+          lambda: [m.group(1) for m in re.finditer(r'data-tab="([a-z]+)"[^>]*title="', _pagen)]
+                  == ["panel", "archive", "observatory", "dash", "report"]
+          and ">To process</button>" in _pagen and 'id="obsFrame"' in _pagen and '"/observatory?t="' in _pagen
+          and 'id="obsRefresh"' in _pagen and "#tab-observatory{flex:1;min-height:0" in _pagen
+          and "e.source!==fr.contentWindow" in _pagen and 'd.kind==="archive-open"' in _pagen
+          and 'd.kind==="archive-show"' in _pagen and 'd.kind==="observatory-ready"' in _pagen,
+          _pagen[:200])
+    os.makedirs(os.path.join(envn.archive, "_verify", "mac"))
+    with open(os.path.join(envn.archive, "_verify", "mac", "ledger-snapshot.json"), "w") as f:
+        json.dump({"schema": "ledger-snapshot/1", "machine": "Mac", "machineId": "mac", "machineUid": "m",
+                   "at": "2026-10-01T08:00:00Z", "customNames": {},
+                   "files": {"a": {"filename": "Light_M 31_10.0s_20260901-220000.fit", "target": "M 31",
+                                   "displayName": "M 31 - Andromeda", "night": "2026-09-01", "sourceType": "sub",
+                                   "exposureSeconds": 10.0, "size": 4, "sha256": "aa" * 32, "device": "seestar",
+                                   "scope": "Seestar S30 Pro", "here": True}}}, f)
+    code, xfo, body = get_dash()
+    check("NL with the Mac's snapshot on the archive the Dashboard shows the Mac's record, with a banner saying so and how old it is",
+          code == 200 and xfo == "SAMEORIGIN" and "This is the Mac's record" in body and "2026-10-01" in body
+          and "day(s) ago" in body and "M 31" in body and "__DATA__" not in body, f"{code} {xfo} {body[:300]}")
+    # the Refresh button's endpoint writes projects.json and observatory.json; the tab reads the file
+    load_token(URLN)
+    _rb = api("/api/projects/rebuild", {}, url=URLN)
+    code, xfo, body = get_obs()
+    _m = re.search(r'<script id="dataset" type="application/json">(.*?)</script>', body, re.S)
+    _dsn = {}
+    try:
+        _dsn = json.loads(_m.group(1)) if _m else {}
+    except ValueError as e:
+        _dsn = {"error": str(e)}
+    check("OB after Refresh the Observatory renders the Mac's record from observatory.json: the page, its "
+          "dataset, Andromeda by its code, one session, the snapshot named, no slot left",
+          lambda: _rb.get("ok") is True and os.path.isfile(os.path.join(envn.state, "observatory.json"))
+          and code == 200 and xfo == "SAMEORIGIN" and "Astro Archive Observatory" in body and "__DATASET__" not in body
+          and _dsn.get("schema") == "observatory/1" and [x["name"] for x in _dsn.get("targets", [])] == ["Andromeda Galaxy (M 31)"]
+          and len(_dsn.get("sessions", [])) == 1 and _dsn["inputs"]["snapshot"]["machine"] == "Mac"
+          and _dsn["targets"][0]["statusCards"][0]["state"] == "stacked" and "<" not in _m.group(1)
+          and "What each scope captured last" in body,
+          f"{code} {xfo} rb={json.dumps(_rb)[:200]} " + (json.dumps(_dsn)[:400] if _dsn else body[:300]))
+    check("OB the first card has two faces: each scope's name is a button to its timeline of projects "
+          "(paintScopeCard, 90 nights / a year / all time, the quiet-period band), the hero rows and the "
+          "Equipment cards open it too (openScope), and 'all scopes' comes back",
+          lambda: "function paintScopeCard(cam)" in body and "function openScope(cam)" in body
+          and body.count("openScope(c") >= 2 and 'el("button","scopebtn")' in body
+          and "all scopes" in body and '["90","90 nights",90],["365","a year",365],["all","all time",' in body
+          and "quiet period: the last " in body and "has been doing" in body,
+          body[:200])
+    # every script block of the page parses (node), so a slip in the template can't blank the tab
+    import shutil as _sh2
+    _node = _sh2.which("node") or next((p for p in ("/opt/node22/bin/node", "/usr/local/bin/node")
+                                        if os.path.isfile(p)), None)
+    _blocks = re.findall(r"<script>(.*?)</script>", body, re.S)
+    if _node and _blocks:
+        _bad = []
+        for i, b in enumerate(_blocks):
+            rp = subprocess.run([_node, "-e", "new Function(require('fs').readFileSync(0,'utf8'))"],
+                                input=b, capture_output=True, text=True, timeout=30)
+            if rp.returncode != 0:
+                _bad.append(f"block {i}: {rp.stderr[-200:]}")
+        check(f"OB the Observatory page's {len(_blocks)} script blocks parse (node)", not _bad, "; ".join(_bad))
+        rj = subprocess.run([_node, "-e", "JSON.parse(require('fs').readFileSync(0,'utf8'))"],
+                            input=_m.group(1) if _m else "x", capture_output=True, text=True, timeout=30)
+        check("OB the dataset block parses with a browser's JSON.parse (node)", rj.returncode == 0, rj.stderr[-200:])
+    else:
+        skip("OB the Observatory page's script blocks parse (needs node)")
+finally:
+    procn.terminate()
+    procn.wait(timeout=30)
+
+summary()
 sys.exit(1 if FAIL else 0)

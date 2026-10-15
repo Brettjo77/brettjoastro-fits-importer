@@ -34,23 +34,28 @@ capabilities (see PARITY.md). Requires: Python 3.9+ and astropy.
 
 import argparse
 import contextlib
+import errno
+import io
 import hashlib
 import json
 import math
 import os
 import re
+import secrets
 import shutil
 import socket
+import stat
 import subprocess
 import sys
 import threading
+import unicodedata
 import uuid
 import time
 from collections import defaultdict
-from datetime import datetime, timedelta
+from datetime import date, datetime, timedelta, timezone
 
 # One version for every platform (1.5.0: the Windows 11 edition joins the Mac).
-VERSION = "1.6.0"
+VERSION = "1.7.0"
 IS_WINDOWS = os.name == "nt"
 IS_MAC = sys.platform == "darwin"
 PLATFORM = "windows" if IS_WINDOWS else ("mac" if IS_MAC else "linux")
@@ -213,13 +218,15 @@ def _test_root_guard():
              ("ASIAIR_DEST", DEST_DIR), ("ASIAIR_CAL_LIBRARY", LIBRARY_DIR),
              ("ASIAIR_STATE", STATE_DIR), ("ASIAIR_MIRROR", MIRROR_DIR),
              ("ASTRO_ARCHIVE_MOUNT", ARCHIVE_MOUNT),
-             ("ASTRO_SHIP_LOG", os.path.join(ARCHIVE_MOUNT, "_verify", SHIP_LOG_NAME)),
+             ("ASTRO_SHIP_LOG", os.path.join(ARCHIVE_MOUNT, "_verify", SHIP_FOLDER, SHIP_LOG_NAME)),
              ("SEESTAR_DEST_S30", SEESTAR_DEST_S30), ("SEESTAR_DEST_S50", SEESTAR_DEST_S50),
              ("SEESTAR_DEST_S30_ORIG", SEESTAR_DEST_S30_ORIG),
              ("SEESTAR_DEST_S50PRO", SEESTAR_DEST_S50PRO),
              ("ASIAIR_EQUIPMENT", EQUIPMENT_JSON), ("ASIAIR_RECEIPTS", RECEIPT_BASE),
              ("ASIAIR_LEGACY_NAMES", LEGACY_CUSTOM_NAMES),
-             ("ASTRO_SIRIL_EXE", SIRIL_EXE), ("ASTRO_OBSERVATORY_DATASET", OBSERVATORY_DATASET)]
+             ("ASTRO_SIRIL_EXE", SIRIL_EXE), ("ASTRO_OBSERVATORY_DATASET", OBSERVATORY_DATASET),
+             ("ASTRO_CONTRACT_DIR", CONTRACT_DIR), ("ASTRO_FINALS_DIR", FINALS_DIR),
+             ("ASTRO_OBSERVATORY_TEMPLATE", OBSERVATORY_TEMPLATE)]
     paths += [("SEESTAR_VOLUME", v) for v in SEESTAR_VOLUMES]
     paths += [("ASTRO_DRIVE_ROOTS", r)
               for r in (os.environ.get("ASTRO_DRIVE_ROOTS") or "").split(os.pathsep)]
@@ -244,7 +251,8 @@ _CONFIG_PATH = os.path.expanduser(os.environ.get(
 if TEST_ROOT and _CONFIG_PATH and not _within(_CONFIG_PATH, TEST_ROOT):
     _test_refuse(f"ASIAIR_CONFIG is outside the test root {TEST_ROOT}: {_CONFIG_PATH}")
 try:
-    with open(_CONFIG_PATH) as _cf:
+    # utf-8-sig: Notepad on Windows writes a byte-order mark (1.7.0)
+    with open(_CONFIG_PATH, encoding="utf-8-sig") as _cf:
         _CONFIG = json.load(_cf)
     if not isinstance(_CONFIG, dict):
         _CONFIG = {}
@@ -282,6 +290,22 @@ ARCHIVE_URL = os.environ.get("ASTRO_ARCHIVE_URL") or _CONFIG.get("ASTRO_ARCHIVE_
 # shipped*.jsonl. No file on the archive is ever appended to by two machines.
 SHIP_LOG_NAME = os.environ.get("ASTRO_SHIP_LOG") or _CONFIG.get("ASTRO_SHIP_LOG") \
     or ("shipped-pc.jsonl" if IS_WINDOWS else "shipped.jsonl")
+if not TEST_ROOT and not re.fullmatch(r"shipped[a-z0-9._-]*\.jsonl", str(SHIP_LOG_NAME)):
+    SHIP_LOG_NAME = "shipped-pc.jsonl" if IS_WINDOWS else "shipped.jsonl"   # never a path (test mode refuses it instead)
+# ...kept in this machine's own folder under _verify\ (1.7.0, decision D7):
+# "mac" for the Mac, "pc" for the archive PC. The share user may change files
+# only there and in _verify\lock\; everything the PC writes lives in pc\.
+SHIP_FOLDER = os.environ.get("ASTRO_SHIP_FOLDER") or _CONFIG.get("ASTRO_SHIP_FOLDER") \
+    or ("pc" if IS_WINDOWS else "mac")
+if not re.fullmatch(r"[a-z0-9-]{1,32}", SHIP_FOLDER) or SHIP_FOLDER == "lock":
+    SHIP_FOLDER = "pc" if IS_WINDOWS else "mac"      # a typo never sends rows elsewhere
+# ...and, beside the ship log, a copy of this machine's ledger left by each ship
+# (1.7.0): the other computer's --projects reads it, so the PC's nightly list
+# carries the Mac's sessions without anyone copying a file.
+LEDGER_SNAPSHOT_NAME = "ledger-snapshot.json"
+# This computer's short name and display name for the Sync view (1.7.0, spec
+# section 2): `ASTRO_MACHINE_ID` is a slug such as "mac" or "chillblast"
+MACHINE_SLUG_RE = re.compile(r"^[a-z0-9-]{1,32}$")
 
 # ── Seestar (S30 Pro / S50) ─────────────────────────────────────────────────
 SEESTAR_VOLUME_ENV = os.environ.get("SEESTAR_VOLUME") or _CONFIG.get("SEESTAR_VOLUME")
@@ -495,19 +519,196 @@ def launch_app(exe, args=()):
         return False
 
 def open_path(target):
-    """Open a file or URL with the system's default app."""
+    """Open a file or folder with the system's default app (Explorer or Finder
+    for a folder). True when the system took it, False with the reason in
+    the log when it didn't: a failed open must never read as "Opened"."""
     if TEST_ROOT:
         _test_record("open", target=target)
-        return
+        return True
     try:
         if IS_WINDOWS:
             os.startfile(target)            # noqa: platform-specific
         elif IS_MAC:
-            subprocess.run(["open", target], capture_output=True, timeout=10)
+            r = subprocess.run(["open", target], capture_output=True, timeout=10)
+            return r.returncode == 0
         else:
-            subprocess.run(["xdg-open", target], capture_output=True, timeout=10)
+            r = subprocess.run(["xdg-open", target], capture_output=True, timeout=10)
+            return r.returncode == 0
+        return True
+    except Exception as e:
+        warn(f"could not open {target}: {e}")
+        return False
+
+def hash_file_unbuffered(path, chunk=1 << 20):
+    """(sha256, size, read) of a file on THIS computer's own disk (1.7.0).
+    On Windows the read bypasses the system cache (FILE_FLAG_NO_BUFFERING,
+    spec P1), so a file that was only just written is read from the disk,
+    and `read` is "unbuffered". Elsewhere, or on a volume that refuses
+    unbuffered reads, it is an ordinary read and `read` is "buffered"."""
+    if IS_WINDOWS:
+        try:
+            got = _win_hash_unbuffered(path, chunk)
+            if got is not None:
+                return got
+        except OSError:
+            raise
+        except Exception:
+            pass
+    h, size = hashlib.sha256(), 0
+    with open(path, "rb") as f:
+        for block in iter(lambda: f.read(chunk), b""):
+            h.update(block)
+            size += len(block)
+    return h.hexdigest(), size, "buffered"
+
+def _win_hash_unbuffered(path, chunk):
+    """Windows: CreateFileW with FILE_FLAG_NO_BUFFERING into a page-aligned
+    buffer (VirtualAlloc) read in whole multiples of the sector size; the
+    read at the end of the file returns what is left. None when the volume
+    won't do unbuffered reads (the caller then reads it the ordinary way)."""
+    import ctypes
+    from ctypes import wintypes
+    k32 = ctypes.WinDLL("kernel32", use_last_error=True)
+    k32.CreateFileW.restype = wintypes.HANDLE
+    k32.CreateFileW.argtypes = (wintypes.LPCWSTR, wintypes.DWORD, wintypes.DWORD, wintypes.LPVOID,
+                                wintypes.DWORD, wintypes.DWORD, wintypes.HANDLE)
+    k32.ReadFile.argtypes = (wintypes.HANDLE, wintypes.LPVOID, wintypes.DWORD,
+                             ctypes.POINTER(wintypes.DWORD), wintypes.LPVOID)
+    k32.CloseHandle.argtypes = (wintypes.HANDLE,)
+    k32.VirtualAlloc.restype = wintypes.LPVOID
+    k32.VirtualAlloc.argtypes = (wintypes.LPVOID, ctypes.c_size_t, wintypes.DWORD, wintypes.DWORD)
+    k32.VirtualFree.argtypes = (wintypes.LPVOID, ctypes.c_size_t, wintypes.DWORD)
+    full = os.path.abspath(path)
+    if not full.startswith("\\\\"):
+        full = "\\\\?\\" + full                     # long paths too
+    # shared for reading, writing and deleting: a file another program still
+    # has open is read, not refused (the caller re-checks size and time after)
+    GENERIC_READ, SHARE_ALL, OPEN_EXISTING, NO_BUFFERING = 0x80000000, 0x7, 3, 0x20000000
+    handle = k32.CreateFileW(full, GENERIC_READ, SHARE_ALL, None, OPEN_EXISTING,
+                             NO_BUFFERING, None)
+    if handle in (None, wintypes.HANDLE(-1).value):
+        err = ctypes.get_last_error()
+        if err == 87:                               # the volume refuses unbuffered reads
+            return None
+        raise OSError({2: errno.ENOENT, 3: errno.ENOENT, 5: errno.EACCES}.get(err, errno.EIO),
+                      ctypes.FormatError(err).strip(), path)
+    buf = k32.VirtualAlloc(None, chunk, 0x3000, 0x04)   # MEM_COMMIT|MEM_RESERVE, READWRITE
+    if not buf:
+        k32.CloseHandle(handle)
+        return None
+    h, size, got = hashlib.sha256(), 0, wintypes.DWORD()
+    try:
+        while True:
+            if not k32.ReadFile(handle, buf, chunk, ctypes.byref(got), None):
+                err = ctypes.get_last_error()
+                if err == 87 and size == 0:
+                    return None
+                raise OSError(errno.EIO, ctypes.FormatError(err).strip(), path)
+            if got.value == 0:
+                break
+            h.update(ctypes.string_at(buf, got.value))
+            size += got.value
+            if got.value < chunk:
+                break                     # the end: no read past it at an unaligned offset
+    finally:
+        k32.VirtualFree(buf, 0, 0x8000)                  # MEM_RELEASE
+        k32.CloseHandle(handle)
+    return h.hexdigest(), size, "unbuffered"
+
+def background_io():
+    """Long background reads (the PC's hashing) give way to whatever Brett is
+    doing (1.7.0): Windows' background mode lowers this process's disk and
+    memory priority. A no-op elsewhere, and in test mode."""
+    if not IS_WINDOWS or TEST_ROOT:
+        return False
+    try:
+        import ctypes
+        from ctypes import wintypes
+        k32 = ctypes.WinDLL("kernel32", use_last_error=True)
+        k32.GetCurrentProcess.restype = wintypes.HANDLE
+        k32.SetPriorityClass.argtypes = (wintypes.HANDLE, wintypes.DWORD)
+        return bool(k32.SetPriorityClass(k32.GetCurrentProcess(), 0x00100000))
     except Exception:
-        pass
+        return False
+
+def file_created_at(st):
+    """When a file was created, as a POSIX time, from its os.stat result: the
+    real creation time on Windows (and a Mac). Test mode on Linux has none,
+    so it uses the modification time, which a test can set (1.7.0)."""
+    t = getattr(st, "st_birthtime", None)
+    if t:
+        return t
+    if IS_WINDOWS:
+        return st.st_ctime                          # Windows: creation time
+    return st.st_mtime
+
+def owner_trusted(path):
+    """Windows: is `path` owned by an account the archive share's user can't
+    act as: the account this runs as, Administrators (what Windows makes the
+    owner of a file written from an administrator window) or SYSTEM? The PC
+    trusts its own files in _verify\\pc only then (spec P6: the share user
+    must never be able to plant one). True elsewhere, where owners don't
+    travel over SMB (decision 10); None when Windows can't say."""
+    if not IS_WINDOWS:
+        return True
+    try:
+        import ctypes
+        from ctypes import wintypes
+        adv = ctypes.WinDLL("advapi32", use_last_error=True)
+        k32 = ctypes.WinDLL("kernel32", use_last_error=True)
+        PDWORD = ctypes.POINTER(wintypes.DWORD)
+        adv.GetFileSecurityW.argtypes = (wintypes.LPCWSTR, wintypes.DWORD, wintypes.LPVOID,
+                                         wintypes.DWORD, PDWORD)
+        adv.GetSecurityDescriptorOwner.argtypes = (wintypes.LPVOID, ctypes.POINTER(ctypes.c_void_p),
+                                                   ctypes.POINTER(wintypes.BOOL))
+        adv.OpenProcessToken.argtypes = (wintypes.HANDLE, wintypes.DWORD,
+                                         ctypes.POINTER(wintypes.HANDLE))
+        adv.GetTokenInformation.argtypes = (wintypes.HANDLE, ctypes.c_int, wintypes.LPVOID,
+                                            wintypes.DWORD, PDWORD)
+        adv.ConvertSidToStringSidW.argtypes = (ctypes.c_void_p, ctypes.POINTER(wintypes.LPWSTR))
+        k32.GetCurrentProcess.restype = wintypes.HANDLE
+        k32.CloseHandle.argtypes = (wintypes.HANDLE,)
+        k32.LocalFree.argtypes = (wintypes.HLOCAL,)
+
+        def sid_text(sid):
+            out = wintypes.LPWSTR()
+            if not adv.ConvertSidToStringSidW(sid, ctypes.byref(out)):
+                return None
+            try:
+                return out.value
+            finally:
+                k32.LocalFree(ctypes.cast(out, wintypes.HLOCAL))
+
+        OWNER = 0x1
+        need = wintypes.DWORD()
+        adv.GetFileSecurityW(path, OWNER, None, 0, ctypes.byref(need))
+        if ctypes.get_last_error() == 5:
+            return False                  # the file won't even show its owner: not ours
+        if not need.value:
+            return None
+        sd = ctypes.create_string_buffer(need.value)
+        if not adv.GetFileSecurityW(path, OWNER, sd, need, ctypes.byref(need)):
+            return None
+        owner, defaulted = ctypes.c_void_p(), wintypes.BOOL()
+        if not adv.GetSecurityDescriptorOwner(sd, ctypes.byref(owner), ctypes.byref(defaulted)):
+            return None
+        token = wintypes.HANDLE()
+        if not adv.OpenProcessToken(k32.GetCurrentProcess(), 0x0008, ctypes.byref(token)):
+            return None
+        try:
+            adv.GetTokenInformation(token, 1, None, 0, ctypes.byref(need))   # TokenUser
+            info = ctypes.create_string_buffer(need.value)
+            if not adv.GetTokenInformation(token, 1, info, need, ctypes.byref(need)):
+                return None
+            me = sid_text(ctypes.c_void_p.from_buffer(info).value)        # TOKEN_USER.User.Sid
+        finally:
+            k32.CloseHandle(token)
+        who = sid_text(owner)
+        if not me or not who:
+            return None
+        return who in (me, "S-1-5-32-544", "S-1-5-18")
+    except Exception:
+        return None
 
 def machine_id():
     """A stable id for THIS computer's importer (created once, kept in the
@@ -527,6 +728,36 @@ def machine_id():
     except OSError:
         pass
     return rec["id"]
+
+_IDENTITY = {}
+
+def machine_identity():
+    """This computer's names (1.7.0). `id`: the stable id the mirror and the
+    archive lock have always used (unchanged, or the mirror would look like
+    another computer's). `slug`: the short name in file names and requests,
+    ^[a-z0-9-]{1,32}$, such as "mac" or "chillblast" (ASTRO_MACHINE_ID in
+    config.json, or "slug" in machine.json). `label`: the name people read
+    (ASTRO_MACHINE_LABEL, or "label"). `slugValid` is False for a slug that
+    breaks the rule; anything that names files with it refuses to run."""
+    if _IDENTITY:
+        return dict(_IDENTITY)
+    rec = {}
+    try:
+        with open(os.path.join(STATE_DIR, "machine.json"), encoding="utf-8") as f:
+            rec = json.load(f)
+    except (OSError, ValueError):
+        pass
+    if not isinstance(rec, dict):
+        rec = {}
+    default_slug = "mac" if IS_MAC else ("pc" if IS_WINDOWS else PLATFORM)
+    default_label = "Mac" if IS_MAC else ("PC" if IS_WINDOWS else PLATFORM.title())
+    slug = str(os.environ.get("ASTRO_MACHINE_ID") or _CONFIG.get("ASTRO_MACHINE_ID")
+               or rec.get("slug") or default_slug)
+    label = str(os.environ.get("ASTRO_MACHINE_LABEL") or _CONFIG.get("ASTRO_MACHINE_LABEL")
+                or rec.get("label") or default_label)
+    _IDENTITY.update({"id": machine_id(), "slug": slug, "label": label,
+                      "slugValid": bool(MACHINE_SLUG_RE.match(slug))})
+    return dict(_IDENTITY)
 
 def mirror_owner_ok(mirror_dir, claim=False):
     """Each machine publishes to its OWN mirror folder. Two ledgers in one
@@ -601,6 +832,32 @@ OBSERVATORY_DATASET = _env_path(
     os.path.join(os.path.splitdrive(ARCHIVE_MOUNT)[0] + "\\", "Astro Config Data", "Observatory",
                  "dataset.json") if IS_WINDOWS
     else os.path.join(_DEF_STATE, "observatory-dataset.json"))
+# Project layer (1.7): the contract (canonical targets and scopes) ships
+# beside the engine; Final Astro Images sits at the archive DRIVE's root on
+# the PC (it is not inside the share the Mac mounts, so the Mac default is
+# empty and --projects says finals were not checked).
+CONTRACT_DIR = _env_path("ASTRO_CONTRACT_DIR",
+                         os.path.join(os.path.dirname(os.path.abspath(__file__)), "contract"))
+# The Observatory page (1.7.0): the Astro Archive Observatory's design, filled
+# by build_observatory() and served by the panel's Observatory tab
+OBSERVATORY_TEMPLATE = _env_path("ASTRO_OBSERVATORY_TEMPLATE",
+                                 os.path.join(os.path.dirname(os.path.abspath(__file__)),
+                                              "astro-observatory.html"))
+FINALS_DIR = _env_path(
+    "ASTRO_FINALS_DIR",
+    os.path.join(os.path.splitdrive(ARCHIVE_MOUNT)[0] + "\\", "Final Astro Images")
+    if IS_WINDOWS else "")
+def _env_int(var, default):
+    value = os.environ.get(var)
+    if value is None:
+        value = _CONFIG.get(var)          # 0 is a real setting, not "unset"
+    if value is None:
+        return default
+    try:
+        return int(value)
+    except (TypeError, ValueError):
+        return default
+QUIET_PERIOD_DAYS = _env_int("ASTRO_QUIET_PERIOD_DAYS", 14)
 _test_root_guard()
 
 # One-time migration from the pre-unification state locations (spec §1).
@@ -986,20 +1243,32 @@ def _atomic_write_json(path, data):
     # A tmp name per writer: two processes saving at once must never share
     # (and interleave into) one ledger.json.tmp (1.4.3 review finding H2).
     tmp = f"{path}.{os.getpid()}.{threading.get_ident()}.tmp"
-    with open(tmp, "w") as f:
-        json.dump(data, f, indent=1)
-        f.flush()
-        os.fsync(f.fileno())   # a power cut must not leave a truncated ledger
-    for attempt in range(40):
-        try:
-            os.replace(tmp, path)
-            return
-        except PermissionError:
-            # Windows: a reader holding the file open blocks the rename for a
-            # moment (Python never opens with FILE_SHARE_DELETE) — wait, retry
-            if not IS_WINDOWS or attempt == 39:
-                raise
-            time.sleep(0.25)
+    done = False
+    try:
+        with open(tmp, "w", encoding="utf-8") as f:
+            json.dump(data, f, indent=1)
+            f.flush()
+            os.fsync(f.fileno())   # a power cut must not leave a truncated ledger
+        for attempt in range(40):
+            try:
+                os.replace(tmp, path)
+                done = True
+                return
+            except OSError as e:
+                # A reader holding the file open blocks the rename for a moment
+                # (Python never opens with FILE_SHARE_DELETE): on Windows a
+                # PermissionError, over SMB from a Mac EBUSY/EACCES. Wait, retry.
+                busy = isinstance(e, PermissionError) or \
+                    e.errno in (errno.EBUSY, errno.EACCES, errno.ETXTBSY)
+                if not busy or attempt == 39:
+                    raise
+                time.sleep(0.25)
+    finally:
+        if not done:
+            try:
+                os.remove(tmp)          # our own temp file, never a leftover
+            except OSError:
+                pass
 
 CAMERA_KEY_SEP = "|cam="
 
@@ -3160,11 +3429,13 @@ def run_reconcile(state, deep=True):
 # Ledger-driven: every entry that is verified here and not yet verified on the
 # archive is a candidate. The archive's own folder names and Day numbers win;
 # a night that already exists there is merged into its Day folder, a new night
-# takes the next free number. Copies go through a .partial name, are read back
-# from the share and compared to the ledger hash, then the entry is stamped
-# archiveLocation + archiveShippedAt. The PC sweep re-hashes on its side and
-# appends _verify\verified.jsonl; the next --ship reads that and stamps
-# archiveVerifiedAt. Nothing here deletes, overwrites, or touches the camera.
+# takes the next free number. From 1.7.0 (D7) each file is created under its
+# final name only if that name is free, read back from the share and compared
+# to the ledger hash, then the entry is stamped archiveLocation +
+# archiveShippedAt. The PC's sweep re-reads it on its own disk and appends
+# _verify\pc\verified.jsonl; the next --ship reads that and stamps
+# archiveVerifiedAt. Nothing here deletes, renames, overwrites, or touches
+# the camera.
 
 SHIP_ROOTS = {"ZWO Seestar S30 Pro": "S30P", "ZWO Seestar S30": "S30",
               "ZWO Seestar S50": "S50", "ZWO Seestar S50 Pro": "S50P",
@@ -3176,26 +3447,254 @@ _DISPLAY_RE = re.compile(r"^(.+?)\s+-\s+(.+?)(\s+\(mosaic\))?$")
 _MAC_DAY_RE = re.compile(r"^(.*?)(?:_sub)? Day (\d+)$")
 _E_DAY_RE = re.compile(r"^(.*?)(?:_sub)? Day (\d+)$")
 
-def archive_reachable(mount=None, write_test=True):
-    """True when the archive is mounted AND alive. After a PC reboot or power
-    cut a stale SMB mount can still list directories from cache while refusing
-    every write (seen 19 Sep 2026, PermissionError on makedirs), so the check
-    also touches a scratch file under _verify."""
+def _verify_path(mount, *parts):
+    """A path under the archive's _verify folder."""
+    return os.path.join(mount, "_verify", *parts)
+
+def ship_sides():
+    """(here, there): this machine's _verify folder name and the other
+    computer's ("mac"/"pc")."""
+    here = SHIP_FOLDER if SHIP_FOLDER in ("mac", "pc") else ("pc" if IS_WINDOWS else "mac")
+    return here, ("pc" if here == "mac" else "mac")
+
+# What the other computer's --projects needs of a ledger row, nothing more:
+# the snapshot is a few MB for thousands of frames, not a copy of the ledger.
+_SNAPSHOT_FIELDS = ("filename", "target", "displayName", "scope", "camera", "device",
+                    "sourceType", "night", "exposureSeconds", "filter", "size", "sha256", "origin",
+                    "archiveLocation", "archivePath", "archiveShippedAt", "archiveVerifiedAt",
+                    "identityGuessed")
+
+def _dest_present(dest, fn, cache):
+    """Is dest/fn on this computer's disk right now? One listing per folder
+    (thousands of rows must not mean thousands of stats, and a sleeping
+    volume fails once, not every time)."""
+    names = cache.get(dest)
+    if names is None:
+        try:
+            names = set(os.listdir(dest))
+        except OSError:
+            names = set()
+        cache[dest] = names
+    return fn in names
+
+def write_ledger_snapshot(state, mount=None):
+    """After a ship: this machine's light rows, each saying whether its frame
+    is still on this disk, in its own _verify folder (the one place on the
+    archive it may change files), for the other computer's --projects
+    (1.7.0). Never replaces another computer's snapshot. A failure only
+    warns: the ship itself is done and recorded."""
+    if not isinstance(state.ledger, dict):
+        return None
+    mount = mount or ARCHIVE_MOUNT
+    ok, _why = archive_check(mount)
+    if not ok:
+        return None                     # a share that just went away: nothing to wait on
+    path = _verify_path(mount, SHIP_FOLDER, LEDGER_SNAPSHOT_NAME)
+    try:
+        _confine(path, "the ledger snapshot")
+        old = _read_json_file(path)
+        if old.get("machineUid") and old["machineUid"] != machine_id():
+            warn(f"The ledger snapshot in _verify\\{SHIP_FOLDER} was written by another computer "
+                 f"({old.get('machine') or '?'}) and was not replaced: two computers must never "
+                 f"share one ASTRO_SHIP_FOLDER.")
+            return None
+        rows, cache = {}, {}
+        for key, row in (state.ledger.get("files") or {}).items():
+            if not isinstance(row, dict) or not _project_light(row):
+                continue
+            slim = {k: row[k] for k in _SNAPSHOT_FIELDS if k in row}
+            dest, fn = row.get("dest"), row.get("filename")
+            if isinstance(dest, str) and isinstance(fn, str):
+                slim["here"] = _dest_present(dest, fn, cache)
+                slim["dayKey"] = _day_key(dest)     # which Day folder: its calibration links by this
+            rows[key] = slim
+        _atomic_write_json(path, {"schema": "ledger-snapshot/1", "machine": MACHINE_LABEL,
+                                  "machineId": machine_identity()["slug"],
+                                  "machineUid": machine_id(), "at": _utc_iso(),
+                                  "files": rows, "customNames": state.custom_names or {},
+                                  "calibration": _calibration_links(state.ledger)})
+        return path
+    except OSError as e:
+        warn(f"The ledger snapshot for the other computer could not be written ({e}); "
+             f"its --projects will not see this computer's sessions until the next ship.")
+        return None
+
+SNAPSHOT_STALE_HOURS = 36       # the ship runs twice a day; older than this and the Mac hasn't reached the archive
+
+def _day_key(dest):
+    """A light row's Day folder, as the calibration links name it (linkedInto):
+    relative to the frame folder, '/'-separated. None when it isn't under it."""
+    try:
+        rel = _rel(dest, DEST_DIR)
+    except ValueError:
+        return None
+    return None if rel.startswith("..") else rel
+
+def _calibration_links(ledger):
+    """The ledger's calibration frames that are linked into a Day folder, slim:
+    what kind, which folders, and which copies the archive has verified. This
+    is what the project layer needs to say what calibration a session has."""
+    out = {}
+    for key, c in ((ledger or {}).get("calibration") or {}).items():
+        if not isinstance(c, dict) or c.get("frameType") not in LIB_SUBDIR:
+            continue
+        links = [l for l in (c.get("linkedInto") or []) if isinstance(l, str)]
+        if not links:
+            continue
+        copies = c.get("archive") if isinstance(c.get("archive"), dict) else {}
+        out[key] = {"frameType": c["frameType"], "filename": c.get("filename"), "linkedInto": links,
+                    "shipped": [l for l in links if isinstance(copies.get(l), dict) and copies[l].get("verifiedAt")]}
+    return out
+
+def _calibration_index(cal_maps):
+    """link (a Day folder key, or a target folder for a mosaic) -> counts per kind,
+    from this computer's ledger and the other's snapshot together."""
+    idx = {}
+    for cal in cal_maps:
+        for c in (cal or {}).values():
+            kind = LIB_SUBDIR.get(c.get("frameType")) if isinstance(c, dict) else None
+            if not kind:
+                continue
+            for link in c.get("linkedInto") or []:
+                if isinstance(link, str):
+                    n = idx.setdefault(link, {"biases": 0, "darks": 0, "flats": 0, "shipped": 0})
+                    n[kind] += 1
+                    if link in (c.get("shipped") or []):
+                        n["shipped"] += 1
+    return idx
+
+def _calibration_for(idx, day_keys):
+    """Counts for a set of Day folder keys: a link matches its own folder, or any
+    folder above it (a mosaic's shared calibration sits on the target folder)."""
+    tot = {"biases": 0, "darks": 0, "flats": 0, "shipped": 0}
+    seen = set()
+    for dk in day_keys:
+        if not isinstance(dk, str):
+            continue
+        parts = dk.split("/")
+        for i in range(1, len(parts) + 1):
+            link = "/".join(parts[:i])
+            if link in idx and link not in seen:
+                seen.add(link)
+                for k in tot:
+                    tot[k] += idx[link][k]
+    return tot
+
+def load_ledger_snapshot(path, warnings):
+    """The other computer's snapshot: (rows, meta). Rows are {} when the file
+    can't be used, and `warnings` says why; meta carries who wrote it, when,
+    and how old it is, for projects.json and the panel."""
+    d = _read_json_file(path)
+    meta = {"file": os.path.basename(path), "machine": d.get("machine") if isinstance(d.get("machine"), str) else None,
+            "at": d.get("at") if isinstance(d.get("at"), str) else None, "rows": 0, "age_hours": None,
+            "calibration": d.get("calibration") if isinstance(d.get("calibration"), dict) else {}}
+    schema = d.get("schema")
+    major = schema.split("/", 1)[1] if isinstance(schema, str) and schema.startswith("ledger-snapshot/") else "1"
+    if not major.isdigit() or int(major) > 1:
+        warnings.append(f"{meta['file']} was written by a newer importer ({schema}): update this "
+                        f"copy first; its sessions were not counted")
+        return {}, meta
+    files = d.get("files")
+    if not isinstance(files, dict) or not files:
+        warnings.append(f"{path}: no ledger rows could be read")
+        return {}, meta
+    meta["rows"] = len(files)
+    if meta["at"]:
+        try:
+            at = datetime.fromisoformat(meta["at"].replace("Z", "+00:00"))
+            if at.tzinfo is None:
+                at = at.replace(tzinfo=timezone.utc)
+            age = (datetime.now(timezone.utc) - at).total_seconds() / 3600
+            meta["age_hours"] = round(age, 1)
+            if age > SNAPSHOT_STALE_HOURS:
+                who = meta["machine"] or "other computer"
+                warnings.append(f"the {who}'s record on the archive is {int(age // 24)} day(s) old "
+                                f"(its last ship reached the archive on {meta['at'][:10]}): its newest "
+                                f"sessions may be missing, and datasets still being captured may look "
+                                f"ready too soon")
+        except ValueError:
+            pass
+    return files, meta
+
+def other_ledger_snapshot(mount=None):
+    """The other computer's ledger snapshot on the archive, when it is there."""
+    _here, there = ship_sides()
+    path = _verify_path(mount or ARCHIVE_MOUNT, there, LEDGER_SNAPSHOT_NAME)
+    return path if os.path.isfile(path) else None
+
+def _snapshot_custom_names(paths):
+    """The custom names the other computer's snapshot(s) carry."""
+    names = {}
+    for p in paths:
+        d = _read_json_file(p)
+        cn = d.get("customNames") if isinstance(d, dict) else None
+        if isinstance(cn, dict):
+            names.update({k: v for k, v in cn.items() if isinstance(k, str) and isinstance(v, str)})
+    return names
+
+def projects_inputs(state, extra_ledgers=()):
+    """What the project layer reads besides this computer's own ledger:
+    the other computer's ledger snapshot on the archive, by itself, plus any
+    --with-ledger file; and the custom names, the snapshot's under this
+    computer's own. Returns (ledger paths, custom names)."""
+    extra = list(extra_ledgers)
+    for p in extra:
+        _confine(p, "--with-ledger")
+    snap = other_ledger_snapshot()
+    if snap and os.path.realpath(snap) not in {os.path.realpath(x) for x in extra}:
+        info(f"Reading the {ship_sides()[1].upper() if ship_sides()[1] == 'pc' else 'Mac'}'s "
+             f"ledger snapshot: {snap}")
+        extra.append(snap)
+    names = _snapshot_custom_names(extra)
+    names.update(state.custom_names or {})
+    return extra, names
+
+def ship_log_path(mount=None):
+    """This machine's own ship log: _verify\\mac\\shipped.jsonl on the Mac,
+    _verify\\pc\\shipped-pc.jsonl on the PC (1.7.0)."""
+    return _verify_path(mount or ARCHIVE_MOUNT, SHIP_FOLDER, SHIP_LOG_NAME)
+
+def _os_reason(e):
+    """Why an archive operation failed, in words that point at the fix."""
+    why = e.strerror or str(e)
+    if IS_MAC and e.errno == errno.EPERM:
+        why += "; macOS may be keeping this program away from the share (Privacy & Security)"
+    elif e.errno in (errno.EACCES, errno.EPERM):
+        why += "; the share's rights may need the PC setup (PC-SYNC.md)"
+    return why
+
+def archive_check(mount=None, write_test=True):
+    """(True, "") when the archive is mounted AND alive, else (False, why).
+    After a PC reboot or power cut a stale SMB mount can still list directories
+    from cache while refusing every write (seen 19 Sep 2026), so the check also
+    writes and removes a scratch file, in this machine's own _verify folder:
+    the one place on the archive the share user may delete (1.7.0). The reason
+    is said, because "not mounted", "the PC is asleep" and "macOS keeps this
+    program out" all used to read "not reachable" (1.7.0, fix d)."""
     mount = mount or ARCHIVE_MOUNT
     try:
-        if not os.path.isdir(mount) or not any(os.path.isdir(os.path.join(mount, r)) for r in SHIP_ROOTS.values()):
-            return False
-        if write_test:
-            vdir = os.path.join(mount, "_verify")
-            _confine(vdir, "the archive probe")
-            os.makedirs(vdir, exist_ok=True)
-            probe = os.path.join(vdir, f".ship-probe-{os.getpid()}")
+        if not os.path.isdir(mount):
+            return False, ("the folder isn't there" if IS_WINDOWS else "the share isn't mounted")
+        if not any(os.path.isdir(os.path.join(mount, r)) for r in SHIP_ROOTS.values()):
+            return False, "none of S30P, S30, S50, S50P or 'ZWO Askar Scopes' is in it"
+    except OSError as e:
+        return False, _os_reason(e)
+    if write_test:
+        own = _verify_path(mount, SHIP_FOLDER)
+        _confine(own, "the archive probe")
+        try:
+            os.makedirs(own, exist_ok=True)
+            probe = os.path.join(own, f".ship-probe-{os.getpid()}")
             with open(probe, "w") as f:
                 f.write(now_stamp())
             os.remove(probe)
-        return True
-    except OSError:
-        return False
+        except OSError as e:
+            return False, f"can't write in _verify{os.sep}{SHIP_FOLDER} ({_os_reason(e)})"
+    return True, ""
+
+def archive_reachable(mount=None, write_test=True):
+    """True when the archive is mounted AND alive (archive_check says why not)."""
+    return archive_check(mount, write_test)[0]
 
 def _ship_target_folder(root_dir, display, mosaic):
     """Archive folder for a Mac display name. Prefer a folder that already
@@ -3242,8 +3741,11 @@ def _file_night_any(filename):
     return _seestar_file_night(filename)   # both camera families stamp yyyymmdd-hhmmss
 
 class _DayMap:
-    """Night -> Day number for one archive target folder (or mosaic panel folder)."""
-    def __init__(self, folder, seestar):
+    """Night -> Day number for one archive target folder (or mosaic panel folder).
+    `seed` adds nights this machine's ship already started into a Day folder
+    (its own log): a copy the PC set aside leaves that Day empty, and the
+    retry must go back into it, not open the next Day (1.7.0)."""
+    def __init__(self, folder, seestar, seed=None):
         self.folder, self.seestar = folder, seestar
         self.nights, self.max_n, self.token = {}, 0, None
         try:
@@ -3266,6 +3768,9 @@ class _DayMap:
                 pass
         if toks:
             self.token = max(toks, key=toks.get)
+        for nt, n in (seed or {}).items():
+            self.nights.setdefault(nt, n)
+            self.max_n = max(self.max_n, n)
     def day_for(self, night):
         if night in self.nights:
             return self.nights[night]
@@ -3277,12 +3782,19 @@ class _DayMap:
             return f"{self.token or mac_token}_sub Day {n}"
         return f"{target_name} Day {n}"
 
-def _find_moved_file(dest, filename, size, index):
+_FITS_EXT = (".fit", ".fits", ".fts")
+
+def _find_moved_file(dest, filename, size, index, allow_prefixed=False):
     """A frame the ledger placed in a Day folder may since have been gathered
     into a flat lights/ folder (Collect Lights, or by hand). Look for it by
     name and size anywhere under the target folder, walking up from the Day
     folder to the first folder that is not a Day/lights/panels level. One
-    directory walk per target folder, cached in `index`."""
+    directory walk per target folder, cached in `index`.
+    allow_prefixed (the ship only, 1.7.0, fix b): also a copy renamed
+    "<session folder>_<original name>", as Collect Lights names them in
+    lights/lights. Same size isn't proof, so only a caller that checks the
+    bytes against the ledger's hash may ask for it (the ship does, before it
+    writes anything); the Space view never does."""
     d = os.path.normpath(dest)
     for _ in range(3):
         parent = os.path.dirname(d)
@@ -3300,7 +3812,18 @@ def _find_moved_file(dest, filename, size, index):
                     for fn in fns:
                         idx.setdefault(fn, []).append(os.path.join(root, fn))
             index[d] = idx
-        for cand in index[d].get(filename, []):
+        cands = list(index[d].get(filename, []))
+        if allow_prefixed and filename.lower().endswith(_FITS_EXT):
+            pkey = ("prefixed", d)
+            if pkey not in index:
+                pidx = {}
+                for fn, paths in index[d].items():
+                    for i, ch in enumerate(fn):
+                        if ch == "_" and fn[i + 1:].lower().endswith(_FITS_EXT):
+                            pidx.setdefault(fn[i + 1:], []).extend(paths)
+                index[pkey] = pidx
+            cands += index[pkey].get(filename, [])
+        for cand in cands:
             try:
                 if size is None or os.path.getsize(cand) == size:
                     return cand
@@ -3724,12 +4247,33 @@ def archive_folder_listing(rel):
         out[key].sort(key=lambda r: r.get("date") or "", reverse=True)
     return out
 
-def ship_plan(state, mount):
-    """Return (items, notes). items: dict(rel, src, entry, key). rel is the
-    archive-relative path with the archive's own separators (\\\\)."""
+def _ship_seeds(own_rows, mount):
+    """Day folders this machine's own ship log has started frames in: archive
+    target folder -> {night: Day number}, for _DayMap's seed (1.7.0)."""
+    seeds = {}
+    for r in (own_rows or {}).values():
+        rel = r.get("relpath")
+        if not isinstance(rel, str):
+            continue
+        parts = [p for p in re.split(r"[\\/]", rel) if p]
+        if len(parts) < 3:
+            continue
+        m = _E_DAY_RE.match(parts[-2])
+        nt = _file_night_any(parts[-1])
+        if m and nt:
+            tdir = os.path.normcase(os.path.normpath(os.path.join(mount, *parts[:-2])))
+            seeds.setdefault(tdir, {}).setdefault(nt, int(m.group(2)))
+    return seeds
+
+def ship_plan(state, mount, own_rows=None):
+    """Return (items, notes). items: dict(rel, src, entry, key, kind[, link]):
+    kind "frame" for a ledger frame, "cal" for one calibration frame's copy in
+    one Day folder (1.7.0). rel is the archive-relative path with the archive's
+    own separators (\\\\)."""
     items, notes = [], []
     daymaps = {}
     _tree_index = {}
+    seeds = _ship_seeds(own_rows, mount)
     home = os.path.expanduser("~")
     for key, e in state.ledger["files"].items():
         if not e.get("verifiedAtImport") or e.get("archiveVerifiedAt") or e.get("tidiedAt"):
@@ -3745,7 +4289,10 @@ def ship_plan(state, mount):
             continue   # 1.4.2: per-sub JPEG previews are not shipped to the archive
         src = os.path.join(dest, e["filename"])
         if not os.path.isfile(src):
-            src = _find_moved_file(dest, e["filename"], e.get("size"), _tree_index)
+            # moved into a lights/ folder, perhaps renamed by Collect Lights:
+            # the ship checks the bytes against the ledger before sending
+            src = _find_moved_file(dest, e["filename"], e.get("size"), _tree_index,
+                                   allow_prefixed=True)
             if not src:
                 if dest.startswith(home):
                     notes.append(("missing on Mac", key))
@@ -3762,14 +4309,15 @@ def ship_plan(state, mount):
         # non-DSO modes live at the root by mode name
         if seestar and base in {n for _, n in SEESTAR_NON_DSO_MAP}:
             rel = os.path.join(root, base, e["filename"])
-            items.append({"rel": rel, "src": src, "entry": e, "key": key}); continue
+            items.append({"rel": rel, "src": src, "entry": e, "key": key, "kind": "frame"}); continue
         tfolder = _ship_target_folder(root_dir, display, mosaic)
         tdir = os.path.join(root_dir, tfolder)
         if panel:
             tdir = os.path.join(tdir, panel)
         dm_key = tdir
         if dm_key not in daymaps:
-            daymaps[dm_key] = _DayMap(tdir, seestar)
+            daymaps[dm_key] = _DayMap(tdir, seestar,
+                                      seed=seeds.get(os.path.normcase(os.path.normpath(tdir))))
         dm = daymaps[dm_key]
         m = _MAC_DAY_RE.match(base)
         if m and st in ("sub", "sub-jpg", "mw", "Plan", "Live", "panel-day"):
@@ -3791,37 +4339,159 @@ def ship_plan(state, mount):
                   else os.path.join(root, "_UNPLACED", tfolder, e["filename"])
         else:
             rel = os.path.join(SHIP_WORKING, root, tfolder, base, e["filename"])
-        items.append({"rel": rel, "src": src, "entry": e, "key": key})
+        items.append({"rel": rel, "src": src, "entry": e, "key": key, "kind": "frame"})
+    _plan_calibration(state, items, notes)
     return items, notes
 
+def _plan_calibration(state, items, notes):
+    """Calibration frames go to the archive with the lights they were linked
+    to (1.7.0, fix a): into the archive Day folder that the Mac Day folder's
+    lights went to, under calibration\\{biases,darks,flats}\\ as on the Mac
+    (and as the 3 Oct copy filed Bubble's). A mosaic's shared calibration
+    goes to its target folder's calibration\\. Only frames verified at import
+    are sent, and only once their lights have a place on the archive. A frame
+    linked into three nights is sent three times, once per Day folder."""
+    day_dirs = defaultdict(lambda: defaultdict(int))
+
+    def note_light(mac_dir, rel):
+        parts = [p for p in re.split(r"[\\/]", rel) if p]
+        if len(parts) >= 2:
+            day_dirs[os.path.normcase(os.path.normpath(mac_dir))]["\\".join(parts[:-1])] += 1
+
+    for e in state.ledger["files"].values():
+        if e.get("archiveLocation") and e.get("dest"):
+            note_light(e["dest"], e["archiveLocation"])
+    for i in items:
+        if i["kind"] == "frame" and i["entry"].get("dest") and not i["entry"].get("archiveLocation"):
+            note_light(i["entry"]["dest"], i["rel"])
+
+    def archive_dir_for(mac_dir, target_level):
+        norm = os.path.normcase(os.path.normpath(mac_dir))
+        if not target_level:
+            got = day_dirs.get(norm)
+            return max(got, key=got.get) if got else None
+        tally = defaultdict(int)          # a mosaic: the target folder above the panels
+        for d, counts in day_dirs.items():
+            if d.startswith(norm + os.sep):
+                for a, n in counts.items():
+                    parts = a.split("\\")
+                    if len(parts) >= 2:
+                        tally["\\".join(parts[:2])] += n
+        return max(tally, key=tally.get) if tally else None
+
+    for ckey, c in (state.ledger.get("calibration") or {}).items():
+        kind_dir = LIB_SUBDIR.get(c.get("frameType"))
+        links = c.get("linkedInto") or []
+        if not kind_dir or not links or not c.get("filename"):
+            continue
+        if not c.get("sha256") or not c.get("verifiedAtImport"):
+            continue                      # adopted by size alone, never proven: not sent
+        copies = c.get("archive") or {}
+        for link in links:
+            if (copies.get(link) or {}).get("verifiedAt"):
+                continue
+            mac_dir = os.path.join(DEST_DIR, link)
+            src = os.path.join(mac_dir, "calibration", kind_dir, c["filename"])
+            if not os.path.isfile(src):
+                lib = os.path.join(LIBRARY_DIR, c["libraryPath"]) if c.get("libraryPath") else None
+                src = lib if lib and os.path.isfile(lib) else None
+            if not src:
+                notes.append(("calibration missing on this computer", ckey))
+                continue
+            target_level = not _MAC_DAY_RE.match(os.path.basename(os.path.normpath(mac_dir)))
+            adir = archive_dir_for(mac_dir, target_level)
+            if not adir:
+                continue                  # its lights aren't on the archive yet: next time
+            rel = "\\".join([adir, "calibration", kind_dir, c["filename"]])
+            items.append({"rel": rel, "src": src, "entry": c, "key": ckey, "kind": "cal",
+                          "link": link})
+
+def _item_shipped(i):
+    """Has this item already been shipped (and is waiting for the PC's check)?"""
+    if i.get("kind") == "cal":
+        return bool(((i["entry"].get("archive") or {}).get(i["link"]) or {}).get("shippedAt"))
+    return bool(i["entry"].get("archiveShippedAt"))
+
+def _read_jsonl_rows(path):
+    """Every JSON object in a .jsonl file; a malformed line never stops a reader."""
+    rows = []
+    try:
+        with open(path, encoding="utf-8", errors="replace") as f:
+            for line in f:
+                line = line.strip()
+                if not line:
+                    continue
+                try:
+                    r = json.loads(line)
+                except ValueError:
+                    continue
+                if isinstance(r, dict):
+                    rows.append(r)
+    except OSError:
+        pass
+    return rows
+
+def _relkey(rel):
+    """One spelling of an archive path for comparing: backslashes, any case
+    (NTFS ignores case)."""
+    return str(rel).replace("/", "\\").lower()
+
+def own_ship_rows(mount=None):
+    """This machine's ship log, folded per archive path: the last row for each
+    path, whose "state" says where it stands (started / shipped / failed /
+    not-created; 1.7.0)."""
+    last = {}
+    for r in _read_jsonl_rows(ship_log_path(mount)):
+        rel = r.get("relpath")
+        if isinstance(rel, str) and rel and r.get("state"):
+            last[_relkey(rel)] = r
+    return last
+
 def _ship_apply_verified(state, mount):
-    """Read the PC's verified.jsonl and stamp archiveVerifiedAt on matching entries."""
-    vpath = os.path.join(mount, "_verify", "verified.jsonl")
-    if not os.path.isfile(vpath):
-        return 0
+    """Stamp archiveVerifiedAt from the PC's verified rows: _verify\\pc\\
+    verified.jsonl (1.7.0) and the old _verify\\verified.jsonl, still read
+    for one release. Calibration copies are stamped per Day folder."""
     by_loc = {}
-    for k, e in state.ledger["files"].items():
+    for _k, e in state.ledger["files"].items():
         loc = e.get("archiveLocation")
         if loc and not e.get("archiveVerifiedAt"):
-            by_loc[loc.replace("/", "\\").lower()] = e
+            by_loc[_relkey(loc)] = (e, e)
+    for _k, c in (state.ledger.get("calibration") or {}).items():
+        for copy in (c.get("archive") or {}).values():
+            if copy.get("location") and not copy.get("verifiedAt"):
+                by_loc[_relkey(copy["location"])] = (c, copy)
     n = 0
-    with open(vpath, encoding="utf-8", errors="replace") as f:
-        for line in f:
-            try:
-                r = json.loads(line)
-            except ValueError:
-                continue
-            if not isinstance(r, dict):
-                continue                     # a stray line never stops a ship
+    for vpath in (_verify_path(mount, "pc", "verified.jsonl"), _verify_path(mount, "verified.jsonl")):
+        for r in _read_jsonl_rows(vpath):
             try:
                 rsize = int(r.get("size"))
             except (TypeError, ValueError):
                 continue
-            e = by_loc.get(str(r.get("relpath", "")).replace("/", "\\").lower())
-            if e and (e.get("sha256") in (None, r.get("sha256"))) and e.get("size") == rsize:
-                e["archiveVerifiedAt"] = r.get("verifiedAt") or now_stamp()
-                state._dirty = True; n += 1
+            hit = by_loc.get(_relkey(r.get("relpath", "")))
+            if not hit:
+                continue
+            e, stamp_into = hit
+            if e.get("sha256") in (None, r.get("sha256")) and e.get("size") == rsize:
+                key = "archiveVerifiedAt" if stamp_into is e else "verifiedAt"
+                if not stamp_into.get(key):
+                    stamp_into[key] = r.get("verifiedAt") or now_stamp()
+                    state._dirty = True
+                    n += 1
     return n
+
+def _share_host_up(url, timeout=2.0):
+    """True when the share's host answers on the SMB port (445). A quick probe before
+    `open smb://...`: with the PC off, Finder would otherwise sit on a "connecting"
+    sheet for a minute or more (1.7.0). Unknown host or no host in the URL → False."""
+    m = re.match(r"^[a-z]+://(?:[^/@]*@)?([^/:]+)(?::(\d+))?", str(url or ""), re.I)
+    if not m:
+        return False
+    host, port = m.group(1), int(m.group(2) or 445)
+    try:
+        with socket.create_connection((host, port), timeout=timeout):
+            return True
+    except OSError:
+        return False
 
 def _try_mount_archive(mount, url, wait=20):
     """Ask Finder to mount the share (password from the keychain). Returns True when
@@ -3831,6 +4501,8 @@ def _try_mount_archive(mount, url, wait=20):
         return False
     if not url or sys.platform != "darwin":
         return False
+    if not _share_host_up(url):
+        return False                        # PC off: no Finder sheet, no wait
     try:
         subprocess.run(["open", url], stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL, timeout=15)
     except Exception:
@@ -3842,79 +4514,381 @@ def _try_mount_archive(mount, url, wait=20):
     return False
 
 MACHINE_LABEL = "Mac" if IS_MAC else ("PC" if IS_WINDOWS else PLATFORM)
-SHIP_LOCK_STALE_S = 6 * 3600
+SHIP_ROW_SCHEMA = "ship-row/1"
+SHIP_LOCK_SCHEMA = "ship-lock/1"
+SHIP_LOCK_RENEW_S = 60               # the holder renews its lock this often (spec 11)
+SHIP_LOCK_BREAK_S = 10 * 60          # ...and it may be broken after this long without
+LEGACY_SHIP_LOCK_STALE_S = 6 * 3600  # a 1.6 lock (_verify\ship.lock) counts this long
 
-def _archive_ship_lock(mount):
-    """One computer ships into the archive at a time (1.5.0). The lock lives
-    ON the archive (_verify/ship.lock), so the Mac and the PC see the same one.
-    Returns the lock path, or None when another run holds it."""
-    path = os.path.join(mount, "_verify", "ship.lock")
-    _confine(path, "the archive ship lock")
-    me = {"machine": machine_id(), "host": socket.gethostname(), "platform": PLATFORM,
-          "pid": os.getpid(), "at": now_stamp()}
-    for _ in range(2):
+def _utc_now():
+    return datetime.now(timezone.utc)
+
+def _utc_iso(dt=None):
+    return (dt or _utc_now()).isoformat(timespec="seconds")
+
+def _parse_utc(text):
+    """A timestamp from a lock or log row (ISO 8601, UTC); None if unreadable."""
+    try:
+        dt = datetime.fromisoformat(str(text))
+    except (TypeError, ValueError):
+        return None
+    return dt if dt.tzinfo else dt.replace(tzinfo=timezone.utc)
+
+class _ShipLock:
+    """The archive's ship lock while this run holds it (1.7.0, spec 11): kept
+    fresh every SHIP_LOCK_RENEW_S by a thread, so a long ship is never taken
+    for a dead one. `lost` turns True if someone broke it; the ship stops at
+    the next file then. Released only if it is still ours."""
+
+    def __init__(self, path, rec, legacy=None):
+        self.path, self.rec, self.legacy, self.lost = path, rec, legacy, False
+        self._stop = threading.Event()
+        self._thread = threading.Thread(target=self._loop, daemon=True)
+        self._thread.start()
+
+    def _ours(self):
         try:
-            fd = os.open(path, os.O_CREAT | os.O_EXCL | os.O_WRONLY)
-            with os.fdopen(fd, "w") as f:
-                json.dump(me, f)
-            return path
-        except FileExistsError:
-            try:
-                with open(path) as f:
-                    held = json.load(f)
-            except (OSError, ValueError):
-                held = {}
-            try:
-                age = time.time() - os.path.getmtime(path)
-            except OSError:
-                continue
-            mine_dead = held.get("machine") == me["machine"] and not pid_alive(held.get("pid"))
-            if age > SHIP_LOCK_STALE_S or mine_dead:
-                warn(f"Clearing a stale archive ship lock ({held.get('host', '?')}, "
-                     f"{held.get('at', '?')}).")
+            with open(self.path, encoding="utf-8") as f:
+                held = json.load(f)
+        except (OSError, ValueError):
+            return False
+        return isinstance(held, dict) and held.get("machine") == self.rec["machine"] \
+            and held.get("pid") == self.rec["pid"] and held.get("startedAt") == self.rec["startedAt"]
+
+    def renew(self):
+        """Write a new renewedAt into the lock; False (and `lost`) if it isn't ours now."""
+        if not self._ours():
+            self.lost = True
+            return False
+        self.rec["renewedAt"] = _utc_iso()
+        try:
+            with open(self.path, "r+", encoding="utf-8") as f:
+                f.seek(0)
+                f.truncate()
+                json.dump(self.rec, f)
+                f.flush()
+        except OSError:
+            self.lost = True
+            return False
+        return True
+
+    def _loop(self):
+        while not self._stop.wait(SHIP_LOCK_RENEW_S):
+            if not self.renew():
+                return
+
+    def release(self):
+        self._stop.set()
+        for path, mine in ((self.legacy, True), (self.path, self._ours())):
+            if path and mine:
                 try:
                     os.remove(path)
                 except OSError:
+                    pass
+
+def _archive_ship_lock(mount, op="ship"):
+    """One computer ships into the archive at a time (1.5.0). The lock lives ON
+    the archive, so the Mac and the PC see the same one: from 1.7.0 in
+    _verify\\lock\\ship.lock, the one folder besides its own where the share
+    user may delete. The holder renews it every minute; a lock not renewed for
+    ten minutes is broken, and that is written in this machine's ship log.
+    While a 1.6 importer may still run somewhere, its _verify\\ship.lock is
+    honoured too, and taken alongside where the rights still allow it.
+    Returns a _ShipLock, or None when another run holds it."""
+    ident = machine_identity()
+    lockdir = _verify_path(mount, "lock")
+    path = os.path.join(lockdir, "ship.lock")
+    legacy = _verify_path(mount, "ship.lock")
+    _confine(path, "the archive ship lock")
+    now = _utc_iso()
+    me = {"schema": SHIP_LOCK_SCHEMA, "machineId": ident["slug"], "machine": ident["id"],
+          "host": socket.gethostname(), "platform": PLATFORM, "pid": os.getpid(), "op": op,
+          "startedAt": now, "renewedAt": now}
+    try:
+        os.makedirs(lockdir, exist_ok=True)
+    except OSError as e:
+        warn(f"Could not take the archive ship lock: {_os_reason(e)}")
+        return None
+    for _ in range(2):
+        try:
+            fd = os.open(path, os.O_CREAT | os.O_EXCL | os.O_WRONLY)
+        except FileExistsError:
+            try:
+                with open(path, encoding="utf-8") as f:
+                    held = json.load(f)
+            except (OSError, ValueError):
+                held = {}
+            if not isinstance(held, dict):
+                held = {}
+            renewed = _parse_utc(held.get("renewedAt"))
+            if renewed is None:
+                try:
+                    renewed = datetime.fromtimestamp(os.path.getmtime(path), timezone.utc)
+                except OSError:
+                    continue                      # gone this instant: try again
+            age = (_utc_now() - renewed).total_seconds()
+            mine_dead = held.get("machine") == ident["id"] and not pid_alive(held.get("pid"))
+            if age > SHIP_LOCK_BREAK_S or mine_dead:
+                warn(f"Breaking a stale archive ship lock ({held.get('host', '?')}, "
+                     f"last renewed {held.get('renewedAt', '?')}).")
+                try:
+                    os.remove(path)
+                except OSError as e:
+                    warn(f"Could not break it: {_os_reason(e)}")
                     return None
+                try:
+                    _ship_row(ship_log_path(mount), "lock-broken", None, None, None, None,
+                              held={k: held.get(k) for k in ("machineId", "host", "pid", "op",
+                                                             "startedAt", "renewedAt")})
+                except OSError:
+                    pass
                 continue
             info(f"{held.get('host', 'Another computer')} is shipping into the archive right "
-                 f"now (since {held.get('at', '?')}) — nothing shipped; will try next time.")
+                 f"now (since {held.get('startedAt', '?')}) — nothing shipped; will try next time.")
             return None
         except OSError as e:
-            warn(f"Could not take the archive ship lock: {e}")
+            warn(f"Could not take the archive ship lock: {_os_reason(e)}")
             return None
+        with os.fdopen(fd, "w", encoding="utf-8") as f:
+            json.dump(me, f)
+        took_legacy = _take_legacy_ship_lock(legacy, me)
+        if took_legacy is False:
+            try:
+                os.remove(path)
+            except OSError:
+                pass
+            return None
+        return _ShipLock(path, me, legacy=legacy if took_legacy else None)
     return None
+
+def _take_legacy_ship_lock(legacy, me):
+    """A 1.6 importer only knows _verify\\ship.lock: while one may still be in
+    use, hold that too. True: taken; None: not possible here (the share's
+    rights no longer allow it, so no 1.6 ship can run either); False: a 1.6
+    run holds it, so this one waits."""
+    try:
+        fd = os.open(legacy, os.O_CREAT | os.O_EXCL | os.O_WRONLY)
+    except FileExistsError:
+        try:
+            age = time.time() - os.path.getmtime(legacy)
+        except OSError:
+            return None
+        if age < LEGACY_SHIP_LOCK_STALE_S:
+            try:
+                with open(legacy, encoding="utf-8") as f:
+                    held = json.load(f)
+            except (OSError, ValueError):
+                held = {}
+            host = held.get("host", "Another computer") if isinstance(held, dict) else "Another computer"
+            info(f"{host} (an older importer) is shipping into the archive right now — "
+                 f"nothing shipped; will try next time.")
+            return False
+        return None                               # stale, and an old run's to clear
+    except OSError:
+        return None
+    with os.fdopen(fd, "w", encoding="utf-8") as f:
+        json.dump({"machine": me["machine"], "host": me["host"], "platform": me["platform"],
+                   "pid": me["pid"], "at": now_stamp()}, f)
+    return True
+
+def _ship_row(log, state, loc, size, sha, ship_id, **extra):
+    """Append one row to this machine's ship log, flushed to the archive's disk
+    before anything else happens (1.7.0). "started" before a file is created,
+    "shipped" after its read-back matches, "failed" when it doesn't,
+    "not-created" when the name turned out to be taken."""
+    row = {"schema": SHIP_ROW_SCHEMA, "state": state, "relpath": loc, "size": size,
+           "sha256": sha, "machine": MACHINE_LABEL, "machineId": machine_identity()["slug"],
+           "shipId": ship_id, "at": _utc_iso()}
+    row.update(extra)
+    _confine(log, "the ship log")
+    with open(log, "a", encoding="utf-8") as f:
+        f.write(json.dumps(row) + "\n")
+        f.flush()
+        os.fsync(f.fileno())
+
+def _ship_existing(dst, loc, expect_sha, expect_size, last, log, ship_id, stamp, checksum):
+    """The archive already holds a file at this frame's path, and it isn't an
+    unfinished copy of ours: adopt it only when it holds these bytes (a lead
+    for the PC's check), never write over it. (status, sha, problem)."""
+    size = os.path.getsize(dst)
+    if expect_size is not None and size != expect_size:
+        return "problem", None, "exists on the archive with a different size; left untouched"
+    if last and last.get("state") == "shipped" and last.get("sha256") \
+            and last.get("sha256") == expect_sha:
+        return "already there", expect_sha, None     # logged before; only the stamp was lost
+    h = _hash_dest_uncached(dst) if checksum else None
+    if h is not None and expect_sha not in (None, h):
+        return "problem", None, "exists on the archive with different content; left untouched"
+    sha = h or expect_sha
+    _ship_row(log, "shipped", loc, size, sha, ship_id, shippedAt=stamp, adopted=True)
+    return "already there", sha, None
+
+def _ship_one(src, dst, loc, expect_sha, expect_size, rows, log, ship_id, stamp, checksum):
+    """Copy one file into the archive without ever deleting, renaming or
+    writing over anything there (1.7.0, D7): the Mac file is proven against
+    the ledger first, a "started" row goes into this machine's log, the file
+    is created under its final name only if that name is free, its bytes are
+    read back, and only then is it "shipped". Returns (status, sha, problem);
+    status is shipped / already there / waiting / problem."""
+    last = rows.get(_relkey(loc))
+    if os.path.lexists(dst):
+        if last and last.get("state") in ("started", "failed"):
+            if checksum and expect_sha and os.path.getsize(dst) == expect_size \
+                    and _hash_dest_uncached(dst) == expect_sha:
+                # every byte arrived: only the "shipped" row was lost (a crash
+                # between the two), or the read-back was what failed. The PC
+                # leaves such a copy where it is, so record it now
+                _ship_row(log, "shipped", loc, expect_size, expect_sha, ship_id,
+                          shippedAt=stamp, adopted=True)
+                return "already there", expect_sha, None
+            # our own unfinished copy: the PC's sweep sets it aside, then the
+            # name is free and this frame goes again, to this same path
+            return "waiting", None, None
+        return _ship_existing(dst, loc, expect_sha, expect_size, last, log, ship_id, stamp,
+                              checksum)
+    sha_src = sha256_of(src) if checksum else None
+    if sha_src and expect_sha and sha_src != expect_sha:
+        return "problem", None, ("the copy on this computer no longer matches the ledger "
+                                 "(changed since import); not sent")
+    size_src = os.path.getsize(src)
+    if expect_size is not None and size_src != expect_size:
+        return "problem", None, "the copy on this computer changed size since import; not sent"
+    with open(src, "rb") as fin:
+        _ship_row(log, "started", loc, size_src, expect_sha or sha_src, ship_id)
+        try:
+            fd = os.open(dst, os.O_WRONLY | os.O_CREAT | os.O_EXCL | getattr(os, "O_BINARY", 0),
+                         0o644)
+        except FileExistsError:
+            # taken between the look and the create: never ours to finish
+            _ship_row(log, "not-created", loc, size_src, expect_sha or sha_src, ship_id)
+            return _ship_existing(dst, loc, expect_sha, expect_size, None, log, ship_id, stamp,
+                                  checksum)
+        sent = hashlib.sha256()
+        try:
+            with os.fdopen(fd, "wb") as fout:
+                for chunk in iter(lambda: fin.read(1024 * 1024), b""):
+                    fout.write(chunk)
+                    sent.update(chunk)
+                fout.flush()
+                os.fsync(fout.fileno())
+        except OSError as ex:
+            try:                                  # the share may be gone already
+                _ship_row(log, "failed", loc, size_src, expect_sha or sha_src, ship_id,
+                          why=f"cut off mid-copy: {ex.strerror or ex}")
+            except OSError:
+                pass
+            raise
+    sha_sent = sent.hexdigest()
+    if checksum and sha_sent != sha_src:
+        _ship_row(log, "failed", loc, size_src, sha_src, ship_id,
+                  why="the file changed on this computer during the copy")
+        return "problem", None, ("the file changed while it was being sent; "
+                                 "left for the PC to set aside")
+    if os.path.getsize(dst) != size_src:
+        _ship_row(log, "failed", loc, size_src, sha_src, ship_id, why="short on the archive")
+        return "problem", None, "the archive copy is short; left for the PC to set aside"
+    if checksum:
+        back = _hash_dest_uncached(dst)
+        if back != sha_sent:
+            _ship_row(log, "failed", loc, size_src, sha_sent, ship_id,
+                      why="read back differs from what was sent", found=back)
+            return "problem", None, ("read back differs from what was sent; "
+                                     "left for the PC to set aside")
+    sha = sha_sent if checksum else expect_sha
+    # the frame's own dates only on a whole, read-back copy: a copy left
+    # unfinished keeps the time it was written, which the PC's sweep checks
+    # against its "started" row before it ever sets one aside
+    try:
+        st = os.stat(src)
+        os.utime(dst, (st.st_atime, st.st_mtime))
+    except OSError:
+        pass
+    _ship_row(log, "shipped", loc, size_src, sha, ship_id, shippedAt=stamp)
+    preserve_creation_time(src, dst)
+    return "shipped", sha, None
+
+def _ship_mount(mount):
+    """(True, "") once the archive is reachable, mounting the share first when
+    a URL is set (the Mac); else (False, why)."""
+    ok, why = archive_check(mount)
+    if not ok and ARCHIVE_URL:
+        info(f"Archive not mounted; asking Finder to connect to {ARCHIVE_URL} ...")
+        _try_mount_archive(mount, ARCHIVE_URL)
+        ok, why = archive_check(mount)
+    return ok, why
+
+def slug_problem():
+    """Why this computer's short name can't go into a log row or a file name
+    (checked before anything is written, spec 2), or "" when it's fine."""
+    ident = machine_identity()
+    if ident["slugValid"]:
+        return ""
+    return (f"this computer's short name {ident['slug']!r} breaks the rule (a to z, 0 to 9 "
+            f"and -, at most 32): change ASTRO_MACHINE_ID in config.json")
 
 def run_ship(state, dry_run=False, mount=None, checksum=True):
     mount = mount or ARCHIVE_MOUNT
-    if not dry_run and archive_reachable(mount):
-        lock = _archive_ship_lock(mount)
-        if lock is None:
-            emit("ship", reachable=True, shipped=0, problems=0, busy=True)
-            return False
-        try:
-            return _run_ship(state, dry_run=dry_run, mount=mount, checksum=checksum)
-        finally:
-            try:
-                os.remove(lock)
-            except OSError:
-                pass
-    return _run_ship(state, dry_run=dry_run, mount=mount, checksum=checksum)
-
-def _run_ship(state, dry_run=False, mount=None, checksum=True):
-    mount = mount or ARCHIVE_MOUNT
-    if not archive_reachable(mount) and ARCHIVE_URL:
-        info(f"Archive not mounted; asking Finder to connect to {ARCHIVE_URL} ...")
-        _try_mount_archive(mount, ARCHIVE_URL)
-    if not archive_reachable(mount):
-        info(f"Archive not reachable at {mount} ({ARCHIVE_LABEL}). Nothing shipped; will try next time.")
-        emit("ship", reachable=False)
+    if not state.has_ledger():
+        info("Nothing has been imported on this computer, so there is nothing to ship.")
+        emit("ship", reachable=None, shipped=0, problems=0, nothing=True)
+        return True
+    bad = slug_problem()
+    if bad:
+        warn(f"Nothing shipped: {bad}.")
+        emit("ship", reachable=None, refused=bad)
         return False
+    ok, why = _ship_mount(mount)
+    if not ok:
+        info(f"Archive not reachable at {mount} ({ARCHIVE_LABEL}): {why}. "
+             f"Nothing shipped; will try next time.")
+        emit("ship", reachable=False, why=why)
+        return False
+    if dry_run:
+        return _run_ship(state, dry_run=True, mount=mount, checksum=checksum)
+    lock = _archive_ship_lock(mount)
+    if lock is None:
+        emit("ship", reachable=True, shipped=0, problems=0, busy=True)
+        return False
+    try:
+        return _run_ship(state, dry_run=False, mount=mount, checksum=checksum, lock=lock)
+    finally:
+        lock.release()
+
+def ship_after_import(state, checksum=True, mount_share=True):
+    """File what an import just brought into the archive while its lock is still
+    held: the command line since 1.4.0, the panel from 1.7.0 (fix c). Quiet when
+    the share can't be reached; the twice-daily ship catches up. The command
+    line first asks Finder to connect, without a word, as it always has; the
+    panel (mount_share=False) ships only when the share is already up."""
+    try:
+        ok, _why = archive_check(ARCHIVE_MOUNT)
+        if not ok and mount_share and ARCHIVE_URL:
+            _try_mount_archive(ARCHIVE_MOUNT, ARCHIVE_URL)
+            ok, _why = archive_check(ARCHIVE_MOUNT)
+        if ok:
+            print()
+            run_ship(state, checksum=checksum)
+    except Exception as e:
+        warn(f"Ship after import failed (frames are safe on this computer): {e}")
+
+def _archive_free_margin():
+    """Bytes the archive keeps free after a ship (ASTRO_ARCHIVE_MIN_FREE_GB,
+    default 10; none in test mode, whose archive is a temp folder)."""
+    v = os.environ.get("ASTRO_ARCHIVE_MIN_FREE_GB") or _CONFIG.get("ASTRO_ARCHIVE_MIN_FREE_GB")
+    try:
+        gb = float(v) if v not in (None, "") else (0.0 if TEST_ROOT else 10.0)
+    except (TypeError, ValueError):
+        gb = 10.0
+    return int(max(gb, 0.0) * 1024 ** 3)
+
+def _run_ship(state, dry_run=False, mount=None, checksum=True, lock=None):
+    mount = mount or ARCHIVE_MOUNT
     stamped = _ship_apply_verified(state, mount)
     if stamped:
         success(f"{stamped} frame(s) confirmed verified by the PC sweep")
-    items, notes = ship_plan(state, mount)
-    todo = [i for i in items if not i["entry"].get("archiveShippedAt")]
+    rows = own_ship_rows(mount)
+    items, notes = ship_plan(state, mount, own_rows=rows)
+    todo = [i for i in items if not _item_shipped(i)]
     waiting = len(items) - len(todo)
     total = sum(i["entry"].get("size") or 0 for i in todo)
     info(f"Ship: {len(todo)} file(s), {human_size(total)} to {ARCHIVE_LABEL}; "
@@ -3930,16 +4904,36 @@ def _run_ship(state, dry_run=False, mount=None, checksum=True):
         by_target["/".join(parts[:2])][0] += 1; by_target["/".join(parts[:2])][1] += i["entry"].get("size") or 0
     for t, (n, b) in sorted(by_target.items()):
         log(f"  {t.replace('/', chr(92))}: {n} file(s), {human_size(b)}")
+    cal = [i for i in todo if i["kind"] == "cal"]
+    if cal:
+        log(f"  of which calibration frames: {len(cal)} file(s), "
+            f"{human_size(sum(i['entry'].get('size') or 0 for i in cal))}")
     if dry_run:
         info("[dry-run] Nothing copied.")
         return True
-    vdir = os.path.join(mount, "_verify"); os.makedirs(vdir, exist_ok=True)
-    shipped_log = os.path.join(vdir, SHIP_LOG_NAME)   # this machine's own log
+    if todo:
+        try:
+            free = shutil.disk_usage(mount).free
+        except OSError:
+            free = None
+        if free is not None and free - total < _archive_free_margin():
+            warn(f"The archive has {human_size(free)} free; sending {human_size(total)} would "
+                 f"leave less than {human_size(_archive_free_margin())}. Nothing shipped: free "
+                 f"up space on the archive first.")
+            emit("ship", reachable=True, shipped=0, problems=0, full=True)
+            return False
+    shipped_log = ship_log_path(mount)
     _confine(shipped_log, "the ship log")
-    shipped, problems, frames = 0, [], []
+    os.makedirs(os.path.dirname(shipped_log), exist_ok=True)
+    ship_id = uuid.uuid4().hex[:12]
+    shipped, problems, frames, held_back = 0, [], [], 0
     stamp = now_stamp()
     real_mount = _prefix(os.path.realpath(mount))
     for n, i in enumerate(todo, 1):
+        if lock is not None and lock.lost:
+            warn("The archive ship lock was taken over; stopping this run. What shipped is "
+                 "recorded; the rest waits for next time.")
+            break
         e, rel = i["entry"], i["rel"].replace("\\", "/")
         dst = os.path.join(mount, rel)
         if ".." in rel.split("/") or os.path.isabs(rel) \
@@ -3947,50 +4941,42 @@ def _run_ship(state, dry_run=False, mount=None, checksum=True):
             # a folder name must never walk a copy out of the archive (V3)
             problems.append((rel, "path leaves the archive folder; not shipped"))
             continue
-        _confine(dst, "the ship")        # its folder, .partial and .BAD sit beside it
+        _confine(dst, "the ship")
+        loc = rel.replace("/", "\\")
         try:
             os.makedirs(os.path.dirname(dst), exist_ok=True)
-            if os.path.isfile(dst):
-                if os.path.getsize(dst) == e.get("size"):
-                    h = sha256_of(dst) if checksum else None
-                    if h is None or e.get("sha256") in (None, h):
-                        sha = h or e.get("sha256")
-                        status = "already there"
-                    else:
-                        problems.append((rel, "exists on the archive with different content; left untouched")); continue
-                else:
-                    problems.append((rel, "exists on the archive with a different size; left untouched")); continue
+            status, sha, problem = _ship_one(i["src"], dst, loc, e.get("sha256"), e.get("size"),
+                                             rows, shipped_log, ship_id, stamp, checksum)
+            if status == "waiting":
+                held_back += 1
+            elif status == "problem":
+                problems.append((rel, problem))
             else:
-                sha, _sz = copy_file_verified(i["src"], dst, checksum=checksum,
-                                              partial_suffix=f".{MACHINE_LABEL.lower()}.partial")
-                if checksum and e.get("sha256") and sha != e["sha256"]:
-                    os.replace(dst, dst + ".BAD")
-                    problems.append((rel, "read-back hash differs from the ledger; renamed .BAD")); continue
-                status = "shipped"
-            loc = rel.replace("/", "\\")
-            # the log row FIRST: a frame stamped as shipped but never logged
-            # would never be swept, so never verified (1.5.0 review W6)
-            with open(shipped_log, "a", encoding="utf-8") as f:
-                f.write(json.dumps({"sha256": sha, "size": e.get("size"), "relpath": loc,
-                                    "shippedAt": stamp, "machine": MACHINE_LABEL}) + "\n")
-            e["archiveLocation"] = loc; e["archiveShippedAt"] = stamp
-            if e.get("sha256") is None and sha:
-                e["sha256"] = sha
-            state._dirty = True
-            frames.append({"sha256": sha, "size": e.get("size"), "filename": e["filename"],
-                           "location": loc, "status": status})
-            shipped += 1
+                if i["kind"] == "cal":
+                    copy = e.setdefault("archive", {}).setdefault(i["link"], {})
+                    copy["location"] = loc
+                    copy["shippedAt"] = stamp
+                else:
+                    e["archiveLocation"] = loc; e["archiveShippedAt"] = stamp
+                    if e.get("sha256") is None and sha:
+                        e["sha256"] = sha
+                state._dirty = True
+                frames.append({"sha256": sha, "size": e.get("size"), "filename": e["filename"],
+                               "location": loc, "status": status})
+                shipped += 1
         except OSError as ex:
             problems.append((rel, str(ex)))
-            if not archive_reachable(mount):
-                warn("Archive stopped responding; stopping this ship run. What shipped is recorded; the rest waits for next time.")
+            ok, why = archive_check(mount)
+            if not ok:
+                warn(f"Archive stopped responding ({why}); stopping this ship run. What shipped "
+                     f"is recorded; the rest waits for next time.")
                 break
         except Exception as ex:
             problems.append((rel, str(ex)))
         if n % 50 == 0 or n == len(todo):
             show_progress(n, len(todo))
             state.save_ledger()
-    state.history_event("ship", shipped=shipped, problems=len(problems))
+    state.history_event("ship", shipped=shipped, problems=len(problems), waiting=held_back)
     state.save_ledger()
     if frames:
         rdir = os.path.join(RECEIPT_BASE, "_ship"); os.makedirs(rdir, exist_ok=True)
@@ -4002,11 +4988,1392 @@ def _run_ship(state, dry_run=False, mount=None, checksum=True):
     only_mac = only_on_this_machine(state)
     success(f"Shipped {shipped} file(s). Problems: {len(problems)}. "
             f"Frames cleared from a camera and not yet PC-verified: {only_mac}.")
+    if held_back:
+        info(f"{held_back} file(s) wait for the PC to set aside an unfinished copy; "
+             f"they go again after that.")
+    unfinished = held_back + sum(1 for r in own_ship_rows(mount).values()
+                                 if r.get("shipId") == ship_id
+                                 and r.get("state") in ("started", "failed"))
+    if unfinished and SHIP_FOLDER != "pc":
+        # an awake PC then sets them aside within minutes, not at its next
+        # nightly sweep (the PC's own unfinished copies wait for that)
+        rid = file_request("sweep", mount=mount, quiet=True)
+        if rid:
+            info(f"Asked the PC to set the unfinished copies aside ({rid}).")
     for rel, why in problems[:20]:
         warn(f"  {rel}: {why}")
-    emit("ship", reachable=True, shipped=shipped, problems=len(problems), onlyMac=only_mac)
+    emit("ship", reachable=True, shipped=shipped, problems=len(problems), onlyMac=only_mac,
+         waiting=held_back)
+    write_ledger_snapshot(state, mount)
     state.publish_mirror()
+    rebuild_projects_quietly(state)         # the Mac's own list, as fresh as its ship
     return True
+
+
+# ═══════════════════════════════════════════════════════════════════════════
+# THE ARCHIVE PC (1.7.0): sweep, inventory, hash cache, heartbeat, requests
+# ═══════════════════════════════════════════════════════════════════════════
+# The PC runs this same engine (Sync View spec, section 2): its scheduled
+# tasks only start Python. Everything it writes on the archive goes into
+# _verify\pc\, where the share user may only read (P6). The Mac asks for work
+# by dropping a request in _verify\mac\requests\ and never moves anything on
+# the archive; the PC never deletes a request.
+
+PC_SWEEP_WAIT_S = SHIP_LOCK_BREAK_S # an unfinished copy is set aside only this long after its ship
+PC_CREATED_SLACK_S = 10 * 60        # ...and only if it was made by that ship (clocks drift)
+PC_HEARTBEAT_EVERY_S = 60           # while a job runs (spec 10.1); the 5-minute task when idle
+PC_KEEP_GENERATION_S = 24 * 3600    # the previous inventory stays readable this long
+PC_REQUEST_EXPIRE_S = 24 * 3600
+PC_JOB_RENEW_S = 60                 # a running job touches its lock this often...
+PC_JOB_STALE_S = 10 * 60            # ...so one not touched for this long is a leftover
+PC_HASH_MINUTES = 360               # the nightly hash stops at a file after this long
+PC_ROLLING_SHARE = 30               # P7: a 1/30th of the cached files is re-read each night
+REQUEST_KINDS = ("sweep", "inventory", "hash", "preclear")
+REQUEST_KINDS_HANDLED = ("sweep", "inventory")      # hash and preclear come in phase 2
+REQUEST_MAX_BYTES = {"sweep": 4096, "inventory": 4096, "hash": 2 << 20, "preclear": 2 << 20}
+REQUEST_RE = re.compile(r"^(sweep|inventory|hash|preclear)-(\d{8}T\d{6}Z)-([a-z0-9-]{1,32})"
+                        r"-([0-9a-f]{8})\.json$")
+RESPONSE_FINAL = ("done", "failed", "expired", "rejected")
+INVENTORY_SKIP = ("_verify", "_index", "_quarantine", "_rights-check")   # top level (7.1, decision 17)
+# what a failed check of a shipped frame writes; such a path isn't checked again by itself
+_VERIFY_PROBLEMS = ("missing", "hash", "outside archive")
+INVENTORY_NOISE = ("thumbs.db", "desktop.ini")     # and every hidden dot-file
+_FIT_EXTS = (".fit", ".fits", ".fts")
+_RESERVED_NAMES = ({"con", "prn", "aux", "nul", "conin$", "conout$"}
+                   | {f"{d}{n}" for d in ("com", "lpt") for n in "123456789¹²³"})
+
+def safe_relpath(rel, root=None):
+    """A path read from a file, as section 12 of the spec wants it before it is
+    ever opened: '/'-separated and NFC, or None when it is absolute, has a
+    drive letter or is UNC, has '..', a control character or ':', a part
+    ending in a dot or a space, is over 260 characters, uses a Windows
+    reserved name (NUL.txt, COM1, CONIN$, LPT¹ ...), or leaves `root`."""
+    if not isinstance(rel, str):
+        return None
+    rel = unicodedata.normalize("NFC", rel.replace("\\", "/"))
+    if not rel or len(rel) > 260 or rel.startswith("/") or ":" in rel:
+        return None
+    if any(ord(c) < 32 or ord(c) == 127 for c in rel):
+        return None
+    for part in rel.split("/"):
+        if part in ("", ".", "..") or part[-1] in ". ":
+            return None
+        if part.split(".", 1)[0].lower() in _RESERVED_NAMES:
+            return None
+    if root is not None and not _within(os.path.join(root, *rel.split("/")), root):
+        return None
+    return rel
+
+def _is_reparse(st):
+    return stat.S_ISLNK(st.st_mode) or bool(getattr(st, "st_file_attributes", 0) & 0x400)
+
+def _has_reparse(root, rel):
+    """Is any folder or file on the way to rel a link or a junction?"""
+    p = root
+    for part in rel.split("/"):
+        p = os.path.join(p, part)
+        try:
+            if _is_reparse(os.lstat(p)):
+                return True
+        except OSError:
+            return False
+    return False
+
+def _pc_path(mount, *parts):
+    return _verify_path(mount, "pc", *parts)
+
+_JSON_READ_CAP = 256 << 20          # a "JSON" file bigger than this is not ours to parse
+
+def _read_json_file(path):
+    """A JSON object from a file, or {}: a byte-order mark (Notepad,
+    PowerShell 5) is fine; anything unreadable, not an object, too big or
+    too deep is {} — never a crash. Readers that need to know the
+    difference check the path themselves."""
+    try:
+        if not os.path.isfile(path) or os.path.getsize(path) > _JSON_READ_CAP:
+            return {}
+        with open(path, encoding="utf-8-sig") as f:
+            d = json.load(f)
+        return d if isinstance(d, dict) else {}
+    except (OSError, ValueError, RecursionError, MemoryError):
+        return {}
+
+def _append_rows(path, rows):
+    """Append rows to a .jsonl the PC owns, flushed to the disk."""
+    if not rows:
+        return
+    _confine(path, "a PC log")
+    os.makedirs(os.path.dirname(path), exist_ok=True)
+    with open(path, "a", encoding="utf-8") as f:
+        for r in rows:
+            f.write(json.dumps(r, ensure_ascii=False) + "\n")
+        f.flush()
+        os.fsync(f.fileno())
+
+def _write_json_file(path, data):
+    _confine(path, "a status file")
+    os.makedirs(os.path.dirname(path), exist_ok=True)
+    _atomic_write_json(path, data)
+
+def _pc_role(what):
+    """The PC's jobs read the archive from its own disk: Windows only (and test
+    mode, which simulates it). The machine's short name must be valid too."""
+    if not (IS_WINDOWS or TEST_ROOT):
+        error(f"{what} runs on the archive PC (Windows), where the archive is its own disk. "
+              f"On this computer, --request asks the PC for it.")
+        sys.exit(2)
+    bad = slug_problem()
+    if bad:
+        error(f"Nothing done: {bad}.")
+        sys.exit(2)
+
+def _pc_trusts(path):
+    """A file in _verify\\pc counts only when this account owns it (P6). None
+    or a missing file: trusted (Windows can't say, or there's nothing yet)."""
+    if not os.path.exists(path):
+        return True
+    ok = owner_trusted(path)
+    if ok is False:
+        warn(f"Not trusted (its owner isn't this account, Administrators or SYSTEM): {path}")
+        return False
+    return True
+
+class _JobLock:
+    """One sweep, one inventory and one hash at a time on this computer: a
+    lock file in the state folder naming the process, touched every minute
+    while the job runs (as the archive's ship lock is renewed). A lock not
+    touched for ten minutes is a leftover from a job that was stopped, even
+    if Windows has since given its process number to another program."""
+
+    def __init__(self, name):
+        self.name, self.path, self.held = name, os.path.join(STATE_DIR, f"{name}.lock"), False
+        self._stop = threading.Event()
+
+    def __enter__(self):
+        os.makedirs(STATE_DIR, exist_ok=True)
+        for _ in range(2):
+            try:
+                fd = os.open(self.path, os.O_CREAT | os.O_EXCL | os.O_WRONLY)
+            except FileExistsError:
+                if job_running(self.name):
+                    return self
+                if not _remove_retrying(self.path):
+                    return self
+                continue
+            with os.fdopen(fd, "w", encoding="utf-8") as f:
+                json.dump({"pid": os.getpid(), "since": _utc_iso()}, f)
+            self.held = True
+            threading.Thread(target=self._renew, daemon=True).start()
+            return self
+        return self
+
+    def _renew(self):
+        while not self._stop.wait(PC_JOB_RENEW_S):
+            try:
+                os.utime(self.path, None)
+            except OSError:
+                pass                       # read by another process this instant: next minute
+
+    def __exit__(self, *exc):
+        if self.held:
+            self._stop.set()
+            _remove_retrying(self.path)
+            self.held = False
+        return False
+
+def _remove_retrying(path, tries=20):
+    """Remove one of this computer's own lock files. On Windows a reader
+    holding it open for a moment blocks that, so try again briefly."""
+    for n in range(tries):
+        try:
+            os.remove(path)
+            return True
+        except FileNotFoundError:
+            return True
+        except OSError:
+            if n == tries - 1:
+                return False
+            time.sleep(0.1)
+    return False
+
+def job_running(name):
+    """Is this computer's sweep / inventory / hash running right now? Its lock
+    was touched in the last ten minutes, and the process it names is alive."""
+    path = os.path.join(STATE_DIR, f"{name}.lock")
+    try:
+        age = time.time() - os.path.getmtime(path)
+    except OSError:
+        return False
+    if age > PC_JOB_STALE_S:
+        return False
+    held = _read_json_file(path)
+    if not held:
+        return True                       # being written this instant
+    return pid_alive(held.get("pid"))
+
+def _mtime(path):
+    try:
+        return os.path.getmtime(path)
+    except OSError:
+        return 0.0
+
+def _hash_progress_path():
+    return os.path.join(STATE_DIR, "hash-progress.json")
+
+def write_heartbeat(mount, job=None, progress=None):
+    """_verify\\pc\\pc-heartbeat.json (spec 10.1): what the PC is doing, so the
+    Mac can tell asleep from busy. Every minute while a job runs and every five
+    minutes when idle; a failed write never stops a job."""
+    ident = machine_identity()
+    hashing = job_running("hash")
+    rec = {"schema": "pc-heartbeat/1", "generatedAt": _utc_iso(),
+           "job": job or ("hash" if hashing else "idle"), "progress": progress,
+           "sweepRunning": job_running("sweep"), "inventoryRunning": job_running("inventory"),
+           "hashProgress": _read_json_file(_hash_progress_path()) if hashing else None,
+           "machineId": ident["slug"], "machineLabel": ident["label"], "version": VERSION}
+    try:
+        _write_json_file(_pc_path(mount, "pc-heartbeat.json"), rec)
+    except OSError:
+        pass
+    return rec
+
+class _Beat:
+    """A job's heartbeat: at most once a minute unless forced."""
+
+    def __init__(self, mount, job):
+        self.mount, self.job, self.last = mount, job, 0.0
+
+    def __call__(self, progress=None, force=False):
+        if force or time.monotonic() - self.last >= PC_HEARTBEAT_EVERY_S:
+            self.last = time.monotonic()
+            write_heartbeat(self.mount, self.job, progress)
+
+def ship_lock_live(mount):
+    """Is someone shipping into the archive right now (a lock renewed in the
+    last ten minutes, or a 1.6 lock under six hours old)?"""
+    held = _read_json_file(_verify_path(mount, "lock", "ship.lock"))
+    if held:
+        renewed = _parse_utc(held.get("renewedAt"))
+        if renewed and (_utc_now() - renewed).total_seconds() <= SHIP_LOCK_BREAK_S:
+            return True
+    elif os.path.exists(_verify_path(mount, "lock", "ship.lock")):
+        return True                                  # being written this instant
+    legacy = _verify_path(mount, "ship.lock")
+    return os.path.exists(legacy) and time.time() - _mtime(legacy) < LEGACY_SHIP_LOCK_STALE_S
+
+def _ship_log_files(mount):
+    """Every computer's ship log: the 1.6 ones in _verify\\ and, from 1.7.0,
+    each one in its computer's own folder (_verify\\mac\\, _verify\\pc\\)."""
+    v = _verify_path(mount)
+    out = []
+    try:
+        folders = [v] + sorted(os.path.join(v, n) for n in os.listdir(v)
+                               if n != "lock" and os.path.isdir(os.path.join(v, n)))
+    except OSError:
+        return out
+    for d in folders:
+        try:
+            names = sorted(os.listdir(d))
+        except OSError:
+            continue
+        out += [os.path.join(d, n) for n in names
+                if n.lower().startswith("shipped") and n.lower().endswith(".jsonl")
+                and os.path.isfile(os.path.join(d, n))]
+    return out
+
+def _verified_rows(mount):
+    rows = []
+    for p in (_pc_path(mount, "verified.jsonl"), _verify_path(mount, "verified.jsonl")):
+        if _pc_trusts(p):
+            rows += _read_jsonl_rows(p)
+    return rows
+
+def _problem_rows(mount):
+    rows = []
+    for p in (_pc_path(mount, "problems.jsonl"), _verify_path(mount, "problems.jsonl")):
+        if _pc_trusts(p):
+            rows += _read_jsonl_rows(p)
+    return rows
+
+def _int(v):
+    try:
+        return int(v)
+    except (TypeError, ValueError):
+        return None
+
+def _problem_row(relpath, problem, sha=None, size=None, **extra):
+    return {"schema": "problem-row/1", "relpath": relpath, "sha256": sha, "size": size,
+            "problem": problem, "at": now_stamp(), "atUtc": _utc_iso(),
+            "machineId": machine_identity()["slug"], **extra}
+
+def _quarantine_dest(root, rel, folder="ship-incomplete"):
+    """Where an unfinished copy goes, never over anything already set aside."""
+    base = os.path.join(root, "_Quarantine", folder, *rel.split("/"))
+    dest, n = base, 2
+    stem, ext = os.path.splitext(base)
+    while os.path.lexists(dest):
+        dest = f"{stem} ({n}){ext}"
+        n += 1
+    return dest
+
+def _old_partials(root):
+    """Files a 1.6 ship left behind: <name>.partial (also .mac.partial and
+    .pc.partial) and <name>.BAD. Listed by every sweep; moved only when Brett
+    says so (--move-old-partials)."""
+    out = []
+    for dp, dns, fns in os.walk(root):
+        if dp == root:
+            dns[:] = [d for d in dns if d.lower() not in INVENTORY_SKIP + ("_to_delete",)]
+        for fn in fns:
+            low = fn.lower()
+            if low.endswith(".partial") or low.endswith(".bad"):
+                p = os.path.join(dp, fn)
+                try:
+                    st = os.lstat(p)
+                except OSError:
+                    continue
+                if stat.S_ISREG(st.st_mode):
+                    out.append((os.path.relpath(p, root).replace(os.sep, "/"), st.st_size))
+    return sorted(out)
+
+def run_sweep(mount=None, move_old_partials=False, beat=None):
+    """The PC's check of what was shipped (spec P1, replacing sweep.ps1): every
+    frame a ship log calls shipped is re-read from the PC's own disk,
+    unbuffered, and a match is written to _verify\\pc\\verified.jsonl, which
+    the Mac reads to stamp archiveVerifiedAt. A mismatch or a missing file goes
+    to problems.jsonl and is never retried by itself. A copy a ship started
+    and never finished is set aside into _Quarantine\\ship-incomplete\\ (the
+    one thing the PC moves by itself, decision 18), so the Mac can send it
+    again to the same path. Nothing is deleted. Returns a summary dict."""
+    mount = mount or ARCHIVE_MOUNT
+    if not os.path.isdir(mount):
+        warn(f"The archive isn't there: {mount}. Nothing swept.")
+        return {"ok": False, "why": "archive missing"}
+    beat = beat or _Beat(mount, "sweep")
+    with _JobLock("sweep") as lock:
+        if not lock.held:
+            info("A sweep is already running on this computer; this one stops here.")
+            return {"ok": False, "why": "busy"}
+        beat(force=True)
+        return _sweep(mount, move_old_partials, beat)
+
+def _sweep(mount, move_old_partials, beat):
+    pc = _pc_path(mount)
+    os.makedirs(pc, exist_ok=True)
+    started_at = time.time()
+    stamp, ident = now_stamp(), machine_identity()
+    verified_rows, problem_rows = _verified_rows(mount), _problem_rows(mount)
+    done = {(_relkey(r.get("relpath", "")), r.get("sha256")) for r in verified_rows}
+    ever_verified = {_relkey(r.get("relpath", "")) for r in verified_rows}
+    bad = {_relkey(r.get("relpath", "")) for r in problem_rows
+           if str(r.get("problem")) in _VERIFY_PROBLEMS or str(r.get("problem")).startswith("size ")}
+    bad_kind = {(_relkey(r.get("relpath", "")), r.get("problem")) for r in problem_rows}
+    # every log's rows, folded per archive path
+    pending, seen, last = [], set(), {}
+    for logf in _ship_log_files(mount):
+        per_last, per_started = {}, {}
+        for r in _read_jsonl_rows(logf):
+            rel = r.get("relpath")
+            if not isinstance(rel, str) or not rel:
+                continue
+            state_ = r.get("state", "shipped")             # 1.6 rows: always shipped
+            k = _relkey(rel)
+            if state_ == "shipped":
+                pair = (k, r.get("sha256"))
+                if _int(r.get("size")) is not None and pair not in done and k not in bad \
+                        and pair not in seen:
+                    seen.add(pair)
+                    pending.append(r)
+            if state_ in ("started", "shipped", "failed", "not-created"):
+                per_last[k] = r
+                if state_ == "started":
+                    per_started[k] = r
+        for k, r in per_last.items():
+            last.setdefault(k, []).append((r, per_started.get(k)))
+    lines = [f"sweep {stamp}  root={mount}  pending={len(pending)}  machine={ident['slug']}"]
+    new_verified, new_problems, quarantined, waiting, soon = [], [], [], [], 0
+    unreadable = []
+    ok_n = fail_n = missing_n = 0
+    read_kinds = set()
+    info(f"Sweep: {len(pending)} shipped file(s) to check on {ARCHIVE_LABEL}")
+    for n, r in enumerate(pending, 1):
+        beat(progress=f"{n}/{len(pending)}")
+        rel_raw, want_sha, want_size = r["relpath"], r.get("sha256"), _int(r.get("size"))
+        rel = safe_relpath(rel_raw, mount)
+        if rel is None:
+            fail_n += 1
+            new_problems.append(_problem_row(rel_raw, "outside archive", want_sha, want_size))
+            lines.append(f"OUTSIDE  {rel_raw}")
+            continue
+        p = os.path.join(mount, *rel.split("/"))
+        try:
+            st = os.stat(p)
+        except OSError:
+            missing_n += 1
+            new_problems.append(_problem_row(rel_raw, "missing", want_sha, want_size))
+            lines.append(f"MISSING  {rel_raw}")
+            continue
+        if st.st_size != want_size:
+            fail_n += 1
+            new_problems.append(_problem_row(rel_raw, f"size {st.st_size}", want_sha, want_size))
+            lines.append(f"BADSIZE  {rel_raw}")
+            continue
+        try:
+            got, _size, read = hash_file_unbuffered(p)
+        except OSError as e:
+            # in use, or a read error: not a verdict on the frame, so no
+            # problem row; the next sweep reads it again
+            unreadable.append(rel_raw)
+            lines.append(f"UNREADABLE  {rel_raw}  ({e.strerror or e}; tried again next time)")
+            continue
+        read_kinds.add(read)
+        if want_sha and got != want_sha:
+            fail_n += 1
+            new_problems.append(_problem_row(rel_raw, "hash", want_sha, want_size, found=got))
+            lines.append(f"BADHASH  {rel_raw}")
+            continue
+        ok_n += 1
+        new_verified.append({"schema": "verified-row/1", "relpath": rel_raw, "sha256": got,
+                             "size": want_size, "verifiedAt": now_stamp(), "read": read,
+                             "hashedBy": ident["slug"]})
+        if len(new_verified) >= 200:             # a long sweep keeps what it proved
+            _append_rows(_pc_path(mount, "verified.jsonl"), new_verified)
+            new_verified = []
+        if n % 200 == 0:
+            print(f"  {n} / {len(pending)}")
+    _append_rows(_pc_path(mount, "verified.jsonl"), new_verified)
+    # copies a ship started and never finished (decision 1: only these)
+    shipping = ship_lock_live(mount)
+    now = _utc_now()
+    for k, entries in sorted(last.items()):
+        if any(r.get("state") in ("shipped", "not-created") for r, _s in entries):
+            continue
+        rows_ = [r for r, _s in entries]
+        starts = [s for _r, s in entries if s] or rows_
+        lastrow = max(rows_, key=lambda x: _parse_utc(x.get("at")) or now)
+        rel_raw = lastrow["relpath"]
+        rel = safe_relpath(rel_raw, mount)
+        if rel is None:
+            continue
+        p = os.path.join(mount, *rel.split("/"))
+        try:
+            st = os.lstat(p)
+        except OSError:
+            continue                              # set aside already, or never created
+        if not stat.S_ISREG(st.st_mode):
+            continue
+        began = max((_parse_utc(s.get("at")) for s in starts if _parse_utc(s.get("at"))),
+                    default=None)
+        latest = max((_parse_utc(r.get("at")) for r in rows_ if _parse_utc(r.get("at"))),
+                     default=None)
+        if began is None or latest is None:
+            continue
+        why_not = None
+        if shipping:
+            why_not = "a ship is running"
+        elif (now - latest).total_seconds() < PC_SWEEP_WAIT_S:
+            why_not = "its ship ended less than ten minutes ago"
+        elif k in ever_verified:
+            why_not = "the PC verified this path once"
+        elif file_created_at(st) < began.timestamp() - PC_CREATED_SLACK_S:
+            why_not = "the file is older than the ship that started it"
+        elif _int(lastrow.get("size")) is not None and st.st_size > _int(lastrow.get("size")):
+            why_not = "the file is bigger than the frame that was being sent"
+        if why_not:
+            waiting.append((rel_raw, why_not))
+            soon += why_not in ("a ship is running", "its ship ended less than ten minutes ago")
+            lines.append(f"LEFT  {rel_raw}  ({why_not})")
+            if why_not.startswith("the file is") or why_not.startswith("the PC verified"):
+                problem = f"unfinished copy left where it is: {why_not}"
+                if (k, problem) not in bad_kind:
+                    bad_kind.add((k, problem))
+                    new_problems.append(_problem_row(rel_raw, problem, lastrow.get("sha256"),
+                                                     _int(lastrow.get("size"))))
+            continue
+        want_sha, want_size = lastrow.get("sha256"), _int(lastrow.get("size"))
+        if want_sha and want_size == st.st_size:
+            # every byte may be there after all (only the row, or the
+            # read-back, failed): a whole, correct copy stays, and the next
+            # ship of the computer that started it records it
+            try:
+                whole = hash_file_unbuffered(p)[0] == want_sha
+            except OSError:
+                waiting.append((rel_raw, "couldn't be read just now"))
+                lines.append(f"LEFT  {rel_raw}  (couldn't be read just now)")
+                continue
+            if whole:
+                waiting.append((rel_raw, "whole and correct: its computer's next ship records it"))
+                lines.append(f"LEFT  {rel_raw}  (whole and correct; the next ship records it)")
+                continue
+        dest = _quarantine_dest(mount, rel)
+        _confine(dest, "the sweep")
+        try:
+            os.makedirs(os.path.dirname(dest), exist_ok=True)
+            os.rename(p, dest)
+        except OSError as e:
+            waiting.append((rel_raw, f"couldn't move it: {e.strerror or e}"))
+            lines.append(f"STUCK  {rel_raw}  ({e})")
+            continue
+        q = {"schema": "quarantine-row/1", "relpath": rel_raw,
+             "movedTo": os.path.relpath(dest, mount).replace(os.sep, "/"), "size": st.st_size,
+             "expectedSize": _int(lastrow.get("size")), "sha256": lastrow.get("sha256"),
+             "state": lastrow.get("state"), "why": lastrow.get("why"),
+             "startedAt": _utc_iso(began), "shipId": lastrow.get("shipId"),
+             "shippedBy": lastrow.get("machineId"), "movedAt": now_stamp(),
+             "movedAtUtc": _utc_iso(), "machineId": ident["slug"]}
+        _append_rows(_pc_path(mount, "quarantine.jsonl"), [q])
+        quarantined.append(rel_raw)
+        lines.append(f"SETASIDE  {rel_raw}  -> {q['movedTo']}")
+    _append_rows(_pc_path(mount, "problems.jsonl"), new_problems)
+    # what a 1.6 ship left behind: listed, moved only on Brett's word
+    partials = _old_partials(mount)
+    moved_partials = 0
+    if partials and move_old_partials:
+        if shipping:
+            warn("A ship is running, so the old partial copies stay where they are this time.")
+        else:
+            for rel, size in partials:
+                p = os.path.join(mount, *rel.split("/"))
+                dest = _quarantine_dest(mount, rel, "old-partials")
+                _confine(dest, "the sweep")
+                try:
+                    os.makedirs(os.path.dirname(dest), exist_ok=True)
+                    os.rename(p, dest)
+                except OSError as e:
+                    lines.append(f"STUCK  {rel}  ({e})")
+                    continue
+                moved_partials += 1
+                _append_rows(_pc_path(mount, "quarantine.jsonl"), [{
+                    "schema": "quarantine-row/1", "relpath": rel, "size": size,
+                    "movedTo": os.path.relpath(dest, mount).replace(os.sep, "/"),
+                    "why": "a partial copy a 1.6 ship left behind", "movedAt": now_stamp(),
+                    "movedAtUtc": _utc_iso(), "machineId": ident["slug"]}])
+                lines.append(f"OLDPARTIAL moved  {rel}")
+    for rel, size in partials[:200]:
+        if not move_old_partials:
+            lines.append(f"OLDPARTIAL  {rel}  ({human_size(size)})")
+    left_partials = partials if not move_old_partials or shipping else \
+        _old_partials(mount)
+    total_verified = len(_verified_rows(mount))
+    total_problems = len(_problem_rows(mount))
+    status = {"schema": "sweep-status/1", "sweptAt": stamp, "sweptAtUtc": _utc_iso(),
+              "verifiedThisRun": ok_n, "failedThisRun": fail_n, "missingThisRun": missing_n,
+              "quarantinedThisRun": len(quarantined), "waitingThisRun": len(waiting),
+              "unreadableThisRun": len(unreadable),
+              "pendingBefore": len(pending), "totalVerified": total_verified,
+              "totalProblems": total_problems,
+              "oldPartials": {"count": len(left_partials),
+                              "bytes": sum(s for _r, s in left_partials),
+                              "movedThisRun": moved_partials},
+              "read": "unbuffered" if read_kinds == {"unbuffered"} else
+                      ("buffered" if read_kinds else None),
+              "durationS": round(time.time() - started_at, 1),
+              "machineId": ident["slug"], "machineLabel": ident["label"], "version": VERSION}
+    _write_json_file(_pc_path(mount, "status.json"), status)
+    summary = (f"verified {ok_n}   failed {fail_n}   missing {missing_n}   set aside "
+               f"{len(quarantined)}   total verified {total_verified}   total problems "
+               f"{total_problems}")
+    lines.append(summary)
+    logp = _pc_path(mount, f"sweep_{datetime.now().strftime('%Y%m%d_%H%M%S')}.log")
+    try:
+        _confine(logp, "the sweep log")
+        with open(logp, "a", encoding="utf-8") as f:
+            f.write("\n".join(lines) + "\n")
+    except OSError:
+        pass
+    success(f"Sweep: {summary}")
+    if quarantined:
+        info(f"{len(quarantined)} unfinished copy(ies) set aside into _Quarantine\\ship-incomplete; "
+             f"the computer that started them sends them again on its next ship.")
+    for rel, why in waiting[:10]:
+        log(f"left in place: {rel} ({why})")
+    if left_partials:
+        info(f"{len(left_partials)} old partial copy(ies) from before 1.7.0 "
+             f"({human_size(sum(s for _r, s in left_partials))}) are listed in {logp}. "
+             f"To move them into _Quarantine\\old-partials: --sweep --move-old-partials")
+    if unreadable:
+        warn(f"{len(unreadable)} shipped frame(s) couldn't be read just now (in use, or a read "
+             f"error); the next sweep reads them again. They are listed in {logp}.")
+    if fail_n or missing_n:
+        warn(f"ATTENTION: see {_pc_path(mount, 'problems.jsonl')}")
+    beat(force=True)
+    return {"ok": True, "verified": ok_n, "failed": fail_n, "missing": missing_n,
+            "setAside": len(quarantined), "waiting": len(waiting), "waitingSoon": soon,
+            "unreadable": len(unreadable),
+            "oldPartials": len(left_partials), "problems": total_problems}
+
+# ── Inventory (spec 7.1) ─────────────────────────────────────────────────────
+
+def _walk_files(root, archive):
+    """(relpath, stat, path) for every file under root: the relpath
+    '/'-separated and NFC, the path as it is on the disk (a name stored
+    decomposed is opened as stored, never by its NFC spelling). Skips
+    _verify, _Index, _Quarantine and _rights-check at the top of the archive,
+    links and junctions, and hidden bookkeeping (Finder's .DS_Store, the
+    importer's .imported_files, Explorer's Thumbs.db). Unsafe names come back
+    with stat None."""
+    out = []
+    stack = [root]
+    while stack:
+        d = stack.pop()
+        try:
+            with os.scandir(d) as it:
+                entries = list(it)
+        except OSError:
+            continue
+        for e in entries:
+            try:
+                st = e.stat(follow_symlinks=False)
+            except OSError:
+                continue
+            if _is_reparse(st):
+                continue
+            rel = os.path.relpath(e.path, root).replace(os.sep, "/")
+            if e.is_dir(follow_symlinks=False):
+                if archive and d == root and e.name.lower() in INVENTORY_SKIP:
+                    continue
+                stack.append(e.path)
+                continue
+            if not stat.S_ISREG(st.st_mode):
+                continue
+            low = e.name.lower()
+            if low in INVENTORY_NOISE or low.startswith("."):
+                continue
+            safe = safe_relpath(rel)
+            out.append((safe or rel, st if safe else None, e.path))
+    out.sort(key=lambda x: x[0])
+    return out
+
+_DAY_RE = re.compile(r"\bDay (\d+)$")
+_KIND_FOLDERS = {"biases": "bias", "bias": "bias", "darks": "dark", "dark": "dark",
+                 "flats": "flat", "flat": "flat", "darkflats": "darkflat", "dark flats": "darkflat"}
+
+def _inventory_row(rel, st, cached):
+    parts = rel.split("/")
+    name = parts[-1]
+    low = name.lower()
+    retired = parts[0].lower() == "_to_delete"
+    where = parts[1:] if retired else parts
+    kind = next((_KIND_FOLDERS[p.lower()] for p in reversed(parts[:-1])
+                 if p.lower() in _KIND_FOLDERS), None)
+    if kind is None:
+        prefix = low.split("_", 1)[0]
+        if prefix in ("light", "bias", "dark", "flat"):
+            kind = prefix
+        elif low.startswith("stacked_"):
+            kind = "stack"
+        elif low.endswith(_FIT_EXTS):
+            kind = "light"
+        else:
+            kind = "other"
+    day = None
+    for p in reversed(parts[:-1]):
+        m = _DAY_RE.search(p)
+        if m:
+            day = int(m.group(1))
+            break
+    night = _seestar_file_night(name)
+    hit = cached if cached and cached.get("size") == st.st_size \
+        and cached.get("mtimeNs") == st.st_mtime_ns else None
+    return {"schema": "inventory-row/1", "relpath": rel, "size": st.st_size,
+            "mtimeNs": st.st_mtime_ns,
+            "camera": where[0] if len(where) > 1 else None, "rig": None,
+            "target": where[1] if len(where) > 2 else None,
+            "night": night, "nightSource": "filename" if night else None, "day": day,
+            "kind": kind, "retired": retired,
+            "sha256": hit.get("sha256") if hit else None,
+            "hashedBy": hit.get("hashedBy") if hit else None,
+            "read": hit.get("read") if hit else None,
+            "hashedAt": hit.get("hashedAt") if hit else None}
+
+def workbench_root():
+    """This computer's frame folders' common parent (the Mac's workbench)."""
+    try:
+        return os.path.commonpath([DEST_DIR, SEESTAR_DEST_S30, SEESTAR_DEST_S50,
+                                   SEESTAR_DEST_S30_ORIG, SEESTAR_DEST_S50PRO])
+    except ValueError:
+        return os.path.dirname(SEESTAR_DEST_S50PRO)
+
+def _is_archive_root(root):
+    try:
+        return os.path.normcase(os.path.realpath(root)) == \
+            os.path.normcase(os.path.realpath(ARCHIVE_MOUNT))
+    except OSError:
+        return False
+
+def run_inventory(root=None, beat=None):
+    """List every file under root with its size, time and what the path says
+    about it (spec 7.1). On the PC, for the archive: a new generation file in
+    _verify\\pc\\ each run, then inventory-E.status.json naming it, written
+    last; the previous generation stays for a day. Elsewhere (the Mac's
+    workbench): inventory-<short name>.jsonl in the state folder. Hashes come
+    from this computer's hash cache, never from reading here."""
+    archive = root is None and IS_WINDOWS or (root is not None and _is_archive_root(root))
+    root = root or (ARCHIVE_MOUNT if archive else workbench_root())
+    if archive:
+        _pc_role("--inventory of the archive")
+    elif slug_problem():
+        error(f"Nothing done: {slug_problem()}.")
+        sys.exit(2)
+    if not os.path.isdir(root):
+        warn(f"Nothing to list: {root} isn't there.")
+        return {"ok": False, "why": "root missing"}
+    beat = beat or (_Beat(root, "inventory") if archive else (lambda *a, **k: None))
+    with _JobLock("inventory") as lock:
+        if not lock.held:
+            info("An inventory is already running on this computer; this one stops here.")
+            return {"ok": False, "why": "busy"}
+        beat(force=True)
+        return _inventory(root, archive, beat)
+
+def _inventory(root, archive, beat):
+    t0 = time.time()
+    ident = machine_identity()
+    shipping = archive and ship_lock_live(root)
+    generated = _utc_now()
+    cache = load_hash_cache("E" if archive else "workbench")
+    files = _walk_files(root, archive)
+    beat(progress=f"listed {len(files)}")
+    skipped = [rel for rel, st, _p in files if st is None]
+    rows = [_inventory_row(rel, st, cache.get(_relkey(rel))) for rel, st, _p in files
+            if st is not None]
+    shipping = shipping or (archive and ship_lock_live(root))
+    gen = generated.strftime("%Y%m%dT%H%M%SZ")
+    if archive:
+        folder = _pc_path(root)
+        out = os.path.join(folder, f"inventory-E-{gen}.jsonl")
+        while os.path.exists(out):                        # twice in one second
+            time.sleep(1.0)
+            generated = _utc_now()
+            gen = generated.strftime("%Y%m%dT%H%M%SZ")
+            out = os.path.join(folder, f"inventory-E-{gen}.jsonl")
+        status_path = os.path.join(folder, "inventory-E.status.json")
+    else:
+        folder = STATE_DIR
+        out = os.path.join(folder, f"inventory-{ident['slug']}.jsonl.tmp{os.getpid()}")
+        status_path = os.path.join(folder, f"inventory-{ident['slug']}.status.json")
+    _confine(out, "the inventory")
+    os.makedirs(folder, exist_ok=True)
+    h = hashlib.sha256()
+    with open(out, "wb") as f:
+        for r in rows:
+            line = (json.dumps(r, ensure_ascii=False) + "\n").encode("utf-8")
+            h.update(line)
+            f.write(line)
+        f.flush()
+        os.fsync(f.fileno())
+    if not archive:
+        final = os.path.join(folder, f"inventory-{ident['slug']}.jsonl")
+        os.replace(out, final)
+        out = final
+    previous = _read_json_file(status_path)
+    status = {"schema": "inventory-status/1", "generation": gen,
+              "generatedAt": _utc_iso(generated), "rows": len(rows),
+              "sha256OfJsonl": h.hexdigest(), "shipInProgress": bool(shipping),
+              "durationS": round(time.time() - t0, 1), "skippedRows": len(skipped),
+              "root": "E" if archive else "workbench", "file": os.path.basename(out),
+              "machineId": ident["slug"], "version": VERSION}
+    _write_json_file(status_path, status)
+    if archive:
+        if skipped:
+            known = {(_relkey(r.get("relpath", "")), r.get("problem")) for r in _problem_rows(root)}
+            _append_rows(_pc_path(root, "problems.jsonl"),
+                         [_problem_row(rel, "unsafe name: not listed, never opened")
+                          for rel in skipped
+                          if (_relkey(rel), "unsafe name: not listed, never opened") not in known])
+        _prune_generations(folder, gen, previous.get("generation"))
+    success(f"Inventory: {len(rows)} file(s) under {root}"
+            + (f"; {len(skipped)} with a name that can't be used were left out" if skipped else "")
+            + (" (a ship was running: files newer than this list may be missing from it)"
+               if shipping else ""))
+    beat(force=True)
+    return {"ok": True, "rows": len(rows), "generation": gen, "skipped": len(skipped),
+            "shipInProgress": bool(shipping)}
+
+def _prune_generations(folder, current, previous):
+    """Keep this generation and, for a day, the one before it; older
+    generation files are this program's own and are removed."""
+    for fn in os.listdir(folder):
+        m = re.match(r"^inventory-E-(\d{8}T\d{6}Z)\.jsonl$", fn)
+        if not m or m.group(1) == current:
+            continue
+        if m.group(1) == previous:
+            try:
+                born = datetime.strptime(previous, "%Y%m%dT%H%M%SZ").replace(tzinfo=timezone.utc)
+            except ValueError:
+                born = None
+            if born and (_utc_now() - born).total_seconds() < PC_KEEP_GENERATION_S:
+                continue
+        try:
+            os.remove(os.path.join(folder, fn))
+        except OSError:
+            pass
+
+# ── Hash cache (spec 7.1, P7) ────────────────────────────────────────────────
+
+def _hash_cache_path():
+    return os.path.join(STATE_DIR, "hash-cache.jsonl")
+
+def load_hash_cache(label):
+    """This computer's hash cache for one root ("E" or "workbench"): the last
+    row per path wins."""
+    out = {}
+    for r in _read_jsonl_rows(_hash_cache_path()):
+        if r.get("root") == label and isinstance(r.get("relpath"), str) and r.get("sha256"):
+            out[_relkey(r["relpath"])] = r
+    return out
+
+def _local_stamp_utc(text):
+    """A now_stamp() time ("2026-09-26T120000", this computer's clock) as UTC
+    ISO 8601, or None."""
+    try:
+        return _utc_iso(datetime.strptime(str(text), "%Y-%m-%dT%H%M%S").astimezone(timezone.utc))
+    except ValueError:
+        return None
+
+def _seed_hash_cache(root, cache):
+    """The PC's cache starts from verified.jsonl where the file's size still
+    matches, taking its current time (7.1). Those were read buffered by the
+    old sweep (decision 9): the first full hash reads them again. A verified
+    frame whose size has changed since is a problem (P7). Returns (rows,
+    problems)."""
+    rows, problems = [], []
+    for r in _verified_rows(root):
+        rel = safe_relpath(r.get("relpath"), root)
+        if not rel or _relkey(rel) in cache or not r.get("sha256"):
+            continue
+        try:
+            st = os.stat(os.path.join(root, *rel.split("/")))
+        except OSError:
+            continue
+        if st.st_size != _int(r.get("size")):
+            problems.append(_problem_row(r.get("relpath"), "changed since it was verified",
+                                         r.get("sha256"), _int(r.get("size")),
+                                         found={"size": st.st_size}))
+            continue
+        row = {"schema": "hash-row/1", "root": "E", "relpath": rel, "size": st.st_size,
+               "mtimeNs": st.st_mtime_ns, "sha256": r["sha256"],
+               "hashedBy": r.get("hashedBy") or "pc-sweep", "read": r.get("read") or "buffered",
+               "hashedAt": _local_stamp_utc(r.get("verifiedAt")), "checkedAt": _utc_iso(),
+               "source": "verified.jsonl"}
+        cache[_relkey(rel)] = row
+        rows.append(row)
+    return rows, problems
+
+def run_hash(root=None, max_minutes=None, rolling=False, beat=None):
+    """Hash what isn't in this computer's hash cache yet, newest first (spec
+    7.3). On the PC, for the archive: read unbuffered at low disk priority,
+    pausing at a file while a sweep runs; a hashed file whose size or time
+    has changed is a problem (P7), and `rolling` re-reads the 1/30th checked
+    longest ago. Stops at a file after max_minutes; the next run carries on."""
+    archive = root is None and IS_WINDOWS or (root is not None and _is_archive_root(root))
+    root = root or (ARCHIVE_MOUNT if archive else workbench_root())
+    if archive:
+        _pc_role("--hash of the archive")
+    elif slug_problem():
+        error(f"Nothing done: {slug_problem()}.")
+        sys.exit(2)
+    if not os.path.isdir(root):
+        warn(f"Nothing to hash: {root} isn't there.")
+        return {"ok": False, "why": "root missing"}
+    beat = beat or (_Beat(root, "hash") if archive else (lambda *a, **k: None))
+    with _JobLock("hash") as lock:
+        if not lock.held:
+            info("Hashing is already running on this computer; this one stops here.")
+            return {"ok": False, "why": "busy"}
+        try:
+            return _hash_run(root, archive, max_minutes, rolling, beat)
+        finally:
+            try:
+                os.remove(_hash_progress_path())
+            except OSError:
+                pass
+
+def _hash_run(root, archive, max_minutes, rolling, beat):
+    background_io()
+    t0 = time.time()
+    label = "E" if archive else "workbench"
+    ident = machine_identity()
+    cache = load_hash_cache(label)
+    new_rows, problems = _seed_hash_cache(root, cache) if archive else ([], [])
+    files = [(rel, st, path) for rel, st, path in _walk_files(root, archive) if st is not None]
+    present = {_relkey(rel) for rel, _st, _p in files}
+    unbuffered_here = archive and IS_WINDOWS
+    todo = []
+    for rel, st, path in files:
+        c = cache.get(_relkey(rel))
+        if c is None:
+            todo.append((0, -st.st_mtime_ns, rel, st, path, "new"))
+        elif c.get("size") != st.st_size or c.get("mtimeNs") != st.st_mtime_ns:
+            if archive:
+                problems.append(_problem_row(
+                    rel, "changed since it was hashed", c.get("sha256"), c.get("size"),
+                    found={"size": st.st_size, "mtimeNs": st.st_mtime_ns}))
+            todo.append((1, -st.st_mtime_ns, rel, st, path, "changed"))
+        elif unbuffered_here and c.get("read") != "unbuffered":
+            todo.append((2, -st.st_mtime_ns, rel, st, path, "re-read"))
+    if rolling and archive:
+        queued = {_relkey(t[2]) for t in todo}
+        cached = sorted((c.get("checkedAt") or c.get("hashedAt") or "", k) for k, c in cache.items()
+                        if k in present and k not in queued)
+        share = math.ceil(len(cached) / PC_ROLLING_SHARE) if cached else 0
+        by_key = {_relkey(rel): (rel, st, path) for rel, st, path in files}
+        for _when, k in cached[:share]:
+            rel, st, path = by_key[k]
+            todo.append((3, 0, rel, st, path, "rolling"))
+    todo.sort(key=lambda t: (t[0], t[1], t[2]))
+    total_b = sum(t[3].st_size for t in todo)
+    info(f"Hash: {len(todo)} file(s), {human_size(total_b)} under {root}")
+    done_n = done_b = unreadable = 0
+    stopped = False
+    deadline = t0 + max_minutes * 60 if max_minutes is not None else None
+
+    def progress():
+        p = {"done": done_n, "total": len(todo), "bytesDone": done_b, "bytesTotal": total_b}
+        try:
+            _atomic_write_json(_hash_progress_path(), p)
+        except OSError:
+            pass
+        return p
+
+    for _prio, _neg, rel, st, p, why in todo:
+        if deadline and time.time() > deadline:
+            stopped = True
+            break
+        waited = time.time()
+        while archive and job_running("sweep") and time.time() - waited < 2 * 3600:
+            beat(progress="waiting for the sweep")
+            time.sleep(5)
+        beat(progress=progress())
+        try:
+            sha, size, read = hash_file_unbuffered(p)
+            st2 = os.stat(p)
+        except OSError:
+            unreadable += 1                           # in use or a read error: next time
+            continue
+        if size != st2.st_size or st2.st_mtime_ns != st.st_mtime_ns:
+            continue                                  # changing under us: next time
+        old = cache.get(_relkey(rel))
+        if archive and old and old.get("sha256") != sha and why in ("rolling", "re-read"):
+            problems.append(_problem_row(rel, "content changed since it was hashed",
+                                         old.get("sha256"), old.get("size"), found=sha))
+        row = {"schema": "hash-row/1", "root": label, "relpath": rel, "size": size,
+               "mtimeNs": st2.st_mtime_ns, "sha256": sha, "hashedBy": ident["slug"],
+               "read": read, "hashedAt": _utc_iso(), "checkedAt": _utc_iso()}
+        cache[_relkey(rel)] = row
+        new_rows.append(row)
+        done_n += 1
+        done_b += size
+        if len(new_rows) >= 200:
+            _cache_append(new_rows)
+            new_rows = []
+    _cache_append(new_rows)
+    if archive:
+        known = {(_relkey(r.get("relpath", "")), r.get("problem"), r.get("sha256"))
+                 for r in _problem_rows(root)}
+        _append_rows(_pc_path(root, "problems.jsonl"),
+                     [r for r in problems
+                      if (_relkey(r["relpath"]), r["problem"], r.get("sha256")) not in known])
+    _compact_hash_cache()
+    left = len(todo) - done_n
+    success(f"Hashed {done_n} file(s), {human_size(done_b)}"
+            + (f"; {len(problems)} problem(s), see {_pc_path(root, 'problems.jsonl')}"
+               if archive and problems else "")
+            + (f"; {left} left for next time" if stopped and left else "")
+            + (f"; {unreadable} couldn't be read just now (next time)" if unreadable else ""))
+    beat(force=True)
+    return {"ok": True, "hashed": done_n, "bytes": done_b, "left": left if stopped else 0,
+            "problems": len(problems), "unreadable": unreadable}
+
+def _cache_append(rows):
+    if not rows:
+        return
+    path = _hash_cache_path()
+    _confine(path, "the hash cache")
+    os.makedirs(os.path.dirname(path), exist_ok=True)
+    with open(path, "a", encoding="utf-8") as f:
+        for r in rows:
+            f.write(json.dumps(r, ensure_ascii=False) + "\n")
+        f.flush()
+        os.fsync(f.fileno())
+
+def _compact_hash_cache():
+    """Keep the cache file near its live size: rewrite it with the last row
+    per path once it holds more than twice that (this computer's own file)."""
+    path = _hash_cache_path()
+    rows = _read_jsonl_rows(path)
+    live = {}
+    for r in rows:
+        live[(r.get("root"), _relkey(r.get("relpath", "")))] = r
+    if len(rows) <= 2 * len(live) + 1000:
+        return
+    tmp = f"{path}.{os.getpid()}.tmp"
+    with open(tmp, "w", encoding="utf-8") as f:
+        for r in live.values():
+            f.write(json.dumps(r, ensure_ascii=False) + "\n")
+        f.flush()
+        os.fsync(f.fileno())
+    os.replace(tmp, path)
+
+# ── Requests (spec 10.2) and the PC's scheduled work ─────────────────────────
+
+def _request_dir(mount, folder="mac"):
+    return _verify_path(mount, folder, "requests")
+
+def _response_path(mount, rid):
+    return _pc_path(mount, "responses", f"{rid}.json")
+
+def _request_time(stamp):
+    try:
+        return datetime.strptime(stamp, "%Y%m%dT%H%M%SZ").replace(tzinfo=timezone.utc)
+    except ValueError:
+        return None
+
+def _respond(mount, rid, kind, status, **fields):
+    rec = {"schema": "response/1", "id": rid, "kind": kind, "status": status,
+           "at": _utc_iso(), "machineId": machine_identity()["slug"], **fields}
+    try:
+        _write_json_file(_response_path(mount, rid), rec)
+    except OSError as e:
+        warn(f"Could not answer request {rid}: {e}")
+    return rec
+
+def run_pc_tick(mount=None):
+    """Every five minutes on the PC ("Astro sync requests"): the heartbeat,
+    then any sweep or inventory the Mac asked for. Idle, it reads one folder
+    and writes only the heartbeat. Same-kind requests share one run, and each
+    gets its own answer; the PC never moves or deletes a request."""
+    mount = mount or ARCHIVE_MOUNT
+    _pc_role("--pc-tick")
+    if not os.path.isdir(mount):
+        return {"ok": False, "why": "archive missing"}
+    write_heartbeat(mount)
+    want = {}
+    try:
+        names = sorted(os.listdir(_request_dir(mount)))
+    except OSError:
+        names = []
+    for fn in names:
+        m = REQUEST_RE.match(fn)
+        if not m:
+            continue
+        rid, kind = fn[:-len(".json")], m.group(1)
+        if _read_json_file(_response_path(mount, rid)).get("status") in RESPONSE_FINAL:
+            continue
+        path = os.path.join(_request_dir(mount), fn)
+        made = _request_time(m.group(2))
+        try:
+            st = os.lstat(path)
+        except OSError:
+            continue
+        if not stat.S_ISREG(st.st_mode) or st.st_size > REQUEST_MAX_BYTES[kind]:
+            _respond(mount, rid, kind, "rejected", why="not a request file, or too big")
+            continue
+        try:
+            with open(path, encoding="utf-8") as f:
+                body = json.load(f)
+        except (OSError, ValueError):
+            _respond(mount, rid, kind, "rejected", why="not readable JSON")
+            continue
+        if not isinstance(body, dict):
+            _respond(mount, rid, kind, "rejected", why="not a JSON object")
+            continue
+        if made is None or (_utc_now() - made).total_seconds() > PC_REQUEST_EXPIRE_S:
+            _respond(mount, rid, kind, "expired", why="older than a day")
+            continue
+        if kind not in REQUEST_KINDS_HANDLED:
+            _respond(mount, rid, kind, "rejected",
+                     why=f"{kind} requests are handled from a later version")
+            continue
+        want.setdefault(kind, []).append(rid)
+    results = {}
+    for kind in REQUEST_KINDS_HANDLED:
+        rids = want.get(kind)
+        if not rids:
+            continue
+        if job_running(kind):
+            for rid in rids:
+                _respond(mount, rid, kind, "queued", why=f"a {kind} is running; next time")
+            continue
+        began = _utc_iso()
+        for rid in rids:
+            _respond(mount, rid, kind, "started", startedAt=began)
+        try:
+            res = run_sweep(mount) if kind == "sweep" else run_inventory(mount)
+        except Exception as e:
+            res = {"ok": False, "why": f"{type(e).__name__}: {e}"}
+        if not res.get("ok") and res.get("why") == "busy":
+            final, extra = "queued", {"why": f"a {kind} is running; next time"}
+        elif kind == "sweep" and res.get("waitingSoon"):
+            # copies wait only for time or for a ship that is running: go
+            # again at the next tick, so they're set aside within minutes
+            final, extra = "queued", {"result": res, "why": "unfinished copies are still "
+                                      "too new to set aside; next time"}
+        else:
+            final = "done" if res.get("ok") else "failed"
+            extra = {"result": res}
+        for rid in rids:
+            _respond(mount, rid, kind, final, startedAt=began, finishedAt=_utc_iso(), **extra)
+        results[kind] = res
+    write_heartbeat(mount)
+    return {"ok": True, "handled": {k: len(v) for k, v in want.items()}, "results": results}
+
+def run_pc_nightly(mount=None, max_minutes=None):
+    """The PC's nightly work, and at logon (spec 7.1, 7.3): sweep, then the
+    inventory, then hash new files (and the P7 rolling re-read), then the
+    inventory again when hashing found anything, so its rows carry the hashes."""
+    mount = mount or ARCHIVE_MOUNT
+    _pc_role("--pc-nightly")
+    if not os.path.isdir(mount):
+        warn(f"The archive isn't there: {mount}. Nothing done.")
+        return {"ok": False}
+    minutes = max_minutes if max_minutes is not None else \
+        (_int(os.environ.get("ASTRO_PC_HASH_MINUTES") or _CONFIG.get("ASTRO_PC_HASH_MINUTES"))
+         or PC_HASH_MINUTES)
+    out, status = {}, {"schema": "nightly-status/1", "startedAt": _utc_iso(), "steps": {}}
+
+    def step(name, fn):
+        """One job on its own: a crash in the sweep must not cost the night its
+        inventory, its list or its heartbeat; the status file says which failed."""
+        t0 = time.time()
+        try:
+            r = fn()
+            out[name] = r
+            ok = bool(r.get("ok", True)) if isinstance(r, dict) else bool(r)
+            status["steps"][name] = {"ok": ok, "seconds": round(time.time() - t0)}
+            if isinstance(r, dict) and r.get("why"):
+                status["steps"][name]["why"] = r["why"]
+        except Exception as e:
+            warn(f"The nightly's {name} failed: {e}")
+            out[name] = {"ok": False, "error": str(e)}
+            status["steps"][name] = {"ok": False, "seconds": round(time.time() - t0),
+                                     "error": f"{type(e).__name__}: {e}"[:300]}
+        return out[name]
+
+    step("sweep", lambda: run_sweep(mount))
+    step("inventory", lambda: run_inventory(mount))
+    # The project layer (1.7): the list is rebuilt from the fresh inventory
+    # NOW, before the hours of hashing, so the Desk's To-process list is never
+    # older than last night even when the night runs long. Reads the ledger
+    # and the Mac's snapshot, writes projects.json and observatory.json.
+    step("projects", lambda: bool(run_projects(State())))
+    # ...and published in this PC's own _verify folder, so the Mac's panel can
+    # show the complete list (only the PC sees the masters and the finals)
+    step("publish", lambda: publish_projects(mount) > 0)
+    step("hash", lambda: run_hash(mount, max_minutes=minutes, rolling=True))
+    if isinstance(out.get("hash"), dict) and out["hash"].get("hashed"):
+        step("inventory2", lambda: run_inventory(mount))
+        step("projects2", lambda: bool(run_projects(State())))
+        step("publish2", lambda: publish_projects(mount) > 0)
+    pj = load_projects() or {}
+    status["projectsGeneratedAt"] = pj.get("generated_at")
+    snaps = (pj.get("sources") or {}).get("snapshots") or []
+    status["snapshotAgeHours"] = snaps[0].get("age_hours") if snaps else None
+    status["finishedAt"] = _utc_iso()
+    status["ok"] = all(v.get("ok") for v in status["steps"].values())
+    try:
+        _write_json_file(_pc_path(mount, "nightly-status.json"), status)
+    except OSError as e:
+        warn(f"nightly-status.json could not be written: {e}")
+    write_heartbeat(mount)
+    return {"ok": status["ok"], **out}
+
+def own_requests(mount=None):
+    """This computer's requests on the archive, with the PC's answers."""
+    mount = mount or ARCHIVE_MOUNT
+    slug = machine_identity()["slug"]
+    out = []
+    try:
+        names = sorted(os.listdir(_request_dir(mount, SHIP_FOLDER)))
+    except OSError:
+        return out
+    for fn in names:
+        m = REQUEST_RE.match(fn)
+        if m and m.group(3) == slug:
+            rid = fn[:-len(".json")]
+            out.append({"id": rid, "kind": m.group(1),
+                        "path": os.path.join(_request_dir(mount, SHIP_FOLDER), fn),
+                        "response": _read_json_file(_response_path(mount, rid))})
+    return out
+
+def file_request(kind, mount=None, quiet=False):
+    """Ask the PC for a sweep or an inventory (spec 10.2): a small file in
+    _verify\\mac\\requests\\ named <kind>-<UTC time>-<short name>-<nonce>.json.
+    Requests the PC has finished answering are tidied away first, and a
+    request of the same kind still waiting is reused. Returns its id, or
+    None when it couldn't be filed."""
+    mount = mount or ARCHIVE_MOUNT
+    bad = slug_problem()
+    if bad:
+        if not quiet:
+            error(f"Nothing filed: {bad}.")
+        return None
+    if SHIP_FOLDER == "pc":
+        if not quiet:
+            error("The PC doesn't send itself requests: run --sweep or --inventory on it.")
+        return None
+    reqdir = _request_dir(mount, SHIP_FOLDER)
+    _confine(reqdir, "a request")
+    for r in own_requests(mount):
+        if r["response"].get("status") in RESPONSE_FINAL:
+            try:
+                os.remove(r["path"])
+            except OSError:
+                pass
+        elif r["kind"] == kind:
+            if not quiet:
+                info(f"A {kind} request is already waiting for the PC: {r['id']}")
+            return r["id"]
+    rid = f"{kind}-{_utc_now().strftime('%Y%m%dT%H%M%SZ')}-{machine_identity()['slug']}-" \
+          f"{secrets.token_hex(4)}"
+    try:
+        os.makedirs(reqdir, exist_ok=True)
+        fd = os.open(os.path.join(reqdir, rid + ".json"), os.O_CREAT | os.O_EXCL | os.O_WRONLY)
+        with os.fdopen(fd, "w", encoding="utf-8") as f:
+            json.dump({"schema": "request/1", "id": rid, "kind": kind,
+                       "machineId": machine_identity()["slug"], "createdAt": _utc_iso()}, f)
+    except OSError as e:
+        if not quiet:
+            warn(f"Could not file the request: {_os_reason(e)}")
+        return None
+    if not quiet:
+        success(f"Asked the PC for {'an' if kind[0] in 'aeiou' else 'a'} {kind}: {rid}. "
+                f"An awake PC picks it up within five minutes.")
+    return rid
+
+def run_request(kind):
+    if kind not in REQUEST_KINDS_HANDLED:
+        error(f"--request takes one of: {', '.join(REQUEST_KINDS_HANDLED)}.")
+        sys.exit(2)
+    ok, why = _ship_mount(ARCHIVE_MOUNT)
+    if not ok:
+        error(f"Archive not reachable at {ARCHIVE_MOUNT} ({ARCHIVE_LABEL}): {why}. Nothing filed.")
+        sys.exit(1)
+    rid = file_request(kind)
+    sys.exit(0 if rid else 1)
+
+# ── The share's rights, tried from the Mac (decision D7) ─────────────────────
+
+RIGHTS_CHECK_DIR = "_rights-check"
+
+def run_check_share_rights(mount=None):
+    """Try, from this computer, each thing the share user may and may not do
+    under D7, on the test folder the PC's set-archive-rights.ps1 -Scratch
+    made (_rights-check, laid out like the archive). It never touches a frame.
+    Allowed: create a new file and write it, set its time, make a folder;
+    write, and delete, in _verify\\mac and _verify\\lock. Refused: delete or
+    rename anything in the tree, create or write in _verify itself or in
+    _verify\\pc. Returns True when every answer is the right one."""
+    mount = mount or ARCHIVE_MOUNT
+    ok, why = _ship_mount(mount)
+    base = os.path.join(mount, RIGHTS_CHECK_DIR)
+    if not os.path.isdir(base):
+        error(f"No rights-check folder at {base}"
+              + ("" if ok else f" ({why})")
+              + ". On the PC, run pc\\set-archive-rights.ps1 -Scratch first.")
+        return False
+    _confine(base, "the rights check")
+    tag = f"{machine_identity()['slug']}-{_utc_now().strftime('%Y%m%dT%H%M%SZ')}-" \
+          f"{secrets.token_hex(2)}"
+    tree, v = os.path.join(base, "tree"), os.path.join(base, "_verify")
+    results = []
+
+    def attempt(label, want_ok, fn):
+        try:
+            fn()
+            got_ok, detail = True, ""
+        except FileNotFoundError:
+            got_ok, detail = None, "couldn't try: the file wasn't there"
+        except OSError as e:
+            got_ok, detail = False, _os_reason(e) if not isinstance(e, FileExistsError) \
+                else "that name is taken"
+        results.append((label, want_ok, got_ok, detail))
+        if got_ok is None:
+            note = f"  ({detail})"
+        elif got_ok == want_ok:
+            note = ""
+        else:
+            note = f"  (should work, but: {detail})" if want_ok else "  (should be refused, but worked)"
+        print(("  PASS  " if got_ok == want_ok else "  FAIL  ") + label + note)
+        return got_ok
+
+    def rename_away(path, other):
+        """A rename that should be refused; if it isn't, it is put back, so the
+        next try still finds the file under its own name."""
+        os.rename(path, other)
+        try:
+            os.rename(other, path)
+        except OSError:
+            pass
+
+    def create(path, data=b"rights check\n"):
+        fd = os.open(path, os.O_WRONLY | os.O_CREAT | os.O_EXCL | getattr(os, "O_BINARY", 0), 0o644)
+        with os.fdopen(fd, "wb") as f:
+            f.write(data)
+            f.flush()
+            os.fsync(f.fileno())
+
+    def append(path):
+        with open(path, "ab") as f:
+            f.write(b"\n")
+
+    def read(path):
+        with open(path, "rb") as f:
+            f.read(1)
+
+    new = os.path.join(tree, f"rights-{tag}.fit")
+    newdir = os.path.join(tree, f"Day {tag}")
+    canary = os.path.join(tree, "canary.fit")
+    print(f"▸ Rights check in {base}")
+    made = attempt("the archive tree: create a new file under its final name", True,
+                   lambda: create(new, os.urandom(64 * 1024)))
+    if made:
+        attempt("...read it back", True, lambda: read(new))
+        attempt("...set its date", True, lambda: os.utime(new, (time.time() - 86400,) * 2))
+        attempt("...rename it", False, lambda: rename_away(new, new + ".renamed"))
+        attempt("...delete it", False, lambda: os.remove(new))
+    if attempt("the archive tree: make a new folder (a Day)", True, lambda: os.mkdir(newdir)):
+        attempt("...rename that folder", False, lambda: rename_away(newdir, newdir + " renamed"))
+        attempt("...remove that folder", False, lambda: os.rmdir(newdir))
+    if os.path.exists(canary):
+        attempt("the PC's file in the tree: read it", True, lambda: read(canary))
+        attempt("...create a file with its name", False, lambda: create(canary))
+        attempt("...rename it", False, lambda: rename_away(canary, canary + ".renamed"))
+        attempt("...delete it", False, lambda: os.remove(canary))
+    attempt("_verify itself: create a file", False,
+            lambda: create(os.path.join(v, f"rights-{tag}.txt")))
+    if os.path.exists(os.path.join(v, "canary.jsonl")):
+        attempt("_verify itself: add to the PC's log there", False,
+                lambda: append(os.path.join(v, "canary.jsonl")))
+    for sub in ("mac", "lock"):
+        p = os.path.join(v, sub, f"rights-{tag}.txt")
+        if attempt(f"_verify\\{sub}: create a file", True, lambda p=p: create(p)):
+            attempt("...add to it", True, lambda p=p: append(p))
+            attempt("...delete it", True, lambda p=p: os.remove(p))
+    pcdir = os.path.join(v, "pc")
+    attempt("_verify\\pc: create a file", False,
+            lambda: create(os.path.join(pcdir, f"rights-{tag}.txt")))
+    if os.path.exists(os.path.join(pcdir, "canary.json")):
+        attempt("_verify\\pc: read the PC's file", True,
+                lambda: read(os.path.join(pcdir, "canary.json")))
+        attempt("...add to it", False, lambda: append(os.path.join(pcdir, "canary.json")))
+        attempt("...delete it", False, lambda: os.remove(os.path.join(pcdir, "canary.json")))
+    wrong = [r for r in results if r[1] != r[2]]
+    if not wrong:
+        success("The share's rights are what D7 needs: this computer can add frames and "
+                "write its own logs, and can't delete or rename anything on the archive.")
+        info(f"The test files it made stay in {tree} (the share can't delete them, which is "
+             f"the point). Delete {base} on the PC when you're done.")
+        return True
+    first = results[0]
+    if first[1] and not first[2]:
+        error("This computer can't create a file on the share under these rights, so the "
+              "ship can't work with them. Leave the archive's rights as they are and tell "
+              "Claude what the line above says.")
+    else:
+        error(f"{len(wrong)} answer(s) were wrong (marked FAIL above). Don't apply these "
+              f"rights to the archive yet.")
+    return False
 
 
 _EXPOSURE_TOKEN = re.compile(r"_(\d+(?:\.\d+)?)s_")
@@ -6553,11 +8920,13 @@ def _humanize_event(ev):
         return "Local state restored from iCloud mirror"
     return e
 
-def generate_dashboard(state):
-    """Build the self-contained status page from the ledger. No camera needed."""
-    if not state.has_ledger():
+def generate_dashboard(state, files=None, banner=None):
+    """Build the self-contained status page from the ledger. No camera needed.
+    With `files`, from those ledger rows instead (the other computer's
+    snapshot, on a PC that never imported), with `banner` said at the top."""
+    if files is None and not state.has_ledger():
         return None
-    led = state.ledger
+    led = state.ledger if files is None else {"files": files, "calibration": {}}
     per_target = {}
     monthly = defaultdict(lambda: {"frames": 0, "hours": 0.0})
     rigs = defaultdict(lambda: {"frames": 0, "hours": 0.0})
@@ -6640,6 +9009,12 @@ def generate_dashboard(state):
     payload = json.dumps(data).replace("<", "\\u003c").replace(">", "\\u003e") \
         .replace("&", "\\u0026")
     html = DASHBOARD_TEMPLATE.replace("__DATA__", payload)
+    if banner:
+        safe = (str(banner).replace("&", "&amp;").replace("<", "&lt;").replace(">", "&gt;"))
+        html = html.replace('<body class="viz-root">',
+                            '<body class="viz-root"><p style="margin:10px 16px;padding:9px 13px;'
+                            'border-radius:8px;background:#fde68a;color:#422006;'
+                            'font:14px system-ui,sans-serif">' + safe + '</p>', 1)
     path = os.path.join(STATE_DIR, "dashboard.html")
     try:
         with open(path + ".tmp", "w") as f:
@@ -6973,6 +9348,1339 @@ def run_skiplist_dialog(state):
 # MAIN
 # ═══════════════════════════════════════════════════════════════════════════
 
+# ═════════════════════════════════════════════════════════════════════════
+# Project layer (1.8, Project_Layer_Spec.md): a read-only view that answers
+# "you captured the light for this — now process it". It reads the ledger(s),
+# the PC's inventory of the archive, the Final Astro Images folder and the
+# contract (canonical targets and scopes), and writes ONE regenerable file,
+# projects.json. It never moves, renames or deletes anything.
+# ═════════════════════════════════════════════════════════════════════════
+
+PROJECT_STATUS_ORDER = ["capturing", "ready_to_process", "in_progress", "done"]
+# What Brett pastes to rebuild the list by hand (the panel shows it)
+PROJECTS_COMMAND_HINT = ('py -3 -X utf8 "$env:LOCALAPPDATA\\BrettjoAstro\\bin\\astro-import.py" --projects'
+                         if IS_WINDOWS else "python3 ~/bin/astro-import.py --projects")
+# Never a light: the Seestar's own stacks and panel stacks, previews, Milky Way frames
+_PL_DENY_SOURCETYPES = {"stack", "stack-jpg", "sub-jpg", "panel", "mw", "mw-stack", "mw-jpg", "media"}
+# Catalogue codes anywhere in a name. Not \b: the site's filenames join code
+# and name with "_", which \b counts as a word character. A letter suffix
+# (IC 1318A) is kept; a bare B or C must be upper case ("b4" is never Barnard 4).
+_PL_CODE_RE = re.compile(
+    r"(?<![A-Za-z0-9])(MESSIER|CALDWELL|SHARPLESS|MELOTTE|CEDERBLAD|"
+    r"M|NGC|IC|C|SH\s?2|HIP|GAIA|BARNARD|B|LDN|VDB|CED|ABELL|OU|MEL)"
+    r"[\s._-]*(\d+)([A-Za-z])?(?![A-Za-z0-9])", re.I)
+_PL_LONG_PREFIX = {"MESSIER": "M", "CALDWELL": "C", "SHARPLESS": "SH2", "MELOTTE": "MEL",
+                   "CEDERBLAD": "CED"}
+_PL_PAREN_RE = re.compile(r"^(.*?)\s*\(([^)]*)\)$")
+# a calibration master (masterDark, masterFlat, masterBias, or anything under a
+# calibration folder) is not Brett's processing of the target
+_PL_CAL_RE = re.compile(r"master[_ -]?(dark|flat|bias|darkflat)|(^|/)(calibration|darks?|flats?|bias(es)?)(/|$)",
+                        re.I)
+_PL_FINAL_EXTS = (".jpg", ".jpeg", ".png", ".tif", ".tiff")
+_PL_FINALS_CAP = 20000          # files looked at in Final Astro Images
+
+def _codekey(code):
+    """One spelling for a catalogue code: 'M 42', 'M42' and 'm_42' are all
+    'M42'; 'Sh2 129', 'Sh 2-129' and 'SH2129' are 'SH2-129'."""
+    s = re.sub(r"[\s._-]+", "", str(code or "").upper())
+    for long, short in _PL_LONG_PREFIX.items():
+        if s.startswith(long):
+            s = short + s[len(long):]
+    if s.startswith("SH2") and len(s) > 3:
+        s = "SH2-" + s[3:]
+    m = re.fullmatch(r"([A-Z]+-?)0*(\d+)([A-Z]?)", s)   # 'NGC 0224' is NGC 224
+    return f"{m.group(1)}{m.group(2)}{m.group(3)}" if m and m.group(2) else s
+
+def _codes_in(text):
+    """Every catalogue code written in a name, as code keys, in order. A code
+    with a letter suffix gives the suffixed key first, then the bare one."""
+    out = []
+    for m in _PL_CODE_RE.finditer(str(text or "")):
+        raw, num, suffix = m.group(1), str(int(m.group(2))), m.group(3) or ""
+        pre = re.sub(r"\s+", "", raw).upper()
+        long_form = pre in _PL_LONG_PREFIX           # 'Caldwell 25', 'Messier 31'
+        pre = _PL_LONG_PREFIX.get(pre, pre)
+        if pre in ("B", "C") and not long_form and raw != pre:
+            continue   # 'b4' / 'c1' in a filename is never a catalogue code
+        pre = "BARNARD" if pre == "B" else pre
+        base = f"SH2-{num}" if pre == "SH2" else f"{pre}{num}"
+        if pre == "HIP":
+            remap = SEESTAR_HIP_REMAP.get(f"HIP {num}")
+            if remap:
+                base = _codekey(remap)
+        for key in ([base + suffix.upper()] if suffix else []) + [base]:
+            if key not in out:
+                out.append(key)
+    return out
+
+# names that say what kind of object it is, not which: never a match, never a clash
+_GENERIC_NAME_KEYS = {"reflection nebula", "spiral galaxy", "open cluster", "open star cluster",
+                      "globular cluster", "dark nebula", "emission nebula", "planetary nebula",
+                      "galaxy", "nebula", "cluster", "star"}
+
+def load_contract():
+    """contract/targets.json and contract/scopes.json, indexed for lookups.
+    A missing, unreadable or malformed file becomes a warning, never a crash."""
+    out = {"targets": [], "scopes": [], "by_code": {}, "by_namekey": {},
+           "ambiguous_names": set(), "default_site": "Shinfield", "warnings": [],
+           "_tokens": None}
+    for fname, key in (("targets.json", "targets"), ("scopes.json", "scopes")):
+        path = os.path.join(CONTRACT_DIR, fname)
+        try:
+            with open(path, encoding="utf-8-sig") as f:   # a BOM from Notepad is fine
+                d = json.load(f)
+        except (OSError, ValueError) as e:
+            out["warnings"].append(f"contract/{fname} could not be read: {e}")
+            continue
+        if not isinstance(d, dict) or not isinstance(d.get(key), list):
+            out["warnings"].append(f"contract/{fname} isn't the expected shape "
+                                   f"(an object with a '{key}' list)")
+            continue
+        out[key] = [e for e in d[key] if isinstance(e, dict) and isinstance(e.get("id"), str)]
+        if key == "scopes" and isinstance(d.get("default_site"), str):
+            out["default_site"] = d["default_site"]
+    dup_codes = []
+    for t in out["targets"]:
+        for c in [x for x in (t.get("codes") or []) if isinstance(x, str)] + [t["id"]]:
+            k = _codekey(c)
+            if k in out["by_code"] and out["by_code"][k] is not t:
+                dup_codes.append(c)
+            out["by_code"].setdefault(k, t)
+        for a in [t.get("name") or ""] + [x for x in (t.get("aliases") or []) if isinstance(x, str)]:
+            k = _name_key(a)
+            if not k or k in _GENERIC_NAME_KEYS:
+                continue                      # 'Reflection Nebula' names a kind, not an object
+            if k in out["by_namekey"] and out["by_namekey"][k] is not t:
+                out["ambiguous_names"].add(k)   # e.g. two 'Reflection Nebula's
+            else:
+                out["by_namekey"][k] = t
+    if dup_codes:
+        out["warnings"].append(f"contract/targets.json lists a code on two targets (the first keeps it): "
+                               f"{', '.join(sorted(set(dup_codes))[:6])}")
+    if out["ambiguous_names"]:
+        out["warnings"].append(f"contract/targets.json has a name on two targets, so it matches "
+                               f"neither: {', '.join(sorted(out['ambiguous_names'])[:6])}")
+    return out
+
+def _lookup_name(contract, text):
+    k = _name_key(text)
+    if not k or k in contract["ambiguous_names"]:
+        return None
+    return contract["by_namekey"].get(k)
+
+def target_display(t):
+    """'Iris Nebula (NGC 7023)': the name with its first catalogue code."""
+    codes = [c for c in (t.get("codes") or []) if isinstance(c, str)]
+    name = t.get("name") or t.get("id") or ""
+    if codes and _name_key(codes[0]) not in _name_key(name):
+        return f"{name} ({codes[0]})"
+    return name
+
+def resolve_target(contract, raw, custom_names=None):
+    """The contract target for any name the ledger, a receipt or an archive
+    folder uses — 'NGC 7380', 'NGC 7380 - Wizard Nebula', 'Wizard Nebula
+    (NGC 7380)', a mosaic panel, or a saved custom name. A name that carries
+    the codes of several different objects ('Leo Triplet (M 65, M 66, NGC
+    3628)') is not folded into one of them. Returns (target, how) or (None, why)."""
+    base = re.sub(r"\s+\(mosaic\)$", "", str(raw or "").strip())
+    base = re.sub(r"\s*·\s*\d+-\d+$", "", base)          # display panel suffix
+    m = MOSAIC_RE.match(base)
+    if m and re.fullmatch(r"\d+-\d+", m.group(2)):
+        base = m.group(1)
+    if not base:
+        return None, "empty name"
+    texts = [base]
+    if isinstance(custom_names, dict):
+        custom = custom_names.get(base) or custom_names.get(str(raw or "").strip())
+        if isinstance(custom, str) and custom:
+            texts.append(custom)
+    for text in texts:
+        keys = _codes_in(text)
+        # 'IC 1318A' is one mention: once the suffixed key is known, its bare
+        # code is not a second object; when it isn't, the bare code stands in
+        mentions = []
+        for i, key in enumerate(keys):
+            nxt = keys[i + 1] if i + 1 < len(keys) else None
+            suffixed = re.fullmatch(r"[A-Z]+-?\d+[A-Z]", key) is not None
+            if suffixed and nxt == key[:-1] and key not in contract["by_code"]:
+                continue        # 'IC 1396A' unknown: its bare code IC 1396 stands in
+            if i and re.fullmatch(r"[A-Z]+-?\d+[A-Z]", keys[i - 1]) and keys[i - 1][:-1] == key:
+                if keys[i - 1] in contract["by_code"]:
+                    continue    # 'IC 1318A' known: IC 1318 is not a second object
+            mentions.append(key)
+        hits, known = [], set()
+        for key in mentions:
+            t = contract["by_code"].get(key)
+            if t is not None:
+                known.add(key)
+                if t not in hits:
+                    hits.append(t)
+        if len(hits) > 1:
+            return None, "names several objects"
+        if hits and len(known) < len(mentions):
+            return None, "names several objects, one unknown"
+        if hits:
+            return hits[0], f"code {next(iter(known))}"
+        t = _lookup_name(contract, text)
+        if t:
+            return t, "name"
+        dm = _DISPLAY_RE.match(text)                      # 'CODE - Common'
+        if dm:
+            t = _lookup_name(contract, dm.group(2))
+            if t:
+                return t, "display name"
+        fm = _PL_PAREN_RE.match(text)                     # 'Name (CODE)'
+        if fm:
+            t = _lookup_name(contract, fm.group(1))
+            if t:
+                return t, "folder name"
+    return None, "no catalogue code or known name"
+
+def _scope_tokens(entry):
+    """Spellings that mean this scope in a filename or folder name, as plain
+    lower-case words: the id, the name, and the name without its maker
+    ('Seestar S30 Pro' → 's30pro')."""
+    toks = {entry.get("id") or "", entry.get("name") or ""}
+    toks.add(re.sub(r"^(seestar|askar|zwo)\s+", "", entry.get("name") or "", flags=re.I))
+    toks |= {a for a in (entry.get("aliases") or []) if isinstance(a, str)}
+    return {re.sub(r"[\s._-]+", "", t).lower() for t in toks if isinstance(t, str) and t}
+
+def _flat_words(text):
+    """'NGC7023_Iris_Nebula__2026-10_FRA400' → ['ngc7023','iris','nebula','2026','10','fra400']"""
+    return [w for w in re.split(r"[^a-z0-9]+", str(text or "").lower()) if w]
+
+def _rigs_in(text, contract):
+    """Every scope a filename or folder name names: whole words between
+    separators, or up to three words run together ('Seestar S30 Pro',
+    'S30_Pro', 'S30Pro' all mean the S30 Pro). The longest mention wins
+    over the shorter one inside it, so the S30 Pro is never also the S30,
+    and '300subs' is not the S30. A final named for both Askars names both."""
+    cache = contract.get("_tokens")
+    if cache is None:
+        cache = contract["_tokens"] = [(s["id"], _scope_tokens(s)) for s in contract["scopes"]
+                                       if "unit" not in (s.get("match") or {})]
+    words = _flat_words(text)
+    hits = []                                   # (start, end, sid)
+    for n in (3, 2, 1):
+        for i in range(len(words) - n + 1):
+            gram = "".join(words[i:i + n])
+            for sid, toks in cache:
+                if gram in toks:
+                    hits.append((i, i + n, sid))
+    out = []
+    for a, b, sid in hits:
+        if any((a2 <= a and b <= b2 and (b2 - a2) > (b - a)) for a2, b2, _ in hits):
+            continue                            # inside a longer mention
+        if sid not in out:
+            out.append(sid)
+    return out
+
+def resolve_scope(contract, row):
+    """The contract scope (and so the site) for a ledger row: the two Askars
+    by the scope name the import worked out from the focal length, a Seestar
+    by its model. A second unit of the same model can't be told apart yet
+    (the importer doesn't record which unit a frame came from), so a scope
+    entry that carries a 'unit' in its match is skipped until it can."""
+    cam = row.get("camera") if isinstance(row.get("camera"), str) else ""
+    scope = row.get("scope") if isinstance(row.get("scope"), str) else ""
+    if not cam and row.get("device") == "seestar":
+        cam = "ZWO " + scope if scope else "ZWO Seestar S30 Pro"   # pre-1.x rows: the S30 Pro
+    for s in contract["scopes"]:
+        mt = s.get("match") if isinstance(s.get("match"), dict) else {}
+        if "unit" in mt:
+            continue
+        mc = mt.get("camera") or ""
+        hit = (cam and cam == mc) or (scope and "ZWO " + scope == mc) \
+            or (scope and scope == s.get("name"))
+        if not hit:
+            continue
+        if mt.get("scope") and mt["scope"] != scope:
+            continue
+        return s
+    return None
+
+def scopes_for_root(contract, root):
+    """The scopes that file into one archive root (the two Askars share one),
+    leaving out site entries that are still switched off."""
+    return [s for s in contract["scopes"] if s.get("archive_root") == root
+            and "unit" not in (s.get("match") or {})]
+
+def _project_light(row):
+    """Is this ledger row one light frame? Subs from a Seestar, Plan/Live
+    lights from the ASIAir, and back-catalogue rows whose filename says
+    Light_*.fit. Never a stack, a panel stack, a preview or a Milky Way frame."""
+    st = row.get("sourceType")
+    if st in ("sub", "Plan", "Live"):
+        return True
+    if st in _PL_DENY_SOURCETYPES:
+        return False
+    name = row.get("filename") if isinstance(row.get("filename"), str) else ""
+    return name.lower().startswith("light_") and name.lower().endswith((".fit", ".fits", ".fts"))
+
+def _row_night(row):
+    """The row's observing night, or the one its filename stamps (baseline
+    and merged rows carry none), or None. Only a real date counts."""
+    night = row.get("night")
+    if not night and isinstance(row.get("filename"), str):
+        night = _seestar_file_night(row["filename"])
+    if not isinstance(night, str):
+        return None
+    try:
+        return date.fromisoformat(night).isoformat()   # one spelling: 20261012 is 2026-10-12
+    except ValueError:
+        return None
+
+def load_capture_state(verbose=False):
+    """The one human-set fact (spec §4): per dataset, auto / open / complete,
+    keyed 'TARGET|SCOPE|SITE' as projects.json shows it. Written by AstroLog
+    (step 3) or by hand; read here. Missing file means all auto. Values are
+    read whatever their case; with verbose=True returns (state, notes) and
+    the notes say what in the file was not understood."""
+    path = os.path.join(STATE_DIR, "capture-state.json")
+    d = _read_json_file(path)
+    notes = []
+    if os.path.isfile(path) and not d:
+        notes.append("capture-state.json is there but could not be read (not valid JSON?): "
+                     "every dataset counts as auto")
+    ds = d.get("datasets") if isinstance(d.get("datasets"), dict) else d
+    out = {}
+    for k, v in (ds or {}).items():
+        if k == "datasets":
+            continue
+        vv = v.strip().lower() if isinstance(v, str) else None
+        if isinstance(k, str) and vv in ("auto", "open", "complete"):
+            out[k] = vv
+        else:
+            notes.append(f"capture-state.json: {k!r} = {v!r} was not understood (auto, open or complete)")
+    return (out, notes) if verbose else out
+
+def _latest_inventory_path():
+    """The archive inventory the sweep/nightly last finished: the generation
+    inventory-E.status.json names (a plain stamp, nothing else is trusted),
+    else the newest file there."""
+    folder = _pc_path(ARCHIVE_MOUNT)
+    gen = _read_json_file(os.path.join(folder, "inventory-E.status.json")).get("generation")
+    if isinstance(gen, str) and re.fullmatch(r"[0-9A-Za-z]+", gen):
+        p = os.path.join(folder, f"inventory-E-{gen}.jsonl")
+        if os.path.isfile(p):
+            return p
+    try:
+        gens = sorted(f for f in os.listdir(folder)
+                      if re.fullmatch(r"inventory-E-[0-9A-Za-z]+\.jsonl", f))
+    except OSError:
+        return None
+    return os.path.join(folder, gens[-1]) if gens else None
+
+def _iter_jsonl_rows(path):
+    """Like _read_jsonl_rows, one row at a time (an archive inventory can be
+    hundreds of thousands of rows, read over SMB on the Mac)."""
+    try:
+        with open(path, encoding="utf-8", errors="replace") as f:
+            for line in f:
+                line = line.strip()
+                if not line:
+                    continue
+                try:
+                    r = json.loads(line)
+                except ValueError:
+                    continue
+                if isinstance(r, dict):
+                    yield r
+    except OSError:
+        return
+
+def _is_link(path):
+    """A symlink, or an NTFS junction (os.walk's followlinks=False skips only
+    the former)."""
+    isj = getattr(os.path, "isjunction", None)
+    return os.path.islink(path) or bool(isj and isj(path))
+
+def _scan_finals(contract):
+    """Finished pictures in Final Astro Images, with the codes and the scopes
+    their filenames and subfolders carry. (None, why) when the folder can't
+    be looked at. Never follows a link out of the folder."""
+    if not FINALS_DIR:
+        return None, "no Final Astro Images folder is configured on this computer"
+    if not os.path.isdir(FINALS_DIR):
+        return None, f"{FINALS_DIR} isn't there"
+    found, seen = [], 0
+    for dirpath, dns, fns in os.walk(FINALS_DIR):
+        dns[:] = [d for d in dns if not d.startswith((".", "_"))
+                  and not _is_link(os.path.join(dirpath, d))]
+        for fn in fns:
+            seen += 1
+            if seen > _PL_FINALS_CAP:
+                return found, f"Final Astro Images is very large; stopped after {_PL_FINALS_CAP:,} files"
+            if fn.startswith((".", "~$")) or not fn.lower().endswith(_PL_FINAL_EXTS):
+                continue                                  # ._ sidecars, Office locks
+            rel = _rel(os.path.join(dirpath, fn), FINALS_DIR).replace("\\", "/")
+            subs = rel.split("/")[:-1]                    # every folder on the way
+            sub = subs[0] if subs else ""
+            stem = os.path.splitext(fn)[0]
+            codes = _codes_in(stem)
+            codes = [c for c in codes                      # 'IC1318A' known: not also IC 1318
+                     if not any(k != c and k.startswith(c) and k[len(c):].isalpha()
+                                and k in contract["by_code"] for k in codes)]
+            folder_scopes = next((r for r in (_rigs_in(d, contract) for d in reversed(subs)) if r), [])
+            roots = set()
+            for d in subs:
+                roots |= _finals_sub_roots(contract, d)
+            found.append({"name": fn, "sub": sub, "codes": codes,
+                          "rigs": _rigs_in(stem, contract),
+                          "folder_scopes": folder_scopes,
+                          "folder_roots": roots})
+    return found, ""
+
+def _finals_sub_roots(contract, sub):
+    """Which archive roots a Final Astro Images subfolder names ('ZWO Askar
+    Scopes', 'S30P'), or an empty set when it names none."""
+    flat = re.sub(r"[\s._-]+", "", sub or "").lower()
+    roots = set()
+    for s in contract["scopes"]:
+        root = s.get("archive_root") or ""
+        if flat and flat == re.sub(r"[\s._-]+", "", root).lower():
+            roots.add(root)
+    return roots
+
+def _final_marks(f, tcodes, sid, root, n_datasets):
+    """Does this finished picture mark dataset (sid, root) done? Returns
+    (yes, note). The scope comes from the filename first, else the subfolder;
+    a final that names no scope counts only when the target has one dataset
+    (spec §4: done is per target AND scope), and the dataset says so."""
+    if not tcodes & set(f["codes"]):
+        return False, None
+    rigs = f["rigs"] or f["folder_scopes"]
+    if rigs:
+        return sid in rigs, None
+    if f["folder_roots"]:
+        if root not in f["folder_roots"]:
+            return False, None
+        return (n_datasets == 1), ("shared-final" if n_datasets > 1 else None)
+    return (n_datasets == 1), ("unscoped-final" if n_datasets > 1 else None)
+
+def _row_idents(key, row):
+    """The two ways one frame can be recognised across two ledgers: its bytes
+    (sha256, lower-cased) and its camera path with its size. A frame is the
+    same frame when either matches."""
+    out = set()
+    sha = row.get("sha256")
+    if isinstance(sha, str) and sha:
+        out.add(("sha", sha.lower()))
+    size = row.get("size")
+    if isinstance(size, int) and not isinstance(size, bool):
+        out.add(("path", str(key).split("|cam=")[0].lower(), size))
+    return out
+
+def _project_rows(state, extra_ledgers, warnings, metas=None, stats=None):
+    """Every light row from this computer's ledger and the other computer's
+    snapshot(s), with its ledger key and the label of the computer whose
+    frame folder it sits in. Duplicates are settled by build_projects, once
+    a row's dataset is known. `metas` collects each snapshot's who/when."""
+    here, there = ship_sides()
+    ledgers = [("this computer", here, True, ((state.ledger or {}).get("files") or {}))]
+    for p in extra_ledgers:
+        _confine(p, "--with-ledger")
+        lf, meta = load_ledger_snapshot(p, warnings)
+        if metas is not None:
+            metas.append(meta)
+        ledgers.append((meta.get("machine") or os.path.basename(p), there, False, lf))
+    for label, loc, own, files in ledgers:
+        for key, row in files.items():
+            try:
+                if not isinstance(row, dict) or not _project_light(row):
+                    continue
+            except TypeError:
+                if stats is not None:       # a row whose fields are not even strings
+                    stats["bad"] = stats.get("bad", 0) + 1
+                continue
+            yield row, key, loc, own
+    return [l for l, _loc, _own, _f in ledgers]
+
+def _frame_here(row, cache=None):
+    """Is this computer's copy of the frame still in its import folder?
+    (Brett clears his own disks himself; the ledger isn't told.) One folder
+    listing per folder when a cache is given."""
+    dest, fn = row.get("dest"), row.get("filename")
+    if not isinstance(dest, str) or not isinstance(fn, str):
+        return False
+    if cache is None:
+        return os.path.isfile(os.path.join(dest, fn))
+    return _dest_present(dest, fn, cache)
+
+def run_targets_draft(state):
+    """Build targets-draft.json in the state folder from this computer's own
+    ledger and the other computer's snapshot (what --projects reads): every
+    distinct target name, resolved against the contract, with
+    the ones the contract doesn't know listed for Brett to review. Read-only
+    apart from the draft itself; the contract is never touched."""
+    contract = load_contract()
+    for w in contract["warnings"]:
+        warn(w)
+    extra, names = projects_inputs(state)
+    rows, notes = {}, []
+    for row, _key, _loc, _own in _project_rows(state, extra, notes):
+        raws = tuple(x for x in (row.get("displayName"), row.get("target"))
+                     if isinstance(x, str) and x)
+        if raws:
+            rows.setdefault(raws, 0)
+            rows[raws] += 1
+    resolved, unresolved = [], []
+    for raws, n in sorted(rows.items()):
+        t = how = None
+        for raw in raws:
+            t, how = resolve_target(contract, raw, names)
+            if t is not None:
+                break
+        if t is not None:
+            resolved.append({"raw": raws[0], "target_id": t["id"], "name": target_display(t),
+                             "how": how, "frames": n})
+        else:
+            unresolved.append({"raw": raws[0], "why": how, "frames": n})
+    for w in notes:
+        warn(w)
+    draft = {"schema": "targets-draft/1", "generated_at": _utc_iso(),
+             "contract_dir": CONTRACT_DIR, "ledgers": ["this computer"] + extra,
+             "resolved": resolved, "unresolved": unresolved}
+    out = os.path.join(STATE_DIR, "targets-draft.json")
+    _confine(out, "--targets-draft")
+    _atomic_write_json(out, draft)
+    success(f"{len(resolved)} of {len(rows)} names match the contract; "
+            f"draft written to {out}")
+    if unresolved:
+        warn(f"{len(unresolved)} name(s) the contract doesn't know yet:")
+        for u in unresolved:
+            print(f"   {u['raw']}  ({u['frames']} frames: {u['why']})")
+        info(f"Add each one to {os.path.join(CONTRACT_DIR, 'targets.json')}: a new "
+             "target, or an alias on an existing one. Then run --targets-draft again. "
+             "An update never replaces that file; a newer shipped copy lands beside it "
+             "as targets.json.new for you to merge.")
+    return draft
+
+# A Seestar sub's filter sits in its filename (Light_M 31_10.0s_IRCUT_20250725-221553.fit);
+# the ledger row carries no filter field for Seestars, the ASIAir rows do
+_PL_FILTER_RE = re.compile(r"_\d+(?:\.\d+)?s_([A-Za-z][A-Za-z0-9+-]{0,11})_\d{8}-\d{6}\.", re.I)
+_PL_PANEL_RE = re.compile(r"\s·\s*\d+-\d+$")        # 'Andromeda · 1-2': an ASIAir mosaic panel
+
+def _row_filter(row):
+    flt = row.get("filter")
+    if isinstance(flt, str) and flt:
+        return flt
+    fn = row.get("filename")
+    m = _PL_FILTER_RE.search(fn) if isinstance(fn, str) else None
+    return m.group(1).upper() if m else ""
+
+def _row_mosaic(row):
+    """Is this frame part of a mosaic? A Seestar '(mosaic)' name, or an ASIAir panel."""
+    for x in (row.get("displayName"), row.get("target")):
+        if not isinstance(x, str):
+            continue
+        if "mosaic" in x.lower() or _PL_PANEL_RE.search(x):
+            return True
+        m = MOSAIC_RE.match(x)
+        if m and re.fullmatch(r"\d+-\d+", m.group(2)):
+            return True
+    return False
+
+def build_projects(state, extra_ledgers=(), today=None, custom_names=None, collect=None):
+    """The whole project layer as one dict (spec §7): every dataset
+    (target + scope + site) with its sessions, where its frames are, and a
+    status derived from the facts — never typed in. Pure read."""
+    contract = load_contract()
+    warnings = list(contract["warnings"])
+    names = custom_names if isinstance(custom_names, dict) else (state.custom_names or {})
+    if today is None:
+        today = date.fromisoformat(observing_night(datetime.now()))   # nights, not dates
+    elif isinstance(today, str):
+        today = date.fromisoformat(today)
+
+    datasets = {}            # (tid, scope_id) -> working dict
+    folder_names = {}        # (tid, root) -> a folder on the archive (for archive_rel)
+    unresolved, no_scope, no_night, bad_rows, rows_read = set(), 0, 0, 0, 0
+    n_unresolved, n_dupes = 0, 0
+    seen = {}                # frame ident -> (tid, sid) it was counted in
+    here_cache = {}
+    metas = []
+    resolved = {}            # name -> target (or None): 175 names, 20k rows
+    stats = {}
+    rowgen = _project_rows(state, extra_ledgers, warnings, metas, stats)
+    while True:
+        try:
+            row, key, loc, own = next(rowgen)
+        except StopIteration as stop:
+            ledger_names = stop.value
+            break
+        rows_read += 1
+        try:
+            night = _row_night(row)
+            if not night:
+                no_night += 1
+                continue
+            t = None
+            for nm in (row.get("displayName"), row.get("target")):
+                if isinstance(nm, str) and nm:
+                    if nm not in resolved:
+                        resolved[nm] = resolve_target(contract, nm, names)[0]
+                    t = resolved[nm]
+                    if t is not None:
+                        break
+            if t is None:
+                nm = row.get("displayName") or row.get("target")
+                if isinstance(nm, str) and nm:
+                    unresolved.add(nm)
+                n_unresolved += 1
+                continue
+            s = resolve_scope(contract, row)
+            if s is None:
+                no_scope += 1
+                continue
+            # the same frame in both ledgers (by bytes, or by camera path and
+            # size) is one frame, counted where it was first seen; a second
+            # copy only adds where it sits
+            idents = _row_idents(key, row)
+            first = next((seen[i] for i in idents if i in seen), None)
+            if first is None:
+                first = (t["id"], s["id"])
+                for i in idents:
+                    seen[i] = first
+                d = datasets.setdefault(first, {"target": t, "scope": s, "nights": {},
+                                                "locations": set()})
+                n = d["nights"].setdefault(night, {"frames": 0, "integration": 0.0,
+                                                   "bytes": 0, "exps": {}, "filters": {}, "days": set()})
+                n["frames"] += 1
+                dk = row.get("dayKey") if isinstance(row.get("dayKey"), str) else \
+                    (_day_key(row["dest"]) if own and isinstance(row.get("dest"), str) else None)
+                if dk:
+                    n["days"].add(dk)
+                if row.get("device") == "seestar":
+                    d["seestar"] = True
+                try:
+                    secs = float(row.get("exposureSeconds") or 0)
+                    if math.isfinite(secs) and 0 <= secs <= 86400:
+                        n["integration"] += secs
+                        if secs > 0:                      # for the Observatory's drawer
+                            ek = f"{secs:g}"
+                            n["exps"][ek] = n["exps"].get(ek, 0) + 1
+                except (TypeError, ValueError, OverflowError):
+                    pass
+                try:
+                    sz = int(row.get("size") or 0)
+                    if 0 < sz < 10 ** 12:
+                        n["bytes"] += sz
+                except (TypeError, ValueError, OverflowError):
+                    pass
+                flt = _row_filter(row)
+                if flt:
+                    n["filters"][flt] = n["filters"].get(flt, 0) + 1
+                if _row_mosaic(row):
+                    d["mosaic"] = True
+            else:
+                d = datasets[first]
+                n_dupes += 1
+                for i in idents:                 # a third copy at this path is the same frame
+                    seen.setdefault(i, first)
+            arel = row.get("archiveLocation") or row.get("archivePath")
+            if arel or row.get("archiveVerifiedAt"):
+                d["locations"].add("chillblast_archive")
+                if isinstance(arel, str):
+                    parts = [p for p in arel.replace("\\", "/").split("/") if p]
+                    if len(parts) >= 2 and not parts[1].startswith("_"):
+                        folder_names.setdefault((t["id"], parts[0]), parts[1])
+            if own:
+                if _frame_here(row, here_cache):
+                    d["locations"].add(loc)
+            elif row.get("here") is True:           # the snapshot checked its disk when written
+                d["locations"].add(loc)
+            elif "here" not in row and isinstance(row.get("dest"), str):
+                d["locations"].add(loc + "-unchecked")   # an older snapshot: its ledger says so
+        except (TypeError, ValueError, AttributeError, OverflowError):
+            bad_rows += 1                           # a row that is not a ledger row
+    bad_rows += stats.get("bad", 0)
+    if bad_rows:
+        warnings.append(f"{bad_rows} ledger row(s) could not be read and were not counted")
+    # the calibration frames linked into each session's Day folder: this computer's
+    # ledger and the other's snapshot together (a Seestar needs none of ours)
+    cal_idx = _calibration_index([_calibration_links(state.ledger)]
+                                 + [m.get("calibration") for m in metas if isinstance(m, dict)])
+    for d in datasets.values():
+        for n in d["nights"].values():
+            n["cal"] = _calibration_for(cal_idx, n["days"])
+            n["days"] = sorted(n["days"])
+    if unresolved:
+        warnings.append(f"{len(unresolved)} target name(s) the contract doesn't know "
+                        f"(run --targets-draft to list them); their frames are not counted")
+    if no_scope:
+        warnings.append(f"{no_scope} frame(s) have no scope recorded (older ASIAir rows) "
+                        f"and were not counted")
+    if no_night:
+        warnings.append(f"{no_night} frame(s) carry no night and were not counted")
+
+    # What the archive itself shows: masters per target and root, from the
+    # PC's newest inventory. Every folder that resolves to the target counts
+    # (a renamed folder is still that target's), and the folder the
+    # inventory saw wins for archive_rel: it is the one that exists.
+    masters = {}             # (tid, root) -> [names]
+    inv_path = _latest_inventory_path()
+    folder_cache = {}
+    if inv_path:
+        for r in _iter_jsonl_rows(inv_path):
+            root, folder, rel = r.get("camera"), r.get("target"), r.get("relpath")
+            if r.get("retired") or not isinstance(root, str) or not isinstance(folder, str) \
+                    or not isinstance(rel, str) or "/" not in rel:
+                continue
+            if (root, folder) not in folder_cache:
+                t, _how = resolve_target(contract, folder, names)
+                folder_cache[(root, folder)] = t["id"] if t else None
+                if t:
+                    folder_names[(t["id"], root)] = folder
+            tid = folder_cache[(root, folder)]
+            if tid is None:
+                continue
+            name = rel.rsplit("/", 1)[1]
+            if _desk_kind(name, rel.rsplit("/", 1)[0]) == "master" and not _PL_CAL_RE.search(rel):
+                masters.setdefault((tid, root), []).append(name)
+    elif not os.path.isdir(ARCHIVE_MOUNT):
+        warnings.append("the archive isn't mounted, so its inventory (masters, In progress) "
+                        "wasn't checked")
+    else:
+        warnings.append("no archive inventory was found; masters (In progress) "
+                        "were not checked — run --inventory on the PC first")
+
+    finals, finals_note = _scan_finals(contract)
+    if finals is None:
+        warnings.append(f"finished pictures were not checked: {finals_note}")
+    elif finals_note:
+        warnings.append(finals_note)
+
+    capture_state, cs_notes = load_capture_state(verbose=True)
+    warnings.extend(cs_notes)
+    per_target = {}
+    for (tid, sid), d in datasets.items():
+        per_target.setdefault(tid, []).append((sid, d))
+    out_projects = {}
+    for tid, group in sorted(per_target.items()):
+        for sid, d in sorted(group):
+            t, s = d["target"], d["scope"]
+            root = s.get("archive_root") or ""
+            site = s.get("site") or contract["default_site"]
+            nights = sorted(d["nights"])
+            last = nights[-1]
+            days_since = (today - date.fromisoformat(last)).days
+            key = f"{tid}|{sid}|{site}"
+            cstate = capture_state.pop(key, "auto")
+            folder = folder_names.get((tid, root))
+            n_in_root = sum(1 for _sid2, d2 in group
+                            if (d2["scope"].get("archive_root") or "") == root)
+            shared_root = len(scopes_for_root(contract, root)) > 1
+            notes = []
+
+            own_masters = []
+            for m in masters.get((tid, root), []):
+                rigs = _rigs_in(m, contract)
+                if not rigs or sid in rigs:
+                    own_masters.append(m)
+                    if not rigs and shared_root:
+                        notes.append("shared-folder")
+            tcodes = {_codekey(c) for c in t.get("codes") or [] if isinstance(c, str)} \
+                | {_codekey(tid)}
+            done_files = []
+            for f in finals or []:
+                yes, note = _final_marks(f, tcodes, sid, root, n_in_root)
+                if yes:
+                    done_files.append(f["name"])
+                if note:
+                    notes.append(note)
+
+            if done_files:
+                status = "done"
+            elif own_masters:
+                status = "in_progress"
+            elif cstate == "open":
+                status = "capturing"
+            elif cstate == "complete":
+                status = "ready_to_process"
+            else:
+                status = "capturing" if days_since <= QUIET_PERIOD_DAYS else "ready_to_process"
+
+            entry = {
+                "key": key, "scope": sid, "scope_name": s.get("name"), "site": site,
+                "status": status, "capture_state": cstate,
+                "nights": len(nights), "frames": sum(n["frames"] for n in d["nights"].values()),
+                "integration_seconds": round(sum(n["integration"] for n in d["nights"].values())),
+                "first_session": nights[0], "last_session": last,
+                "locations": sorted(d["locations"]),
+                "archive_rel": f"{root}/{folder}" if folder else None,
+            }
+            if status == "capturing" and cstate != "open":
+                entry["ready_on"] = (date.fromisoformat(last)
+                                     + timedelta(days=QUIET_PERIOD_DAYS + 1)).isoformat()
+            if d.get("seestar"):
+                entry["calibration"] = {"applies": False}    # the Seestar calibrates itself
+            else:
+                cal = {"biases": 0, "darks": 0, "flats": 0, "shipped": 0}
+                with_cal = 0
+                for n in d["nights"].values():
+                    c = n.get("cal") or {}
+                    for k in cal:
+                        cal[k] += c.get(k, 0)
+                    if c.get("darks") or c.get("flats"):
+                        with_cal += 1
+                entry["calibration"] = {"applies": True, **cal, "nights_with": with_cal,
+                                        "nights": len(nights),
+                                        "missing": [k for k in ("darks", "flats") if not cal[k]]}
+            if own_masters:
+                entry["masters"] = sorted(own_masters)[:20]
+            if done_files:
+                entry["finals"] = sorted(set(done_files))[:20]
+            if notes:
+                entry["attribution"] = sorted(set(notes))
+            p = out_projects.setdefault(tid, {"target_id": tid, "name": target_display(t),
+                                              "datasets": []})
+            p["datasets"].append(entry)
+
+    for key in sorted(capture_state):
+        warnings.append(f"capture-state.json names a dataset that doesn't exist: {key}")
+    projects = []
+    for tid, p in out_projects.items():
+        ds = p["datasets"]
+        rank = min(PROJECT_STATUS_ORDER.index(e["status"]) for e in ds)
+        p["status"] = PROJECT_STATUS_ORDER[rank]
+        p["to_process"] = any(e["status"] == "ready_to_process" for e in ds)
+        p["last_captured"] = max(e["last_session"] for e in ds)
+        p["integration_seconds"] = sum(e["integration_seconds"] for e in ds)
+        projects.append(p)
+    projects.sort(key=lambda p: p["last_captured"], reverse=True)
+    if isinstance(collect, dict):               # build_observatory reads the working dicts
+        collect["datasets"] = datasets
+        collect["contract"] = contract
+
+    return {"schema": "projects/1", "generated_at": _utc_iso(),
+            "as_of_night": today.isoformat(),
+            "quiet_period_days": QUIET_PERIOD_DAYS,
+            "sources": {"ledgers": ledger_names, "rows": rows_read,
+                        "dropped": {"unknown_names": n_unresolved, "no_scope": no_scope,
+                                    "no_night": no_night, "unreadable": bad_rows,
+                                    "duplicates": n_dupes},
+                        "snapshots": metas,
+                        "inventory": os.path.basename(inv_path) if inv_path else None,
+                        "finals_dir": FINALS_DIR or None,
+                        "capture_state": bool(capture_state)},
+            "warnings": warnings, "projects": projects}
+
+# ── The Observatory (1.7.0): the Astro Archive Observatory's page, fed live ──
+# The dataset shape is the artifact's (29 Aug 2026 build_dataset.py), so its
+# page renders unchanged: scopes[], targets[] with programmes[] and
+# statusCards[], sessions[] (one target, one scope, one night), totals,
+# health[] and reconciliation[]. It is made in the SAME pass as projects.json
+# (run_projects writes both files), so the two views never disagree. Pure read.
+OBS_STATE = {"capturing": "captured", "ready_to_process": "stacked",
+             "in_progress": "processing", "done": "complete"}
+OBS_COLOURS = {"yellow": "#eda100", "green": "#3cb554", "black": "#0a0a0a", "blue": "#3987e5",
+               "red": "#e05a5a", "pink": "#d66bc9", "purple": "#8f80ea", "orange": "#ec835a",
+               "grey": "#7a849b", "gray": "#7a849b", "white": "#edf1f8"}
+OBS_ATTRIBUTION = {"shared-folder": "shared Askar folder: the master may be the other Askar's"}
+
+def _obs_where(locs, here_label, there_label):
+    out = []
+    for l in locs or ():
+        if l == "chillblast_archive":
+            out.append("on the archive")
+        elif l.endswith("-unchecked"):
+            out.append(f"on the {there_label} (per its ledger)")
+        elif l == ship_sides()[0]:
+            out.append(f"on this {here_label}")
+        else:
+            out.append(f"on the {there_label}")
+    return sorted(set(out))
+
+def _obs_number(v):
+    """A real, finite number or None (a bool or NaN from a hand-edited file is not one)."""
+    return v if isinstance(v, (int, float)) and not isinstance(v, bool) and math.isfinite(v) else None
+
+def _obs_date(iso):
+    """'2026-09-12' as '12 Sep 2026'; anything else as it is."""
+    try:
+        return date.fromisoformat(str(iso)).strftime("%-d %b %Y") if not IS_WINDOWS \
+            else date.fromisoformat(str(iso)).strftime("%d %b %Y").lstrip("0")
+    except (TypeError, ValueError):
+        return str(iso or "?")
+
+def _obs_path(arel):
+    """The dataset's folder on the archive, written the way its label is
+    (E:\\Astro Image Data\\S30P\\…, or /Volumes/…/S30P/… on a Mac label)."""
+    label = str(ARCHIVE_LABEL or "")
+    sep = "/" if ("/" in label and "\\" not in label) else "\\"
+    return label.rstrip("\\/") + sep + arel.replace("/", sep)
+
+def _obs_inventory_at(name):
+    """The inventory generation's time, from its file name (inventory-E-20261009T033012Z.jsonl)."""
+    m = re.search(r"(\d{4})(\d{2})(\d{2})T(\d{2})(\d{2})(\d{2})Z", str(name or ""))
+    return f"{m.group(1)}-{m.group(2)}-{m.group(3)}T{m.group(4)}:{m.group(5)}:{m.group(6)}+00:00" if m else None
+
+def observatory_from(doc, collect, state=None, now=None):
+    """The Observatory's dataset from one build_projects() result and the
+    working dicts it collected. No I/O."""
+    datasets = (collect or {}).get("datasets") or {}
+    here_side, there_side = ship_sides()
+    here_label = "PC" if here_side == "pc" else "Mac"
+    there_label = "PC" if there_side == "pc" else "Mac"
+    today = doc.get("as_of_night")
+    quiet = doc.get("quiet_period_days", QUIET_PERIOD_DAYS)
+    by_key = {(p["target_id"], e["scope"]): (p, e)
+              for p in doc["projects"] for e in p["datasets"]}
+    scopes, sessions, targets = {}, [], {}
+    nights_all, tot_bytes, tot_frames, tot_secs = set(), 0, 0, 0.0
+    for (tid, sid), d in sorted(datasets.items()):
+        pe = by_key.get((tid, sid))
+        if pe is None:
+            continue                            # a dataset with no counted night
+        p, e = pe
+        t, s = d["target"], d["scope"]
+        cam = str(s.get("name") or sid)
+        name = str(target_display(t))           # 'Spiral Galaxy (M 106)': never two targets as one
+        codes = [c for c in (t.get("codes") or []) if isinstance(c, str)] \
+            if isinstance(t.get("codes"), list) else []
+        nights = d["nights"]
+        frames = sum(n["frames"] for n in nights.values())
+        secs = sum(n["integration"] for n in nights.values())
+        nbytes = sum(n.get("bytes", 0) for n in nights.values())
+        hours = round(secs / 3600, 2)
+        sc = scopes.setdefault(cam, {"camera": cam, "id": sid, "frames": 0, "hours": 0.0,
+                                     "nights": set(), "bytes": 0, "first": None, "last": None,
+                                     "colour": OBS_COLOURS.get(str(s.get("colour") or "").lower())})
+        sc["frames"] += frames; sc["hours"] += secs / 3600; sc["bytes"] += nbytes
+        sc["nights"].update(nights)
+        nights_all.update(nights)
+        sc["first"] = min(x for x in (sc["first"], min(nights)) if x)
+        sc["last"] = max(x for x in (sc["last"], max(nights)) if x)
+        tot_bytes += nbytes; tot_frames += frames; tot_secs += secs
+        filters, exps = {}, {}
+        for nt, n in sorted(nights.items()):
+            nf = dict(n.get("filters", {}))
+            rest = n["frames"] - sum(nf.values())
+            if rest > 0:
+                nf["unrecorded"] = rest
+            for k, v in nf.items():
+                filters[k] = filters.get(k, 0) + v
+            for k, v in n.get("exps", {}).items():
+                exps[k] = exps.get(k, 0) + v
+            sessions.append({"target": name, "camera": cam, "night": nt, "frames": n["frames"],
+                             "hours": round(n["integration"] / 3600, 3),
+                             "filters": nf, "exps": dict(n.get("exps", {})),
+                             "askar": {}, "stackOnly": False,
+                             "cal": None if d.get("seestar") else
+                             {k: (n.get("cal") or {}).get(k, 0) for k in ("darks", "flats", "biases")}})
+        state_id = OBS_STATE.get(e["status"], "captured")
+        where = _obs_where(e.get("locations"), here_label, there_label)
+        masters, finals = e.get("masters") or [], e.get("finals") or []
+        last_txt = _obs_date(e["last_session"])
+        if e["status"] == "done":
+            evidence = ("finished picture " + os.path.basename(finals[0])) if finals else "a finished picture names it"
+            action = ""
+        elif e["status"] == "in_progress":
+            evidence = ("master saved: " + os.path.basename(masters[0])) if masters else "a master of yours is saved"
+            action = "Finish it: process to a final"
+        elif e["status"] == "ready_to_process":
+            if e.get("capture_state") == "complete":
+                evidence = "marked complete by hand; nothing started"
+            else:
+                try:
+                    gap = (date.fromisoformat(today) - date.fromisoformat(e["last_session"])).days
+                    evidence = f"no new frames since {last_txt} ({gap} nights); nothing started"
+                except (TypeError, ValueError):
+                    evidence = f"no new frames since {last_txt}; nothing started"
+            action = "Process it"
+        else:
+            if e.get("capture_state") == "open":
+                evidence = "kept open by hand (capture-state.json)"
+            elif e.get("ready_on"):
+                evidence = f"last session {last_txt}; ready to process from {_obs_date(e['ready_on'])}"
+            else:
+                evidence = f"last session {last_txt}"
+            action = "Keep capturing"
+        notes = [OBS_ATTRIBUTION.get(a, a) for a in (e.get("attribution") or [])]
+        calib = e.get("calibration") or {}
+        if calib.get("applies") and calib.get("missing") and e["status"] in ("ready_to_process", "capturing"):
+            notes.append("no " + " or ".join(calib["missing"]) + " linked to its lights")
+        if notes:
+            evidence += "; " + ", ".join(notes)
+        arel = e.get("archive_rel")
+        prog = {"camera": cam, "folder": arel.split("/")[-1] if arel else name,
+                "path": _obs_path(arel) if arel else "", "rel": arel,
+                "lights": frames, "autostacks": 0, "autostackFrames": 0,
+                "processedFiles": len(masters) + len(finals), "processedFinals": len(finals),
+                "masters": len(masters), "working": 0, "thumbs": 0, "other": 0,
+                "mosaic": bool(d.get("mosaic")), "collectFiles": 0, "collected": False,
+                "hours": hours, "bytes": nbytes, "sizeAll": nbytes, "nights": len(nights),
+                "firstNight": e["first_session"], "lastNight": e["last_session"],
+                "filters": filters, "exposures": exps, "panels": [], "gains": {}, "askar": {},
+                "where": where, "status": e["status"], "readyOn": e.get("ready_on"),
+                "evidence": evidence, "action": action, "calibration": e.get("calibration")}
+        card = {"target": name, "label": name + (" (mosaic)" if d.get("mosaic") else ""),
+                "camera": cam, "state": state_id, "hours": hours, "nights": len(nights),
+                "lights": frames, "lastNight": e["last_session"], "readyOn": e.get("ready_on"),
+                "evidence": evidence, "action": action, "source": "worked out by the importer",
+                "badges": where, "rel": arel}
+        ra, dec = _obs_number(t.get("ra")), _obs_number(t.get("dec"))
+        if ra is None or dec is None:
+            ra = dec = None
+        tg = targets.setdefault(tid, {
+            "id": tid, "name": name, "codes": codes,
+            "type": str(t["type"]) if t.get("type") else None,
+            "constellation": str(t["constellation"]) if t.get("constellation") else None,
+            "ra": ra, "dec": dec,
+            "mosaic": False, "programmes": [], "cameras": [], "lights": 0, "hours": 0.0,
+            "nights": set(), "sessions": 0, "firstNight": None, "lastNight": None,
+            "state": None, "pendingProgrammes": 0, "statusCards": [], "_rank": 99})
+        tg["programmes"].append(prog); tg["statusCards"].append(card)
+        if cam not in tg["cameras"]:
+            tg["cameras"].append(cam)
+        tg["mosaic"] = tg["mosaic"] or bool(d.get("mosaic"))
+        tg["lights"] += frames; tg["hours"] += secs / 3600; tg["nights"].update(nights)
+        tg["sessions"] += len(nights)
+        tg["firstNight"] = min(x for x in (tg["firstNight"], e["first_session"]) if x)
+        tg["lastNight"] = max(x for x in (tg["lastNight"], e["last_session"]) if x)
+        if e["status"] != "done":
+            tg["pendingProgrammes"] += 1
+        rank = PROJECT_STATUS_ORDER.index(e["status"])
+        if rank < tg["_rank"]:                      # the project's state: its least advanced dataset
+            tg["_rank"], tg["state"] = rank, state_id
+    out_targets = []
+    for tg in sorted(targets.values(), key=lambda x: x["name"].lower()):
+        tg["nights"] = len(tg["nights"]); tg["hours"] = round(tg["hours"], 2); tg.pop("_rank")
+        out_targets.append(tg)
+    out_scopes = []
+    for sc in sorted(scopes.values(), key=lambda x: x["camera"]):
+        sc["nights"] = len(sc["nights"]); sc["hours"] = round(sc["hours"], 1)
+        out_scopes.append(sc)
+    src = doc.get("sources") or {}
+    snaps_used = [m for m in (src.get("snapshots") or []) if isinstance(m, dict) and m.get("rows")]
+    ledgers = [l for l in (src.get("ledgers") or []) if l]
+    own_rows = bool(getattr(state, "ledger", None)) if state is not None else bool(ledgers)
+    corrupt = bool(getattr(state, "ledger_corrupt", False)) if state is not None else False
+    inv_name, inv_at = src.get("inventory"), _obs_inventory_at(src.get("inventory"))
+    finals_checked = bool(src.get("finals_dir")) and not any(
+        "finished pictures were not checked" in w for w in (doc.get("warnings") or []))
+    inputs = {"ledger": own_rows, "ledgerCorrupt": corrupt,
+              "snapshot": ({"machine": snaps_used[0].get("machine"), "at": snaps_used[0].get("at"),
+                            "ageHours": snaps_used[0].get("age_hours"), "rows": snaps_used[0].get("rows")}
+                           if snaps_used else None),
+              "inventory": inv_name, "inventoryAt": inv_at, "finals": finals_checked,
+              "asOfNight": today, "quietPeriodDays": quiet, "machine": here_label}
+    read_from = []
+    if own_rows:
+        read_from.append(f"this {here_label}'s ledger")
+    if snaps_used:
+        read_from.append(f"the {snaps_used[0].get('machine') or there_label}'s record "
+                         f"(its ledger snapshot of {_obs_date(str(snaps_used[0].get('at', ''))[:10])})")
+    if inv_name:
+        read_from.append("the archive's inventory" + (f" of {_obs_date(inv_at[:10])}" if inv_at else ""))
+    read_from.append("Final Astro Images" if finals_checked else "no finished pictures (not checked here)")
+    health = []
+    if corrupt:
+        health.append({"severity": "warn", "title": f"This {here_label}'s ledger can't be read",
+                       "detail": "Only the other computer's sessions are shown. See the panel's Activity log."})
+    health.append({"severity": "info", "title": "Built from the importer's own record, nothing typed in",
+                   "detail": f"Worked out on this {here_label} from " + ", ".join(read_from)
+                             + f": {src.get('rows', 0):,} ledger rows read. The one human-set fact is "
+                               f"capture-state.json (open / complete)."})
+    for w in doc.get("warnings") or []:
+        health.append({"severity": "warn", "title": "Warning from the project layer", "detail": w})
+    dropped = src.get("dropped") or {}
+    n_dropped = sum(int(v or 0) for v in dropped.values())
+    why = []
+    for k, label in (("unknown_names", "names the contract doesn't know"), ("no_scope", "no scope"),
+                     ("no_night", "no night"), ("unreadable", "unreadable rows"),
+                     ("duplicates", "copies already counted")):
+        if dropped.get(k):
+            why.append(f"{dropped[k]:,} {label}")
+    recon = [{"check": "Ledger rows read, light frames counted",
+              "expected": src.get("rows", 0), "computed": tot_frames,
+              "note": (f"{n_dropped:,} not counted: " + ", ".join(why)) if n_dropped else "every row counted",
+              "ok": tot_frames + n_dropped == src.get("rows", 0)},
+             {"check": "Datasets on this page, against projects.json",
+              "expected": sum(len(p["datasets"]) for p in doc["projects"]),
+              "computed": sum(len(x["programmes"]) for x in out_targets),
+              "note": "one dataset is one object on one scope",
+              "ok": sum(len(p["datasets"]) for p in doc["projects"]) == sum(len(x["programmes"]) for x in out_targets)},
+             {"check": "Hours by scope, against the total",
+              "expected": round(tot_secs / 3600, 1), "computed": round(sum(x["hours"] for x in out_scopes), 1),
+              "note": "rounded per scope", "ok": abs(sum(x["hours"] for x in out_scopes) - tot_secs / 3600) < 0.1 * max(1, len(out_scopes))}]
+    now = now or datetime.now()
+    when_txt = _obs_date(now.date().isoformat()) + now.strftime(", %H:%M")
+    return {
+        "schema": "observatory/1", "generatedAt": when_txt, "generatedAtIso": _utc_iso(),
+        "machine": f"{MACHINE_LABEL} · {ARCHIVE_LABEL} · live from the importer",
+        "sourceNote": f"Worked out on this {here_label} on {when_txt} from " + ", ".join(read_from)
+                      + f" ({src.get('rows', 0):,} ledger rows). The statuses are the project layer's, the "
+                        f"same as the To process list.",
+        "provenance": f"Still capturing: a session within the quiet period of {quiet} observing nights, or "
+                      "kept open by hand. Ready to process: the quiet period has passed and nothing is "
+                      "started. In progress: one of your own masters sits in the object's folder on the "
+                      "archive. Done: a finished picture names the object and the scope.",
+        "quietPeriodDays": quiet, "asOfNight": today, "inputs": inputs,
+        "snapshotRows": sum(int(m.get("rows") or 0) for m in snaps_used),
+        "scopes": out_scopes, "askarSplit": {}, "targets": out_targets, "sessions": sessions,
+        "events": [], "calibration": {}, "shelves": {}, "quarantine": {},
+        "junk": {"files": 0, "bytes": 0},
+        "totals": {"files": tot_frames, "bytes": tot_bytes, "lights": tot_frames,
+                   "hours": round(tot_secs / 3600, 1), "targets": len(out_targets),
+                   "nights": len(nights_all), "sessions": len(sessions)},
+        "colourMeaning": {}, "parseFailures": {}, "ledgerMeta": {"rows": src.get("rows", 0)},
+        "askarRigs": {}, "rigAttribution": {}, "health": health, "delta": None,
+        "reconciliation": recon, "warnings": list(doc.get("warnings") or []),
+    }
+
+def build_observatory(state, extra_ledgers=(), today=None, custom_names=None):
+    """The Observatory's dataset, from the same facts as projects.json (one pass)."""
+    collect = {}
+    doc = build_projects(state, extra_ledgers, today, custom_names, collect=collect)
+    return observatory_from(doc, collect, state)
+
+def observatory_html(dataset, template=None):
+    """The Observatory page with the dataset in place of __DATASET__. Raises
+    OSError when the template isn't beside the engine, ValueError when it has
+    no slot. Every <, > and & in the JSON is written as \\uXXXX, so no text
+    from a ledger, a snapshot or a file name can end or comment the block."""
+    with open(template or OBSERVATORY_TEMPLATE, encoding="utf-8") as f:
+        page = f.read()
+    if "__DATASET__" not in page:
+        raise ValueError("the Observatory page has no __DATASET__ slot")
+    blob = (json.dumps(dataset, ensure_ascii=True, allow_nan=False)
+            .replace("<", "\\u003c").replace(">", "\\u003e").replace("&", "\\u0026"))
+    return page.replace("__DATASET__", blob, 1)
+
+OBSERVATORY_MARK = '<script id="dataset" type="application/json">'
+_OWN_RECORD_FILES = {"ledger.json", "projects.json", "observatory.json", "config.json",
+                     "custom-names.json", "capture-state.json", "equipment.json", "skiplist.json"}
+
+def _observatory_out_problem(out):
+    """Why `out` must not be written, or None. The archive and the finals folder
+    are never written (rule 5), the importer's own records never replaced, and
+    an existing file is replaced only when it is an Observatory page."""
+    if os.path.isdir(out):
+        return "is a folder; name a file"
+    for label, base in (("the archive", ARCHIVE_MOUNT), ("Final Astro Images", FINALS_DIR)):
+        if base and _within(out, base):
+            return f"is inside {label}, which this never writes"
+    low = os.path.basename(out).lower()
+    if low in _OWN_RECORD_FILES or low.startswith("ledger"):
+        return "is one of the importer's own record files"
+    if os.path.isfile(out):
+        try:
+            with open(out, "rb") as f:
+                head = f.read(512 * 1024)
+        except OSError as e:
+            return f"can't be read ({e.strerror or e})"
+        if OBSERVATORY_MARK.encode() not in head:
+            return "already exists and isn't an Observatory page; it is left alone"
+    return None
+
+def _template_fix_hint():
+    return "reinstall the app" if getattr(sys, "frozen", False) else "run the installer again"
+
+def run_observatory(state, out=None, extra_ledgers=(), dry_run=False):
+    """--observatory [FILE]: write the Observatory as one standalone HTML file
+    (default: observatory.html in the state folder). Writes nothing else; with
+    --dry-run nothing at all."""
+    if getattr(state, "ledger_corrupt", False):
+        error("The ledger can't be read, so the Observatory wasn't written (see the Activity log).")
+        return None
+    extra, names = projects_inputs(state, extra_ledgers)
+    dataset = build_observatory(state, extra, custom_names=names)
+    tt = dataset["totals"]
+    for w in dataset["warnings"]:
+        warn(w)
+    if not dataset["targets"]:
+        warn("Nothing to show yet: no light frames in this computer's ledger"
+             + ("" if dataset["snapshotRows"] else " and no snapshot from the other computer on the archive")
+             + ". The Observatory fills in once frames have been imported and shipped.")
+        return None
+    out = os.path.abspath(os.path.expanduser(out or os.path.join(STATE_DIR, "observatory.html")))
+    _confine(out, "--observatory")
+    if dry_run:
+        info(f"Dry run: {out} was not written ({tt['targets']} targets, {tt['lights']:,} lights, "
+             f"{tt['hours']} h, {tt['nights']} nights).")
+        return dataset
+    why = _observatory_out_problem(out)
+    if why:
+        error(f"{out} {why}.")
+        return None
+    try:
+        html = observatory_html(dataset)
+    except (OSError, ValueError) as e:
+        error(f"The Observatory page (astro-observatory.html) isn't beside the engine: {e}; "
+              f"{_template_fix_hint()}.")
+        sys.exit(1)
+    os.makedirs(os.path.dirname(out), exist_ok=True)
+    tmp = f"{out}.{os.getpid()}.{threading.get_ident()}.tmp"
+    try:
+        with open(tmp, "x", encoding="utf-8") as f:
+            f.write(html)
+            f.flush()
+            os.fsync(f.fileno())
+        os.replace(tmp, out)
+    finally:
+        if os.path.exists(tmp):
+            try:
+                os.remove(tmp)
+            except OSError:
+                pass
+    success(f"Observatory written: {out} ({tt['targets']} targets, {tt['lights']:,} lights, "
+            f"{tt['hours']} h, {tt['nights']} nights)")
+    return out
+
+def _published_other(name):
+    """The other computer's published copy of projects.json / observatory.json
+    in ITS _verify folder on the archive (the PC's nightly job publishes
+    there), or None. Read-only; never written by this computer (rule 6)."""
+    there = ship_sides()[1]
+    path = _verify_path(ARCHIVE_MOUNT, there, name)
+    if TEST_ROOT and not _within(path, TEST_ROOT):
+        return None, None
+    try:
+        if not os.path.isfile(path):
+            return None, None
+    except OSError:
+        return None, None
+    d = _read_json_file(path)
+    return (d, path) if d else (None, None)
+
+PUBLISHED_FRESH_HOURS = 48      # the PC's nightly list counts as current this long
+
+def _prefer_published(own, name, schema_key, stamp_key):
+    """The PC's published list beats this computer's own when it is recent:
+    the PC sees the archive's masters and the finished pictures, the Mac
+    doesn't. Marks where it came from."""
+    other, path = _published_other(name)
+    if not other or other.get(schema_key) is None:
+        return own
+    at = _parse_utc(other.get(stamp_key))
+    age = ((_utc_now() - at).total_seconds() / 3600) if at else None
+    if age is None or age > PUBLISHED_FRESH_HOURS:
+        return own
+    other = dict(other)
+    src = dict(other.get("sources") or {}) if isinstance(other.get("sources"), dict) else {}
+    src["published_by"] = ship_sides()[1]
+    src["published_from"] = path
+    src["published_age_hours"] = round(age, 1)
+    other["sources"] = src
+    return other
+
+def load_projects(prefer_published=False):
+    """projects.json from the state folder, or None. The panel reads this.
+    With prefer_published, the PC's recent published copy wins (see
+    _prefer_published)."""
+    d = _read_json_file(os.path.join(STATE_DIR, "projects.json"))
+    own = d if d.get("schema") == "projects/1" and isinstance(d.get("projects"), list) else None
+    if not prefer_published:
+        return own
+    doc = _prefer_published(own, "projects.json", "schema", "generated_at")
+    return doc if doc and doc.get("schema") == "projects/1" and isinstance(doc.get("projects"), list) else own
+
+def load_observatory(prefer_published=False):
+    """observatory.json from the state folder (written with projects.json), or
+    None; with prefer_published, the PC's recent published copy wins."""
+    d = _read_json_file(os.path.join(STATE_DIR, "observatory.json"))
+    own = d if d.get("schema") == "observatory/1" and isinstance(d.get("targets"), list) else None
+    if not prefer_published:
+        return own
+    doc = _prefer_published(own, "observatory.json", "schema", "generatedAtIso")
+    if doc is not own and doc:
+        doc["servedFrom"] = {"machine": "PC" if ship_sides()[1] == "pc" else "Mac",
+                             "ageHours": (doc.get("sources") or {}).get("published_age_hours")}
+    return doc if doc and doc.get("schema") == "observatory/1" and isinstance(doc.get("targets"), list) else own
+
+def publish_projects(mount=None):
+    """The archive PC's nightly job: put this computer's projects.json and
+    observatory.json in ITS OWN _verify folder on the archive, so the Mac's
+    panel can show the complete list (masters and finals are the PC's to
+    see). Creates or replaces only these two files in this computer's folder."""
+    mount = mount or ARCHIVE_MOUNT
+    n = 0
+    for name in ("projects.json", "observatory.json"):
+        src = os.path.join(STATE_DIR, name)
+        d = _read_json_file(src) if os.path.isfile(src) else {}
+        if not d:
+            continue
+        dst = _verify_path(mount, ship_sides()[0], name)
+        _confine(dst, "publish")
+        os.makedirs(os.path.dirname(dst), exist_ok=True)
+        _atomic_write_json(dst, d)
+        n += 1
+    return n
+
+def rebuild_projects_quietly(state):
+    """After a ship or an import: refresh projects.json without a word, when
+    there is a contract to resolve names with. Never fails the caller."""
+    try:
+        if not os.path.isfile(os.path.join(CONTRACT_DIR, "targets.json")):
+            return None
+        with contextlib.redirect_stdout(io.StringIO()), contextlib.redirect_stderr(io.StringIO()):
+            return run_projects(state)
+    except Exception:
+        return None
+
+def run_projects(state, extra_ledgers=(), dry_run=False):
+    """--projects: rebuild projects.json and observatory.json (the Observatory's
+    dataset, from the same pass). Safe to repeat; writes nothing else.
+    A ledger that can't be read writes nothing: an empty list must never
+    replace a good one."""
+    if getattr(state, "ledger_corrupt", False):
+        error("The ledger can't be read, so projects.json was left as it is.")
+        return None
+    out = os.path.join(STATE_DIR, "projects.json")
+    if state.ledger is None:
+        # a computer that has never imported (the archive PC, usually): its own
+        # sessions are none, and the list comes from the other computer's snapshot
+        warn("This computer has no ledger yet (nothing has been imported here): "
+             "only the other computer's sessions can be listed.")
+    extra, names = projects_inputs(state, extra_ledgers)
+    collect = {}
+    doc = build_projects(state, extra_ledgers=extra, custom_names=names, collect=collect)
+    previous = _read_json_file(out) if os.path.isfile(out) else {}
+    if not doc["sources"]["rows"] and previous.get("projects"):
+        warn("No ledger rows could be read from this computer or from the other computer's "
+             "snapshot on the archive; projects.json was left as it is.")
+        return None
+    had_snapshot = bool((previous.get("sources") or {}).get("snapshots"))
+    got_snapshot = any(m.get("rows") for m in doc["sources"]["snapshots"])
+    if had_snapshot and not got_snapshot and not extra_ledgers and not dry_run:
+        warn("The other computer's record on the archive wasn't read this time (is the archive "
+             "connected?), so the list would lose its sessions; projects.json was left as it is.")
+        return None
+    counts, n_ds = {}, 0
+    for p in doc["projects"]:
+        for e in p["datasets"]:
+            n_ds += 1
+            counts[e["status"]] = counts.get(e["status"], 0) + 1
+    bits = [f"{counts.get(k, 0)} {k.replace('_', ' ')}" for k in
+            ("ready_to_process", "in_progress", "capturing", "done") if counts.get(k)]
+    info(f"{len(doc['projects'])} objects, {n_ds} datasets (an object on one scope): "
+         + (", ".join(bits) or "nothing yet"))
+    for w in doc["warnings"]:
+        warn(w)
+    if dry_run:
+        info(f"Dry run: {out} was not written.")
+        return doc
+    _confine(out, "--projects")
+    _atomic_write_json(out, doc)
+    # the Observatory's dataset, from the same pass: the two views never disagree
+    obs_out = os.path.join(STATE_DIR, "observatory.json")
+    _confine(obs_out, "--projects")
+    _atomic_write_json(obs_out, observatory_from(doc, collect, state))
+    success(f"Wrote {out} and observatory.json")
+    # The mirror copy, only into a mirror this computer has already claimed
+    # (publish_mirror claims; this never does — one writer per folder)
+    ok, owner = mirror_owner_ok(MIRROR_DIR)
+    if ok and isinstance(owner, dict) and owner.get("id") == machine_id():
+        try:
+            mpath = os.path.join(MIRROR_DIR, "projects.json")
+            _confine(mpath, "--projects mirror")
+            _atomic_write_json(mpath, doc)
+        except OSError:
+            pass
+    return doc
+
 def main():
     global VERBOSE
     p = argparse.ArgumentParser(description="BrettjoAstro FITS Importer — backup-first (ASIAir + Seestar)")
@@ -7018,6 +10726,23 @@ def main():
     p.add_argument("--space", action="store_true",
                    help="read-only: what on this computer is safe to delete (its archive "
                         "copy re-checked by the PC), what is waiting, and what to keep")
+    p.add_argument("--projects", action="store_true",
+                   help="read-only: rebuild projects.json (what is ready to process, "
+                        "in progress, still capturing, done) and observatory.json (the "
+                        "Observatory's data) from the ledger, the PC's archive inventory "
+                        "and Final Astro Images")
+    p.add_argument("--with-ledger", action="append", default=[], metavar="FILE",
+                   help="with --projects: also read another computer's ledger.json "
+                        "(a read-only snapshot; may repeat)")
+    p.add_argument("--observatory", nargs="?", const="", metavar="FILE",
+                   help="read-only: write the Observatory (the archive's story as one page: "
+                        "targets, pipeline, nights, sky, scopes) as a standalone HTML file; "
+                        "FILE defaults to observatory.html in the state folder. The panel's "
+                        "Observatory tab shows the same page live")
+    p.add_argument("--targets-draft", action="store_true",
+                   help="read-only: list this ledger's target names against "
+                        "contract/targets.json and write targets-draft.json with "
+                        "the ones the contract doesn't know yet")
     p.add_argument("--tidy-stacks", action="store_true",
                    help="list archived Seestar stacks outranked by a higher stack from "
                         "the SAME night and offer to remove them (typed DELETE; "
@@ -7048,6 +10773,32 @@ def main():
     p.add_argument("--dry-run", action="store_true")
     p.add_argument("--verbose", action="store_true")
     p.add_argument("--all", action="store_true")
+    # 1.7.0: the archive PC's own jobs, and the Mac's side of them
+    p.add_argument("--sweep", action="store_true",
+                   help="archive PC: re-read every shipped frame from its own disk into "
+                        "_verify\\pc\\verified.jsonl, and set aside copies a ship never finished")
+    p.add_argument("--move-old-partials", action="store_true",
+                   help="with --sweep: also move the .partial and .BAD files a 1.6 ship left "
+                        "into _Quarantine\\old-partials")
+    p.add_argument("--inventory", action="store_true",
+                   help="list every file under --root (the archive, on the PC; else this "
+                        "computer's frame folders) with what its path says about it")
+    p.add_argument("--hash", action="store_true",
+                   help="hash the files under --root that this computer's hash cache lacks")
+    p.add_argument("--root", metavar="DIR")
+    p.add_argument("--max-minutes", type=int, metavar="N",
+                   help="with --hash: stop at a file after N minutes")
+    p.add_argument("--rolling", action="store_true",
+                   help="with --hash on the PC: also re-read the 1/30th checked longest ago")
+    p.add_argument("--pc-tick", action="store_true",
+                   help="archive PC, every 5 minutes: the heartbeat, then the Mac's requests")
+    p.add_argument("--pc-nightly", action="store_true",
+                   help="archive PC, at logon and 03:30: sweep, inventory, hash")
+    p.add_argument("--request", metavar="KIND", choices=list(REQUEST_KINDS_HANDLED),
+                   help="ask the archive PC for a sweep or an inventory")
+    p.add_argument("--check-share-rights", action="store_true",
+                   help="try what this computer may and may not do on the archive share, in "
+                        "the test folder the PC set up (_rights-check)")
     args = p.parse_args()
     VERBOSE = args.verbose
 
@@ -7069,6 +10820,28 @@ def main():
         s = status_summary(st)
         print(json.dumps(s) if args.json else s["text"])
         sys.exit(0)
+
+    # The archive PC's jobs and the Mac's side of them (1.7.0): they read the
+    # archive, its logs and this computer's caches, never the ledger (the
+    # nightly's last step, projects.json, is the one read-only exception)
+    if args.sweep:
+        _pc_role("--sweep")
+        sys.exit(0 if run_sweep(move_old_partials=args.move_old_partials).get("ok") else 1)
+    if args.inventory:
+        sys.exit(0 if run_inventory(args.root).get("ok") else 1)
+    if args.hash:
+        sys.exit(0 if run_hash(args.root, max_minutes=args.max_minutes,
+                               rolling=args.rolling).get("ok") else 1)
+    if args.pc_tick:
+        run_pc_tick()
+        sys.exit(0)
+    if args.pc_nightly:
+        r = run_pc_nightly(max_minutes=args.max_minutes)
+        sys.exit(0 if r.get("ok") else 1)        # Task Scheduler's Last Run Result says so
+    if args.request:
+        run_request(args.request)
+    if args.check_share_rights:
+        sys.exit(0 if run_check_share_rights() else 1)
 
     refresh_camera_volumes(force=True)
 
@@ -7122,6 +10895,16 @@ def main():
         return
     if args.space:
         run_space(state)
+        return
+    if args.targets_draft:
+        run_targets_draft(state)
+        return
+    if args.projects:
+        run_projects(state, extra_ledgers=args.with_ledger, dry_run=args.dry_run)
+        return
+    if args.observatory is not None:
+        run_observatory(state, out=args.observatory or None, extra_ledgers=args.with_ledger,
+                        dry_run=args.dry_run)
         return
     if args.tidy_stacks:
         if args.dry_run:
@@ -7307,14 +11090,7 @@ def main():
         # File what just arrived into the archive on the PC while the lock is
         # still held (1.4.0). Quiet no-op when the share is not mounted.
         if not args.dry_run and not args.no_ship:
-            try:
-                if not archive_reachable() and ARCHIVE_URL:
-                    _try_mount_archive(ARCHIVE_MOUNT, ARCHIVE_URL)
-                if archive_reachable():
-                    print()
-                    run_ship(state, checksum=not args.no_checksum)
-            except Exception as e:
-                warn(f"Ship after import failed (frames are safe on this Mac): {e}")
+            ship_after_import(state, checksum=not args.no_checksum)
         offer_eject(args)
     finally:
         release_lock()

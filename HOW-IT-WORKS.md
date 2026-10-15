@@ -164,6 +164,29 @@ In the author's setup the PC holds the archive (E:) and does the stacking on
 its fast C: drive, so a Windows import lands on C: like the Mac's does in
 Documents, and is then filed into the archive on E: and verified there.
 
+## Filing into the archive
+
+If you keep an archive on another computer (PC-SYNC.md), the Mac files its
+verified frames into it after an import and twice a day. Calibration frames
+go with their lights, into the night's `calibration` folder. The archive's
+own names and Day numbers always win.
+
+From 1.7.0 the Mac never deletes, renames or writes over anything on the
+archive. It creates each frame under its final name, only if that name is
+free, then reads it back. Its log on the archive says "started" before each
+frame and "shipped" only after the read-back matched. Because nothing needs
+deleting, the share can be set up so that it *can't* delete anything there.
+
+Then the PC checks. It re-reads every shipped frame from its own disk,
+bypassing Windows' cache, and only that check makes a frame count as safe in
+two places. Every night it also lists the archive and hashes new files, so
+the Sync tab still to come can tell what is where. Every five minutes it does
+what the Mac asked for and leaves a heartbeat, so the Mac can tell it's awake.
+
+Only one computer files into the archive at a time. The one doing it holds a
+lock and renews it every minute, so a lock left by a crash goes stale after
+ten minutes instead of blocking the archive for hours.
+
 ## The line at the top of the panel
 
 The top of the panel answers one question: are you safe? **Everything is
@@ -194,7 +217,7 @@ A folder is only ever called safe as a whole when everything in it is safe; othe
 
 ## Astro Desk: what is still to process
 
-The panel's **Archive** tab lists what on the archive still needs processing. It uses the states from the Observatory's last scan: captured, stacked, or in processing. The biggest come first.
+The panel's **To process** tab (the Archive tab until 1.7.0) opens with the live list from `projects.json` (below). Under it sits a list of every folder on the archive. A folder's state there comes from the live list when the folder is known to it; otherwise from the August 2026 drive scan (the `dataset.json` that scan left on E:, which the importer never updates), marked "(Aug scan)": captured, stacked, or in processing. The biggest come first.
 
 Click a target to see:
 - its state and the reason for it
@@ -209,6 +232,68 @@ From there:
 
 The tab only reads. It never changes anything in the archive. It only opens folders and pictures that are inside the archive, never programs.
 
+## The project layer: "you captured this, now process it"
+
+Once frames ship to the archive they are safe — and easily forgotten. `--projects` writes one small file, `projects.json`, that remembers for you. It changes nothing in your frames or the archive: it reads, and writes that one file (plus a copy in Import Status once this computer has published there). It is safe to delete and rebuild at any time.
+
+Where it lands: on the Mac `~/Library/Application Support/Astro Import/projects.json`, on the PC `%LOCALAPPDATA%\Astro Import\projects.json`. To rebuild it:
+
+- Mac, in Terminal: `python3 ~/bin/astro-import.py --projects`
+- PC, in Terminal (PowerShell): `py -3 -X utf8 "$env:LOCALAPPDATA\BrettjoAstro\bin\astro-import.py" --projects`
+
+The PC rebuilds it by itself every night (at logon and 03:30, after the archive sweep and inventory), so the PC's list is never older than last night. The PC's list is the complete one: it can see the masters on E: and the finished pictures. The Mac's list says what it could not check.
+
+A **project** is one object in the sky. A **dataset** is that object on one scope (a wide Seestar mosaic and an Askar close-up are two pieces of work). Each dataset gets a status, worked out from facts, never typed in:
+
+- **Capturing** — the last session is recent (within the quiet period, 14 observing nights by default), so you're probably still adding nights. The Archive tab says when the first capturing dataset becomes ready.
+- **Ready to process** — the quiet period has passed and nothing has been started. This is the list to look at in front of the telly.
+- **In progress** — a master (a file named master…, …integration…, …_stacked…) is saved in the target's folder on the archive (E:). The Seestar's own `Stacked_…` files never count; only your work does. Processing on C: that hasn't been saved to the target's folder isn't seen.
+- **Done** — a finished picture in `E:\Final Astro Images` carries the target's catalogue code in its filename (`NGC7023_Iris_Nebula__2026-10_FRA400.jpg`). The scope comes from the filename (FRA400, 107PHQ, S30Pro…) or from the folder it sits in (a folder called `Askar FRA400` or `ZWO Askar Scopes`). A picture that names no scope counts only when the object has one dataset; if it has two, the dataset says "unscoped final" and stays where it was. A filename that names both Askars marks both done.
+
+Nights are noon to noon, like the Day folders, and the quiet period is counted in those nights. To change the 14 days, put `"ASTRO_QUIET_PERIOD_DAYS": 21` (say) in config.json.
+
+**Calibration goes with the session** (Brett, 13 Oct). For an ASIAir dataset the To process row and the Observatory say what darks, flats and bias are linked to its lights (the frames the import paired with that night, in the Day folder's `calibration` folder, and a mosaic's shared set on the target folder), night by night in a target's drawer. A ready set with no darks or flats linked says so in its reason, because it can't be processed without them. The Seestar calibrates itself, so its rows say nothing about calibration. The Mac's calibration links travel to the PC in the ledger snapshot with the lights.
+
+**Where the data is** says "on this Mac" (or "on this PC") only when the frame is still in the importer's folder on this computer right now — you clear your own disks by hand, and the importer checks the disk, not its memory. "On the archive" means the ship has filed it. "On the PC (per its ledger)" means the other computer's ledger says so and this one can't look.
+
+The one fact you can set by hand is per dataset: **open** ("I'm keeping this going all season — leave it as capturing") or **complete** ("that's enough light — count it as ready now"). AstroLog will set it later; until then, make a file called `capture-state.json` in the same folder as `projects.json`, for example:
+
+```
+{"datasets": {"NGC7023|FRA400|Shinfield": "open", "M42|S30P|Shinfield": "complete"}}
+```
+
+The key is target id, scope id and site, exactly as `projects.json` writes them. A finished picture or a saved master still wins: an object with a final reads done whatever the file says.
+
+The facts come from this computer's ledger, the PC's inventory of the archive, and the `Final Astro Images` folder.
+
+**How the PC knows what the Mac captured.** Each ship leaves a copy of that computer's ledger rows, `ledger-snapshot.json`, in its own folder under the archive's `_verify` (the Mac's in `_verify\mac`). The other computer's `--projects` reads it by itself, so the PC's nightly list carries the Mac's sessions without anyone copying a file. A computer that has never imported (the PC, usually) says so and lists the other's. A snapshot older than 36 hours, or written by a newer importer, is flagged at the top of the list. Another snapshot can still be added with `--with-ledger <file>`; a frame in both is counted once.
+
+**The first time on the PC.** Install 1.7.0 on the Mac first and run one ship, so the snapshot is on the archive. Then install on the PC and run `--projects` once (or press **Refresh** on the Archive tab); after that the nightly sweep keeps it fresh. The panel's **Dashboard** on the PC shows the Mac's record, with a banner saying so and how old it is, because the PC has no ledger of its own.
+
+**The names** come from `contract/targets.json` and `contract/scopes.json` beside the engine (`~/bin/contract` on the Mac, `%LOCALAPPDATA%\BrettjoAstro\bin\contract` on the PC): one list of what each object and each scope is called. `--targets-draft` writes `targets-draft.json` beside `projects.json` with every name in your ledger (and in the other computer's snapshot, so it works on the PC too, with the Mac's custom names) the contract doesn't know. Open it, add each one to `targets.json` as a new target or as an alias on an existing one, and run `--targets-draft` again.
+
+**Editing the contract, and updates.** The file carries its own editing notes at the top. An update replaces your installed copy only when it is still the one we shipped, unchanged (the installer checks its hash against `contract/shipped.sha256`). A copy you have edited is kept, and the newer shipped copy lands beside it as `targets.json.new`: open both, carry your additions across, then delete the `.new`.
+
+**Messages on the Archive tab.** Warnings (an old snapshot, names the contract doesn't know, ledger rows that couldn't be read) sit at the top of the list, in a box you can't miss. What a button did, or why it couldn't, appears under its own row.
+
+Not yet: the Starfront S50 Pro and the rented Tenerife S30 Pro can't be told apart from the home Seestars of the same model, because the importer doesn't record which unit a frame came from. Until it does, their frames count under the Shinfield entry.
+
+On the Mac, "done" isn't checked unless `E:\Final Astro Images` is shared and `"ASTRO_FINALS_DIR": "/Volumes/Final Astro Images"` is in config.json; until then a finished object can show as ready on the Mac. "In progress" needs the share mounted (the masters come from the PC's inventory).
+
+On the To process tab, **To process** and **In progress** sit at the top, newest capture first, with the date the list was worked out and any warnings. Each row shows the scope, where the data is, hours and nights, and has an **Open in Explorer** (**Open in Finder** on the Mac) button straight to that object's folder on the archive. A row not yet on the archive says so instead. The folder list below it is the Observatory's view, for everything else.
+
+## The Observatory: the whole archive at a glance
+
+The panel's **Observatory** tab is the Astro Archive Observatory, the page built in August 2026 from a one-off scan of the drive, now fed by the importer. It opens on an overview, the job first: what each scope captured last (its last three sessions; click a scope's name and the card becomes a calendar timeline of that scope's projects, one row per object with a dot per session, the quiet period shaded, over the last 90 nights, a year or all time), then what to process next on the PC, and under those the headline figure, the two figures that matter (to process, in progress), hours by scope and where the hours went. Then the tabs: Targets, Coverage (every target against every scope), Pipeline, Nights (a heatmap), Sky, Footprints, Equipment (the scopes) and Data health. Click a target anywhere for its story: sessions night by night, and each dataset (one object on one scope) with why it has the state it has, what to do next, and two buttons: **Open in Explorer** (**Open in Finder** on the Mac), straight to its folder on the archive, and **Show in To process**.
+
+Its facts are the To process list's. `--projects` writes two files side by side from one pass, `projects.json` and `observatory.json`, so the two views never disagree; the tab reads the second. They are rebuilt after each import and each ship on the Mac, each night on the PC, and whenever you press **Refresh now** on either tab. The states are the four you know: still capturing, to process, in progress, done. Names, codes and sky positions come from `contract/targets.json`; a target name the contract doesn't know isn't on the page at all (Data health says how many, `--targets-draft` lists them). Nothing is typed in apart from `capture-state.json`, and nothing on the archive is touched.
+
+**Which computer's list you see.** The PC's is the complete one: it sees the masters on the archive and the finished pictures. Each night, after its sweep, the PC publishes its `projects.json` and `observatory.json` into its own folder on the archive (`_verify\pc`). The Mac's panel shows that published list while it is under 48 hours old, and says so at the top; otherwise it shows the Mac's own, with the Mac's limits: "in progress" needs the share mounted and "done" needs `ASTRO_FINALS_DIR`. The PC's list is complete up to the Mac's last ship (that is when the Mac's sessions reach the archive).
+
+**A copy as one file**, to open on another computer or to send: on the Mac, in Terminal, `/usr/local/bin/python3 ~/bin/astro-import.py --observatory`; on the PC, in Terminal (PowerShell), `py -3 -X utf8 "$env:LOCALAPPDATA\BrettjoAstro\bin\astro-import.py" --observatory`. It writes `observatory.html` beside `projects.json` (add a file name after `--observatory` to put it elsewhere; it will never write under the archive, over one of the importer's own files, or over a file that isn't an Observatory page).
+
+**Sky positions.** A target with no position in `contract/targets.json` is listed but sits off the sky map and the footprints. To place it, add `"ra"` (hours, as a decimal) and `"dec"` (degrees, as a decimal) to its entry, as on Andromeda: `"ra": 0.712, "dec": 41.27`. Your copy then counts as edited, so the next update leaves `targets.json.new` beside it to merge.
+
 ## When things go wrong
 
 Interruptions are expected, not exceptional. A copy that dies mid-file leaves
@@ -220,6 +305,13 @@ the whole library against the ledger — the same audit you can run any time
 for reassurance:
 
 *"5,126 files checked, zero problems"* is what a healthy library says.
+
+A copy into the archive that is cut off half-way (the PC sleeps, the network
+drops) stays "started" in the log and is never counted. The PC moves that
+copy, and only it, into `_Quarantine\ship-incomplete`, and the Mac sends the
+frame again to the same place. If every byte got there after all, the copy
+stays and the Mac's next ship simply records it. The PC never moves anything
+else on its own.
 
 ## What can never happen
 

@@ -1,0 +1,1676 @@
+{
+ "schema": "targets/1",
+ "note": "One entry per object. 'codes': every catalogue code that is the SAME object (M 31 and NGC 224 are one Andromeda). 'aliases': the other names you use for it. How to edit safely: (1) a plain-text editor (Notepad on the PC; on the Mac TextEdit only in plain-text mode with smart quotes off): one curly quote breaks the file, and then nothing resolves. (2) To add a name, put it in an entry's aliases: \"aliases\": [\"Wizard\", \"Wizard Nebula\"]. To add an object, copy a whole { ... } entry, paste it after another one, give it a new id. Straight double quotes only, a comma between entries, NO comma after the last one in a list, no comments. (3) Never change or reuse an id: your open/complete choices are keyed by it; to merge two entries, move the codes and aliases onto the one you keep and delete the other. (4) Write codes like M 31, NGC 224, IC 1318A (letter joined on), Sh2-157, C 25, Barnard 33 (never B 33), LDN 1235, vdB 126, Ced 214, Mel 22, HIP 106890, no leading zeros. (5) A code, a name or an alias may sit on only one entry; two entries with the same name make that name match neither (--targets-draft warns). (6) A name that contains a catalogue code always files by the code, whatever the words say. (7) Each computer has its own copy of this file: make the same change on both. (8) An update replaces this file by itself while you haven't edited it; if you have, it leaves targets.json.new beside it: merge the two by hand. Then run --targets-draft: it checks the file and says what it still doesn't know. Optional per target, read by the Observatory page: 'type' (Galaxy, Emission nebula, Open cluster...), 'constellation', 'ra' (hours, decimal) and 'dec' (degrees, decimal). A target without ra/dec is listed but not drawn on the sky map. The first set came from the Astro Archive Observatory's catalogue (29 Aug 2026).",
+ "review": "Seed built 10 Oct 2026 from the importer's own name list plus a merge pass; 37 targets added 12 Oct from the Mac's --targets-draft (48 names; all resolve except 'Unknown', 3 frames, no object). For Brett: 'NGC 1893 - Flaming Star' files under NGC 1893 (the Tadpoles' cluster, IC 410) because the code wins, not under IC 405; Fish on a Platter is Barnard 144; Middle Heart (LDN 1373) is the Heart's own core; Markarian's Chain, the Milky Way core and the comet are name-only. Kept apart on purpose until Brett says: Sh2-171 (Teddy Bear) and NGC 7822; NGC 6910 (the cluster) and IC 1318 (the Sadr nebula); NGC 6823 and NGC 6820 / Sh2-86; NGC 1893 and IC 410.",
+ "targets": [
+  {
+   "id": "M1",
+   "name": "Crab Nebula",
+   "codes": [
+    "M 1",
+    "NGC 1952"
+   ],
+   "aliases": [],
+   "ra": 5.575,
+   "dec": 22.02,
+   "type": "Supernova remnant",
+   "constellation": "Taurus"
+  },
+  {
+   "id": "M8",
+   "name": "Lagoon Nebula",
+   "codes": [
+    "M 8",
+    "NGC 6523"
+   ],
+   "aliases": [],
+   "ra": 18.063,
+   "dec": -24.38,
+   "type": "Emission nebula",
+   "constellation": "Sagittarius"
+  },
+  {
+   "id": "M13",
+   "name": "Great Globular Cluster",
+   "codes": [
+    "M 13",
+    "NGC 6205"
+   ],
+   "aliases": [],
+   "ra": 16.695,
+   "dec": 36.47,
+   "type": "Globular cluster",
+   "constellation": "Hercules"
+  },
+  {
+   "id": "M16",
+   "name": "Eagle Nebula",
+   "codes": [
+    "M 16",
+    "NGC 6611"
+   ],
+   "aliases": [],
+   "ra": 18.313,
+   "dec": -13.82,
+   "type": "Nebula",
+   "constellation": "Serpens"
+  },
+  {
+   "id": "M17",
+   "name": "Omega Nebula",
+   "codes": [
+    "M 17",
+    "NGC 6618"
+   ],
+   "aliases": [],
+   "ra": 18.347,
+   "dec": -16.18,
+   "type": "Emission nebula",
+   "constellation": "Sagittarius"
+  },
+  {
+   "id": "M20",
+   "name": "Trifid Nebula",
+   "codes": [
+    "M 20",
+    "NGC 6514"
+   ],
+   "aliases": [],
+   "ra": 18.04,
+   "dec": -23.03,
+   "type": "Emission nebula",
+   "constellation": "Sagittarius"
+  },
+  {
+   "id": "M27",
+   "name": "Dumbbell Nebula",
+   "codes": [
+    "M 27",
+    "NGC 6853"
+   ],
+   "aliases": [],
+   "ra": 19.993,
+   "dec": 22.72,
+   "type": "Planetary nebula",
+   "constellation": "Vulpecula"
+  },
+  {
+   "id": "M31",
+   "name": "Andromeda Galaxy",
+   "codes": [
+    "M 31",
+    "NGC 224"
+   ],
+   "aliases": [
+    "Andromeda"
+   ],
+   "ra": 0.712,
+   "dec": 41.27,
+   "type": "Galaxy",
+   "constellation": "Andromeda"
+  },
+  {
+   "id": "M33",
+   "name": "Triangulum Galaxy",
+   "codes": [
+    "M 33",
+    "NGC 598"
+   ],
+   "aliases": [],
+   "ra": 1.565,
+   "dec": 30.67,
+   "type": "Galaxy",
+   "constellation": "Triangulum"
+  },
+  {
+   "id": "M42",
+   "name": "Orion Nebula",
+   "codes": [
+    "M 42",
+    "NGC 1976"
+   ],
+   "aliases": [],
+   "ra": 5.59,
+   "dec": -5.38,
+   "type": "Nebula",
+   "constellation": "Orion"
+  },
+  {
+   "id": "M43",
+   "name": "De Mairan's Nebula",
+   "codes": [
+    "M 43",
+    "NGC 1982"
+   ],
+   "aliases": [],
+   "ra": 5.592,
+   "dec": -5.27,
+   "type": "Emission nebula",
+   "constellation": "Orion"
+  },
+  {
+   "id": "M44",
+   "name": "Beehive Cluster",
+   "codes": [
+    "M 44",
+    "NGC 2632"
+   ],
+   "aliases": [],
+   "ra": 8.673,
+   "dec": 19.98,
+   "type": "Open cluster",
+   "constellation": "Cancer"
+  },
+  {
+   "id": "M45",
+   "name": "Pleiades",
+   "codes": [
+    "M 45",
+    "Mel 22"
+   ],
+   "aliases": [
+    "Seven Sisters"
+   ],
+   "ra": 3.79,
+   "dec": 24.12,
+   "type": "Open cluster",
+   "constellation": "Taurus"
+  },
+  {
+   "id": "M51",
+   "name": "Whirlpool Galaxy",
+   "codes": [
+    "M 51",
+    "NGC 5194"
+   ],
+   "aliases": [],
+   "ra": 13.498,
+   "dec": 47.2,
+   "type": "Galaxy",
+   "constellation": "Canes Venatici"
+  },
+  {
+   "id": "M57",
+   "name": "Ring Nebula",
+   "codes": [
+    "M 57",
+    "NGC 6720"
+   ],
+   "aliases": [],
+   "ra": 18.893,
+   "dec": 33.03,
+   "type": "Planetary nebula",
+   "constellation": "Lyra"
+  },
+  {
+   "id": "M63",
+   "name": "Sunflower Galaxy",
+   "codes": [
+    "M 63",
+    "NGC 5055"
+   ],
+   "aliases": [],
+   "ra": 13.264,
+   "dec": 42.03,
+   "type": "Galaxy",
+   "constellation": "Canes Venatici"
+  },
+  {
+   "id": "M64",
+   "name": "Black Eye Galaxy",
+   "codes": [
+    "M 64",
+    "NGC 4826"
+   ],
+   "aliases": [],
+   "ra": 12.945,
+   "dec": 21.68,
+   "type": "Galaxy",
+   "constellation": "Coma Berenices"
+  },
+  {
+   "id": "M76",
+   "name": "Little Dumbbell Nebula",
+   "codes": [
+    "M 76",
+    "NGC 650"
+   ],
+   "aliases": [],
+   "ra": 1.705,
+   "dec": 51.58,
+   "type": "Planetary nebula",
+   "constellation": "Perseus"
+  },
+  {
+   "id": "M78",
+   "name": "Reflection Nebula",
+   "codes": [
+    "M 78",
+    "NGC 2068"
+   ],
+   "aliases": [],
+   "ra": 5.78,
+   "dec": 0.05,
+   "type": "Reflection nebula",
+   "constellation": "Orion"
+  },
+  {
+   "id": "M81",
+   "name": "Bode's Galaxy",
+   "codes": [
+    "M 81",
+    "NGC 3031"
+   ],
+   "aliases": [],
+   "ra": 9.926,
+   "dec": 69.07,
+   "type": "Galaxy",
+   "constellation": "Ursa Major"
+  },
+  {
+   "id": "M82",
+   "name": "Cigar Galaxy",
+   "codes": [
+    "M 82",
+    "NGC 3034"
+   ],
+   "aliases": [],
+   "ra": 9.932,
+   "dec": 69.68,
+   "type": "Galaxy",
+   "constellation": "Ursa Major"
+  },
+  {
+   "id": "M83",
+   "name": "Southern Pinwheel Galaxy",
+   "codes": [
+    "M 83",
+    "NGC 5236"
+   ],
+   "aliases": []
+  },
+  {
+   "id": "M87",
+   "name": "Virgo A",
+   "codes": [
+    "M 87",
+    "NGC 4486"
+   ],
+   "aliases": [],
+   "ra": 12.514,
+   "dec": 12.39,
+   "type": "Galaxy",
+   "constellation": "Virgo"
+  },
+  {
+   "id": "M94",
+   "name": "Cat's Eye Galaxy",
+   "codes": [
+    "M 94",
+    "NGC 4736"
+   ],
+   "aliases": [],
+   "ra": 12.848,
+   "dec": 41.12,
+   "type": "Galaxy",
+   "constellation": "Canes Venatici"
+  },
+  {
+   "id": "M97",
+   "name": "Owl Nebula",
+   "codes": [
+    "M 97",
+    "NGC 3587"
+   ],
+   "aliases": [],
+   "ra": 11.247,
+   "dec": 55.02,
+   "type": "Planetary nebula",
+   "constellation": "Ursa Major"
+  },
+  {
+   "id": "M101",
+   "name": "Pinwheel Galaxy",
+   "codes": [
+    "M 101",
+    "NGC 5457"
+   ],
+   "aliases": [],
+   "ra": 14.053,
+   "dec": 54.35,
+   "type": "Galaxy",
+   "constellation": "Ursa Major"
+  },
+  {
+   "id": "M104",
+   "name": "Sombrero Galaxy",
+   "codes": [
+    "M 104",
+    "NGC 4594"
+   ],
+   "aliases": [],
+   "ra": 12.667,
+   "dec": -11.62,
+   "type": "Galaxy",
+   "constellation": "Virgo"
+  },
+  {
+   "id": "M106",
+   "name": "Spiral Galaxy",
+   "codes": [
+    "M 106",
+    "NGC 4258"
+   ],
+   "aliases": [],
+   "ra": 12.317,
+   "dec": 47.3,
+   "type": "Galaxy",
+   "constellation": "Canes Venatici"
+  },
+  {
+   "id": "M110",
+   "name": "Satellite of Andromeda",
+   "codes": [
+    "M 110",
+    "NGC 205"
+   ],
+   "aliases": [],
+   "ra": 0.673,
+   "dec": 41.69,
+   "type": "Galaxy",
+   "constellation": "Andromeda"
+  },
+  {
+   "id": "NGC253",
+   "name": "Sculptor Galaxy",
+   "codes": [
+    "NGC 253"
+   ],
+   "aliases": []
+  },
+  {
+   "id": "NGC281",
+   "name": "Pacman Nebula",
+   "codes": [
+    "NGC 281",
+    "Sh2-184"
+   ],
+   "aliases": [],
+   "ra": 0.88,
+   "dec": 56.62,
+   "type": "Emission nebula",
+   "constellation": "Cassiopeia"
+  },
+  {
+   "id": "NGC457",
+   "name": "Owl Cluster",
+   "codes": [
+    "NGC 457",
+    "C 13"
+   ],
+   "aliases": [],
+   "ra": 1.326,
+   "dec": 58.29,
+   "type": "Open cluster",
+   "constellation": "Cassiopeia"
+  },
+  {
+   "id": "NGC869",
+   "name": "Double Cluster",
+   "codes": [
+    "NGC 869",
+    "NGC 884",
+    "C 14"
+   ],
+   "aliases": [
+    "Double Cluster",
+    "h and chi Persei"
+   ],
+   "ra": 2.345,
+   "dec": 57.13,
+   "type": "Open cluster",
+   "constellation": "Perseus"
+  },
+  {
+   "id": "NGC896",
+   "name": "Heart Nebula (part)",
+   "codes": [
+    "NGC 896"
+   ],
+   "aliases": [],
+   "ra": 2.424,
+   "dec": 62.02,
+   "type": "Emission nebula",
+   "constellation": "Cassiopeia"
+  },
+  {
+   "id": "NGC1333",
+   "name": "Reflection Nebula",
+   "codes": [
+    "NGC 1333"
+   ],
+   "aliases": []
+  },
+  {
+   "id": "NGC1499",
+   "name": "California Nebula",
+   "codes": [
+    "NGC 1499",
+    "Sh2-220"
+   ],
+   "aliases": [
+    "California"
+   ],
+   "ra": 4.055,
+   "dec": 36.42,
+   "type": "Emission nebula",
+   "constellation": "Perseus"
+  },
+  {
+   "id": "NGC1977",
+   "name": "Running Man Nebula",
+   "codes": [
+    "NGC 1977"
+   ],
+   "aliases": [],
+   "ra": 5.588,
+   "dec": -4.85,
+   "type": "Reflection nebula",
+   "constellation": "Orion"
+  },
+  {
+   "id": "NGC2024",
+   "name": "Flame Nebula",
+   "codes": [
+    "NGC 2024"
+   ],
+   "aliases": [],
+   "ra": 5.698,
+   "dec": -1.85,
+   "type": "Emission nebula",
+   "constellation": "Orion"
+  },
+  {
+   "id": "NGC2070",
+   "name": "Tarantula Nebula",
+   "codes": [
+    "NGC 2070"
+   ],
+   "aliases": []
+  },
+  {
+   "id": "NGC2174",
+   "name": "Monkey Head Nebula",
+   "codes": [
+    "NGC 2174",
+    "Sh2-252"
+   ],
+   "aliases": [],
+   "ra": 6.162,
+   "dec": 20.5,
+   "type": "Emission nebula",
+   "constellation": "Orion"
+  },
+  {
+   "id": "NGC2237",
+   "name": "Rosette Nebula",
+   "codes": [
+    "NGC 2237",
+    "NGC 2238",
+    "NGC 2239",
+    "NGC 2244",
+    "Sh2-275",
+    "C 49"
+   ],
+   "aliases": [
+    "Rosette"
+   ],
+   "ra": 6.54,
+   "dec": 4.87,
+   "type": "Emission nebula",
+   "constellation": "Monoceros"
+  },
+  {
+   "id": "NGC2264",
+   "name": "Cone Nebula",
+   "codes": [
+    "NGC 2264"
+   ],
+   "aliases": [],
+   "ra": 6.683,
+   "dec": 9.88,
+   "type": "Cluster + nebula",
+   "constellation": "Monoceros"
+  },
+  {
+   "id": "NGC2359",
+   "name": "Thor's Helmet",
+   "codes": [
+    "NGC 2359",
+    "Sh2-298"
+   ],
+   "aliases": [],
+   "ra": 7.31,
+   "dec": -13.2,
+   "type": "Wolf-Rayet nebula",
+   "constellation": "Canis Major"
+  },
+  {
+   "id": "NGC2392",
+   "name": "Eskimo Nebula",
+   "codes": [
+    "NGC 2392",
+    "C 39"
+   ],
+   "aliases": [],
+   "ra": 7.486,
+   "dec": 20.91,
+   "type": "Planetary nebula",
+   "constellation": "Gemini"
+  },
+  {
+   "id": "NGC2403",
+   "name": "Spiral Galaxy",
+   "codes": [
+    "NGC 2403",
+    "C 7"
+   ],
+   "aliases": [],
+   "ra": 7.615,
+   "dec": 65.6,
+   "type": "Galaxy",
+   "constellation": "Camelopardalis"
+  },
+  {
+   "id": "NGC2736",
+   "name": "Pencil Nebula",
+   "codes": [
+    "NGC 2736"
+   ],
+   "aliases": []
+  },
+  {
+   "id": "NGC2841",
+   "name": "Tiger's Eye Galaxy",
+   "codes": [
+    "NGC 2841"
+   ],
+   "aliases": [],
+   "ra": 9.367,
+   "dec": 50.98,
+   "type": "Galaxy",
+   "constellation": "Ursa Major"
+  },
+  {
+   "id": "NGC3372",
+   "name": "Carina Nebula",
+   "codes": [
+    "NGC 3372"
+   ],
+   "aliases": []
+  },
+  {
+   "id": "NGC3628",
+   "name": "Hamburger Galaxy",
+   "codes": [
+    "NGC 3628"
+   ],
+   "aliases": [],
+   "ra": 11.338,
+   "dec": 13.6,
+   "type": "Galaxy",
+   "constellation": "Leo"
+  },
+  {
+   "id": "NGC4565",
+   "name": "Needle Galaxy",
+   "codes": [
+    "NGC 4565",
+    "C 38"
+   ],
+   "aliases": [],
+   "ra": 12.606,
+   "dec": 25.99,
+   "type": "Galaxy",
+   "constellation": "Coma Berenices"
+  },
+  {
+   "id": "NGC4631",
+   "name": "Whale Galaxy",
+   "codes": [
+    "NGC 4631",
+    "C 32"
+   ],
+   "aliases": [],
+   "ra": 12.702,
+   "dec": 32.54,
+   "type": "Galaxy",
+   "constellation": "Canes Venatici"
+  },
+  {
+   "id": "NGC4656",
+   "name": "Hockey Stick Galaxy",
+   "codes": [
+    "NGC 4656"
+   ],
+   "aliases": [],
+   "ra": 12.733,
+   "dec": 32.17,
+   "type": "Galaxy",
+   "constellation": "Canes Venatici"
+  },
+  {
+   "id": "NGC5128",
+   "name": "Centaurus A",
+   "codes": [
+    "NGC 5128"
+   ],
+   "aliases": []
+  },
+  {
+   "id": "NGC5139",
+   "name": "Omega Centauri",
+   "codes": [
+    "NGC 5139"
+   ],
+   "aliases": []
+  },
+  {
+   "id": "NGC5907",
+   "name": "Splinter Galaxy",
+   "codes": [
+    "NGC 5907"
+   ],
+   "aliases": [],
+   "ra": 15.265,
+   "dec": 56.33,
+   "type": "Galaxy",
+   "constellation": "Draco"
+  },
+  {
+   "id": "NGC6334",
+   "name": "Cat's Paw Nebula",
+   "codes": [
+    "NGC 6334"
+   ],
+   "aliases": []
+  },
+  {
+   "id": "NGC6357",
+   "name": "Lobster Nebula",
+   "codes": [
+    "NGC 6357"
+   ],
+   "aliases": []
+  },
+  {
+   "id": "NGC6369",
+   "name": "Little Ghost Nebula",
+   "codes": [
+    "NGC 6369"
+   ],
+   "aliases": []
+  },
+  {
+   "id": "NGC6503",
+   "name": "Lost-in-Space Galaxy",
+   "codes": [
+    "NGC 6503"
+   ],
+   "aliases": [],
+   "ra": 17.824,
+   "dec": 70.14,
+   "type": "Galaxy",
+   "constellation": "Draco"
+  },
+  {
+   "id": "NGC6543",
+   "name": "Cat's Eye Nebula",
+   "codes": [
+    "NGC 6543",
+    "C 6"
+   ],
+   "aliases": [],
+   "ra": 17.976,
+   "dec": 66.63,
+   "type": "Planetary nebula",
+   "constellation": "Draco"
+  },
+  {
+   "id": "NGC6559",
+   "name": "Emission Nebula",
+   "codes": [
+    "NGC 6559"
+   ],
+   "aliases": []
+  },
+  {
+   "id": "NGC6572",
+   "name": "Emerald Eye Nebula",
+   "codes": [
+    "NGC 6572"
+   ],
+   "aliases": [],
+   "ra": 18.202,
+   "dec": 6.85,
+   "type": "Planetary nebula",
+   "constellation": "Ophiuchus"
+  },
+  {
+   "id": "NGC6826",
+   "name": "Blinking Nebula",
+   "codes": [
+    "NGC 6826",
+    "C 15"
+   ],
+   "aliases": [],
+   "ra": 19.747,
+   "dec": 50.53,
+   "type": "Planetary nebula",
+   "constellation": "Cygnus"
+  },
+  {
+   "id": "NGC6888",
+   "name": "Crescent Nebula",
+   "codes": [
+    "NGC 6888",
+    "Sh2-105",
+    "C 27"
+   ],
+   "aliases": [
+    "Crescent"
+   ],
+   "ra": 20.201,
+   "dec": 38.35,
+   "type": "Nebula",
+   "constellation": "Cygnus"
+  },
+  {
+   "id": "NGC6960",
+   "name": "Western Veil Nebula",
+   "codes": [
+    "NGC 6960",
+    "C 34"
+   ],
+   "aliases": [],
+   "ra": 20.762,
+   "dec": 30.72,
+   "type": "Supernova remnant",
+   "constellation": "Cygnus"
+  },
+  {
+   "id": "NGC6979",
+   "name": "Pickering's Triangle",
+   "codes": [
+    "NGC 6979"
+   ],
+   "aliases": [],
+   "ra": 20.841,
+   "dec": 32.02,
+   "type": "Supernova remnant",
+   "constellation": "Cygnus"
+  },
+  {
+   "id": "NGC6992",
+   "name": "Eastern Veil Nebula",
+   "codes": [
+    "NGC 6992",
+    "NGC 6995",
+    "C 33"
+   ],
+   "aliases": [],
+   "ra": 20.94,
+   "dec": 31.72,
+   "type": "Supernova remnant",
+   "constellation": "Cygnus"
+  },
+  {
+   "id": "NGC7000",
+   "name": "North America Nebula",
+   "codes": [
+    "NGC 7000",
+    "Sh2-117",
+    "C 20"
+   ],
+   "aliases": [
+    "North America"
+   ],
+   "ra": 20.988,
+   "dec": 44.52,
+   "type": "Nebula",
+   "constellation": "Cygnus"
+  },
+  {
+   "id": "NGC7023",
+   "name": "Iris Nebula",
+   "codes": [
+    "NGC 7023",
+    "C 4"
+   ],
+   "aliases": [
+    "Iris"
+   ],
+   "ra": 21.027,
+   "dec": 68.17,
+   "type": "Nebula",
+   "constellation": "Cepheus"
+  },
+  {
+   "id": "NGC7293",
+   "name": "Helix Nebula",
+   "codes": [
+    "NGC 7293",
+    "C 63"
+   ],
+   "aliases": [],
+   "ra": 22.493,
+   "dec": -20.83,
+   "type": "Planetary nebula",
+   "constellation": "Aquarius"
+  },
+  {
+   "id": "NGC7380",
+   "name": "Wizard Nebula",
+   "codes": [
+    "NGC 7380",
+    "Sh2-142"
+   ],
+   "aliases": [
+    "Wizard"
+   ],
+   "ra": 22.79,
+   "dec": 58.13,
+   "type": "Nebula",
+   "constellation": "Cepheus"
+  },
+  {
+   "id": "NGC7635",
+   "name": "Bubble Nebula",
+   "codes": [
+    "NGC 7635",
+    "Sh2-162",
+    "C 11"
+   ],
+   "aliases": [
+    "Bubble"
+   ],
+   "ra": 23.347,
+   "dec": 61.2,
+   "type": "Nebula",
+   "constellation": "Cassiopeia"
+  },
+  {
+   "id": "NGC7822",
+   "name": "Cederblad 214",
+   "codes": [
+    "NGC 7822",
+    "Ced 214"
+   ],
+   "aliases": [],
+   "ra": 0.06,
+   "dec": 68.62,
+   "type": "Emission nebula",
+   "constellation": "Cepheus"
+  },
+  {
+   "id": "IC405",
+   "name": "Flaming Star Nebula",
+   "codes": [
+    "IC 405",
+    "Sh2-229",
+    "C 31"
+   ],
+   "aliases": [
+    "Flaming Star"
+   ],
+   "ra": 5.27,
+   "dec": 34.27,
+   "type": "Emission nebula",
+   "constellation": "Auriga"
+  },
+  {
+   "id": "IC410",
+   "name": "Tadpole Nebula",
+   "codes": [
+    "IC 410",
+    "Sh2-236"
+   ],
+   "aliases": [],
+   "ra": 5.378,
+   "dec": 33.42,
+   "type": "Emission nebula",
+   "constellation": "Auriga"
+  },
+  {
+   "id": "IC434",
+   "name": "Horsehead Nebula",
+   "codes": [
+    "IC 434",
+    "Barnard 33"
+   ],
+   "aliases": [
+    "Horsehead"
+   ],
+   "ra": 5.683,
+   "dec": -2.45,
+   "type": "Dark nebula",
+   "constellation": "Orion"
+  },
+  {
+   "id": "IC443",
+   "name": "Jellyfish Nebula",
+   "codes": [
+    "IC 443",
+    "Sh2-248"
+   ],
+   "aliases": [],
+   "ra": 6.287,
+   "dec": 22.52,
+   "type": "Supernova remnant",
+   "constellation": "Gemini"
+  },
+  {
+   "id": "IC1318",
+   "name": "Sadr Region",
+   "codes": [
+    "IC 1318",
+    "IC 1318B",
+    "IC 1318C"
+   ],
+   "aliases": [
+    "Sadr",
+    "Gamma Cygni Nebula"
+   ],
+   "ra": 20.37,
+   "dec": 40.4,
+   "type": "Nebula",
+   "constellation": "Cygnus"
+  },
+  {
+   "id": "IC1396",
+   "name": "Elephant's Trunk Nebula",
+   "codes": [
+    "IC 1396",
+    "Sh2-131",
+    "vdB 142",
+    "HIP 106890",
+    "IC 1396A"
+   ],
+   "aliases": [
+    "Elephant Trunk",
+    "Elephant's Trunk",
+    "Elephant Trunk Nebula"
+   ],
+   "ra": 21.65,
+   "dec": 57.5,
+   "type": "Emission nebula",
+   "constellation": "Cepheus"
+  },
+  {
+   "id": "IC1795",
+   "name": "Fish Head Nebula",
+   "codes": [
+    "IC 1795"
+   ],
+   "aliases": [
+    "Fish Head",
+    "Fishhead"
+   ],
+   "ra": 2.442,
+   "dec": 62.05,
+   "type": "Emission nebula",
+   "constellation": "Cassiopeia"
+  },
+  {
+   "id": "IC1805",
+   "name": "Heart Nebula",
+   "codes": [
+    "IC 1805",
+    "Sh2-190",
+    "Mel 15"
+   ],
+   "aliases": [
+    "Heart"
+   ],
+   "ra": 2.557,
+   "dec": 61.43,
+   "type": "Nebula",
+   "constellation": "Cassiopeia"
+  },
+  {
+   "id": "IC1848",
+   "name": "Soul Nebula",
+   "codes": [
+    "IC 1848",
+    "Sh2-199"
+   ],
+   "aliases": [
+    "Soul"
+   ],
+   "ra": 2.86,
+   "dec": 60.43,
+   "type": "Emission nebula",
+   "constellation": "Cassiopeia"
+  },
+  {
+   "id": "IC2118",
+   "name": "Witch Head Nebula",
+   "codes": [
+    "IC 2118"
+   ],
+   "aliases": [],
+   "ra": 5.03,
+   "dec": -7.9,
+   "type": "Reflection nebula",
+   "constellation": "Eridanus"
+  },
+  {
+   "id": "IC2177",
+   "name": "Seagull Nebula",
+   "codes": [
+    "IC 2177",
+    "Sh2-296"
+   ],
+   "aliases": []
+  },
+  {
+   "id": "IC4604",
+   "name": "Rho Ophiuchi",
+   "codes": [
+    "IC 4604"
+   ],
+   "aliases": []
+  },
+  {
+   "id": "IC5067",
+   "name": "Pelican Nebula",
+   "codes": [
+    "IC 5067",
+    "IC 5070"
+   ],
+   "aliases": [],
+   "ra": 20.85,
+   "dec": 44.4,
+   "type": "Nebula",
+   "constellation": "Cygnus"
+  },
+  {
+   "id": "IC5146",
+   "name": "Cocoon Nebula",
+   "codes": [
+    "IC 5146",
+    "Sh2-125",
+    "C 19"
+   ],
+   "aliases": [],
+   "ra": 21.89,
+   "dec": 47.27,
+   "type": "Emission nebula",
+   "constellation": "Cygnus"
+  },
+  {
+   "id": "IC1318A",
+   "name": "Sadr Region, part A",
+   "codes": [
+    "IC 1318A"
+   ],
+   "aliases": []
+  },
+  {
+   "id": "C9",
+   "name": "Cave Nebula",
+   "codes": [
+    "C 9",
+    "Sh2-155"
+   ],
+   "aliases": [],
+   "ra": 22.947,
+   "dec": 62.62,
+   "type": "Nebula",
+   "constellation": "Cepheus"
+  },
+  {
+   "id": "Sh2-129",
+   "name": "Flying Bat Nebula",
+   "codes": [
+    "Sh2-129"
+   ],
+   "aliases": [],
+   "ra": 21.203,
+   "dec": 59.98,
+   "type": "Nebula",
+   "constellation": "Cepheus"
+  },
+  {
+   "id": "Sh2-132",
+   "name": "Lion Nebula",
+   "codes": [
+    "Sh2-132"
+   ],
+   "aliases": [
+    "LDN 1163",
+    "Lion"
+   ],
+   "ra": 22.317,
+   "dec": 56.08,
+   "type": "Nebula",
+   "constellation": "Cepheus"
+  },
+  {
+   "id": "Sh2-171",
+   "name": "Phantom Nebula",
+   "codes": [
+    "Sh2-171"
+   ],
+   "aliases": [
+    "Teddy Bear",
+    "Teddy Bear Nebula"
+   ],
+   "ra": 0.05,
+   "dec": 67.25,
+   "type": "Nebula",
+   "constellation": "Cepheus"
+  },
+  {
+   "id": "Sh2-240",
+   "name": "Simeis 147",
+   "codes": [
+    "Sh2-240"
+   ],
+   "aliases": [],
+   "ra": 5.65,
+   "dec": 27.83,
+   "type": "Supernova remnant",
+   "constellation": "Taurus"
+  },
+  {
+   "id": "Sh2-261",
+   "name": "Lower's Nebula",
+   "codes": [
+    "Sh2-261"
+   ],
+   "aliases": []
+  },
+  {
+   "id": "LDN1622",
+   "name": "Boogeyman Nebula",
+   "codes": [
+    "LDN 1622"
+   ],
+   "aliases": []
+  },
+  {
+   "id": "GAIA2192287033139966848",
+   "name": "Squid Nebula",
+   "codes": [
+    "GAIA 2192287033139966848"
+   ],
+   "aliases": []
+  },
+  {
+   "id": "3IATLAS",
+   "name": "Comet 3I/ATLAS",
+   "codes": [],
+   "aliases": [
+    "3I ATLAS",
+    "3I/ATLAS",
+    "Comet 3I/ATLAS",
+    "C/2025 N1 (ATLAS)",
+    "C/2025 N1"
+   ],
+   "type": "Interstellar comet"
+  },
+  {
+   "id": "BETELGEUSE",
+   "name": "Betelgeuse",
+   "codes": [
+    "HIP 27989"
+   ],
+   "aliases": [
+    "Betelgeuse",
+    "Alpha Orionis"
+   ],
+   "ra": 5.92,
+   "dec": 7.41,
+   "type": "Star",
+   "constellation": "Orion"
+  },
+  {
+   "id": "NGC2419",
+   "name": "Intergalactic Wanderer",
+   "codes": [
+    "NGC 2419",
+    "C 25"
+   ],
+   "aliases": [
+    "Intergalactic Wanderer"
+   ],
+   "ra": 7.635,
+   "dec": 38.88,
+   "type": "Globular cluster",
+   "constellation": "Lynx"
+  },
+  {
+   "id": "LDN386",
+   "name": "Dark nebula LDN 386",
+   "codes": [
+    "LDN 386"
+   ],
+   "aliases": [
+    "Dark Nebula LDN 386"
+   ]
+  },
+  {
+   "id": "LDN1235",
+   "name": "Dark Shark Nebula",
+   "codes": [
+    "LDN 1235"
+   ],
+   "aliases": [
+    "Dark Shark Nebula",
+    "Dark Shark"
+   ],
+   "ra": 22.238,
+   "dec": 73.42,
+   "type": "Dark nebula",
+   "constellation": "Cepheus"
+  },
+  {
+   "id": "FISHONAPLATTER",
+   "name": "Fish on a Platter Nebula",
+   "codes": [
+    "Barnard 144"
+   ],
+   "aliases": [
+    "Fish on a Platter Nebula",
+    "Fish on a Platter"
+   ]
+  },
+  {
+   "id": "IC63",
+   "name": "Ghost of Cassiopeia",
+   "codes": [
+    "IC 63"
+   ],
+   "aliases": [
+    "Ghost of Cassiopeia",
+    "Ghost of Cassiopeiae",
+    "Gamma Cassiopeiae",
+    "Gamma Cassiopeiae - Ghost of Cassiopeiae"
+   ],
+   "ra": 0.992,
+   "dec": 60.82,
+   "type": "Emission nebula",
+   "constellation": "Cassiopeia"
+  },
+  {
+   "id": "NGC6229",
+   "name": "Globular cluster in Hercules",
+   "codes": [
+    "NGC 6229"
+   ],
+   "aliases": [
+    "Globular Cluster NGC 6229"
+   ],
+   "ra": 16.783,
+   "dec": 47.53,
+   "type": "Globular cluster",
+   "constellation": "Hercules"
+  },
+  {
+   "id": "IC342",
+   "name": "Hidden Galaxy",
+   "codes": [
+    "IC 342",
+    "C 5"
+   ],
+   "aliases": [
+    "Hidden Galaxy"
+   ],
+   "ra": 3.78,
+   "dec": 68.1,
+   "type": "Galaxy",
+   "constellation": "Camelopardalis"
+  },
+  {
+   "id": "LDN1082",
+   "name": "Seahorse Nebula",
+   "codes": [
+    "LDN 1082",
+    "Barnard 150"
+   ],
+   "aliases": [
+    "Seahorse Nebula"
+   ],
+   "ra": 20.883,
+   "dec": 60.17,
+   "type": "Dark nebula",
+   "constellation": "Cepheus"
+  },
+  {
+   "id": "LDN1373",
+   "name": "Middle Heart Nebula",
+   "codes": [
+    "LDN 1373"
+   ],
+   "aliases": [
+    "Middle Heart Nebula",
+    "Middle Heart"
+   ]
+  },
+  {
+   "id": "M109",
+   "name": "Vacuum Cleaner Galaxy",
+   "codes": [
+    "M 109",
+    "NGC 3992"
+   ],
+   "aliases": [],
+   "ra": 11.96,
+   "dec": 53.38,
+   "type": "Galaxy",
+   "constellation": "Ursa Major"
+  },
+  {
+   "id": "M29",
+   "name": "Cooling Tower Cluster",
+   "codes": [
+    "M 29",
+    "NGC 6913"
+   ],
+   "aliases": [],
+   "ra": 20.398,
+   "dec": 38.5,
+   "type": "Open cluster",
+   "constellation": "Cygnus"
+  },
+  {
+   "id": "M3",
+   "name": "Globular cluster M 3",
+   "codes": [
+    "M 3",
+    "NGC 5272"
+   ],
+   "aliases": [],
+   "ra": 13.703,
+   "dec": 28.38,
+   "type": "Globular cluster",
+   "constellation": "Canes Venatici"
+  },
+  {
+   "id": "M38",
+   "name": "Starfish Cluster",
+   "codes": [
+    "M 38",
+    "NGC 1912"
+   ],
+   "aliases": [
+    "Starfish Cluster"
+   ],
+   "ra": 5.478,
+   "dec": 35.85,
+   "type": "Open cluster",
+   "constellation": "Auriga"
+  },
+  {
+   "id": "M39",
+   "name": "Open cluster M 39",
+   "codes": [
+    "M 39",
+    "NGC 7092"
+   ],
+   "aliases": [],
+   "ra": 21.53,
+   "dec": 48.43,
+   "type": "Open cluster",
+   "constellation": "Cygnus"
+  },
+  {
+   "id": "M52",
+   "name": "Open cluster M 52",
+   "codes": [
+    "M 52",
+    "NGC 7654"
+   ],
+   "aliases": [],
+   "ra": 23.413,
+   "dec": 61.59,
+   "type": "Open cluster",
+   "constellation": "Cassiopeia"
+  },
+  {
+   "id": "M56",
+   "name": "Globular cluster M 56",
+   "codes": [
+    "M 56",
+    "NGC 6779"
+   ],
+   "aliases": [],
+   "ra": 19.277,
+   "dec": 30.18,
+   "type": "Globular cluster",
+   "constellation": "Lyra"
+  },
+  {
+   "id": "M92",
+   "name": "Globular cluster M 92",
+   "codes": [
+    "M 92",
+    "NGC 6341"
+   ],
+   "aliases": [],
+   "ra": 17.285,
+   "dec": 43.13,
+   "type": "Globular cluster",
+   "constellation": "Hercules"
+  },
+  {
+   "id": "MARKARIANSCHAIN",
+   "name": "Markarian's Chain",
+   "codes": [],
+   "aliases": [
+    "Markarian's Chain",
+    "Markarians Chain"
+   ],
+   "ra": 12.45,
+   "dec": 13.17,
+   "type": "Galaxy group",
+   "constellation": "Virgo"
+  },
+  {
+   "id": "MILKYWAYCORE",
+   "name": "Milky Way Core",
+   "codes": [],
+   "aliases": [
+    "Milky Way Core",
+    "Milky Way",
+    "MilkyWay"
+   ],
+   "ra": 17.75,
+   "dec": -29.0,
+   "type": "Milky Way region",
+   "constellation": "Sagittarius"
+  },
+  {
+   "id": "NGC1893",
+   "name": "Open cluster in the Tadpoles (IC 410)",
+   "codes": [
+    "NGC 1893"
+   ],
+   "aliases": [],
+   "ra": 5.379,
+   "dec": 33.4,
+   "type": "Open cluster",
+   "constellation": "Auriga"
+  },
+  {
+   "id": "NGC2071",
+   "name": "Reflection nebula near M 78",
+   "codes": [
+    "NGC 2071"
+   ],
+   "aliases": [],
+   "ra": 5.785,
+   "dec": 0.3,
+   "type": "Reflection nebula",
+   "constellation": "Orion"
+  },
+  {
+   "id": "NGC4236",
+   "name": "Barred spiral galaxy in Draco",
+   "codes": [
+    "NGC 4236",
+    "C 3"
+   ],
+   "aliases": [],
+   "ra": 12.278,
+   "dec": 69.47,
+   "type": "Galaxy",
+   "constellation": "Draco"
+  },
+  {
+   "id": "NGC6823",
+   "name": "Open cluster in NGC 6820",
+   "codes": [
+    "NGC 6823"
+   ],
+   "aliases": [],
+   "ra": 19.718,
+   "dec": 23.3,
+   "type": "Open cluster",
+   "constellation": "Vulpecula"
+  },
+  {
+   "id": "NGC6871",
+   "name": "Open cluster in Cygnus",
+   "codes": [
+    "NGC 6871"
+   ],
+   "aliases": [],
+   "ra": 20.098,
+   "dec": 35.78,
+   "type": "Open cluster",
+   "constellation": "Cygnus"
+  },
+  {
+   "id": "NGC6934",
+   "name": "Globular cluster in Delphinus",
+   "codes": [
+    "NGC 6934",
+    "C 47"
+   ],
+   "aliases": [],
+   "ra": 20.57,
+   "dec": 7.4,
+   "type": "Globular cluster",
+   "constellation": "Delphinus"
+  },
+  {
+   "id": "NGC6946",
+   "name": "Fireworks Galaxy",
+   "codes": [
+    "NGC 6946",
+    "C 12"
+   ],
+   "aliases": [
+    "Fireworks Galaxy"
+   ],
+   "ra": 20.581,
+   "dec": 60.15,
+   "type": "Galaxy",
+   "constellation": "Cepheus"
+  },
+  {
+   "id": "NGC7510",
+   "name": "Open cluster in Cepheus",
+   "codes": [
+    "NGC 7510"
+   ],
+   "aliases": [],
+   "ra": 23.185,
+   "dec": 60.57,
+   "type": "Open cluster",
+   "constellation": "Cepheus"
+  },
+  {
+   "id": "Sh2-157",
+   "name": "Lobster Claw Nebula",
+   "codes": [
+    "Sh2-157"
+   ],
+   "aliases": [
+    "Lobster Claw Nebula",
+    "Lobster Claw"
+   ]
+  },
+  {
+   "id": "NGC6910",
+   "name": "Rocking Horse Cluster",
+   "codes": [
+    "NGC 6910"
+   ],
+   "aliases": [],
+   "ra": 20.385,
+   "dec": 40.78,
+   "type": "Open cluster",
+   "constellation": "Cygnus"
+  },
+  {
+   "id": "NGC891",
+   "name": "Silver Sliver Galaxy",
+   "codes": [
+    "NGC 891",
+    "C 23"
+   ],
+   "aliases": [
+    "Silver Sliver Galaxy",
+    "Silver Sliver"
+   ],
+   "ra": 2.377,
+   "dec": 42.35,
+   "type": "Galaxy",
+   "constellation": "Andromeda"
+  },
+  {
+   "id": "IC417",
+   "name": "Spider Nebula",
+   "codes": [
+    "IC 417",
+    "Sh2-234"
+   ],
+   "aliases": [
+    "Spider Nebula",
+    "Spider"
+   ],
+   "ra": 5.468,
+   "dec": 34.43,
+   "type": "Emission nebula",
+   "constellation": "Auriga"
+  },
+  {
+   "id": "M108",
+   "name": "Surfboard Galaxy",
+   "codes": [
+    "M 108",
+    "NGC 3556"
+   ],
+   "aliases": [
+    "Surfboard Galaxy"
+   ],
+   "ra": 11.192,
+   "dec": 55.67,
+   "type": "Galaxy",
+   "constellation": "Ursa Major"
+  },
+  {
+   "id": "vdB126",
+   "name": "vdB 126",
+   "codes": [
+    "vdB 126"
+   ],
+   "aliases": [],
+   "type": "Reflection nebula",
+   "constellation": "Vulpecula"
+  }
+ ]
+}

@@ -1,0 +1,12 @@
+# Windows scripts keep CRLF whatever the clone platform; everything else LF.
+*.ps1 text eol=crlf
+*.cmd text eol=crlf
+*.sh text eol=lf
+*.command text eol=lf
+*.py text eol=lf
+*.plist text eol=lf
+# The contract hashes in contract/shipped.sha256 are of LF bytes: never convert these
+contract/* text eol=lf
+*.json text eol=lf
+*.html text eol=lf
+*.md text eol=lf
