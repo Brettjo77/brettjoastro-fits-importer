@@ -55,7 +55,7 @@ from collections import defaultdict
 from datetime import date, datetime, timedelta, timezone
 
 # One version for every platform (1.5.0: the Windows 11 edition joins the Mac).
-VERSION = "1.7.0"
+VERSION = "1.7.1"
 IS_WINDOWS = os.name == "nt"
 IS_MAC = sys.platform == "darwin"
 PLATFORM = "windows" if IS_WINDOWS else ("mac" if IS_MAC else "linux")
@@ -367,12 +367,15 @@ def _drive_roots():
         ours = {os.path.splitdrive(os.path.abspath(p))[0].upper()
                 for p in (ARCHIVE_MOUNT, DEST_DIR, STATE_DIR, MIRROR_DIR, LIBRARY_DIR)
                 if p}
+        exclude = {x.strip().upper().rstrip("\\") for x in
+                   str(os.environ.get("ASTRO_DRIVE_EXCLUDE") or _CONFIG.get("ASTRO_DRIVE_EXCLUDE") or "")
+                   .replace(";", ",").split(",") if x.strip()}
         for i in range(26):
             if not mask & (1 << i):
                 continue
             letter = chr(65 + i) + ":"
-            if letter.upper() == system:
-                continue
+            if letter.upper() == system or letter.upper() in exclude:
+                continue        # never a camera: the system drive, or one named in ASTRO_DRIVE_EXCLUDE (1.7.1)
             root = letter + "\\"
             kind = k32.GetDriveTypeW(ctypes.c_wchar_p(root))
             if kind == 2:                                    # removable: a camera or card
@@ -1642,7 +1645,7 @@ LOCK_PATH = os.path.join(STATE_DIR, "import.lock")
 # What Brett reads when the lock is held, by what holds it: the same words
 # from the command line and on the panel's banner (1.5.3)
 LOCK_HOLDER_TEXT = {"panel": "The panel is busy right now",
-                    "ship": "The twice-daily ship to the PC is running right now"}
+                    "ship": "The ship to the archive is running right now"}
 
 def lock_busy_text(what):
     """'The panel is busy right now', 'Another import is already running', ..."""
@@ -1862,6 +1865,21 @@ def get_display_name(state, catalog_name, ask=True, dry_run=False):
                 return catalog_name
             return f"{catalog_name} - {custom}"
         return catalog_name
+    other = other_record()
+    if other and catalog_name in other.names:
+        # the other computer already answered this question (1.7.1): one
+        # object, one name, one folder on the archive. Its answer is adopted
+        # into this computer's own names file, so it stays stable here.
+        custom = other.names[catalog_name]
+        if custom and clean_target_name(custom) is not None:
+            state.custom_names[catalog_name] = clean_target_name(custom)
+            state._save_names()
+            info(f"Using the {other.machine}'s name: {catalog_name} → {custom}")
+            return get_display_name(state, catalog_name, ask=False)
+        if custom == "":
+            state.custom_names[catalog_name] = ""      # skipped there, skipped here
+            state._save_names()
+            return catalog_name
     if catalog_name in _session_skipped_names or not ask or dry_run:
         return catalog_name
     info(f"Unknown target: {catalog_name}")
@@ -2014,9 +2032,20 @@ def tag_purple(folder_path):
         pass
 
 def documents_under_icloud():
-    """Preflight: detect iCloud Desktop & Documents sync (breaks hardlinks/evicts)."""
+    """Preflight: is the import folder under a cloud sync that can evict files
+    or break hardlinks: iCloud Desktop & Documents on the Mac, OneDrive's
+    folder redirection on Windows (1.7.1)."""
     docs = os.path.realpath(os.path.expanduser("~/Documents"))
-    return "com~apple~CloudDocs" in docs or "Mobile Documents" in docs
+    if "com~apple~CloudDocs" in docs or "Mobile Documents" in docs:
+        return True
+    if IS_WINDOWS:
+        for p in (DEST_DIR, LIBRARY_DIR, docs):
+            try:
+                if "onedrive" in os.path.realpath(p).lower():
+                    return True
+            except OSError:
+                pass
+    return False
 
 
 # ═══════════════════════════════════════════════════════════════════════════
@@ -2030,6 +2059,7 @@ def scan_camera(state):
     """Walk the camera. Returns dict with targets, calibration, relpath set, disk usage."""
     targets = []
     all_relpaths = set()
+    other = other_record()          # the other computer's record (1.7.1), or None
 
     for source_subdir in SOURCE_SUBDIRS:
         source_dir = os.path.join(ASIAIR_VOLUME, source_subdir)
@@ -2060,6 +2090,19 @@ def scan_camera(state):
                    and state.is_imported(f["relpath"], f["size"]) != "yes"]
             if not state.has_ledger():
                 new = list(files)
+            # ...minus what the other computer already imported and verified:
+            # not new here, shown as backed up by it (never a proof for a clear)
+            elsewhere = []
+            if other and new:
+                keep = []
+                for f in new:
+                    hit = other.backed_up(f["relpath"], f["size"])
+                    if hit:
+                        f["other"] = hit
+                        elsewhere.append(f)
+                    else:
+                        keep.append(f)
+                new = keep
             integration = 0.0
             for f in new:
                 p = parse_light_filename(f["filename"])
@@ -2075,6 +2118,11 @@ def scan_camera(state):
                 "total_bytes": sum(f["size"] for f in files),
                 "integration_s": integration,
                 "skipped": entry in state.skiplist,
+                "elsewhere": elsewhere,
+                "elsewhere_bytes": sum(f["size"] for f in elsewhere),
+                "elsewhere_archived": sum(1 for f in elsewhere if f["other"].get("archived")),
+                "elsewhere_machine": other.machine if other else None,
+                "other_skip": bool(other and entry in other.skiplist and entry not in state.skiplist),
             })
 
     calibration = []
@@ -2111,6 +2159,7 @@ def scan_camera(state):
                 parsed["source_path"] = fpath
                 parsed["relpath"] = rel
                 parsed["size"] = fsize
+                parsed["other"] = other.library_has(rel, fsize) if other else None
                 calibration.append(parsed)
 
     try:
@@ -2121,7 +2170,8 @@ def scan_camera(state):
 
     return {"targets": targets, "calibration": calibration,
             "cal_unparseable": cal_unparseable,
-            "relpaths": all_relpaths, "disk": disk}
+            "relpaths": all_relpaths, "disk": disk,
+            "other": other.summary() if other else None}
 
 
 # ═══════════════════════════════════════════════════════════════════════════
@@ -2631,9 +2681,16 @@ def run_import(state, args, only_targets=None):
     explain = [] if args.explain_cal else None
 
     if documents_under_icloud():
-        warn("~/Documents appears to be under iCloud Desktop & Documents sync.")
-        warn("Hardlinks are degraded to full copies, and iCloud may evict FITS data —")
-        warn("consider moving the Astro folders to plain local storage.")
+        if IS_WINDOWS:
+            warn("The import folders appear to be under OneDrive.")
+            warn("Files On-Demand can move frames off this disk after they are imported, and "
+                 "the ship would then find them missing —")
+            warn("set ASIAIR_DEST and ASIAIR_CAL_LIBRARY in config.json to a folder OneDrive "
+                 "doesn't sync.")
+        else:
+            warn("~/Documents appears to be under iCloud Desktop & Documents sync.")
+            warn("Hardlinks are degraded to full copies, and iCloud may evict FITS data —")
+            warn("consider moving the Astro folders to plain local storage.")
 
     scan = scan_camera(state)
     scope_lookup = load_equipment_scope_lookup()
@@ -2646,6 +2703,7 @@ def run_import(state, args, only_targets=None):
         state._dirty = True
 
     emit("run-start", targets=len([t for t in scan["targets"] if t["new"]]))
+    _say_elsewhere(scan)
 
     # Calibration backup first — independent of target matching (spec §4a)
     if scan["calibration"]:
@@ -2962,7 +3020,8 @@ def run_import(state, args, only_targets=None):
 
         # ── Wrap-up per target ─────────────────────────────────────────
         if not dry_run and successful > 0:
-            info(f"Tagging {name} purple on ASIAir...")
+            if not IS_WINDOWS:
+                info(f"Tagging {name} purple on ASIAir...")
             tag_purple(target["dir"])
             integ = sum((f["meta"].get("exposure_seconds") or 0)
                         for f in new_files)
@@ -3462,7 +3521,11 @@ def ship_sides():
 _SNAPSHOT_FIELDS = ("filename", "target", "displayName", "scope", "camera", "device",
                     "sourceType", "night", "exposureSeconds", "filter", "size", "sha256", "origin",
                     "archiveLocation", "archivePath", "archiveShippedAt", "archiveVerifiedAt",
-                    "identityGuessed")
+                    "identityGuessed",
+                    # 1.7.1: what the other computer's SCAN needs to judge a camera
+                    # file: was this copy verified (a baseline row never was), and
+                    # has the camera file since been cleared
+                    "verifiedAtImport", "checksumSkipped", "clearedFromCamera", "importedAt")
 
 def _dest_present(dest, fn, cache):
     """Is dest/fn on this computer's disk right now? One listing per folder
@@ -3500,8 +3563,11 @@ def write_ledger_snapshot(state, mount=None):
             return None
         rows, cache = {}, {}
         for key, row in (state.ledger.get("files") or {}).items():
-            if not isinstance(row, dict) or not _project_light(row):
+            if not isinstance(row, dict):
                 continue
+            # every row since 1.7.1, not only the lights: the other computer's
+            # scan must recognise a stack, a panel or a rider it already has
+            # (the project layer keeps filtering lights on its side)
             slim = {k: row[k] for k in _SNAPSHOT_FIELDS if k in row}
             dest, fn = row.get("dest"), row.get("filename")
             if isinstance(dest, str) and isinstance(fn, str):
@@ -3512,7 +3578,12 @@ def write_ledger_snapshot(state, mount=None):
                                   "machineId": machine_identity()["slug"],
                                   "machineUid": machine_id(), "at": _utc_iso(),
                                   "files": rows, "customNames": state.custom_names or {},
-                                  "calibration": _calibration_links(state.ledger)})
+                                  "calibration": _calibration_links(state.ledger),
+                                  # 1.7.1: the other computer's scan reads these too
+                                  "library": _library_slim(state.ledger),
+                                  "discarded": _discarded_slim(state.ledger),
+                                  "skiplist": [x for x in (state.skiplist or []) if isinstance(x, str)],
+                                  "equipment": _equipment_slim()})
         return path
     except OSError as e:
         warn(f"The ledger snapshot for the other computer could not be written ({e}); "
@@ -3520,6 +3591,41 @@ def write_ledger_snapshot(state, mount=None):
         return None
 
 SNAPSHOT_STALE_HOURS = 36       # the ship runs twice a day; older than this and the Mac hasn't reached the archive
+
+def _library_slim(ledger):
+    """This computer's calibration Library, slim, for the other computer's scan
+    (1.7.1): which camera files it holds, at what size, and whether that copy
+    was verified."""
+    out = {}
+    for key, c in ((ledger or {}).get("calibration") or {}).items():
+        if not isinstance(c, dict) or not isinstance(key, str):
+            continue
+        out[key] = {"frameType": c.get("frameType"), "filename": c.get("filename"),
+                    "size": c.get("size"), "sha256": c.get("sha256"),
+                    "verifiedAtImport": bool(c.get("verifiedAtImport"))}
+    return out
+
+def _discarded_slim(ledger):
+    """What this computer binned with DISCARD (relpath|size -> the bytes it
+    binned, from which camera): the other computer's scan must not import a
+    frame Brett binned on purpose (1.7.1)."""
+    out = {}
+    for key, r in ((ledger or {}).get("discarded") or {}).items():
+        if not isinstance(r, dict) or not isinstance(key, str):
+            continue
+        out[key] = {"relpath": r.get("relpath"), "size": r.get("size"), "sha256": r.get("sha256"),
+                    "camera": r.get("camera"), "stillOnCamera": bool(r.get("stillOnCamera"))}
+    return out
+
+def _equipment_slim():
+    """The scopes this computer's equipment.json adds beyond the built-in
+    table (focal length -> name), so the other computer names them the same
+    way (1.7.1, read-only there)."""
+    try:
+        return {str(fl): name for fl, name in load_equipment_scope_lookup().items()
+                if fl not in SCOPE_LOOKUP and isinstance(name, str)}
+    except Exception:
+        return {}
 
 def _day_key(dest):
     """A light row's Day folder, as the calibration links name it (linkedInto):
@@ -3551,22 +3657,25 @@ def _calibration_index(cal_maps):
     from this computer's ledger and the other's snapshot together."""
     idx = {}
     for cal in cal_maps:
-        for c in (cal or {}).values():
+        for key, c in (cal or {}).items():
             kind = LIB_SUBDIR.get(c.get("frameType")) if isinstance(c, dict) else None
             if not kind:
                 continue
+            # one frame, however many computers linked their own copy of it
+            # (1.7.1): identified by its camera path, the ledger key
+            ident = str(key).split(CAMERA_KEY_SEP, 1)[0]
             for link in c.get("linkedInto") or []:
                 if isinstance(link, str):
-                    n = idx.setdefault(link, {"biases": 0, "darks": 0, "flats": 0, "shipped": 0})
-                    n[kind] += 1
+                    n = idx.setdefault(link, {"biases": set(), "darks": set(), "flats": set(), "shipped": set()})
+                    n[kind].add(ident)
                     if link in (c.get("shipped") or []):
-                        n["shipped"] += 1
+                        n["shipped"].add(ident)
     return idx
 
 def _calibration_for(idx, day_keys):
     """Counts for a set of Day folder keys: a link matches its own folder, or any
     folder above it (a mosaic's shared calibration sits on the target folder)."""
-    tot = {"biases": 0, "darks": 0, "flats": 0, "shipped": 0}
+    acc = {"biases": set(), "darks": set(), "flats": set(), "shipped": set()}
     seen = set()
     for dk in day_keys:
         if not isinstance(dk, str):
@@ -3576,9 +3685,9 @@ def _calibration_for(idx, day_keys):
             link = "/".join(parts[:i])
             if link in idx and link not in seen:
                 seen.add(link)
-                for k in tot:
-                    tot[k] += idx[link][k]
-    return tot
+                for k in acc:
+                    acc[k] |= idx[link][k]
+    return {k: len(v) for k, v in acc.items()}
 
 def load_ledger_snapshot(path, warnings):
     """The other computer's snapshot: (rows, meta). Rows are {} when the file
@@ -3621,6 +3730,139 @@ def other_ledger_snapshot(mount=None):
     _here, there = ship_sides()
     path = _verify_path(mount or ARCHIVE_MOUNT, there, LEDGER_SNAPSHOT_NAME)
     return path if os.path.isfile(path) else None
+
+# ── The other computer's record (1.7.1) ──────────────────────────────────────
+# Two computers import now, each with its own ledger (a rule that never
+# changes: the SAFE gate and discard trust only THIS ledger). The archive is
+# the one truth, and each computer leaves its record there (the snapshot
+# above). A scan reads the other computer's record so a frame it already
+# imported and verified is not offered again, and is named for what it is.
+# Read-only, never a proof for deleting anything, and absent = everything new.
+OTHER_RECORD_ON = _env_flag("ASTRO_OTHER_RECORD", True)
+_OTHER_CACHE = {"path": None, "sig": None, "rec": None}
+_OTHER_WARNED = set()
+
+def _hours_since(iso):
+    try:
+        at = datetime.fromisoformat(str(iso).replace("Z", "+00:00"))
+        if at.tzinfo is None:
+            at = at.replace(tzinfo=timezone.utc)
+        return round((datetime.now(timezone.utc) - at).total_seconds() / 3600, 1)
+    except (TypeError, ValueError):
+        return None
+
+class OtherRecord:
+    """What the other computer's ledger snapshot says it has: camera files by
+    relative path (and camera, for a Seestar), its calibration Library, what
+    it binned, its target names, its never-import list and its scopes."""
+    def __init__(self, d, path):
+        self.path = path
+        self.machine = d.get("machine") if isinstance(d.get("machine"), str) and d.get("machine") \
+            else "the other computer"
+        self.at = d.get("at") if isinstance(d.get("at"), str) else None
+        self.age_hours = _hours_since(self.at) if self.at else None
+        self.stale = self.age_hours is None or self.age_hours > SNAPSHOT_STALE_HOURS
+        self.files = {}
+        for key, row in (d.get("files") or {}).items():
+            if isinstance(row, dict) and isinstance(key, str):
+                self.files.setdefault(key.split(CAMERA_KEY_SEP, 1)[0], []).append(row)
+        self.library = d.get("library") if isinstance(d.get("library"), dict) else {}
+        self.discarded = d.get("discarded") if isinstance(d.get("discarded"), dict) else {}
+        self.names = {k: v for k, v in (d.get("customNames") or {}).items()
+                      if isinstance(k, str) and isinstance(v, str)} \
+            if isinstance(d.get("customNames"), dict) else {}
+        self.skiplist = [x for x in (d.get("skiplist") or []) if isinstance(x, str)] \
+            if isinstance(d.get("skiplist"), list) else []
+        self.equipment = {}
+        for fl, name in ((d.get("equipment") or {}).items() if isinstance(d.get("equipment"), dict) else ()):
+            try:
+                self.equipment[int(fl)] = str(name)
+            except (TypeError, ValueError):
+                pass
+
+    def backed_up(self, relpath, size, camera=None):
+        """None, or how the other computer holds this camera file: only a row
+        it VERIFIED at import counts (a baseline or an unchecked copy never
+        does), at this size, and for a Seestar from this camera."""
+        for row in self.files.get(relpath, ()):
+            if camera is not None:
+                rc = _row_camera(row)
+                if rc is not None and rc != camera:
+                    continue
+            if row.get("size") not in (None, size):
+                continue
+            if not (row.get("verifiedAtImport") or row.get("archiveVerifiedAt")):
+                continue
+            return {"machine": self.machine, "archived": bool(row.get("archiveVerifiedAt")),
+                    "sha256": row.get("sha256") if isinstance(row.get("sha256"), str) else None}
+        return None
+
+    def library_has(self, relpath, size):
+        c = self.library.get(relpath)
+        if isinstance(c, dict) and c.get("verifiedAtImport") and c.get("size") in (None, size):
+            return {"machine": self.machine}
+        return None
+
+    def binned(self, relpath, size, camera=None):
+        """The record of a DISCARD of this camera file on the other computer,
+        if any (the caller still hashes the file against it: path and size
+        are not identity, 1.4.3 H11)."""
+        r = self.discarded.get(f"{relpath}|{size}")
+        if not isinstance(r, dict) or r.get("stillOnCamera"):
+            return None
+        if camera is not None and r.get("camera") not in (None, camera):
+            return None
+        return r
+
+    def summary(self):
+        return {"machine": self.machine, "at": self.at, "ageHours": self.age_hours,
+                "stale": self.stale, "files": sum(len(v) for v in self.files.values())}
+
+def other_record():
+    """The other computer's record for a scan, or None: switched off
+    (ASTRO_OTHER_RECORD=off), no archive, no snapshot, or one this version
+    can't read (said once). Cached by the file's date and size, so the panel's
+    frequent scans don't re-read megabytes."""
+    if not OTHER_RECORD_ON:
+        return None
+    try:
+        if not os.path.isdir(ARCHIVE_MOUNT):
+            return None
+        path = other_ledger_snapshot()
+        if not path:
+            return None
+        st = os.stat(path)
+        sig = (st.st_mtime_ns, st.st_size)
+    except OSError:
+        return None
+    if _OTHER_CACHE["path"] == path and _OTHER_CACHE["sig"] == sig:
+        return _OTHER_CACHE["rec"]
+    _confine(path, "the other computer's record")
+    d = _read_json_file(path)
+    rec = None
+    schema = d.get("schema") if isinstance(d, dict) else None
+    major = schema.split("/", 1)[1] if isinstance(schema, str) and schema.startswith("ledger-snapshot/") else "1"
+    if not major.isdigit() or int(major) > 1:
+        if path not in _OTHER_WARNED:
+            _OTHER_WARNED.add(path)
+            warn(f"The other computer's record ({path}) was written by a newer importer ({schema}): "
+                 f"update this copy. Until then every frame on a camera counts as new here.")
+    elif isinstance(d, dict) and isinstance(d.get("files"), dict):
+        rec = OtherRecord(d, path)
+    _OTHER_CACHE.update(path=path, sig=sig, rec=rec)
+    return rec
+
+def snapshot_quietly(state):
+    """After a change to this computer's rows outside a ship (a discard, a
+    merge, a filter fix): refresh the record the other computer reads, when
+    the archive is there. Quiet when it isn't: the next ship writes it."""
+    try:
+        if state is not None and state.has_ledger() and os.path.isdir(ARCHIVE_MOUNT):
+            ok, _why = archive_check(ARCHIVE_MOUNT, write_test=False)
+            if ok:
+                write_ledger_snapshot(state)
+    except Exception:
+        pass
 
 def _snapshot_custom_names(paths):
     """The custom names the other computer's snapshot(s) carry."""
@@ -4265,6 +4507,24 @@ def _ship_seeds(own_rows, mount):
             seeds.setdefault(tdir, {}).setdefault(nt, int(m.group(2)))
     return seeds
 
+def _all_ship_rows(mount, own_rows=None):
+    """Every computer's ship rows that started or finished a frame, folded per
+    archive path (read-only; rule 6 allows reading another computer's log):
+    the Day a night was started into must be the same whichever computer
+    retries it (1.7.1)."""
+    out = dict(own_rows or {})
+    for p in _ship_log_files(mount):
+        try:
+            if os.path.realpath(p) == os.path.realpath(ship_log_path(mount)):
+                continue
+        except OSError:
+            pass
+        for r in _read_jsonl_rows(p):
+            rel = r.get("relpath")
+            if isinstance(rel, str) and rel and r.get("state") in ("started", "shipped"):
+                out.setdefault(_relkey(rel), r)
+    return out
+
 def ship_plan(state, mount, own_rows=None):
     """Return (items, notes). items: dict(rel, src, entry, key, kind[, link]):
     kind "frame" for a ledger frame, "cal" for one calibration frame's copy in
@@ -4273,7 +4533,7 @@ def ship_plan(state, mount, own_rows=None):
     items, notes = [], []
     daymaps = {}
     _tree_index = {}
-    seeds = _ship_seeds(own_rows, mount)
+    seeds = _ship_seeds(_all_ship_rows(mount, own_rows), mount)
     home = os.path.expanduser("~")
     for key, e in state.ledger["files"].items():
         if not e.get("verifiedAtImport") or e.get("archiveVerifiedAt") or e.get("tidiedAt"):
@@ -4295,7 +4555,7 @@ def ship_plan(state, mount, own_rows=None):
                                    allow_prefixed=True)
             if not src:
                 if dest.startswith(home):
-                    notes.append(("missing on Mac", key))
+                    notes.append(("missing on this computer", key))
                 continue
         seestar = e.get("device") == "seestar"
         root_dir = os.path.join(mount, root)
@@ -4723,6 +4983,8 @@ def _ship_existing(dst, loc, expect_sha, expect_size, last, log, ship_id, stamp,
     _ship_row(log, "shipped", loc, size, sha, ship_id, shippedAt=stamp, adopted=True)
     return "already there", sha, None
 
+_RESAVED_KINDS = {"stack", "stack-jpg", "mw-stack", "mw-jpg"}   # files a Seestar re-saves in place
+
 def _ship_one(src, dst, loc, expect_sha, expect_size, rows, log, ship_id, stamp, checksum):
     """Copy one file into the archive without ever deleting, renaming or
     writing over anything there (1.7.0, D7): the Mac file is proven against
@@ -4892,7 +5154,7 @@ def _run_ship(state, dry_run=False, mount=None, checksum=True, lock=None):
     waiting = len(items) - len(todo)
     total = sum(i["entry"].get("size") or 0 for i in todo)
     info(f"Ship: {len(todo)} file(s), {human_size(total)} to {ARCHIVE_LABEL}; "
-         f"{waiting} already shipped and awaiting the PC sweep")
+         f"{waiting} already shipped and awaiting the archive sweep")
     for why, key in notes[:10]:
         warn(f"{why}: {key}")
     if len(notes) > 10:
@@ -4947,6 +5209,19 @@ def _run_ship(state, dry_run=False, mount=None, checksum=True, lock=None):
             os.makedirs(os.path.dirname(dst), exist_ok=True)
             status, sha, problem = _ship_one(i["src"], dst, loc, e.get("sha256"), e.get("size"),
                                              rows, shipped_log, ship_id, stamp, checksum)
+            if status == "problem" and "different" in (problem or "") \
+                    and e.get("sourceType") in _RESAVED_KINDS:
+                # a Seestar re-saves a stack under the same name (H4); the
+                # other computer may have filed the earlier one. Both are kept:
+                # this one goes beside it with this computer's tag (1.7.1)
+                stem, ext = os.path.splitext(rel)
+                rel2 = f"{stem}__{machine_identity()['slug']}{ext}"
+                dst, loc = os.path.join(mount, rel2), rel2.replace("/", "\\")
+                status, sha, problem = _ship_one(i["src"], dst, loc, e.get("sha256"), e.get("size"),
+                                                 rows, shipped_log, ship_id, stamp, checksum)
+                if status not in ("waiting", "problem"):
+                    info(f"{rel}: the archive already holds a different file of that name; "
+                         f"this one is filed beside it as {os.path.basename(rel2)}")
             if status == "waiting":
                 held_back += 1
             elif status == "problem":
@@ -4987,9 +5262,9 @@ def _run_ship(state, dry_run=False, mount=None, checksum=True, lock=None):
                             "frames": frames, "problems": problems})
     only_mac = only_on_this_machine(state)
     success(f"Shipped {shipped} file(s). Problems: {len(problems)}. "
-            f"Frames cleared from a camera and not yet PC-verified: {only_mac}.")
+            f"Frames cleared from a camera and not yet verified on the archive: {only_mac}.")
     if held_back:
-        info(f"{held_back} file(s) wait for the PC to set aside an unfinished copy; "
+        info(f"{held_back} file(s) wait for the archive sweep to set aside an unfinished copy; "
              f"they go again after that.")
     unfinished = held_back + sum(1 for r in own_ship_rows(mount).values()
                                  if r.get("shipId") == ship_id
@@ -5000,14 +5275,55 @@ def _run_ship(state, dry_run=False, mount=None, checksum=True, lock=None):
         rid = file_request("sweep", mount=mount, quiet=True)
         if rid:
             info(f"Asked the PC to set the unfinished copies aside ({rid}).")
+    elif unfinished:
+        info("The PC's own unfinished copies are set aside by its next sweep (03:30, or "
+             "run --sweep now); they go again after that.")
     for rel, why in problems[:20]:
         warn(f"  {rel}: {why}")
     emit("ship", reachable=True, shipped=shipped, problems=len(problems), onlyMac=only_mac,
          waiting=held_back)
     write_ledger_snapshot(state, mount)
+    publish_receipts(mount)
     state.publish_mirror()
-    rebuild_projects_quietly(state)         # the Mac's own list, as fresh as its ship
+    rebuild_projects_quietly(state)         # this computer's own list, as fresh as its ship
     return True
+
+def publish_receipts(mount=None):
+    """Copy this computer's AstroLog receipts into its own _verify folder on the
+    archive (_verify\\<side>\\receipts\\<scope>\\), where AstroLog can read both
+    computers' from one place (1.7.1, Brett's decision of 16 Oct). Exclusive
+    create, so nothing there is ever written over; a failure only warns."""
+    mount = mount or ARCHIVE_MOUNT
+    n = 0
+    try:
+        if not os.path.isdir(RECEIPT_BASE):
+            return 0
+        for scope in sorted(os.listdir(RECEIPT_BASE)):
+            sdir = os.path.join(RECEIPT_BASE, scope)
+            if scope.startswith(("_", ".")) or not os.path.isdir(sdir):
+                continue
+            for name in sorted(os.listdir(sdir)):
+                if not name.lower().endswith(".json") or name.startswith("."):
+                    continue
+                dst = _verify_path(mount, SHIP_FOLDER, "receipts", scope, name)
+                if os.path.exists(dst):
+                    continue
+                _confine(dst, "the published receipt")
+                os.makedirs(os.path.dirname(dst), exist_ok=True)
+                with open(os.path.join(sdir, name), "rb") as fin:
+                    data = fin.read()
+                try:
+                    fd = os.open(dst, os.O_WRONLY | os.O_CREAT | os.O_EXCL | getattr(os, "O_BINARY", 0), 0o644)
+                except FileExistsError:
+                    continue
+                with os.fdopen(fd, "wb") as fout:
+                    fout.write(data)
+                n += 1
+        if n:
+            info(f"{n} AstroLog receipt(s) published to the archive (_verify\\{SHIP_FOLDER}\\receipts).")
+    except OSError as e:
+        warn(f"Receipts could not be published to the archive ({e}); the next ship tries again.")
+    return n
 
 
 # ═══════════════════════════════════════════════════════════════════════════
@@ -6645,6 +6961,36 @@ def run_discard(state, target_name, night=None, reason="", dry_run=False):
     judged = [p for p in files if "_thn" not in os.path.basename(p).lower()]
     proven = [p for p in judged if os.path.realpath(p) in proven_set]
     kept_note = ""
+    # The other computer's verified copies (1.7.1): not at risk, so never
+    # offered to DISCARD; and not THIS ledger's proof, so never a SAFE clear
+    # from here either. "Clear it from the Mac."
+    other = other_record()
+    other_proven = []
+    if other:
+        for p in judged:
+            if os.path.realpath(p) in proven_set:
+                continue
+            try:
+                sz = os.path.getsize(p)
+            except OSError:
+                continue
+            if other.backed_up(_rel(p, vol), sz, s["camera"]):
+                other_proven.append(p)
+    if other_proven and len(other_proven) + len(proven) == len(judged):
+        error(f"Everything in {disp} is backed up by the {other.machine} and verified"
+              f"{' on the archive' if all(other.backed_up(_rel(p, vol), os.path.getsize(p), s['camera']).get('archived') for p in other_proven) else ''}. "
+              f"It is not at risk, and only the {other.machine}'s own ledger can prove it: "
+              f"clear it from the {other.machine}. Nothing was touched.")
+        return "refused"
+    if other_proven:
+        files = [p for p in judged if p not in other_proven]
+        judged = list(files)
+        kept_note = (f"{len(other_proven)} file(s) backed up by the {other.machine} stay on the "
+                     f"camera (clear those from the {other.machine}).")
+        info(f"{disp}: {len(other_proven)} file(s) are backed up by the {other.machine}; "
+             f"only the rest is offered.")
+        sizes = {p: sizes.get(p) for p in files}
+        proven = [p for p in judged if os.path.realpath(p) in proven_set]
     if proven and len(proven) == len(judged):
         if night:
             error("Everything on that night is already backed up and verified — that is "
@@ -6666,7 +7012,8 @@ def run_discard(state, target_name, night=None, reason="", dry_run=False):
         # bin EXACTLY the never-backed-up files and leave the rest (1.4.3;
         # 1.4.2 refused, which left no way out on the panel).
         files = [p for p in judged if os.path.realpath(p) not in proven_set]
-        kept_note = (f"{len(proven)} file(s) that ARE backed up stay on the camera "
+        kept_note = ((kept_note + " ") if kept_note else "") + \
+                    (f"{len(proven)} file(s) that ARE backed up stay on the camera "
                      f"(clear those the SAFE way).")
         info(f"{disp} is a mix: {len(proven)} file(s) already backed up, "
              f"{len(files)} never backed up. Only the never-backed-up files are offered.")
@@ -7574,15 +7921,32 @@ def scan_seestar(state):
         except OSError:
             return False
 
+    other = other_record()          # the other computer's record (1.7.1), or None
+
+    def other_has(f):
+        """The other computer verified this file: not new here, and said so."""
+        hit = other.backed_up(f["relpath"], f["size"], camera) if other else None
+        if hit:
+            f["other"] = hit
+        return bool(hit)
+
     def is_new(f):
         if binned(f, discarded.get(f"{f['relpath']}|{f['size']}")):
             return False
+        if other and binned(f, other.binned(f["relpath"], f["size"], camera)):
+            return False            # Brett binned these bytes on the other computer
         if not state.has_ledger():
-            return True
+            return not other_has(f)
         if state.is_imported(f["relpath"], f["size"], camera) != "yes":
-            return True
+            return not other_has(f)
         # same path + size but the camera re-saved it since import (H4)
         return _camera_changed(state.file_entry(f["relpath"], camera), f.get("mtime"))
+
+    def elsewhere_of(*lists):
+        out = [f for lst in lists for f in lst if f.get("other")]
+        return {"elsewhere": out, "elsewhere_bytes": sum(f["size"] for f in out),
+                "elsewhere_archived": sum(1 for f in out if f["other"].get("archived")),
+                "elsewhere_machine": other.machine if other else None}
 
     targets, panel_sets, non_dso = [], [], []
     consumed = set()   # top-level MyWorks names the scan actually understands
@@ -7656,6 +8020,8 @@ def scan_seestar(state):
             "new_jpgs": ([f for f in twinned if is_new(f)]
                          if SEESTAR_IMPORT_SUB_JPEGS else []),
             "skipped": base in state.skiplist,
+            "other_skip": bool(other and base in other.skiplist and base not in state.skiplist),
+            **elsewhere_of(subs, stacks, twinned),
         })
 
     # Stack-only projects: sub-frame saving is OFF by default on Seestars, so
@@ -7692,6 +8058,8 @@ def scan_seestar(state):
             "stacks": st_files, "new_stacks": [f for f in st_files if is_new(f)],
             "jpgs": [], "new_jpgs": [],
             "skipped": entry in state.skiplist,
+            "other_skip": bool(other and entry in other.skiplist and entry not in state.skiplist),
+            **elsewhere_of(st_files),
         })
 
     for entry in entries:
@@ -7704,7 +8072,8 @@ def scan_seestar(state):
         files = [x for x in (fentry(p) for p in _fits_files(pt_dir, maxdepth=1)) if x]
         panel_sets.append({"pt_name": entry, "pt_dir": pt_dir,
                            "mosaic_name": entry[:-3],  # strip "_pt"
-                           "files": files, "new": [f for f in files if is_new(f)]})
+                           "files": files, "new": [f for f in files if is_new(f)],
+                           **elsewhere_of(files)})
 
     # Non-DSO modes are scanned on EVERY model — an S30 Pro shoots Lunar too,
     # and "backup-first" means whatever is on the card gets offered, not just
@@ -7726,7 +8095,8 @@ def scan_seestar(state):
                     files.append(fe)
         if files:
             non_dso.append({"src": src, "src_name": src_name, "dest_name": dest_name,
-                            "files": files, "new": [f for f in files if is_new(f)]})
+                            "files": files, "new": [f for f in files if is_new(f)],
+                            **elsewhere_of(files)})
 
     # Anything else in MyWorks is data this tool does NOT understand — a new
     # firmware folder, a wide-camera product, a stack-only project. Never be
@@ -7925,6 +8295,7 @@ def run_seestar_import(state, scan_s, args, only_targets=None):
         warn(f"Another Seestar is mounted at {xv} — one camera at a time: "
              f"this run covers only {vol}. Import it after a swap.")
     emit("run-start", device="seestar", targets=len([t for t in scan_s['targets'] if t['new']]))
+    _say_elsewhere(scan_s)
 
     # ── DSO projects (non-MW) ────────────────────────────────────────────
     for t in scan_s["targets"]:
@@ -8014,6 +8385,8 @@ def run_seestar_import(state, scan_s, args, only_targets=None):
             for night, n, best in keepers:
                 if dry_run:
                     continue
+                if best.get("other") and state.is_imported(best["relpath"], best["size"], camera) != "yes":
+                    continue        # the other computer holds it, verified (1.7.1): not copied here
                 dst = os.path.join(dest_project_dir, best["filename"])
                 # Re-copy when the CAMERA's stack changed since it was
                 # ledgered — the S50 Pro re-saves its stack after a session
@@ -8559,7 +8932,7 @@ def seestar_safe_cleanup(state, scan_s, cleanup_candidates):
     q = "Delete these SAFE source folders from the Seestar? [y/N] "
     if PROMPT_FN is not None:
         # the panel card must say WHAT it deletes — the log pane is not the card
-        q = (f"Clear from the {scope}: every file below is backed up on this Mac and "
+        q = (f"Clear from the {scope}: every file below is backed up on this {MACHINE_LABEL} and "
              f"verified byte for byte (that is what SAFE means).\n" + "\n".join(lines)
              + "\n" + q)
     resp = safe_input(q, default="n")
@@ -8755,7 +9128,7 @@ svg text{font:11px system-ui,-apple-system,"Segoe UI",sans-serif;fill:var(--mute
 <h1>BrettjoAstro FITS Importer — Status</h1>
 <div class="sub" id="sub"></div>
 <div class="cards" id="tiles"></div>
-<div class="card" id="spaceCard"><h2 id="spaceTitle">Space on this Mac</h2>
+<div class="card" id="spaceCard"><h2 id="spaceTitle">Space on this computer</h2>
   <div class="note" id="spaceNote"></div>
   <div class="cards" id="spaceTiles" style="margin:8px 0 10px"></div>
   <div class="legend" id="spaceLegend"></div>
@@ -9030,6 +9403,28 @@ def generate_dashboard(state, files=None, banner=None):
 # WATCHER SUPPORT / DIALOG FLOWS
 # ═══════════════════════════════════════════════════════════════════════════
 
+def _elsewhere_count(scan):
+    """(frames, of which verified on the archive, the other computer's name)
+    that a scan found already backed up by the other computer (1.7.1)."""
+    n = archived = 0
+    who = None
+    for group in ("targets", "panel_sets", "non_dso"):
+        for t in (scan or {}).get(group) or []:
+            n += len(t.get("elsewhere") or [])
+            archived += t.get("elsewhere_archived") or 0
+            who = who or t.get("elsewhere_machine")
+    return n, archived, who
+
+def _say_elsewhere(scan):
+    n, archived, who = _elsewhere_count(scan)
+    if n:
+        info(f"{n} frame(s) on the camera are already backed up by the {who} "
+             f"({archived} verified on the archive) — not copied again here.")
+    o = (scan or {}).get("other")
+    if o and o.get("stale"):
+        warn(f"The {o.get('machine')}'s record on the archive is "
+             f"{int((o.get('ageHours') or 0) // 24)} day(s) old: frames it imported since may look new here.")
+
 def run_scan_only(state):
     """Tagged lines for the watcher: count / summary / storage — both devices."""
     rows, storages = [], []
@@ -9047,6 +9442,9 @@ def run_scan_only(state):
         for t in sorted(with_new, key=lambda t: -len(t["new"]))[:4]:
             disp = display_name_for(state, t["name"])
             rows.append(f"   {'[ASIAir] ' if both else ''}{disp}  —  {len(t['new']):,} frame(s)")
+        n_else, _a, who = _elsewhere_count(scan)
+        if n_else:
+            rows.append(f"   {'[ASIAir] ' if both else ''}{n_else:,} frame(s) already backed up by the {who}")
         if scan["disk"]:
             d = scan["disk"]
             storages.append(f"ASIAir {human_size(d['used'])}/{human_size(d['total'])} "
@@ -9092,8 +9490,12 @@ def run_scan_only(state):
         attention = 0
     unhandled_n = attention
 
+    n_else_all = sum(_elsewhere_count(x)[0] for x in (locals().get("scan"), locals().get("s")) if x)
+    who_else = next((_elsewhere_count(x)[2] for x in (locals().get("scan"), locals().get("s")) if x and _elsewhere_count(x)[0]), None)
     if not state.has_ledger():
-        summary = "No import ledger yet — the first import backs everything up."
+        summary = ("No import ledger yet — the first import backs everything up."
+                   + (f" {n_else_all:,} frame(s) are already backed up by the {who_else} and are left to it."
+                      if n_else_all else ""))
     elif total_new:
         lines = [f"{total_new} target(s) have new frames — "
                  f"{n_files:,} files, {human_size(n_bytes)}", ""] + rows
@@ -10630,8 +11032,8 @@ def run_projects(state, extra_ledgers=(), dry_run=False):
         return None
     out = os.path.join(STATE_DIR, "projects.json")
     if state.ledger is None:
-        # a computer that has never imported (the archive PC, usually): its own
-        # sessions are none, and the list comes from the other computer's snapshot
+        # a computer that has not imported yet: its own sessions are none, and
+        # the list comes from the other computer's snapshot
         warn("This computer has no ledger yet (nothing has been imported here): "
              "only the other computer's sessions can be listed.")
     extra, names = projects_inputs(state, extra_ledgers)
@@ -10928,6 +11330,8 @@ def main():
             reload()
             res = run_discard(state, args.discard, night=args.night,
                               reason=args.reason or "", dry_run=args.dry_run)
+            if res in ("done", "partial", "cleared"):
+                snapshot_quietly(state)
         finally:
             release_lock()
         sys.exit(1 if res in ("refused", "partial") else 0)
@@ -10935,15 +11339,16 @@ def main():
         if len(args.merge_days) < 3:
             error("--merge-days wants: TARGET DAY DAY ...")
             sys.exit(2)
-        locked(lambda: run_merge_days(state, args.merge_days[0], args.merge_days[1:]))
+        locked(lambda: (run_merge_days(state, args.merge_days[0], args.merge_days[1:]),
+                        snapshot_quietly(state)))
         return
     if args.renumber_day:
         locked(lambda: run_renumber_day(state, args.renumber_day[0],
                                         args.renumber_day[1], args.renumber_day[2]))
         return
     if args.set_filter:
-        locked(lambda: run_set_filter(state, args.set_filter[0], args.set_filter[1],
-                                      night=args.night))
+        locked(lambda: (run_set_filter(state, args.set_filter[0], args.set_filter[1],
+                                       night=args.night), snapshot_quietly(state)))
         return
     if args.unbaseline:
         locked(lambda: run_unbaseline(state, args.unbaseline))
@@ -11025,7 +11430,7 @@ def main():
                 if args.baseline or safe_input(
                         "Mark everything currently on the camera as already imported, "
                         "WITHOUT copying it? Only say yes if you already have copies of "
-                        "these files on this Mac (no = back everything up) [y/N] ",
+                        f"these files on this {MACHINE_LABEL} (no = back everything up) [y/N] ",
                         default="n").lower() == "y":
                     run_baseline(state, assume_yes=args.baseline)
                     if not (args.report or args.reconcile or args.verify):

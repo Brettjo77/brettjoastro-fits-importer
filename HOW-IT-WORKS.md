@@ -152,26 +152,47 @@ listed in PARITY.md). On Windows a camera arrives as a drive letter, and the
 tool recognises it by what is on it — an `Autorun` folder is the ASIAir, a
 `MyWorks` folder is a Seestar.
 
-Each computer keeps **its own ledger**. They are never merged or shared:
-a ledger describes copies on *that* machine, and the SAFE rule must never
-trust a copy that lives somewhere else. Each publishes to its own mirror
-folder, writes its own ship log on the archive, and refuses to adopt the
-other's ledger. What *can* travel between them is settings — your custom
-target names, the never-import list and the scope table — with one export
-and one import.
+Both computers import (since 16 Oct 2026 the author plugs the cameras into
+whichever is nearer). Each computer keeps **its own ledger**. They are never
+merged or shared: a ledger describes copies on *that* machine, and the SAFE
+rule must never trust a copy that lives somewhere else. Each publishes to its
+own mirror folder, writes its own ship log on the archive, and refuses to
+adopt the other's ledger.
+
+What ties them together is the archive. Each ship (and each import, discard,
+merge and filter fix, when the archive is reachable) leaves that computer's
+**record** there: `_verify\mac\ledger-snapshot.json` or `_verify\pc\…`, a
+slim copy of its ledger rows saying what it holds and which copies were
+verified, plus its calibration Library, what it binned with DISCARD, its
+target names, its never-import list and its scope table. A scan reads the
+*other* computer's record: a frame the other computer imported and verified
+is not offered again, and its row says "already backed up by the Mac, verified
+on the archive" (or "not yet on the archive"). Only a verified copy counts;
+a baseline row proves nothing. Such a row has no clear and no discard button:
+only the computer that holds the copy can clear the camera (its ledger is the
+proof), so the panel says "clear it from the Mac". A target name the other
+computer saved is used without the question. Settings can still be carried
+over whole, with one export and one import.
 
 In the author's setup the PC holds the archive (E:) and does the stacking on
 its fast C: drive, so a Windows import lands on C: like the Mac's does in
-Documents, and is then filed into the archive on E: and verified there.
+Documents, and is then filed into the archive on E: at once and verified
+there by the nightly sweep.
 
 ## Filing into the archive
 
-If you keep an archive on another computer (PC-SYNC.md), the Mac files its
-verified frames into it after an import and twice a day. Calibration frames
-go with their lights, into the night's `calibration` folder. The archive's
-own names and Day numbers always win.
+Each computer files its verified frames into the archive after an import
+and twice a day: the Mac over the share (PC-SYNC.md), the PC from its C:
+workbench into E:. Calibration frames go with their lights, into the night's
+`calibration` folder. The archive's own names and Day numbers always win,
+whichever computer files: a night one computer started into a Day stays in
+that Day, and a frame already there is adopted when its bytes match, never
+copied twice. A Seestar stack re-saved under a name the archive already holds
+with different bytes is filed beside it as `<name>__pc.fit` (or `__mac`).
+Each ship also copies that computer's AstroLog receipts into its own
+`_verify\…\receipts` folder on the archive.
 
-From 1.7.0 the Mac never deletes, renames or writes over anything on the
+From 1.7.0 no computer ever deletes, renames or writes over anything on the
 archive. It creates each frame under its final name, only if that name is
 free, then reads it back. Its log on the archive says "started" before each
 frame and "shipped" only after the read-back matched. Because nothing needs
@@ -203,9 +224,9 @@ A new computer says *Nothing imported yet*. And if the tool can't read its
 own ledger, the line says *Status unknown* rather than guess: it never says
 safe when it can't tell.
 
-## What you can delete from the Mac
+## What you can delete from this computer
 
-The Dashboard tab has a section called **Space on this Mac**. It shows which folders the importer filed on this computer you can now delete. A frame counts as safe to delete only when the PC's sweep has re-hashed its copy in the archive and it matched.
+The Dashboard tab has a section called **Space on this computer**. It shows which folders the importer filed on this computer you can now delete. A frame counts as safe to delete only when the PC's sweep has re-hashed its copy in the archive and it matched. The Dashboard itself shows this computer's imports and the other computer's record together.
 
 Everything else is kept:
 - frames shipped but not yet re-checked
@@ -266,9 +287,9 @@ The key is target id, scope id and site, exactly as `projects.json` writes them.
 
 The facts come from this computer's ledger, the PC's inventory of the archive, and the `Final Astro Images` folder.
 
-**How the PC knows what the Mac captured.** Each ship leaves a copy of that computer's ledger rows, `ledger-snapshot.json`, in its own folder under the archive's `_verify` (the Mac's in `_verify\mac`). The other computer's `--projects` reads it by itself, so the PC's nightly list carries the Mac's sessions without anyone copying a file. A computer that has never imported (the PC, usually) says so and lists the other's. A snapshot older than 36 hours, or written by a newer importer, is flagged at the top of the list. Another snapshot can still be added with `--with-ledger <file>`; a frame in both is counted once.
+**How the PC knows what the Mac captured.** Each ship leaves a copy of that computer's ledger rows, `ledger-snapshot.json`, in its own folder under the archive's `_verify` (the Mac's in `_verify\mac`). The other computer's `--projects` reads it by itself, so each computer's list carries the other's sessions without anyone copying a file. A computer that has not imported yet says so and lists the other's. A frame in both ledgers (the PC's first imports of October 2026) is counted once, and so are calibration frames both computers linked. A snapshot older than 36 hours, or written by a newer importer, is flagged at the top of the list. Another snapshot can still be added with `--with-ledger <file>`; a frame in both is counted once.
 
-**The first time on the PC.** Install 1.7.0 on the Mac first and run one ship, so the snapshot is on the archive. Then install on the PC and run `--projects` once (or press **Refresh** on the Archive tab); after that the nightly sweep keeps it fresh. The panel's **Dashboard** on the PC shows the Mac's record, with a banner saying so and how old it is, because the PC has no ledger of its own.
+**The first time on the PC.** Install on the Mac first and run one ship, so the Mac's record is on the archive. Then install on the PC and run `--projects` once (or press **Refresh** on the To process tab); after that the nightly sweep keeps it fresh. The panel's **Dashboard** shows this computer's imports and the other's record together, with a banner saying how old the record is.
 
 **The names** come from `contract/targets.json` and `contract/scopes.json` beside the engine (`~/bin/contract` on the Mac, `%LOCALAPPDATA%\BrettjoAstro\bin\contract` on the PC): one list of what each object and each scope is called. `--targets-draft` writes `targets-draft.json` beside `projects.json` with every name in your ledger (and in the other computer's snapshot, so it works on the PC too, with the Mac's custom names) the contract doesn't know. Open it, add each one to `targets.json` as a new target or as an alias on an existing one, and run `--targets-draft` again.
 

@@ -120,9 +120,13 @@ Administrator window and prints what to do.
 4. **Plug in the Seestar or ASIAir.** A notification appears and the panel
    opens (`http://127.0.0.1:8765`). Tick what you want and press **Import**.
    The first import starts this PC's own ledger.
+   - Frames the Mac already imported and verified show as "backed up by the
+     Mac", unticked (1.7.1): the PC reads the Mac's record on the archive.
    - Frames go to your C: workbench, `%USERPROFILE%\Documents\Astro\…`.
-   - Verified frames are then filed into `E:\Astro Image Data`, the same as
-     the Mac's ship does.
+   - Verified frames are then filed into `E:\Astro Image Data` at once, the
+     same as the Mac's ship does, and the panel says so.
+   - If the self-test's "drives checked" line lists a data drive (say D:),
+     add `"ASTRO_DRIVE_EXCLUDE": "D:"` to `%LOCALAPPDATA%\Astro Import\config.json`.
 5. **Check the install** any time. Open **Terminal** (right-click Start →
    Terminal; it opens PowerShell) and paste this line as it is:
 

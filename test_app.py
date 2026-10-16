@@ -326,8 +326,8 @@ try:
     finally:
         os.remove(lockp)
     check("U6 the panel's banner says what holds the lock in the engine's own words: "
-          "'The twice-daily ship to the PC is running right now', 'The panel is busy right now'",
-          said.get("ship", "").startswith("The twice-daily ship to the PC is running right now. ")
+          "'The ship to the archive is running right now', 'The panel is busy right now'",
+          said.get("ship", "").startswith("The ship to the archive is running right now. ")
           and said.get("panel", "").startswith("The panel is busy right now. ")
           and not s.get("hasReport"), json.dumps(said))
 
@@ -1042,9 +1042,9 @@ check("U9 ...and no ledger at all: 'Nothing imported yet'",
       u4.get("none") == {"safe": True, "onlyHere": 0, "text": "Nothing imported yet",
                          "machine": HERE_MACHINE}, json.dumps(u4.get("none")))
 TIP = (f"Cleared from the camera; the only verified copy is on this {HERE_MACHINE} "
-       "until the PC's sweep checks it")
+       "until the archive's sweep checks it" + (" (the 03:30 sweep, then the next ship)" if os.name == "nt" else ""))
 check("U9 the status line's tooltip, worded for this computer, explains a count "
-      "('… only on this Mac/PC until the PC's sweep checks it')",
+      "('… only on this Mac/PC until the archive's sweep checks it')",
       f'const STATUS_TIP="{TIP}";' in page4 and "sl.title=sum.onlyHere?STATUS_TIP" in page4,
       re.findall(r"const STATUS_TIP=.*", page4)[:1])
 
@@ -1593,7 +1593,8 @@ try:
               and "Still capturing · 1" in html and 'class="ad-legend"' in html
               and '<select id="deskScope"' in html and "All scopes (3)" in html and "Askar FRA400 (1)" in html
               and 'id="deskRefresh"' in html and "from Mac's record as of 1 Oct 2026 (10 days old)" in html
-              and '<p class="ad-warn">⚠ 43 target name(s)' in html and "on the Mac (per its ledger)" in html,
+              and '<p class="ad-warn">⚠ 43 target name(s)' in html
+              and "on this Mac (per its ledger)" in html,      # rendered as the Mac (the page's default sides, 1.7.1)
               html[-1200:])
         check("PL the scope filter keeps only that scope's rows, and an unreadable list says so without a crash",
               "To process · 1" in filtered and "In progress · " not in filtered and "Still capturing · " not in filtered
@@ -1773,6 +1774,123 @@ try:
 finally:
     procn.terminate()
     procn.wait(timeout=30)
+
+# ═══════════════ CHAIN OT: two importing computers, one truth (1.7.1) ════════
+# The panel on the PC, with the Mac's record on the archive: rows the Mac
+# verified are a third state (no clear, no discard from here), the scan card
+# names the record and its age, a panel import files into the archive at once
+# and says so, the Dashboard shows both computers, and the page's labels come
+# from the engine (so the same page is right on both machines).
+from datetime import datetime as _otdt, timezone as _ottz
+envo = teh.Env("APPOT", asiair=True, seestar=True)
+envo.env.update({"ASTRO_SHIP_FOLDER": "pc", "ASTRO_SHIP_LOG": "shipped-pc.jsonl", "ASTRO_MACHINE_ID": "pc"})
+for _r in ("ZWO Askar Scopes", "S30P"):
+    os.makedirs(os.path.join(envo.archive, _r), exist_ok=True)
+_oto_mac = os.path.join(envo.archive, "_verify", "mac"); os.makedirs(_oto_mac, exist_ok=True)
+_oto_l1 = envo.add_light("Plan", "M 81", "0001", dt="20261001-220000")   # the Mac's, verified on the archive
+_oto_l2 = envo.add_light("Plan", "M 81", "0002", dt="20261001-221000")   # new to both
+_oto_a = envo.add_seestar_sub("M 42", "20261001-210000")                 # the Mac's
+_oto_b = envo.add_seestar_sub("M 42", "20261001-210500")                 # new
+_oto_m33 = [envo.add_seestar_sub("M 33", f"20261002-21{i}000") for i in (0, 1)]   # all the Mac's
+def _oto_rel(p, root):
+    return os.path.relpath(p, root).replace("\\", "/")
+def _oto_row(p, root, **kw):
+    r = {"filename": os.path.basename(p), "size": os.path.getsize(p), "sha256": "a" * 64,
+         "origin": "import", "verifiedAtImport": True, "archiveVerifiedAt": "2026-10-05T030000"}
+    r.update(kw); return r
+_oto_files = {_oto_rel(_oto_l1, envo.cam): _oto_row(_oto_l1, envo.cam, target="M 81", sourceType="Plan"),
+              _oto_rel(_oto_a, envo.svol): _oto_row(_oto_a, envo.svol, target="M 42", device="seestar",
+                                                    camera="ZWO Seestar S30 Pro", sourceType="sub")}
+for p in _oto_m33:
+    _oto_files[_oto_rel(p, envo.svol)] = _oto_row(p, envo.svol, target="M 33", device="seestar",
+                                                  camera="ZWO Seestar S30 Pro", sourceType="sub")
+with open(os.path.join(_oto_mac, "ledger-snapshot.json"), "w", encoding="utf-8") as f:
+    json.dump({"schema": "ledger-snapshot/1", "machine": "Mac", "machineId": "mac", "machineUid": "mac-uid",
+               "at": _otdt.now(_ottz.utc).isoformat(timespec="seconds"), "files": _oto_files,
+               "calibration": {}, "library": {}, "discarded": {}, "customNames": {}, "skiplist": [],
+               "equipment": {}}, f)
+PORTO = int(envo.env["ASTRO_PANEL_PORT"])
+URLO = f"http://127.0.0.1:{PORTO}"
+proco = start_panel(envo, PORTO)
+try:
+    own_panel(URLO, envo, proco, "OT the two-computer panel answers with its own instance id")
+    pageo = load_token(URLO)
+    def wait_o(pred, timeout=90):
+        t0 = time.time()
+        while time.time() - t0 < timeout:
+            st = api("/api/state", url=URLO)
+            if pred(st):
+                return st
+            time.sleep(0.3)
+        raise TimeoutError("OT: condition not met; last status " + str(st.get("status")))
+    api("/api/scan", {}, url=URLO)
+    so = wait_o(lambda st: st["status"] == "idle" and st["scan"])
+    rows = {t["name"]: t for t in so["scan"]["targets"]}
+    check("OT the scan's rows carry the third state: M 81 one new, one backed up by the Mac (verified on the "
+          "archive); M 42 one new, one the Mac's; M 33 nothing new, both the Mac's; the scan names the record",
+          rows.get("M 81", {}).get("new") == 1 and rows["M 81"].get("elsewhere") == 1
+          and rows["M 81"].get("elsewhereArchived") == 1 and rows["M 81"].get("elsewhereMachine") == "Mac"
+          and rows.get("M 42", {}).get("new") == 1 and rows["M 42"].get("elsewhere") == 1
+          and rows.get("M 33", {}).get("new") == 0 and rows["M 33"].get("elsewhere") == 2
+          and (so["scan"].get("other") or {}).get("machine") == "Mac" and so["scan"].get("elsewhereFiles") == 4
+          and so["scan"]["sides"]["hereSide"] == "pc" and so["scan"]["sides"]["there"] == "Mac",
+          json.dumps({k: {x: v.get(x) for x in ("new", "elsewhere", "elsewhereArchived", "elsewhereMachine")}
+                      for k, v in rows.items()}) + json.dumps(so["scan"].get("other")))
+    check("OT the scan's log line counts what the Mac already holds and names its record",
+          any("already backed up by the Mac" in ln and "its record from" in ln for ln in so["log"]),
+          json.dumps([ln for ln in so["log"] if "Scan:" in ln])[:400])
+    check("OT /api/state carries the two computers' names, and the page builds its 'where' labels from them "
+          "(no hard-coded Mac/PC), with the third-state pill and 'clear it from the …'",
+          so.get("sides", {}).get("there") == "Mac" and "function projWhere(" in pageo
+          and "backed up by the ${esc(otherWho(t))}" in pageo and "clear it from the" in pageo
+          and "on the ${SIDES.there}" not in pageo and 'pc:"on this PC"' not in pageo,
+          json.dumps(so.get("sides")))
+    pj = api("/api/projects", url=URLO)
+    check("OT /api/projects carries the same names", pj.get("sides", {}).get("hereSide") == "pc", json.dumps(pj.get("sides")))
+    with urllib.request.urlopen(URLO + "/dashboard?t=1", timeout=15) as resp:
+        dash0 = resp.read().decode()
+    check("OT the Dashboard with no ledger here shows the Mac's record and says so",
+          "Nothing has been imported on this" in dash0 and "This is the Mac's record" in dash0 and "NoneType" not in dash0,
+          dash0[-300:])
+    # import the one new Seestar sub: the first import here, filed into the (local) archive at once
+    api("/api/import", {"names": ["M 42"]}, url=URLO)
+    t0 = time.time()
+    while time.time() - t0 < 120:
+        st = api("/api/state", url=URLO)
+        if st["status"] == "idle":
+            break
+        if st.get("question"):
+            api("/api/answer", {"id": st["question"]["id"], "value": "n"}, url=URLO)
+        time.sleep(0.3)
+    so = st
+    check("OT the first import on this computer names the Mac's record in the log, copies only the new sub, "
+          "files into the archive at once and says so, and leaves this computer's record on the archive",
+          any("First import on this" in ln and "The Mac's record from" in ln for ln in so["log"])
+          and "filed into the archive" in str(so.get("lastResult"))
+          and os.path.isfile(os.path.join(envo.archive, "_verify", "pc", "ledger-snapshot.json"))
+          and _oto_rel(_oto_b, envo.svol) in json.load(open(os.path.join(envo.state, "ledger.json")))["files"]
+          and _oto_rel(_oto_a, envo.svol) not in json.load(open(os.path.join(envo.state, "ledger.json")))["files"],
+          json.dumps([so.get("lastResult")] + [ln for ln in so["log"] if "First import" in ln or "already backed up" in ln])[:600])
+    with urllib.request.urlopen(URLO + "/dashboard?t=2", timeout=15) as resp:
+        dash1 = resp.read().decode()
+    check("OT the Dashboard now shows this computer's imports and the Mac's record together",
+          "and the Mac's record together" in dash1 and "NoneType" not in dash1, dash1[-300:])
+    api("/api/scan", {}, url=URLO)
+    so = wait_o(lambda st: st["status"] == "idle" and st["scan"] and st.get("scannedAt"))
+    rows = {t["name"]: t for t in so["scan"]["targets"]}
+    check("OT after the import M 42 is all backed up (one here, one the Mac's): no new frames, still one 'elsewhere'",
+          rows.get("M 42", {}).get("new") == 0 and rows["M 42"].get("elsewhere") == 1, json.dumps(rows.get("M 42")))
+    api("/api/discard", {"name": "M 33_sub"}, url=URLO)
+    so = wait_o(lambda st: st["status"] == "idle" and st.get("lastResult"))
+    check("OT DISCARD of a target the Mac verified is refused from here ('clear it from the Mac'), no card, "
+          "nothing leaves the camera",
+          str(so.get("lastResult")).startswith("Discard refused") and so.get("question") is None
+          and all(os.path.isfile(p) for p in _oto_m33)
+          and any("clear it from the Mac" in ln for ln in so["log"]),
+          json.dumps([so.get("lastResult")] + [ln for ln in so["log"] if "Mac" in ln][-3:]))
+finally:
+    proco.terminate()
+    proco.wait(timeout=30)
 
 summary()
 sys.exit(1 if FAIL else 0)

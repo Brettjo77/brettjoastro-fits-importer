@@ -75,7 +75,11 @@ way. Every release updates it.
 | The Observatory (1.7.0): the panel's Observatory tab and `--observatory [FILE]`, the Astro Archive Observatory page filled from `observatory.json`, which `--projects` writes beside `projects.json`; `astro-observatory.html` beside the engine; nothing loaded from the web (no web fonts, no outside scripts) | ✓ (its own ledger; the PC's published list preferred while under 48 h old) | ✓ complete up to the Mac's last ship: the Mac's sessions through its snapshot, the archive inventory and finals; `--pc-nightly` publishes both files into `_verify\pc` | engine + panel + installers |
 | The project layer (1.7.0): `contract/` beside the engine, `--targets-draft`, `--projects` → `projects.json`, and the Archive tab's To-process and In-progress sections with Open in Explorer / Open in Finder (through the same archive-only open) | ✓ (In progress needs the share mounted: the masters come from the PC's inventory; Open in Finder) | ✓ local E:, rebuilt nightly by `--pc-nightly`; Open in Explorer | engine + panel + installers |
 | The ledger snapshot (1.7.0): each ship writes `ledger-snapshot.json` in its own `_verify` folder, and only ever replaces its own (same machine id); `--projects` reads the other side's and flags one older than 36 h or from a newer importer; `--pc-nightly` writes `_verify/pc/nightly-status.json` | ✓ writes `_verify/mac`, reads `_verify/pc` | ✓ writes `_verify/pc`, reads `_verify/mac`; nightly status is the PC's only | engine |
-| The panel's Dashboard on a computer with no ledger shows the other side's snapshot, with a banner; `/api/projects/rebuild` (the Refresh button); a restarted panel asks the page to reload (`BOOT` id) | ✓ | ✓ | panel |
+| The panel's Dashboard shows this computer's imports and the other side's snapshot together, with a banner saying how old the snapshot is (1.7.1; with no ledger here, the other's alone); `/api/projects/rebuild` (the Refresh button); a restarted panel asks the page to reload (`BOOT` id) | ✓ | ✓ | panel |
+| The other computer's record (1.7.1): each ship, import, discard, merge and filter fix leaves `ledger-snapshot.json` with every row (verified or not), the Library, the DISCARD register, names, never-import list and scopes; both scans read the other side's (`other_record`, camera path + size, Seestar rows per camera) and offer only what no computer verified; a name the other saved is used without the question; DISCARD refuses the other's verified files; `ASTRO_OTHER_RECORD=off` ignores it | ✓ reads `_verify/pc` | ✓ reads `_verify/mac` | engine + panel |
+| Receipts published to the archive (1.7.1): each ship copies this computer's AstroLog receipts into `_verify\<side>\receipts\<scope>\`, exclusive create | ✓ | ✓ | engine |
+| A fixed drive kept out of the camera search: `ASTRO_DRIVE_EXCLUDE` (1.7.1) | — (the Mac uses /Volumes) | ✓ `"D:"` | engine |
+| An import folder under a cloud sync is warned about before copying: iCloud Desktop & Documents on the Mac, OneDrive on Windows (1.7.1) | ✓ | ✓ | engine |
 | Before `open smb://…` the Mac checks the PC answers on port 445 (2 s), so a PC that is off costs no Finder sheet and no wait | ✓ `_share_host_up` | — (the archive is a local drive) | engine |
 | The installer refuses an Administrator window and names the three tasks to unregister; one helper registers all three; `sweep.ps1` is set aside only after the Python sweep task registered; the sync tick is cut after 15 min | — (no equivalent: launchd agents are per user) | ✓ `-AllowElevated` to override | installers |
 | Contract files: an installed copy whose hash is in `contract/shipped.sha256` is updated in place; an edited one is kept with the new copy as `.new` | ✓ `shasum -a 256` | ✓ `Get-FileHash` | installers |
@@ -161,7 +165,8 @@ the scope table, and the non-path keys.
 - **Hash cache and inventory of a computer's own frames:** in its own state
   folder (`hash-cache.jsonl`, `inventory-<short name>.jsonl`).
 - **Receipts:** the PC's carry `-pc` in the name, so one receipts folder can
-  take both machines' receipts without a clash.
+  take both machines' receipts without a clash; from 1.7.1 each ship also
+  publishes them into the machine's own `_verify\<side>\receipts` folder.
 
 ## Differences by design
 

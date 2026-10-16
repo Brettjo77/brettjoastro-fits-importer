@@ -151,10 +151,13 @@ overwrites an existing config.
 Nothing here is installed or run until you configure it (`ASTRO_ARCHIVE_URL`
 in `config.json`); the step-by-step is in [PC-SYNC.md](PC-SYNC.md).
 
-In the author's setup the Mac takes frames off the cameras and holds the ledger,
-and the archive of record lives on a Windows PC (`E:\Astro Image Data`), shared
-over SMB and mounted on the Mac at `/Volumes/AstroImageData`. Three things keep
-the two in step, none of which you run by hand:
+In the author's setup both computers take frames off the cameras, each with
+its own ledger, and the archive of record lives on the Windows PC
+(`E:\Astro Image Data`), shared over SMB and mounted on the Mac at
+`/Volumes/AstroImageData`; the PC files into it from its own C: drive. Each
+computer leaves its record on the archive and reads the other's, so a frame
+one computer already imported is not offered again on the other (1.7.1).
+Three things keep the two in step, none of which you run by hand:
 
 1. **After every import** the engine ships what just arrived to the archive
    (`--no-ship` to skip): a Terminal import connects the share first, a panel
@@ -230,7 +233,7 @@ The panel covers day-to-day use; everything is also scriptable:
 
 ## Testing
 
-717 end-to-end checks run the real engine and the real panel against simulated cameras (hand-built minimal FITS files, every device layout, crash/rename/mosaic/Milky-Way/cleanup/consent/interruption/multi-Seestar scenarios — including that the destination preview must equal the folders the import then actually creates, that a folder holding any unproven file is never offered as SAFE, and that the panel refuses foreign-origin requests):
+747 end-to-end checks run the real engine and the real panel against simulated cameras (hand-built minimal FITS files, every device layout, crash/rename/mosaic/Milky-Way/cleanup/consent/interruption/multi-Seestar scenarios — including that the destination preview must equal the folders the import then actually creates, that a folder holding any unproven file is never offered as SAFE, and that the panel refuses foreign-origin requests):
 
 ```bash
 python3 test_v2.py     # 556 engine checks (chain W1 simulates the Windows drive layer)

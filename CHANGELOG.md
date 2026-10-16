@@ -1,5 +1,22 @@
 # Changelog
 
+## 1.7.1 (2026-10-16): two importing computers, one truth
+
+On 14 and 16 Oct Brett plugged the Seestars and the ASIAir into the Chillblast and imported there. The PC had no ledger, so everything on the cameras looked new, and he decided the PC becomes a second importing computer. The rules stay: each computer keeps its own ledger and writes only its own files; the SAFE gate and DISCARD trust only the ledger of the computer doing it. The archive is the one truth: each computer leaves its record there, and every screen reads both.
+
+- **The scan reads the other computer's record.** A frame the other computer imported *and verified* is not offered again: the row says "already backed up by the Mac" (or by the PC), "verified on the archive" or "not yet on the archive". Only a verified copy counts: a baseline row never does. Stacks, panels and riders are recognised too. Off with `ASTRO_OTHER_RECORD=off`. The record is the ledger snapshot each ship leaves in `_verify\<mac|pc>\`; it now carries every row (with whether its copy was verified), the calibration Library, the DISCARD register, the target names, the never-import list and the scope table, and is refreshed after every import, discard, merge and filter fix as well as every ship.
+- **No clear and no discard on what the other computer holds.** On the panel such a row is a third state with no clear and no discard button; DISCARD from the command line refuses ("clear it from the Mac"), and a mix offers only the files no computer holds. The SAFE gate itself is unchanged. Frames you binned with DISCARD on one computer are not imported by the other.
+- **One name, one folder.** A target name the other computer already saved is used without the question, and kept in this computer's own names file. The other computer's never-import list unticks a target here (it stays importable).
+- **Counted once.** Calibration frames linked on both computers count once per night in the To process list. A night one computer's ship started into a Day folder stays in that Day whichever computer retries it (the Day seed now comes from every ship log).
+- **A re-saved Seestar stack** whose name the archive already holds with different bytes is filed beside it as `<name>__pc.fit` (or `__mac`), both kept, nothing written over, and the ship stops reporting it as a problem every run.
+- **Receipts on the archive.** Each ship copies this computer's AstroLog receipts into `_verify\<mac|pc>\receipts\<scope>\` (never written over), so AstroLog can read both computers' from one place. AstroLog itself still reads the Mac's Documents folder: that change is next, on the AstroLog side.
+- **The panel** says a PC import is filed into E: at once; the scan card shows whose record it read and how old it is (and warns when the archive, or the record, isn't there); the Dashboard shows this computer's imports and the other's record together; "on this PC" and "on the Mac" come from the engine, so the same page is right on both machines; the calibration card counts the other computer's Library. Wording: "the ship to the archive", "missing on this computer", "backed up on this PC/Mac".
+- **Windows**: `ASTRO_DRIVE_EXCLUDE` in config.json (for example `"D:"`) keeps a fixed drive out of the camera search; an import folder under OneDrive is warned about (Files On-Demand can move frames off the disk after import).
+
+**After updating** (both computers): install as for 1.7.0. On the PC, add `"ASTRO_DRIVE_EXCLUDE": "D:"` to `%LOCALAPPDATA%\Astro Import\config.json` if a data drive shows in the self-test's "drives checked". Bring the Mac's settings over once (`--export-settings` on the Mac, `--import-settings` on the PC: names, the never-import list, the scope table). The 14 to 16 Oct imports on the PC happened before the scan read the Mac's record, so those frames sit in both ledgers; the ship adopted the copies already on E: by their hash and opened no second folders, and the To process list counts a frame once. Mac / Windows: the same on both.
+
+747 end-to-end checks (576 engine + 171 panel): 20 new engine checks and 10 new panel checks (chain OT in each suite). On Linux here: engine 572 passed, 3 skipped, the four Mac/PC-only lines as before; panel 171 passed.
+
 ## 1.7.0 (2026-10-13): shipping without Delete, the PC's jobs in Python, the project layer and the Observatory
 
 One release, built in four steps on the same branch and run as one. Nothing from any step has shipped before this.

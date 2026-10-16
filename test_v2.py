@@ -1994,8 +1994,10 @@ _sj = json.load(open(_snap, encoding="utf-8")) if os.path.isfile(_snap) else {}
 check("P1 the ship leaves a copy of this computer's ledger rows in its own _verify folder "
       "(ledger-snapshot.json), for the other computer's --projects (1.7.0)",
       _sj.get("schema") == "ledger-snapshot/1" and _sj.get("machineId") and _sj.get("machineUid")
-      and set(_sj.get("files") or {}) == {k for k, e in P1.ledger()["files"].items() if e.get("sourceType") == "sub"}
-      and all(r.get("here") is True and "dest" not in r for r in _sj["files"].values()),
+      and set(_sj.get("files") or {}) == set(P1.ledger()["files"])      # every row since 1.7.1
+      and all(r.get("here") is True and "dest" not in r for r in _sj["files"].values())
+      and all(r.get("verifiedAtImport") is True for k, r in _sj["files"].items()
+              if P1.ledger()["files"][k].get("verifiedAtImport")),
       f"schema={_sj.get('schema')} uid={bool(_sj.get('machineUid'))} rows={sorted(_sj.get('files') or {})} "
       f"ledger={sorted(P1.ledger()['files'])} here={[r.get('here') for r in (_sj.get('files') or {}).values()]}")
 r = P1.run("--ship")
@@ -2196,7 +2198,7 @@ _size_cut = os.path.getsize(cut_path) if os.path.isfile(cut_path) else -1
 r = D7b.run("--ship", extra_env=teh.no_delete_env(D7b.root, b_arch))
 check("D7 the next ship leaves the unfinished copy alone for the PC and says so; the new "
       "night still ships",
-      "1 file(s) wait for the PC to set aside an unfinished copy" in r.stdout
+      "1 file(s) wait for the archive sweep to set aside an unfinished copy" in r.stdout
       and "Shipped 1 file(s)" in r.stdout and os.path.getsize(cut_path) == _size_cut
       and len(d7_rows(blog, "started")) == 4, r.stdout[-500:])
 # the PC's sweep sets it aside (the PC may move files on the archive; the Mac may not)
@@ -4340,10 +4342,10 @@ check("U6 ...and the engine's callers pass the right word: ship, discard, import
       got.get("callers") == ["ship", "discard", "import"], json.dumps(got)[:300])
 lock = hold_lock(U6, "ship")
 r = U6.run("--skip-target", "M 42")
-check("U6 a command meeting the held lock says what holds it ('The twice-daily ship to the PC "
+check("U6 a command meeting the held lock says what holds it ('The ship to the archive "
       "is running right now')",
       r.returncode == 1
-      and "The twice-daily ship to the PC is running right now" in r.stdout + r.stderr,
+      and "The ship to the archive is running right now" in r.stdout + r.stderr,
       f"rc={r.returncode} " + (r.stdout + r.stderr)[-300:])
 os.remove(lock)
 lock = hold_lock(U6, "panel")
@@ -4427,7 +4429,7 @@ check("U9 the platform forced in-process: '1 frame only on this PC', '2,769 fram
       json.dumps(both)[:400])
 check("U9 the ship summary line is unchanged (2769, no separator), the same count as --status",
       "✓ Shipped 0 file(s). Problems: 0. Frames cleared from a camera and not yet "
-      "PC-verified: 2769." in r.stdout.splitlines()
+      "verified on the archive: 2769." in r.stdout.splitlines()
       and isinstance(b[1], dict) and b[1].get("onlyHere") == 2769, r.stdout[-400:])
 # never "safe" when it can't tell: no ledger yet, an unreadable ledger, and the
 # .bak recovery warning never mixed into --json (the app parses it)
@@ -6043,6 +6045,286 @@ check("IN the suite's check() turns a raising callable into a FAIL with the trac
       and _r.stdout.count("passed,") == 1,
       (_r.stdout + _r.stderr)[-1500:])
 shutil.rmtree(IN_ROOT, ignore_errors=True)
+
+# ═══════════════ CHAIN OT: two importing computers, one truth (1.7.1) ════════
+# The PC imports too (Brett, 16 Oct 2026). Each computer keeps its own ledger;
+# the archive carries each one's record; a scan reads the OTHER computer's
+# record so a frame it verified is not offered again, named for what it is,
+# and never a proof for a clear or a discard here.
+import hashlib as _hl
+from datetime import datetime as _otdt, timezone as _ottz, timedelta as _ottd
+
+def _ot_sha(p):
+    h = _hl.sha256()
+    with open(p, "rb") as f:
+        h.update(f.read())
+    return h.hexdigest()
+
+OT = teh.Env("OT", asiair=True, seestar=True)          # the PC: ASTRO_SHIP_FOLDER=pc
+OT.env.update({"ASTRO_SHIP_FOLDER": "pc", "ASTRO_SHIP_LOG": "shipped-pc.jsonl", "ASTRO_MACHINE_ID": "pc"})
+for _r in ("ZWO Askar Scopes", "S30P"):
+    os.makedirs(os.path.join(OT.archive, _r), exist_ok=True)
+_ot_macdir = os.path.join(OT.archive, "_verify", "mac"); os.makedirs(_ot_macdir, exist_ok=True)
+# the camera: M 81 (three lights: one the Mac verified AND the PC checked on the
+# archive, one the Mac verified but hasn't shipped, one new), NGC 7000 (the
+# Mac only has a BASELINE row: never copied, so new), M 101 (new; on the Mac's
+# never-import list), MYSTERY 7 (unknown here; the Mac named it)
+_ot_m81 = [OT.add_light("Plan", "M 81", f"000{i}", dt=f"20261001-22000{i}") for i in (1, 2, 3)]
+_ot_n7000 = OT.add_light("Plan", "NGC 7000", "0001", dt="20261002-220000")
+_ot_m101 = OT.add_light("Live", "M 101", "0001", dt="20261002-221000")
+_ot_myst = OT.add_light("Plan", "MYSTERY 7", "0001", dt="20261003-220000")
+_ot_dark = OT.add_cal("Dark", "300.0s", "20261001-090000")          # in the Mac's Library
+_ot_flat = OT.add_cal("Flat", "20.0ms", "20261001-100000", filt="LUltimate")   # new to both
+# the Seestar S30 Pro: M 42 (sub A the Mac verified, sub B new, the stack the
+# Mac verified, sub C binned on the Mac, sub D that another Seestar model
+# imported at the same path and size), M 33 (every sub the Mac verified)
+_ot_a = OT.add_seestar_sub("M 42", "20261001-210000")
+_ot_b = OT.add_seestar_sub("M 42", "20261001-210500")
+_ot_c = OT.add_seestar_sub("M 42", "20261001-211000")
+_ot_d = OT.add_seestar_sub("M 42", "20261001-211500")
+_ot_stack = OT.add_seestar_stack("M 42", 40, "20261001-213000")
+_ot_m33 = [OT.add_seestar_sub("M 33", f"20261002-21{i}000") for i in (0, 1)]
+_ot_cam = os.path.join(OT.root, "ASIAIR")
+def _ot_rel(p, root):
+    return os.path.relpath(p, root).replace("\\", "/")
+def _ot_row(p, root, **kw):
+    r = {"filename": os.path.basename(p), "size": os.path.getsize(p), "sha256": "a" * 64,
+         "origin": "import", "verifiedAtImport": True}
+    r.update(kw); return r
+_ot_files = {
+    _ot_rel(_ot_m81[0], _ot_cam): _ot_row(_ot_m81[0], _ot_cam, target="M 81", sourceType="Plan",
+                                         archiveVerifiedAt="2026-10-05T030000"),
+    _ot_rel(_ot_m81[1], _ot_cam): _ot_row(_ot_m81[1], _ot_cam, target="M 81", sourceType="Plan"),
+    _ot_rel(_ot_n7000, _ot_cam): _ot_row(_ot_n7000, _ot_cam, target="NGC 7000", sourceType="Plan",
+                                        origin="baseline", verifiedAtImport=False),
+    _ot_rel(_ot_a, OT.svol): _ot_row(_ot_a, OT.svol, target="M 42", device="seestar",
+                                    camera="ZWO Seestar S30 Pro", sourceType="sub", archiveVerifiedAt="2026-10-05T030000"),
+    _ot_rel(_ot_stack, OT.svol): _ot_row(_ot_stack, OT.svol, target="M 42", device="seestar",
+                                        camera="ZWO Seestar S30 Pro", sourceType="stack"),
+    _ot_rel(_ot_d, OT.svol): _ot_row(_ot_d, OT.svol, target="M 42", device="seestar",
+                                    camera="ZWO Seestar S50", sourceType="sub"),
+}
+for p in _ot_m33:
+    _ot_files[_ot_rel(p, OT.svol)] = _ot_row(p, OT.svol, target="M 33", device="seestar",
+                                            camera="ZWO Seestar S30 Pro", sourceType="sub",
+                                            archiveVerifiedAt="2026-10-05T030000")
+_ot_snapshot = {
+    "schema": "ledger-snapshot/1", "machine": "Mac", "machineId": "mac", "machineUid": "mac-uid",
+    "at": _otdt.now(_ottz.utc).isoformat(timespec="seconds"),
+    "files": _ot_files, "calibration": {},
+    "library": {_ot_rel(_ot_dark, _ot_cam): {"frameType": "Dark", "size": os.path.getsize(_ot_dark),
+                                             "verifiedAtImport": True}},
+    "discarded": {f"{_ot_rel(_ot_c, OT.svol)}|{os.path.getsize(_ot_c)}": {
+        "relpath": _ot_rel(_ot_c, OT.svol), "size": os.path.getsize(_ot_c), "sha256": _ot_sha(_ot_c),
+        "camera": "ZWO Seestar S30 Pro", "stillOnCamera": False}},
+    "customNames": {"MYSTERY 7": "Fuzzy Blob"}, "skiplist": ["M 101"], "equipment": {"1000": "Big Scope"},
+}
+_ot_snap_path = os.path.join(_ot_macdir, "ledger-snapshot.json")
+with open(_ot_snap_path, "w", encoding="utf-8") as f:
+    json.dump(_ot_snapshot, f)
+
+_OT_SCAN = ("st = m.State()\n"
+            "a = m.scan_camera(st); s = m.scan_seestar(st)\n"
+            "def tg(name): return next(t for t in a['targets'] if t['name'] == name)\n"
+            "def sg(name): return next(t for t in s['targets'] if t['name'] == name)\n"
+            "print(json.dumps({"
+            " 'm81_new': [f['filename'] for f in tg('M 81')['new']],"
+            " 'm81_else': len(tg('M 81')['elsewhere']), 'm81_arch': tg('M 81')['elsewhere_archived'],"
+            " 'm81_who': tg('M 81')['elsewhere_machine'],"
+            " 'n7000_new': len(tg('NGC 7000')['new']), 'n7000_else': len(tg('NGC 7000')['elsewhere']),"
+            " 'm101_new': len(tg('M 101')['new']), 'm101_skip': tg('M 101')['other_skip'],"
+            " 'dark_other': bool(next(c for c in a['calibration'] if c['frame_type']=='Dark').get('other')),"
+            " 'flat_other': bool(next(c for c in a['calibration'] if c['frame_type']=='Flat').get('other')),"
+            " 'other': a['other'],"
+            " 'm42_new': sorted(os.path.basename(f['path']) for f in sg('M 42')['new']),"
+            " 'm42_new_stacks': len(sg('M 42')['new_stacks']),"
+            " 'm42_else': sorted(os.path.basename(f['path']) for f in sg('M 42')['elsewhere']),"
+            " 'm33_new': len(sg('M 33')['new']), 'm33_else': len(sg('M 33')['elsewhere']),"
+            " 'myst': m.display_name_for(st, 'MYSTERY 7')}))\n")
+_ot = probe(OT.env, _OT_SCAN)
+check("OT the ASIAir scan reads the Mac's record: the two M 81 lights the Mac VERIFIED are not new "
+      "(one of them checked on the archive), the third is; the Mac's BASELINE row proves nothing, "
+      "so NGC 7000 stays new; M 101 is new and flagged as on the Mac's never-import list",
+      lambda: _ot["m81_new"] == [os.path.basename(_ot_m81[2])] and _ot["m81_else"] == 2 and _ot["m81_arch"] == 1
+      and _ot["m81_who"] == "Mac" and _ot["n7000_new"] == 1 and _ot["n7000_else"] == 0
+      and _ot["m101_new"] == 1 and _ot["m101_skip"] is True, json.dumps(_ot)[:600])
+check("OT the calibration frames know the Mac's Library (the dark), a flat new to both does not; the scan "
+      "names the record (machine, when, not stale)",
+      lambda: _ot["dark_other"] is True and _ot["flat_other"] is False
+      and _ot["other"]["machine"] == "Mac" and _ot["other"]["stale"] is False and _ot["other"]["files"] == len(_ot_files),
+      json.dumps(_ot)[:600])
+check("OT the Seestar scan: sub A and the stack the Mac verified are not new, sub B is; sub C binned on the "
+      "Mac (its bytes match) is neither new nor 'elsewhere'; sub D that another Seestar model holds at "
+      "the same path and size is new here (a row belongs to one camera); M 33 is all the Mac's",
+      lambda: _ot["m42_new"] == sorted([os.path.basename(_ot_b), os.path.basename(_ot_d)])
+      and _ot["m42_new_stacks"] == 0
+      and _ot["m42_else"] == sorted([os.path.basename(_ot_a), os.path.basename(_ot_stack)])
+      and _ot["m33_new"] == 0 and _ot["m33_else"] == 2, json.dumps(_ot)[:600])
+check("OT a name the Mac already saved is used here without a question, and kept in this computer's own "
+      "names file",
+      lambda: _ot["myst"] == "MYSTERY 7 - Fuzzy Blob"
+      and json.load(open(os.path.join(OT.state, "custom-names.json"))).get("MYSTERY 7") == "Fuzzy Blob",
+      json.dumps(_ot.get("myst")))
+r = OT.run("--scan-only")
+check("OT --scan-only (the watcher's line) counts what the Mac already holds",
+      "already backed up by the Mac" in r.stdout, r.stdout[-400:])
+# switched off, or no record: everything is new again (more copying is the safe direction)
+_ot_off = probe(dict(OT.env, ASTRO_OTHER_RECORD="off"), _OT_SCAN)
+check("OT ASTRO_OTHER_RECORD=off: the record is ignored, every frame is new, no 'elsewhere'",
+      lambda: len(_ot_off["m81_new"]) == 3 and _ot_off["m81_else"] == 0 and _ot_off["other"] is None
+      and _ot_off["m33_new"] == 2, json.dumps(_ot_off)[:400])
+_ot_old = dict(_ot_snapshot); _ot_old["at"] = (_otdt.now(_ottz.utc) - _ottd(days=3)).isoformat(timespec="seconds")
+with open(_ot_snap_path, "w", encoding="utf-8") as f:
+    json.dump(_ot_old, f)
+_ot_stale = probe(OT.env, _OT_SCAN)
+_ot_new_schema = dict(_ot_snapshot); _ot_new_schema["schema"] = "ledger-snapshot/2"
+with open(_ot_snap_path, "w", encoding="utf-8") as f:
+    json.dump(_ot_new_schema, f)
+_ot_newer = probe(OT.env, _OT_SCAN)
+with open(_ot_snap_path, "w", encoding="utf-8") as f:
+    json.dump(_ot_snapshot, f)
+check("OT an old record is still read but said to be stale; one from a newer importer is not read at all "
+      "(every frame new), and the scan says so",
+      lambda: _ot_stale["other"]["stale"] is True and _ot_stale["m81_else"] == 2
+      and _ot_newer["other"] is None and len(_ot_newer["m81_new"]) == 3,
+      json.dumps([_ot_stale.get("other"), _ot_newer.get("other"), _ot_newer.get("m81_new")])[:400])
+
+# the import: copies only what is new here, says what the Mac holds, never asks
+# the question the Mac answered; then files into the (local) archive at once,
+# leaves THIS computer's record and its receipts there
+r = OT.run(stdin="n\n")
+_ot_led = OT.ledger()
+_ot_keys = set(_ot_led["files"])
+check("OT the import copies the new frames only: M 81's third light, NGC 7000, M 101, MYSTERY 7 (as Fuzzy "
+      "Blob, no 'Unknown target' question); not the two M 81 lights the Mac verified",
+      r.returncode == 0 and _ot_rel(_ot_m81[2], _ot_cam) in _ot_keys and _ot_rel(_ot_n7000, _ot_cam) in _ot_keys
+      and _ot_rel(_ot_m101, _ot_cam) in _ot_keys and _ot_rel(_ot_myst, _ot_cam) in _ot_keys
+      and _ot_rel(_ot_m81[0], _ot_cam) not in _ot_keys and _ot_rel(_ot_m81[1], _ot_cam) not in _ot_keys
+      and "Unknown target" not in r.stdout
+      and ("Using the Mac's name: MYSTERY 7" in r.stdout        # or adopted already, by the scan above
+           or json.load(open(os.path.join(OT.state, "custom-names.json"))).get("MYSTERY 7") == "Fuzzy Blob")
+      and "Fuzzy Blob" in str(_ot_led["files"][_ot_rel(_ot_myst, _ot_cam)].get("displayName")),
+      f"rc={r.returncode} keys={sorted(_ot_keys)[:8]} " + r.stdout[-500:])
+check("OT ...and says what it skipped: 'already backed up by the Mac (1 verified on the archive)'",
+      "already backed up by the Mac" in r.stdout and "verified on the archive" in r.stdout, r.stdout[-600:])
+_ot_sub_keys = {k for k in _ot_keys if k.startswith("MyWorks/")}
+check("OT the Seestar import copies sub B and sub D, not sub A, the stack or binned sub C; M 33 nothing",
+      _ot_rel(_ot_b, OT.svol) in _ot_keys and any(k.startswith(_ot_rel(_ot_d, OT.svol)) for k in _ot_keys)
+      and _ot_rel(_ot_a, OT.svol) not in _ot_keys and _ot_rel(_ot_stack, OT.svol) not in _ot_keys
+      and _ot_rel(_ot_c, OT.svol) not in _ot_keys and not any("M 33_sub" in k for k in _ot_keys),
+      str(sorted(_ot_sub_keys)))
+_ot_pc_snap = os.path.join(OT.archive, "_verify", "pc", "ledger-snapshot.json")
+_ot_pcs = json.load(open(_ot_pc_snap)) if os.path.isfile(_ot_pc_snap) else {}
+check("OT the import filed into the archive at once and left THIS computer's record there, with every row "
+      "(lights and the Seestar's sub), the Library, the binned register, the never-import list and the "
+      "scopes, and each row says whether its copy was verified",
+      lambda: _ot_pcs.get("schema") == "ledger-snapshot/1" and _ot_pcs.get("machineId") == "pc"
+      and _ot_rel(_ot_b, OT.svol) in _ot_pcs["files"] and _ot_rel(_ot_myst, _ot_cam) in _ot_pcs["files"]
+      and _ot_pcs["files"][_ot_rel(_ot_myst, _ot_cam)].get("verifiedAtImport") is True
+      and isinstance(_ot_pcs.get("library"), dict) and _ot_rel(_ot_dark, _ot_cam) in _ot_pcs["library"]
+      and isinstance(_ot_pcs.get("discarded"), dict) and isinstance(_ot_pcs.get("skiplist"), list)
+      and isinstance(_ot_pcs.get("equipment"), dict),
+      json.dumps({k: (len(v) if isinstance(v, (dict, list)) else v) for k, v in _ot_pcs.items()})[:400])
+_ot_rc = os.path.join(OT.archive, "_verify", "pc", "receipts")
+_ot_rcs = [os.path.join(dp, f) for dp, _d, fs in os.walk(_ot_rc) for f in fs] if os.path.isdir(_ot_rc) else []
+check("OT the AstroLog receipts of this import are published into this computer's own _verify folder on "
+      "the archive (one per scope, the same files as in Documents)",
+      lambda: len(_ot_rcs) >= 2 and all(json.load(open(p)).get("version") == 1 for p in _ot_rcs)
+      and any("asiair-" in os.path.basename(p) for p in _ot_rcs) and any("seestar-" in os.path.basename(p) for p in _ot_rcs),
+      str(_ot_rcs))
+r2 = OT.run("--ship")
+_ot_rcs2 = [os.path.join(dp, f) for dp, _d, fs in os.walk(_ot_rc) for f in fs]
+check("OT a second ship publishes nothing twice (exclusive create, by name)",
+      r2.returncode == 0 and sorted(_ot_rcs2) == sorted(_ot_rcs), r2.stdout[-300:])
+
+# discard: never bins what the Mac holds verified; the SAFE clear is the Mac's to do
+r = OT.run("--discard", "M 33", stdin="DISCARD\n", extra_env={"ASTRO_STDIN_PROMPTS": "1"})
+check("OT DISCARD on a Seestar target the Mac verified is refused — 'backed up by the Mac ... clear it from "
+      "the Mac' — and nothing leaves the camera",
+      r.returncode == 1 and "backed up by the Mac" in r.stdout + r.stderr
+      and "clear it from the Mac" in r.stdout + r.stderr
+      and all(os.path.isfile(p) for p in _ot_m33), (r.stdout + r.stderr)[-400:])
+r = OT.run("--discard", "M 42", "--dry-run")
+check("OT a mix (sub C never backed up anywhere, A and the stack the Mac's, B and D this computer's): the "
+      "dry run offers sub C only and says the Mac's stay",
+      "backed up by the Mac" in r.stdout and os.path.basename(_ot_c) in r.stdout
+      and os.path.basename(_ot_a) not in r.stdout.split("would delete")[-1]
+      and "would delete" in r.stdout and r.stdout.count("would delete: ") == 1, r.stdout[-700:])
+
+# the SAFE gate itself is untouched: only THIS ledger's verified copies prove a clear
+_ot_safe = probe(OT.env, "st = m.State(); s = m.scan_seestar(st)\n"
+                 "g = next(x for x in m.seestar_groups(st, s) if x['id'] == 'M 33_sub')\n"
+                 "un, _b = m._seestar_unproven_files(st, s['volume'], g['dirs'], exempt_superseded=g['exempt'], camera=s['camera'])\n"
+                 "print(json.dumps({'unproven': len(un)}))\n")
+check("OT the SAFE gate still judges by this ledger alone: M 33's subs (the Mac's) are UNPROVEN here, so no "
+      "clear from this computer, whatever the record says",
+      lambda: _ot_safe.get("unproven") == 2, json.dumps(_ot_safe))
+
+# calibration linked on both computers is one set, not two
+_ot_cal = probe(OT.env, "idx = m._calibration_index(["
+                "{'Autorun/Dark/d1.fit': {'frameType': 'Dark', 'linkedInto': ['T/Day 5'], 'shipped': ['T/Day 5']},"
+                " 'Autorun/Dark/d2.fit': {'frameType': 'Dark', 'linkedInto': ['T/Day 5']}},"
+                "{'Autorun/Dark/d1.fit': {'frameType': 'Dark', 'linkedInto': ['T/Day 1'], 'shipped': []},"
+                " 'Autorun/Flat/f1.fit': {'frameType': 'Flat', 'linkedInto': ['T/Day 1']}}])\n"
+                "print(json.dumps(m._calibration_for(idx, ['T/Day 5', 'T/Day 1'])))\n")
+check("OT the same dark linked by both computers (into their own Day folders of one night) counts once: "
+      "2 darks, 1 flat, 1 shipped",
+      lambda: _ot_cal == {"biases": 0, "darks": 2, "flats": 1, "shipped": 1}, json.dumps(_ot_cal))
+
+# the Day a night was started into, by EITHER computer, is where it stays
+_ot_tdir = os.path.join(OT.archive, "ZWO Askar Scopes", "Seed Target")
+os.makedirs(os.path.join(_ot_tdir, "Seed Target Day 3"), exist_ok=True)      # the Mac's started, set-aside copy left it empty
+with open(os.path.join(_ot_macdir, "shipped.jsonl"), "a", encoding="utf-8") as f:
+    f.write(json.dumps({"schema": "ship-row/1", "state": "started", "machine": "Mac",
+                        "relpath": "ZWO Askar Scopes\\Seed Target\\Seed Target Day 3\\Light_Seed_300.0s_Bin1_gain200_20260901-220000.fit",
+                        "size": 1, "sha256": "b" * 64}) + "\n")
+_ot_seed = probe(OT.env, "arch = m.ARCHIVE_MOUNT\n"
+                 "seeds = m._ship_seeds(m._all_ship_rows(arch, m.own_ship_rows(arch)), arch)\n"
+                 "tdir = os.path.normcase(os.path.normpath(os.path.join(arch, 'ZWO Askar Scopes', 'Seed Target')))\n"
+                 "dm = m._DayMap(tdir, False, seed=seeds.get(tdir))\n"
+                 "print(json.dumps({'day': dm.day_for('2026-09-01'), 'next': dm.day_for('2026-09-02')}))\n")
+check("OT a night the Mac's ship started into Day 3 (and the sweep emptied) goes back into Day 3 from this "
+      "computer too, not into a new Day; the next night gets Day 4",
+      lambda: _ot_seed == {"day": 3, "next": 4}, json.dumps(_ot_seed))
+
+# the Windows cloud-sync guard, on any OS
+_ot_cloud = probe(OT.env, "m.IS_WINDOWS = True\n"
+                  "m.DEST_DIR = os.path.join(m.TEST_ROOT, 'OneDrive', 'Documents', 'Astro')\n"
+                  "a = m.documents_under_icloud()\n"
+                  "m.DEST_DIR = os.path.join(m.TEST_ROOT, 'Local', 'Astro'); m.LIBRARY_DIR = m.DEST_DIR\n"
+                  "print(json.dumps({'onedrive': a, 'plain': m.documents_under_icloud()}))\n")
+check("OT on Windows an import folder under OneDrive is noticed (Files On-Demand evicts frames), a plain "
+      "one is not",
+      lambda: _ot_cloud == {"onedrive": True, "plain": False}, json.dumps(_ot_cloud))
+
+# a Seestar stack re-saved under a name the other computer already filed with
+# different bytes: filed beside it with this computer's tag, nothing written over
+OT2 = teh.Env("OT2", asiair=False, seestar=True)
+OT2.env.update({"ASTRO_SHIP_FOLDER": "pc", "ASTRO_SHIP_LOG": "shipped-pc.jsonl", "ASTRO_MACHINE_ID": "pc"})
+OT2.add_seestar_sub("M 45", "20261003-210000")
+_ot2_stack = OT2.add_seestar_stack("M 45", 20, "20261003-213000")
+r = OT2.run(stdin="n\n")                      # the archive folder doesn't exist yet: imported, not shipped
+os.makedirs(os.path.join(OT2.archive, "S30P"), exist_ok=True)
+_ot2_plan = probe(OT2.env, "st = m.State(); items, notes = m.ship_plan(st, m.ARCHIVE_MOUNT)\n"
+                  "print(json.dumps([i['rel'] for i in items if i['entry'].get('filename', '').startswith('Stacked_')]))\n")
+_ot2_rel = _ot2_plan[0] if isinstance(_ot2_plan, list) and _ot2_plan else None
+if _ot2_rel:
+    _ot2_dst = os.path.join(OT2.archive, _ot2_rel.replace("\\", "/"))
+    os.makedirs(os.path.dirname(_ot2_dst), exist_ok=True)
+    with open(_ot2_dst, "wb") as f:
+        f.write(b"the Mac's earlier stack, different bytes")
+r = OT2.run("--ship")
+_ot2_led = OT2.ledger()
+_ot2_row = next((e for e in _ot2_led["files"].values() if e.get("filename", "").startswith("Stacked_")), {})
+_ot2_loc = str(_ot2_row.get("archiveLocation") or "")
+_ot2_beside = os.path.join(OT2.archive, _ot2_loc.replace("\\", "/")) if _ot2_loc else ""
+check("OT a re-saved stack whose name the archive already holds with different bytes is filed BESIDE it "
+      "as <name>__pc.fit: the first file untouched, the row's archive location is the new name, the ship "
+      "says so, and the problem does not recur",
+      lambda: _ot2_rel is not None and r.returncode == 0 and "__pc" in _ot2_loc and os.path.isfile(_ot2_beside)
+      and open(_ot2_dst, "rb").read() == b"the Mac's earlier stack, different bytes"
+      and "filed beside it" in r.stdout and "Problems: 0" in r.stdout,
+      f"rel={_ot2_rel} loc={_ot2_loc} " + r.stdout[-500:])
 
 # ═══════════════ Summary ═════════════════════════════════════════════════════
 summary()

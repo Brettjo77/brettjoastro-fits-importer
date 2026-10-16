@@ -307,7 +307,8 @@ Write-Host ""
 if (-not $appOwns) {
     Write-Host "Next:" -ForegroundColor White
     Write-Host "  1. Plug in your Seestar or ASIAir - the panel opens by itself (http://127.0.0.1:8765)."
-    Write-Host "  2. Tick what you want and press Import. The first import starts this PC's ledger."
+    Write-Host "  2. Tick what you want and press Import. The first import starts this PC's ledger;"
+    Write-Host "     frames the Mac already imported show as backed up by the Mac and are not copied again."
     Write-Host "  3. Check the install any time (in Terminal):  & `"$py`" -X utf8 `"$bin\selftest.py`""
 } else {
     Write-Host "Open the FITs Importer App to import: it handles the cameras on this PC." -ForegroundColor White

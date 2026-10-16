@@ -130,6 +130,23 @@ class App:
             return True
 
     # ── engine operations (each runs in a worker thread) ────────────────
+    @staticmethod
+    def _else(t):
+        """What the other computer already holds of this row (1.7.1): frames
+        it verified, of which verified on the archive, and who it is."""
+        els = t.get("elsewhere") or []
+        return {"elsewhere": len(els), "elsewhereBytes": t.get("elsewhere_bytes") or 0,
+                "elsewhereArchived": t.get("elsewhere_archived") or 0,
+                "elsewhereMachine": t.get("elsewhere_machine"),
+                "otherSkip": bool(t.get("other_skip"))}
+
+    @staticmethod
+    def _sides():
+        """This computer's name and the other's, as the engine labels them."""
+        here, there = eng.ship_sides()
+        return {"here": eng.MACHINE_LABEL, "hereSide": here,
+                "there": "PC" if there == "pc" else "Mac", "thereSide": there}
+
     def _camera_ok(self):
         eng.refresh_camera_volumes()
         if os.path.isdir(eng.ASIAIR_VOLUME) or eng.seestar_volume():
@@ -285,6 +302,8 @@ class App:
                         "night": key.rsplit("|", 1)[-1]})
                     g["count"] += 1
                 cal_summary = {"total": len(scan["calibration"]), "inLibrary": in_lib,
+                               "inOtherLibrary": sum(1 for c in scan["calibration"] if c.get("other")),
+                               "otherMachine": (scan.get("other") or {}).get("machine"),
                                "newSets": sorted(new_sets.values(),
                                                  key=lambda g: (g["night"], g["type"]))}
                 try:
@@ -303,6 +322,7 @@ class App:
                         "newBytes": t["new_bytes"], "totalBytes": t["total_bytes"],
                         "hours": round(t["integration_s"] / 3600.0, 1),
                         "lastStamp": last_stamp(t["files"]),
+                        **self._else(t),
                     })
                 if scan["disk"]:
                     disks.append({"label": "ASIAir", **scan["disk"]})
@@ -367,6 +387,7 @@ class App:
                         "totalBytes": sum(f["size"] for f in t["files"] + (t.get("stacks") or [])),
                         "hours": None,
                         "lastStamp": last_stamp(t["files"] + t.get("stacks", [])),
+                        **self._else(t),
                     })
                 # panel sets and mode folders are rows too — also once
                 # imported, so they can be cleared (and never just vanish, S11)
@@ -386,6 +407,7 @@ class App:
                         "totalBytes": sum(f["size"] for f in p["files"]),
                         "hours": None,
                         "lastStamp": last_stamp(p["files"]),
+                        **self._else(p),
                     })
                 for nd in s["non_dso"]:
                     # Mode folders (Solar/Lunar/…) are ordinary tickable
@@ -405,6 +427,7 @@ class App:
                         "totalBytes": sum(f["size"] for f in nd["files"]),
                         "hours": None,
                         "lastStamp": last_stamp(nd["files"]),
+                        **self._else(nd),
                     })
                 if s["disk"]:
                     disks.append({"label": f"Seestar {s['model']}", **s["disk"]})
@@ -441,6 +464,10 @@ class App:
                 "disk": disks[0] if disks else None,
                 "hasLedger": state.has_ledger(),
                 "notes": scan_notes,
+                # the other computer's record (1.7.1): who, when, how old
+                "other": (scan_a or {}).get("other") or (s or {}).get("other"),
+                "elsewhereFiles": sum(t["elsewhere"] for t in targets if not t["skipped"]),
+                "sides": self._sides(),
             }
             self.labels = getattr(self, "labels", {})
             for t in targets:
@@ -448,8 +475,14 @@ class App:
                     if t.get(k):
                         self.labels[t[k]] = t["display"]
             self.scanned_at = time.strftime("%H:%M:%S")
+            o = self.scan["other"]
             self.logline(f"▸ Scan: {self.scan['newTargets']} target(s) with new frames, "
-                         f"{self.scan['newFiles']} files")
+                         f"{self.scan['newFiles']} files"
+                         + (f" · {self.scan['elsewhereFiles']} already backed up by the {o['machine']}"
+                            if self.scan["elsewhereFiles"] else "")
+                         + (f" (its record from {str(o.get('at') or '')[:10]}"
+                            f"{', ' + str(int(o['ageHours'] // 24)) + ' day(s) old' if o.get('stale') and o.get('ageHours') else ''})"
+                            if o else ""))
         return self._run("scanning", fn)
 
     def do_import(self, names, cal_decisions=None):
@@ -475,8 +508,14 @@ class App:
                 # First run: back EVERYTHING up. (The baseline — "I already
                 # have copies" — stays a deliberate Terminal step, S1.)
                 state.new_ledger()
-                self.logline("▸ First import: starting a new ledger — everything "
-                             "on the camera counts as new.")
+                o = (self.scan or {}).get("other")
+                if o:
+                    self.logline(f"▸ First import on this {eng.MACHINE_LABEL}: starting a new ledger. "
+                                 f"The {o['machine']}'s record from {str(o.get('at') or '')[:10]} says "
+                                 f"what it already holds; the rest counts as new.")
+                else:
+                    self.logline("▸ First import: starting a new ledger — everything "
+                                 "on the camera counts as new.")
             # scan-card checkbox decisions → engine pre-consent map
             eng.CAL_DECISIONS = {
                 t: {str(k): bool(v) for k, v in (m or {}).items()}
@@ -511,8 +550,15 @@ class App:
             # as a Terminal import does (1.7.0); quiet when it isn't, and
             # never asks Finder to connect from here
             eng.ship_after_import(state, mount_share=False)
-            self.last_result = (f"Imported {total_f} frame(s) across "
-                                f"{total_t} target(s).")
+            try:
+                filed, _why = eng.archive_check(eng.ARCHIVE_MOUNT, write_test=False)
+            except Exception:
+                filed = False
+            self.last_result = (f"Imported {total_f} frame(s) across {total_t} target(s)"
+                                + (f", filed into the archive ({eng.ARCHIVE_LABEL})."
+                                   if filed else
+                                   ". The archive isn't reachable from here right now; the scheduled "
+                                   "ship files them later."))
             dur = int(time.time() - t0)
             self.last_done = {
                 "op": "import", "targets": total_t, "frames": total_f,
@@ -552,6 +598,8 @@ class App:
             if state is None:
                 return
             res = eng.run_discard(state, name, night=night or None, reason=reason or "")
+            if res in ("done", "partial", "cleared"):
+                eng.snapshot_quietly(state)
             label = self._label_for(name)
             self.last_result = {
                 "done": f"Discarded {label} from the camera — recorded as never backed up.",
@@ -659,6 +707,7 @@ class App:
             "hasReport": self.report_text is not None,
             # "status" above is the operation; this is the status line (U9)
             "statusSummary": STATUS.value,
+            "sides": self._sides(),
         }
 
 
@@ -778,7 +827,8 @@ PORT = 8765
 MAX_BODY = 64 * 1024
 # the status line's tooltip: what "N frames only on the Mac" means (U9)
 STATUS_TIP = (f"Cleared from the camera; the only verified copy is on this "
-              f"{'PC' if eng.IS_WINDOWS else 'Mac'} until the PC's sweep checks it")
+              f"{'PC' if eng.IS_WINDOWS else 'Mac'} until the archive's sweep checks it"
+              + (" (the 03:30 sweep, then the next ship)" if eng.IS_WINDOWS else ""))
 LOCAL_HOSTS = ("127.0.0.1", "localhost", "::1")
 
 
@@ -917,6 +967,7 @@ class Handler(BaseHTTPRequestHandler):
                 why = "missing" if not os.path.exists(
                     os.path.join(eng.STATE_DIR, "projects.json")) else "unreadable"
             self._json({"ok": doc is not None, "why": why, "projects": doc,
+                        "sides": APP._sides(),
                         "opener": "Explorer" if eng.IS_WINDOWS else "Finder",
                         "command": eng.PROJECTS_COMMAND_HINT})
         elif self.path == "/api/archive/index":
@@ -978,31 +1029,39 @@ class Handler(BaseHTTPRequestHandler):
             try:
                 state = eng.State()
                 path = None
-                if state.has_ledger():
-                    path = eng.generate_dashboard(state)
-                else:
-                    here_side, there_side = eng.ship_sides()
-                    here = "PC" if here_side == "pc" else "Mac"
-                    other = "PC" if there_side == "pc" else "Mac"
-                    snap = eng.other_ledger_snapshot()
-                    files, meta = (eng.load_ledger_snapshot(snap, []) if snap else ({}, {}))
-                    if files:
-                        age = meta.get("age_hours")
-                        when = (meta.get("at") or "")[:10]
-                        path = eng.generate_dashboard(
-                            state, files=files,
-                            banner=f"Nothing has been imported on this {here}. This is the {other}'s "
-                                   f"record, as its last ship left it on the archive on {when}"
-                                   + (f" ({int(age // 24)} day(s) ago)" if isinstance(age, float) and age >= 24 else "")
-                                   + ". Space figures are this computer's.")
+                here_side, there_side = eng.ship_sides()
+                here = "PC" if here_side == "pc" else "Mac"
+                other = "PC" if there_side == "pc" else "Mac"
+                # both computers import (1.7.1): this one's rows and the other's
+                # record together, the other's as its last ship left it
+                snap = eng.other_ledger_snapshot()
+                files, meta = (eng.load_ledger_snapshot(snap, []) if snap else ({}, {}))
+                own = (state.ledger or {}).get("files") or {}
+                if files or own:
+                    age = meta.get("age_hours")
+                    when = (meta.get("at") or "")[:10]
+                    merged = dict(files)
+                    merged.update(own)          # the same camera file on both: this computer's row
+                    if files and own:
+                        banner = (f"This {here}'s imports and the {other}'s record together (the {other}'s "
+                                  f"as its last ship left it on the archive on {when}"
+                                  + (f", {int(age // 24)} day(s) ago" if isinstance(age, float) and age >= 24 else "")
+                                  + "). Space figures are this computer's.")
+                    elif files:
+                        banner = (f"Nothing has been imported on this {here} yet. This is the {other}'s "
+                                  f"record, as its last ship left it on the archive on {when}"
+                                  + (f" ({int(age // 24)} day(s) ago)" if isinstance(age, float) and age >= 24 else "")
+                                  + ". Space figures are this computer's.")
                     else:
-                        self._html(_note_page(
-                            f"Nothing has been imported on this {here}, so there is no dashboard "
-                            f"of its own here. The dashboard is drawn from the imports, and they "
-                            f"happen on the {other}. Once the {other} has shipped to the archive "
-                            f"with 1.7.0, its record shows here. Meanwhile the Archive tab lists "
-                            f"what is ready to process."), frame_self=True)
-                        return
+                        banner = None
+                    path = eng.generate_dashboard(state, files=merged if files else None, banner=banner)
+                else:
+                    self._html(_note_page(
+                        f"Nothing has been imported on this {here} yet, and the {other}'s record "
+                        f"isn't on the archive. Once either computer has imported and shipped, "
+                        f"the dashboard shows here. Meanwhile the To process tab lists what is "
+                        f"ready to process."), frame_self=True)
+                    return
                 if not path:
                     self._html(_note_page("The dashboard couldn't be saved in the state folder; "
                                           "see the Activity log."), frame_self=True)
@@ -1320,6 +1379,10 @@ details.ad-sec[open]>summary::before{content:"▾ "}
   border:1px solid transparent;transition:all .12s}
 .trow:hover{background:var(--surface2);border-color:var(--line)}
 .trow + .trow{margin-top:2px}
+.elsw{color:var(--muted);font-size:12px}
+.bak.part{color:var(--warn,#b36b00)}
+.scannote.rec{color:var(--muted)}
+.scannote.rec.stale{color:var(--warn,#b36b00)}
 .cb{appearance:none;width:21px;height:21px;border:1.5px solid var(--line2);border-radius:7px;
   background:var(--surface);cursor:pointer;flex:none;position:relative;transition:all .12s}
 .cb:checked{background:var(--accent);border-color:var(--accent)}
@@ -1629,10 +1692,19 @@ function notesHtml(scan){
   return scan.notes.map(n=>`<div class="scannote">⚠ ${esc(n)}</div>`).join("");
 }
 const unitFor=t=>(t.unit==="frames"||!t.unit)?(t.new===1?"frame":"frames"):t.unit;
+// The third state (1.7.1): every file of this row that this computer can't
+// prove is held, verified, by the other computer. Not a proof for a clear
+// (only this ledger is), so no clear and no discard: "clear it from the Mac".
+const otherAll=t=>!!(t.elsewhere>0 && t.new===0 && (t.unproven||0)<=t.elsewhere);
+const otherWho=t=>t.elsewhereMachine||SIDES.there;
 function pillFor(t){
   if(t.skipped) return `<span class="bak skip">never import</span>`;
-  if(t.device!=="seestar") return `<span class="bak">backed up · kept on ASIAir</span>`;
-  if(t.safeState==="safe") return `<span class="bak">backed up</span>`;
+  if(otherAll(t)){
+    const arch=t.elsewhereArchived>=t.elsewhere;
+    return `<span class="bak${arch?"":" part"}">backed up by the ${esc(otherWho(t))} · ${arch?"verified on the archive":"not yet on the archive"}${t.device==="seestar"?` · clear it from the ${esc(otherWho(t))}`:""}</span>`;
+  }
+  if(t.device!=="seestar") return `<span class="bak">backed up on this ${esc(SIDES.here)} · kept on ASIAir</span>`;
+  if(t.safeState==="safe") return `<span class="bak">backed up on this ${esc(SIDES.here)}</span>`;
   return `<span class="bak no">NOT backed up${t.unproven?` · ${t.unproven} file${t.unproven===1?"":"s"}`:""}</span>`;
 }
 function invSection(scan){
@@ -1652,11 +1724,14 @@ function invSection(scan){
       `</div>`;
   }
   if(!others.length) return h;
-  const notSafe=others.filter(t=>t.device==="seestar"&&!t.skipped&&t.safeState!=="safe").length;
+  const notSafe=others.filter(t=>t.device==="seestar"&&!t.skipped&&t.safeState!=="safe"&&!otherAll(t)).length;
+  const byOther=others.filter(t=>otherAll(t)).length;
   const tot=others.reduce((a,t)=>a+(t.totalBytes||0),0);
   const wasOpen=!!document.querySelector("#invBox details.inv[open]");
+  const who=(others.find(t=>otherAll(t))||{}).elsewhereMachine||SIDES.there;
+  const split=byOther?` · ${others.length-byOther} by this ${esc(SIDES.here)}, ${byOther} by the ${esc(who)}`:"";
   h+=`<details class="inv"${wasOpen||notSafe?" open":""}><summary>${notSafe?"Also on camera":"Also on camera — all backed up"}
-      <span class="cnt">${others.length} item${others.length>1?"s":""} · ${fmtGB(tot)}${notSafe?` · ${notSafe} not backed up`:""}</span></summary>
+      <span class="cnt">${others.length} item${others.length>1?"s":""} · ${fmtGB(tot)}${split}${notSafe?` · ${notSafe} not backed up`:""}</span></summary>
     <div class="invlist">
     ${others.map(t=>{
       let act="";
@@ -1664,7 +1739,7 @@ function invSection(scan){
         act=`<button type="button" class="linkbtn clr" data-id="${encodeURIComponent(t.clearId)}"
                aria-label="Clear ${esc(t.display)} from the camera (backed up and verified)"
                title="Delete from the Seestar — everything in it is backed up and verified">clear…</button>`;
-      else if(t.device==="seestar" && t.safeState!=="safe" && t.discardId)
+      else if(t.device==="seestar" && t.safeState!=="safe" && t.discardId && !otherAll(t))
         act=`<button type="button" class="disc" data-name="${encodeURIComponent(t.discardId)}"
                aria-label="Discard the never-backed-up files of ${esc(t.display)}"
                title="Delete the files that were NEVER backed up — asks you to type DISCARD">discard…</button>`;
@@ -1697,8 +1772,11 @@ function renderTargets(scan){
   const withNew=scan.targets.filter(t=>t.new>0 && !t.skipped)
       .sort((a,b)=>byNewest(a,b)||b.new-a.new);   // most recent night first
   $("#notesBox").innerHTML = notesHtml(scan);
+  const recNote=scan.other?`<div class="scannote rec${scan.other.stale?" stale":""}">${scan.other.stale?"⚠ ":""}The ${esc(scan.other.machine)}'s record from ${esc(String(scan.other.at||"").slice(0,10))}${typeof scan.other.ageHours==="number"&&scan.other.ageHours>=24?` (${Math.floor(scan.other.ageHours/24)} day${Math.floor(scan.other.ageHours/24)===1?"":"s"} old)`:""} says what it already holds${scan.elsewhereFiles?`: ${scan.elsewhereFiles.toLocaleString()} file${scan.elsewhereFiles===1?"":"s"} on the camera`:""}.${scan.other.stale?` It is old: frames the ${esc(scan.other.machine)} imported since may show as new here.`:""}</div>`
+    :(scan.hasLedger?"":`<div class="scannote rec">The ${esc(SIDES.there)}'s record isn't on the archive (or the archive isn't reachable), so nothing it imported can be recognised here.</div>`);
+  $("#notesBox").innerHTML += recNote;
   if(!withNew.length){
-    const notSafe=scan.targets.filter(t=>t.device==="seestar"&&!t.skipped&&t.safeState!=="safe").length;
+    const notSafe=scan.targets.filter(t=>t.device==="seestar"&&!t.skipped&&t.safeState!=="safe"&&!otherAll(t)).length;
     const skippedNew=scan.targets.filter(t=>t.skipped&&t.new>0).length;
     const attn=(scan.notes||[]).length+notSafe+skippedNew;
     box.innerHTML = !scan.targets.length
@@ -1715,14 +1793,14 @@ function renderTargets(scan){
     setEyebrow("Targets");
     return;
   }
-  setEyebrow(scan.hasLedger?"Targets with new frames":"First import — everything on the camera is new");
+  setEyebrow(scan.hasLedger?"Targets with new frames":(scan.other?`First import on this ${SIDES.here} — new to both computers`:"First import — everything on the camera is new"));
   box.innerHTML = withNew.map(t=>`
     <label class="trow">
-      <input type="checkbox" class="cb sel" data-name="${encodeURIComponent(t.name)}" checked
+      <input type="checkbox" class="cb sel" data-name="${encodeURIComponent(t.name)}"${t.otherSkip?"":" checked"}
         aria-label="Import ${esc(t.display)}">
       <div class="tmain">
         <div class="tname">${esc(t.display)}</div>
-        <div class="tmeta">${scopeChip(t)}${t.what?`<span>${esc(t.what)}</span>`:(t.hours==null?"":`<span>${t.hours.toFixed(1)} h integration</span>`)}${t.discardId&&scan.hasLedger?`<button type="button" class="disc" data-name="${encodeURIComponent(t.discardId)}" aria-label="Discard ${esc(t.display)} without importing" title="Delete from the Seestar WITHOUT importing — asks you to type DISCARD">discard…</button>`:""}</div>
+        <div class="tmeta">${scopeChip(t)}${t.what?`<span>${esc(t.what)}</span>`:(t.hours==null?"":`<span>${t.hours.toFixed(1)} h integration</span>`)}${t.elsewhere?`<span class="elsw">${t.elsewhere.toLocaleString()} more already backed up by the ${esc(otherWho(t))}</span>`:""}${t.otherSkip?`<span class="bak skip">on the ${esc(otherWho(t))}'s never-import list</span>`:""}${t.discardId&&scan.hasLedger?`<button type="button" class="disc" data-name="${encodeURIComponent(t.discardId)}" aria-label="Discard ${esc(t.display)} without importing" title="Delete from the Seestar WITHOUT importing — asks you to type DISCARD">discard…</button>`:""}</div>
       </div>
       <div class="tstats">
         <div class="big">${t.new.toLocaleString()}</div>
@@ -1947,8 +2025,18 @@ const fmtNight=iso=>{ if(!iso) return ""; const [y,m,d]=iso.split("-"); return `
 const fmtSize=b=>b>=1073741824?(b/1073741824).toFixed(1)+" GB":b>=1048576?Math.round(b/1048576)+" MB":Math.max(1,Math.round(b/1024))+" KB";
 // The project layer (1.7): To process and In progress, from projects.json.
 // projectsHtml is pure (no DOM), so a test can render the fixture and look.
-const PROJ_WHERE={chillblast_archive:"on the archive",mac:"on the Mac",pc:"on this PC",
-  "mac-unchecked":"on the Mac (per its ledger)","pc-unchecked":"on the PC (per its ledger)"};
+// Where a frame is, in words for THIS computer (1.7.1): the labels come from
+// the engine's sides (here/there), so the same page is right on both machines.
+// (PROJ_WHERE first: test_app renders projectsHtml from this line onward.)
+const PROJ_WHERE=new Proxy({}, {get:(_o,k)=>projWhere(String(k))});
+let SIDES={here:"Mac",hereSide:"mac",there:"PC",thereSide:"pc"};
+function projWhere(k){
+  const self=SIDES.hereSide, oth=SIDES.thereSide;
+  const W={chillblast_archive:"on the archive"};
+  W[self]="on this "+SIDES.here; W[oth]="on the "+SIDES.there;
+  W[self+"-unchecked"]="on this "+SIDES.here+" (per its ledger)"; W[oth+"-unchecked"]="on the "+SIDES.there+" (per its ledger)";
+  return W[k]||k;
+}
 const fmtHours=s=>!s?"":s<360?Math.round(s/60)+" min":(s/3600).toFixed(1)+" h";
 const fmtWhen=iso=>{ const t=new Date(String(iso||"")); if(isNaN(t)) return ""; const d=t.getDate(), m=MONTHS[t.getMonth()], y=t.getFullYear(); return `${d} ${m} ${y} at ${String(t.getHours()).padStart(2,"0")}:${String(t.getMinutes()).padStart(2,"0")}`; };
 const PROJ_STATUS={ready_to_process:"To process",in_progress:"In progress",capturing:"Still capturing",done:"Done"};
@@ -2012,7 +2100,7 @@ function projectsHtml(pj, opts){
   const soonest=cap.map(r=>readyFrom(r.d)).filter(Boolean).sort()[0];
   const tail=rows.length?`<p class="ad-note">${cap.length} still capturing${soonest?` (the first is ready from ${esc(fmtNight(soonest))})`:""}, ${done} done.</p>`
     :`<p class="ad-note">No captures were counted on this computer yet.</p>`;
-  const pub=doc.sources&&doc.sources.published_by?` This is the ${esc(String(doc.sources.published_by).toUpperCase()==="PC"?"PC":"Mac")}'s complete list (it sees the masters and the finished pictures), published on the archive.`:"";
+  const pub=doc.sources&&doc.sources.published_by?` This is the ${esc(String(doc.sources.published_by).toUpperCase()==="PC"?"PC":"Mac")}'s list (it sees the masters and the finished pictures), published on the archive; complete up to the other computer's last ship.`:"";
   return `<div class="ad-note" id="deskProjMsg" aria-live="polite">Worked out ${when?esc(fmtNight(when)):"at an unknown time"}${whenFull?` (${esc(whenFull)})`:""}${snapNote?` from ${snapNote}`:""}.${pub}</div>`
     +head+legend+warns+(body||(rows.length?`<p class="ad-note">Nothing is waiting to process.</p>`:""))+tail;
 }
@@ -2195,7 +2283,8 @@ async function tick(){
   try{
     const s=await api("/api/state");
     if(s.boot&&s.boot!==BOOT) showStale();
-    $("#camDot").className="dot"+(s.cameraPresent?" on":"");
+    if(s.sides) SIDES=s.sides;
+  $("#camDot").className="dot"+(s.cameraPresent?" on":"");
     $("#camText").textContent=s.cameraPresent?((s.devices||[]).join(" + ")||"camera")+" connected":"no camera connected";
     busy = s.status!=="idle";
     $("#busyDot").className="dot"+(busy?" busy":"");
@@ -2214,7 +2303,7 @@ async function tick(){
       if(cs && cs.total){
         const exp=x=>x.exposureSeconds==null?"":(x.exposureSeconds>=1?` ${x.exposureSeconds}s`:` ${Math.round(x.exposureSeconds*1000)}ms`);
         const setLabel=x=>`${x.count} × ${esc(x.type)}${exp(x)}${x.filter?" · "+esc(x.filter):""}${x.type==="Flat"&&x.rotation!=null?" · "+x.rotation+"°":""} · ${esc(x.night)}`;
-        let h=`<b>${cs.total.toLocaleString()}</b> calibration frames on camera · <b>${cs.inLibrary.toLocaleString()}</b> already in the Library`;
+        let h=`<b>${cs.total.toLocaleString()}</b> calibration frames on camera · <b>${cs.inLibrary.toLocaleString()}</b> already in this ${esc(SIDES.here)}'s Library${cs.inOtherLibrary?` · <b>${cs.inOtherLibrary.toLocaleString()}</b> in the ${esc(cs.otherMachine||SIDES.there)}'s (kept here too, for matching)`:""}`;
         const nNew=cs.newSets.reduce((a,x)=>a+x.count,0);
         if(nNew){
           h+=` · <b>${nNew.toLocaleString()} new</b> — backed up to the Library on next import:`;
