@@ -72,7 +72,7 @@ def cameras_now():
     found = {}
     if os.path.isdir(eng.ASIAIR_VOLUME):
         found["ASIAir"] = eng.ASIAIR_VOLUME
-    sv = eng.seestar_volume()
+    sv = eng.seestar_volume(force=True)   # a poll never trusts the 1.5 s cache
     if sv:
         found["Seestar"] = sv
     return found

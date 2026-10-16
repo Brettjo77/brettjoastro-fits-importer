@@ -80,6 +80,9 @@ way. Every release updates it.
 | Receipts published to the archive (1.7.1): each ship copies this computer's AstroLog receipts into `_verify\<side>\receipts\<scope>\`, exclusive create | ✓ | ✓ | engine |
 | A fixed drive kept out of the camera search: `ASTRO_DRIVE_EXCLUDE` (1.7.1) | — (the Mac uses /Volumes) | ✓ `"D:"` | engine |
 | An import folder under a cloud sync is warned about before copying: iCloud Desktop & Documents on the Mac, OneDrive on Windows (1.7.1) | ✓ | ✓ | engine |
+| Long paths (1.7.1): a copy or ship destination over 240 characters gets the `\\?\` prefix; a typed target name is capped at 80 characters | — (no limit) | ✓ `_win_long` | engine |
+| The creation date of a copied frame (1.7.1): `os.stat` birth time; `SetFile` only when installed, looked up once | ✓ | — (NTFS keeps it through `preserve_creation_time`'s Windows path) | engine |
+| A camera unplugged mid-import or mid-scan stops the run with one plain sentence; nothing that failed is marked imported (1.7.1) | ✓ `/Volumes` gone | ✓ drive letter gone | engine |
 | Before `open smb://…` the Mac checks the PC answers on port 445 (2 s), so a PC that is off costs no Finder sheet and no wait | ✓ `_share_host_up` | — (the archive is a local drive) | engine |
 | The installer refuses an Administrator window and names the three tasks to unregister; one helper registers all three; `sweep.ps1` is set aside only after the Python sweep task registered; the sync tick is cut after 15 min | — (no equivalent: launchd agents are per user) | ✓ `-AllowElevated` to override | installers |
 | Contract files: an installed copy whose hash is in `contract/shipped.sha256` is updated in place; an edited one is kept with the new copy as `.new` | ✓ `shasum -a 256` | ✓ `Get-FileHash` | installers |

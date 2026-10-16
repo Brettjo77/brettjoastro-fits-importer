@@ -55,7 +55,7 @@ def check(name, cond, detail=""):
 def skip(name):
     global SKIPPED
     SKIPPED += 1
-    skip(f"{name}")
+    print(f"  SKIP  {name}")
 
 _SUMMARY_DONE = False
 def summary(crash=None):
@@ -319,7 +319,7 @@ try:
     try:
         for what in ("ship", "panel"):
             with open(lockp, "w") as f:         # held by a live process (this runner)
-                json.dump({"pid": os.getpid(), "started": "2026-09-26T101500", "what": what}, f)
+                json.dump({"pid": os.getpid(), "started": time.strftime("%Y-%m-%dT%H%M%S"), "what": what}, f)
             api("/api/report", {})
             s = wait_for(lambda s: s["status"] == "idle", timeout=30)
             said[what] = str(s.get("lastResult"))
@@ -1753,6 +1753,12 @@ try:
           and "all scopes" in body and '["90","90 nights",90],["365","a year",365],["all","all time",' in body
           and "quiet period: the last " in body and "has been doing" in body,
           body[:200])
+    check("OB (16 Oct) the page normalises a thin dataset (missing keys filled once, an unknown state falls back, "
+          "the drawer is a dialog, the tooltip is hidden from readers)",
+          lambda: "if(D[k]==null) D[k]=v;" in body and "reconciliation:[],warnings:[]" in body
+          and "stageOf(" in body and "function showDrawer(" in body
+          and '<div class="tt" id="tt" aria-hidden="true">' in body,
+          body[:200])
     # every script block of the page parses (node), so a slip in the template can't blank the tab
     import shutil as _sh2
     _node = _sh2.which("node") or next((p for p in ("/opt/node22/bin/node", "/usr/local/bin/node")
@@ -1891,6 +1897,224 @@ try:
 finally:
     proco.terminate()
     proco.wait(timeout=30)
+
+# ═══════════════ CHAIN PR: the panel after the 1.7.1 review (16 Oct) ═════════
+# The Mac's panel with a reachable archive on which the PC holds the ship
+# lock: the import's banner says the ship didn't finish (not "filed"); a
+# request while the importer is busy is answered with why; cross-site GETs
+# that act or cost are refused; an application bundle on the archive is never
+# opened; bad calDecisions are a 400; the Dashboard is built off the request
+# thread and /api/state says when; the page keeps ticks across rescans, polls
+# one at a time and takes the two computers' names from /api/projects.
+envp = teh.Env("APPPR", asiair=True, seestar=False)
+envp.env["ASTRO_SHIP_FOLDER"] = "mac"
+_pr_root = os.path.join(envp.archive, "ZWO Askar Scopes")
+os.makedirs(_pr_root, exist_ok=True)                       # the archive is reachable
+_pr_m81 = envp.add_light("Plan", "M 81", "0001", dt="20261003-220000")
+_pr_mys = envp.add_light("Live", "MYSTERY 9", "0001", dt="20261003-230000", focallen=402)  # asks its name
+# folders on the archive: a plain one, an application bundle, a bundle in disguise
+_pr_plain = os.path.join(_pr_root, "Wizard Nebula (NGC 7380)")
+_pr_app = os.path.join(_pr_root, "Evil.APP")
+_pr_plist = os.path.join(_pr_root, "Looks Plain")
+for _d in (_pr_plain, _pr_app, os.path.join(_pr_plist, "Contents")):
+    os.makedirs(_d, exist_ok=True)
+with open(os.path.join(_pr_plist, "Contents", "Info.plist"), "w") as f:
+    f.write("<plist/>")
+# the PC is shipping right now: a live lock (renewed this second, another machine)
+_pr_lockdir = os.path.join(envp.archive, "_verify", "lock")
+os.makedirs(_pr_lockdir, exist_ok=True)
+_pr_now = _otdt.now(_ottz.utc).isoformat(timespec="seconds")
+with open(os.path.join(_pr_lockdir, "ship.lock"), "w", encoding="utf-8") as f:
+    json.dump({"schema": "ship-lock/1", "machineId": "pc", "machine": "pc-machine-uid", "host": "SKYLARKPC",
+               "platform": "windows", "pid": os.getpid(), "op": "ship", "startedAt": _pr_now, "renewedAt": _pr_now}, f)
+with open(teh.SCRIPT, encoding="utf-8") as f:
+    _pr_engine_reports = "SHIP_AFTER_IMPORT_REPORTS = True" in f.read()
+PORTP = int(envp.env["ASTRO_PANEL_PORT"])
+URLP = f"http://127.0.0.1:{PORTP}"
+procp = start_panel(envp, PORTP)
+
+def _pr_get(path, headers=None):
+    """A GET as a browser would send it; (status, body)."""
+    req = urllib.request.Request(URLP + path, headers=headers or {})
+    try:
+        with urllib.request.urlopen(req, timeout=15) as r:
+            return r.status, r.read().decode("utf-8", "replace")
+    except urllib.error.HTTPError as e:
+        return e.code, e.read().decode("utf-8", "replace")
+
+try:
+    own_panel(URLP, envp, procp, "PR the reviewed panel answers with its own instance id")
+    pagep = load_token(URLP)
+    def wait_p(pred, timeout=90):
+        t0 = time.time()
+        while time.time() - t0 < timeout:
+            st = api("/api/state", url=URLP)
+            if pred(st):
+                return st
+            time.sleep(0.3)
+        raise TimeoutError("PR: condition not met; last status " + str(st.get("status")))
+    # ── the page (static) ───────────────────────────────────────────────────
+    check("PR the page polls one at a time and drops an older answer, keeps ticks and pairing decisions "
+          "across rescans, draws a scan that can't be shown as a note, loads the Dashboard frame once and "
+          "again only when dashboardAt changes, takes the sides /api/projects gives, reloads the Report when "
+          "a report finished (no 1.5 s timer), gives focus back after a card, takes Space on row buttons, "
+          "says what to do when the Observatory frame is a note, and tells the banner why a button did nothing",
+          "tickBusy" in pagep and "seq!==tickSeq" in pagep and "wasTicked" in pagep and "wasCal" in pagep
+          and "The scan couldn't be shown:" in pagep and "s.dashboardAt!==dashAt" in pagep
+          and 'if(b.dataset.tab==="dash" && !dashShown) showDash();' in pagep
+          and "if(pj&&pj.sides) SIDES=pj.sides;" in pagep and 'prevStatus==="reporting"' in pagep
+          and "setTimeout(loadReport,1500)" not in pagep and "qPrevFocus=document.activeElement" in pagep
+          and pagep.count('e.key===" "') == 2 and "See the note in the frame." in pagep
+          and "function startOp(" in pagep and 'startOp("/api/import"' in pagep and 'startOp("/api/scan"' in pagep
+          and "importedHere" in pagep and "so anything the ${esc(SIDES.there)} imported shows as new here" in pagep,
+          "")
+    import shutil as _shp
+    _nodep = _shp.which("node") or next((p for p in ("/opt/node22/bin/node", "/usr/local/bin/node")
+                                         if os.path.isfile(p)), None)
+    _scriptp = re.search(r"<script>(.*?)</script>", pagep, re.S)
+    if _nodep and _scriptp:
+        _jsp = _scriptp.group(1)
+        r_parse = subprocess.run([_nodep, "-e", "new Function(require('fs').readFileSync(0,'utf8'))"],
+                                 input=_jsp, capture_output=True, text=True, timeout=30)
+        check("PR the panel's inline script still parses (node)", r_parse.returncode == 0, r_parse.stderr[-300:])
+        # projectsHtml rendered as the PC, from the sides the answer carries; the pill as the Mac
+        _piecesp = [re.search(p_, _jsp, re.S).group(0) for p_ in
+                    (r"const MONTHS=[^\n]*", r"const esc=[^\n]*", r"const fmtNight=[^\n]*",
+                     r"const PROJ_WHERE=.*?\nfunction projectsHtml\(pj, opts\)\{.*?\n\}\n",
+                     r"const otherAll=.*?\nfunction pillFor\(t\)\{.*?\n\}\n")]
+        _fixp = {"ok": True, "opener": "Explorer",
+                 "sides": {"here": "PC", "hereSide": "pc", "there": "Mac", "thereSide": "mac"},
+                 "projects": {"schema": "projects/1", "generated_at": "2026-10-16T08:00:00+00:00", "quiet_period_days": 14,
+                              "projects": [{"target_id": "M31", "name": "Andromeda", "datasets": [
+                                  {"scope_name": "Askar FRA400", "status": "capturing", "nights": 1, "integration_seconds": 600,
+                                   "last_session": "2026-10-10", "locations": ["pc-unchecked", "mac"], "archive_rel": None}]}]}}
+        _harp = ("let deskSel=null;\n" + "\n".join(_piecesp)
+                 + f"\nprocess.stdout.write(projectsHtml({json.dumps(_fixp)}));\n"
+                 + "process.stdout.write('\\n---\\n'+pillFor({device:'asiair',new:0,elsewhere:3,importedHere:5,elsewhereMachine:'Mac'}));\n"
+                 + "process.stdout.write('\\n---\\n'+pillFor({device:'asiair',new:0,elsewhere:3,elsewhereMachine:'Mac'}));\n"
+                 + "process.stdout.write('\\n---\\n'+pillFor({device:'asiair',new:0,elsewhere:0,importedHere:5}));\n")
+        r_pr = subprocess.run([_nodep, "-e", _harp], capture_output=True, text=True, timeout=30)
+        _outp = r_pr.stdout.split("\n---\n")
+        check("PR projectsHtml takes the sides it is given (rendered as the PC: 'on this PC (per its ledger) and on "
+              "the Mac'); the ASIAir pill splits what each computer holds, and reads as before when the engine "
+              "doesn't say (nothing 'undefined')",
+              r_pr.returncode == 0 and len(_outp) == 4
+              and "on this PC (per its ledger) and on the Mac" in _outp[0]
+              and _outp[1] == '<span class="bak">backed up: 5 on this PC, 3 by the Mac · kept on ASIAir</span>'
+              and "backed up by the Mac" in _outp[2] and "undefined" not in r_pr.stdout
+              and "kept on ASIAir" in _outp[3] and "by the" not in _outp[3],
+              (r_pr.stderr or r_pr.stdout)[-600:])
+    else:
+        skip("PR node isn't installed: the inline script's parse check and the rendered pieces")
+    # ── cross-site GETs (item 9) ────────────────────────────────────────────
+    _cs = {"Sec-Fetch-Site": "cross-site"}
+    check("PR a GET that acts or costs is refused when the browser says it came from another site "
+          "(Sec-Fetch-Site: cross-site → 403 for /api/state, /dashboard, /api/archive/index), allowed "
+          "without the header, same-origin, or for /api/ping",
+          _pr_get("/api/state", _cs)[0] == 403 and _pr_get("/dashboard?t=1", _cs)[0] == 403
+          and _pr_get("/api/archive/index", _cs)[0] == 403
+          and _pr_get("/api/state")[0] == 200 and _pr_get("/api/state", {"Sec-Fetch-Site": "same-origin"})[0] == 200
+          and _pr_get("/api/ping", _cs)[0] == 200,
+          json.dumps([_pr_get("/api/state", _cs)[0], _pr_get("/dashboard?t=1", _cs)[0], _pr_get("/api/state")[0]]))
+    _stp = status_line(URLP)
+    check("PR /api/status always has the status line's shape (the line itself, or 'Status unknown: still working it out')",
+          isinstance(_stp, dict) and STATUS_KEYS <= set(_stp) and isinstance(_stp.get("text"), str), json.dumps(_stp))
+    # ── the archive open (item 11) ──────────────────────────────────────────
+    r_app = api("/api/archive/open", {"rel": "ZWO Askar Scopes/Evil.APP"}, url=URLP)
+    r_plist = api("/api/archive/open", {"rel": "ZWO Askar Scopes/Looks Plain"}, url=URLP)
+    r_plain = api("/api/archive/open", {"rel": "ZWO Askar Scopes/Wizard Nebula (NGC 7380)"}, url=URLP)
+    _opens = teh.os_calls(envp.root, "open")
+    check("PR a folder named *.app (any case) or carrying Contents/Info.plist is refused by /api/archive/open "
+          "(400, 'application') and nothing is opened; a plain folder still opens",
+          r_app.get("_status") == 400 and "application" in str(r_app.get("error"))
+          and r_plist.get("_status") == 400 and r_plain.get("ok") is True
+          and len(_opens) == 1 and _opens[0].get("target") == _pr_plain,
+          json.dumps([r_app, r_plist, r_plain, _opens]))
+    # ── bad calDecisions (item 20) ──────────────────────────────────────────
+    r_bad = api("/api/import", {"names": ["M 81"], "calDecisions": {"M 81": True}}, url=URLP)
+    check("PR calDecisions whose values aren't maps are a 400, nothing starts",
+          r_bad.get("_status") == 400 and r_bad.get("started") is False
+          and api("/api/state", url=URLP)["status"] == "idle", json.dumps(r_bad))
+    # ── the scan: no record from the PC, said once (items 12, 14) ───────────
+    api("/api/scan", {}, url=URLP)
+    sp = wait_p(lambda st: st["status"] == "idle" and st["scan"])
+    api("/api/scan", {}, url=URLP)
+    sp = wait_p(lambda st: st["status"] == "idle" and st["scan"] and st.get("scannedAt"))
+    _norec = [ln for ln in sp["log"] if "record isn't on the archive" in ln]
+    check("PR with no record from the PC the scan says so once per panel run ('anything the PC imported shows "
+          "as new here'), the rows carry importedHere (None from an engine that doesn't say it), and the "
+          "other computer is named by its side",
+          sp["scan"].get("other") is None and len(_norec) == 1 and "anything the PC imported shows as new here" in _norec[0]
+          and all("importedHere" in t for t in sp["scan"]["targets"])
+          and all(t.get("importedHere") in (None, 0) for t in sp["scan"]["targets"])
+          and sp["scan"]["sides"]["there"] == "PC",
+          json.dumps([_norec, [{k: t.get(k) for k in ("name", "new", "importedHere")} for t in sp["scan"]["targets"]]])[:500])
+    # ── the Dashboard, built by the worker (item 2) ─────────────────────────
+    sp = wait_p(lambda st: st.get("dashboardAt"), timeout=20)
+    _dash_at0 = sp["dashboardAt"]
+    _code0, _dash0 = _pr_get("/dashboard?t=1")
+    check("PR /api/state says when the Dashboard was built; with nothing imported anywhere /dashboard is the note page",
+          bool(_dash_at0) and _code0 == 200 and "Nothing has been imported on this Mac yet, and the PC's record" in _dash0,
+          json.dumps([_dash_at0, _code0, _dash0[-200:]]))
+    # ── import while the PC holds the ship lock; a request while busy (items 1, 6, 13) ─
+    r_imp = api("/api/import", {"names": ["M 81", "MYSTERY 9"]}, url=URLP)
+    sp = wait_p(lambda st: st["question"] is not None or st["status"] == "idle")
+    _busy = None
+    _kinds = []
+    while sp["question"] is not None:
+        q = sp["question"]
+        _kinds.append(q["kind"])
+        if _busy is None:
+            _busy = api("/api/scan", {}, url=URLP)        # the card is up: the importer is busy
+            _busy_state = api("/api/state", url=URLP)
+        api("/api/answer", {"id": q["id"], "value": "" if q["kind"] == "text" else "n"}, url=URLP)
+        time.sleep(0.3)
+        sp = wait_p(lambda st: st["question"] is not None or st["status"] == "idle")
+    sp = wait_p(lambda st: st["status"] == "idle")
+    check("PR a request while the importer is busy is answered with why (started: false, 'The importer is busy "
+          "(importing)…'), and the banner says the same",
+          r_imp.get("started") is True and _busy is not None and _busy.get("started") is False
+          and "busy (importing)" in str(_busy.get("error")) and "busy (importing)" in str(_busy_state.get("lastResult")),
+          json.dumps([r_imp, _kinds, _busy, (_busy_state or {}).get("lastResult") if _busy else None]))
+    _lockline = [ln for ln in sp["log"] if "shipping into the archive right now" in ln]
+    check("PR the import copied both frames, honoured the PC's live ship lock (nothing shipped, said in the log), "
+          "and cleared the scan for fresh counts",
+          "Imported 2 frame(s) across 2 target(s)" in str(sp.get("lastResult")) and len(_lockline) == 1
+          and sp.get("scan") is None and not os.listdir(os.path.join(envp.archive, "ZWO Askar Scopes", "Wizard Nebula (NGC 7380)")),
+          json.dumps([sp.get("lastResult"), _lockline]))
+    if _pr_engine_reports:
+        check("PR the banner is worded on the ship's REAL result: the ship didn't finish (the lock was held), so it "
+              "never says 'filed into the archive'",
+              "the ship to the archive didn't finish — see the log; the scheduled ship files them later" in str(sp.get("lastResult"))
+              and "filed into the archive" not in str(sp.get("lastResult")), str(sp.get("lastResult")))
+    else:
+        skip("PR the banner on the ship's real result: the engine doesn't report it yet (SHIP_AFTER_IMPORT_REPORTS; "
+             "run panel_engine_patch.py)")
+    sp = wait_p(lambda st: st.get("dashboardAt") and st["dashboardAt"] != _dash_at0, timeout=30)
+    _code1, _dash1 = _pr_get("/dashboard?t=2")
+    check("PR after the import the worker rebuilt the Dashboard (dashboardAt changed) and /dashboard is this "
+          "computer's dashboard, served from its file",
+          sp["dashboardAt"] != _dash_at0 and _code1 == 200 and "Nothing has been imported" not in _dash1
+          and "__DATA__" not in _dash1 and '"frames": 2' in _dash1,
+          json.dumps([_dash_at0, sp.get("dashboardAt"), _code1, _dash1[:200]]))
+    # ── a failed import leaves no stale scan (item 13): a newer importer's ledger ─
+    api("/api/scan", {}, url=URLP)
+    sp = wait_p(lambda st: st["status"] == "idle" and st["scan"])
+    _ledp = os.path.join(envp.state, "ledger.json")
+    with open(_ledp, encoding="utf-8") as f:
+        _newer = json.load(f)
+    _newer["version"] = (_newer.get("version") or 1) + 1
+    with open(_ledp, "w", encoding="utf-8") as f:
+        json.dump(_newer, f)
+    envp.add_light("Plan", "M 81", "0002", dt="20261004-220000")
+    api("/api/import", {"names": ["M 81"]}, url=URLP)
+    sp = wait_p(lambda st: st["status"] == "idle" and st.get("lastResult"))
+    check("PR an import refused before it starts (a newer importer's ledger) still clears the scan: no stale "
+          "counts and no live Import button",
+          "newer version" in str(sp.get("lastResult")) and sp.get("scan") is None, json.dumps([sp.get("lastResult"), bool(sp.get("scan"))]))
+finally:
+    procp.terminate()
+    procp.wait(timeout=30)
 
 summary()
 sys.exit(1 if FAIL else 0)

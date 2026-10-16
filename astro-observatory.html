@@ -141,7 +141,7 @@ table.dt tr:last-child td{border-bottom:none}
 .trow .num b{color:var(--ink);font-weight:600}
 .thead{display:grid;grid-template-columns:minmax(210px,1.5fr) minmax(140px,1fr) 110px 130px 76px 68px 84px 100px;gap:10px;padding:0 16px 6px;font-size:11px;color:var(--muted);font-family:"IBM Plex Mono",monospace;letter-spacing:.05em;text-transform:uppercase}
 .thead .num{text-align:right}
-@media (max-width:900px){.thead{display:none}.trow{grid-template-columns:1fr 1fr;grid-auto-rows:auto}}
+@media (max-width:1040px){.thead{display:none}.trow{grid-template-columns:1fr 1fr;grid-auto-rows:auto}}
 
 /* ---------- drawer ---------- */
 .drawer-scrim{position:fixed;inset:0;background:rgba(4,6,10,.55);z-index:39;display:none}
@@ -218,7 +218,6 @@ svg .tl-lane:hover text.dlabel{fill:var(--ink)}
 
 /* ---------- coverage matrix ---------- */
 .mxwrap{overflow-x:auto;padding-bottom:4px}
-.mx{min-width:820px}
 .mxhead{display:grid;gap:6px;padding:0 12px 8px;font-size:11px;color:var(--muted);font-family:"IBM Plex Mono",monospace;letter-spacing:.05em;text-transform:uppercase;align-items:end}
 .mxhead .mxcol{display:flex;align-items:center;gap:6px;justify-content:center;text-align:center}
 .mxhead .end{text-align:right;justify-content:flex-end}
@@ -229,11 +228,6 @@ svg .tl-lane:hover text.dlabel{fill:var(--ink)}
 .mxcell.off{color:var(--muted)}
 .mxn{font-family:"IBM Plex Mono",monospace;font-size:11px;color:var(--muted);text-align:right}
 .mxsum{display:flex;gap:8px;flex-wrap:wrap;margin:0 0 12px}
-.igchip{display:inline-flex;align-items:center;justify-content:center;gap:4px;font-family:"IBM Plex Mono",monospace;font-size:10.5px;font-weight:600;border-radius:999px;border:1px dashed var(--line);color:var(--muted);padding:3px 9px;cursor:pointer;user-select:none;white-space:nowrap}
-.igchip:hover{border-color:var(--muted);color:var(--ink2)}
-.igchip.on{border:1px solid color-mix(in srgb,var(--good) 55%,var(--line));color:var(--good);background:color-mix(in srgb,var(--good) 11%,transparent)}
-.igchip.dead{cursor:default;border-style:dotted}
-.igchip.dead:hover{border-color:var(--line);color:var(--muted)}
 
 /* ---------- footprints ---------- */
 .fp-grid{display:grid;grid-template-columns:minmax(0,1.15fr) minmax(320px,1fr);gap:14px;align-items:start}
@@ -285,7 +279,7 @@ footer.foot{border-top:1px solid var(--line);margin-top:34px;padding:16px 0 26px
   <main class="wrap" id="main"></main>
   <footer class="foot"><div class="wrap" id="footNote"></div></footer>
 </div>
-<div class="tt" id="tt" role="status" aria-live="polite"></div>
+<div class="tt" id="tt" aria-hidden="true"></div>
 <div class="drawer-scrim" id="scrim"></div>
 <aside class="drawer" id="drawer" aria-label="Target detail"></aside>
 
@@ -293,6 +287,8 @@ footer.foot{border-top:1px solid var(--line);margin-top:34px;padding:16px 0 26px
 <script>
 "use strict";
 const D = JSON.parse(document.getElementById("dataset").textContent);
+/* a dataset from another engine version may lack a key: fill the gaps once, so no tab goes blank */
+for(const [k,v] of Object.entries({targets:[],sessions:[],scopes:[],events:[],health:[],reconciliation:[],warnings:[],shelves:{},calibration:{},askarRigs:{},junk:{files:0,bytes:0},totals:{},inputs:{}})) if(D[k]==null) D[k]=v;
 
 /* ---------- constants ---------- */
 /* Fixed identity order (validated palette slots); CAMS shows only the scopes
@@ -313,7 +309,12 @@ for(const s of (D.scopes||[])){
   if(!CAMORDER.some(c=>c.id===s.camera))
     CAMORDER.push({id:s.camera, short:String(s.camera).replace(/^(Seestar|Askar)\s+/,""), v:"--muted", hex:s.colour||null});
 }
-const CAMS = CAMORDER.filter(c=>D.scopes.some(s=>s.camera===c.id));
+/* a camera that only the sessions name (no scopes row) gets a place the same way */
+for(const s of (D.sessions||[])){
+  if(s && s.camera && !CAMORDER.some(c=>c.id===s.camera))
+    CAMORDER.push({id:s.camera, short:String(s.camera).replace(/^(Seestar|Askar)\s+/,""), v:"--muted", hex:null});
+}
+const CAMS = CAMORDER.filter(c=>D.scopes.some(s=>s.camera===c.id) || D.sessions.some(s=>s && s.camera===c.id));
 const CAMV = Object.fromEntries(CAMORDER.map(c=>[c.id,c.v]));
 const CAMSHORT = Object.fromEntries(CAMORDER.map(c=>[c.id,c.short]));
 CAMV["Askar (unattributed)"]="--muted"; CAMSHORT["Askar (unattributed)"]="Askar, rig unrecorded";
@@ -355,26 +356,27 @@ const STAGES = [
   {id:"quarantined", label:"Quarantined",  v:"--st-quarantined"},
 ];
 const STAGE = Object.fromEntries(STAGES.map(s=>[s.id,s]));
+const stageOf=id=>STAGE[id]||STAGE.captured;
 const css = v => getComputedStyle(document.documentElement).getPropertyValue(v).trim();
 
 /* ---------- state (remembered per viewer, best-effort) ---------- */
 let mem = {};
 try { mem = JSON.parse(localStorage.getItem("aao") || "{}") || {}; } catch(e) { mem = {}; }
+if(typeof mem!=="object"||mem===null||Array.isArray(mem)) mem={};
 function remember(){ try { localStorage.setItem("aao", JSON.stringify(mem)); } catch(e){} }
 
 /* ---------- tiny DOM + format helpers ---------- */
 function el(tag, cls, text){ const n=document.createElement(tag); if(cls) n.className=cls; if(text!=null) n.textContent=text; return n; }
-function frag(...kids){ const f=document.createDocumentFragment(); kids.forEach(k=>k&&f.append(k)); return f; }
 const fmtI = n => (n==null?"?":n.toLocaleString("en-GB"));
 const fmtH = (h,dp=1) => h==null?"?":h.toLocaleString("en-GB",{minimumFractionDigits:dp,maximumFractionDigits:dp})+" h";
 const fmtGB = b => b>=1e12 ? (b/1e12).toLocaleString("en-GB",{maximumFractionDigits:2})+" TB" : b>=1e9 ? (b/1e9).toLocaleString("en-GB",{maximumFractionDigits:1})+" GB" : (b/1e6).toLocaleString("en-GB",{maximumFractionDigits:0})+" MB";
 const MONTHS=["Jan","Feb","Mar","Apr","May","Jun","Jul","Aug","Sep","Oct","Nov","Dec"];
-function fmtD(iso){ if(!iso) return "?"; const [y,m,d]=iso.split("-"); return (+d)+" "+MONTHS[+m-1]+" "+(y.slice(2)?y:y); }
-function fmtDY(iso){ if(!iso) return "?"; const [y,m,d]=iso.split("-"); return (+d)+" "+MONTHS[+m-1]+" "+y; }
+function fmtDY(iso){ if(!iso) return "?"; const [y,m,d]=String(iso).split("-"); if(!m||!d) return String(iso); return (+d)+" "+(MONTHS[+m-1]||m)+" "+y; }
+const fmtD=fmtDY;
 function svgEl(tag, attrs){ const n=document.createElementNS("http://www.w3.org/2000/svg",tag); for(const k in attrs) n.setAttribute(k,attrs[k]); return n; }
 function camDot(camId){ const d=el("span","dot"); paintSwatch(d,camId); d.title=camId; return d; }
 function stageChip(stId){
-  const s=STAGE[stId]||STAGE.captured, c=el("span","stchip");
+  const s=stageOf(stId), c=el("span","stchip");
   const d=el("span","dot"); d.style.background=s.outline?"transparent":"var("+s.v+")";
   if(s.outline) d.style.border="1.5px solid var("+s.v+")";
   c.append(d, s.label); return c;
@@ -382,28 +384,32 @@ function stageChip(stId){
 
 /* ---------- tooltip ---------- */
 const tt = document.getElementById("tt");
-function ttShow(evt, build){
-  tt.replaceChildren(); build(tt); tt.style.display="block";
+let ttOwner=null;
+function ttBuild(build, owner){ tt.replaceChildren(); build(tt); tt.style.display="block"; ttOwner=owner||null; }
+function ttPlace(evt){
   const pad=14, w=tt.offsetWidth, h=tt.offsetHeight;
   let x=evt.clientX+pad, y=evt.clientY+pad;
   if(x+w>innerWidth-8) x=evt.clientX-w-pad;
   if(y+h>innerHeight-8) y=evt.clientY-h-pad;
   tt.style.left=x+"px"; tt.style.top=y+"px";
 }
-function ttHide(){ tt.style.display="none"; }
+function ttShow(evt, build, owner){ ttBuild(build, owner); ttPlace(evt); }
+function ttHide(){ tt.style.display="none"; ttOwner=null; }
 function ttRow(parent, label, val, colorVar){
   const r=el("div","row");
   if(colorVar){ const k=el("span","lk");
-    if(CAMFILL[colorVar]) paintSwatch(k,colorVar);
+    if(CAMFILL[colorVar] || CAMORDER.some(c=>c.id===colorVar)) paintSwatch(k,colorVar);
     else k.style.background="var("+colorVar+")";
     r.append(k); }
   r.append(el("span",null,label));
   const b=el("b",null,val); r.append(b); return parent.appendChild(r);
 }
 function hoverable(node, build){
-  node.addEventListener("pointermove", e=>ttShow(e,build));
+  /* built once on enter (or focus), only moved on pointermove; rebuilt if another node owns the tooltip */
+  node.addEventListener("pointerenter", e=>ttShow(e,build,node));
+  node.addEventListener("pointermove", e=>{ if(ttOwner!==node||tt.style.display!=="block") ttShow(e,build,node); else ttPlace(e); });
   node.addEventListener("pointerleave", ttHide);
-  node.addEventListener("focus", e=>{ const r=node.getBoundingClientRect(); ttShow({clientX:r.right,clientY:r.top}, build); });
+  node.addEventListener("focus", e=>{ const r=node.getBoundingClientRect(); ttShow({clientX:r.right,clientY:r.top}, build, node); });
   node.addEventListener("blur", ttHide);
 }
 
@@ -437,8 +443,13 @@ function simpleTable(wrap, headers, rows){
 
 /* ---------- derived data ---------- */
 const TG = D.targets.slice();
-const byName = Object.fromEntries(TG.map(t=>[t.name,t]));
+const byName = {};
+for(const t of TG){
+  if(byName[t.name]){ D.health.push({severity:"warn", title:"Two targets share a display name", detail:t.name}); continue; }
+  byName[t.name]=t;
+}
 const SESS = D.sessions;
+for(const s of SESS){ s.hours=+s.hours||0; s.frames=+s.frames||0; s.filters=s.filters||{}; s.exps=s.exps||{}; s.night=String(s.night||""); }
 const totalHours = D.totals.hours;
 const camOrderIdx = Object.fromEntries(CAMS.map((c,i)=>[c.id,i]));
 
@@ -461,7 +472,7 @@ for(const s of SESS){
 /* all status cards flattened */
 const CARDS=[];
 for(const t of TG) for(const c of t.statusCards) CARDS.push(c);
-CARDS.push = undefined;
+Object.freeze(CARDS);
 
 /* ---------- tabs ---------- */
 const VIEWS=[
@@ -488,7 +499,7 @@ tabsNav.addEventListener("keydown",e=>{
   document.getElementById("tab-"+ids[i]).focus();
 });
 let current=null;
-const painted={};
+const painted={}, failed={};
 function go(id){
   if(!RENDER[id]) id="overview";
   current=id;
@@ -498,19 +509,15 @@ function go(id){
   }
   if(!painted[id]){
     try{ RENDER[id](sections[id]); }
-    catch(e){ sections[id].replaceChildren(el("p","sub","This view couldn't be drawn ("+(e&&e.message||e)+"). The other tabs still work.")); }
+    catch(e){ failed[id]=true; sections[id].replaceChildren(el("p","sub","This view couldn't be drawn ("+(e&&e.message||e)+"). The other tabs still work.")); }
     painted[id]=true;
   }
-  mem.tab=id; remember();           /* remembered only once it drew: a view that fails never sticks */
+  if(!failed[id]){ mem.tab=id; remember(); }   /* remembered only once it drew: a view that fails never sticks */
 }
 
 /* ---------- masthead + footer ---------- */
 (function(){
   const m=document.getElementById("mastStats");
-  m.append(frag(
-    el("div",null,""), // spacing shim replaced below
-  ));
-  m.replaceChildren();
   const l1=el("div"); l1.append(el("b",null,fmtH(totalHours))); l1.append(document.createTextNode(" integration · "));
   l1.append(el("b",null,fmtI(D.totals.lights))); l1.append(document.createTextNode(" lights"));
   const inp=D.inputs||{};
@@ -548,7 +555,7 @@ function openScope(cam){
   go("overview");
   if(!SCOPECARD) return;
   paintScopeCard(cam);
-  SCOPECARD.card.scrollIntoView({block:"start",behavior:"smooth"});
+  SCOPECARD.card.scrollIntoView({block:"start",behavior:matchMedia("(prefers-reduced-motion: reduce)").matches?"auto":"smooth"});
 }
 function paintScopeCard(cam){
   const {head,sub,body}=SCOPECARD;
@@ -599,7 +606,7 @@ function paintScopeCard(cam){
   body.append(bar);
   const plot=el("div","skywrap"); plot.style.marginTop="10px"; body.append(plot);
   if(!all.length){ plot.append(el("p","sub","No sessions recorded on this scope.")); return; }
-  const end=D.asOfNight||all[all.length-1].night;
+  const end=[D.asOfNight, all[all.length-1].night].filter(Boolean).sort().pop();
   const first=all[0].night;
   const spanAll=Math.max(30, nightIdx(end,first)+1);
   const RANGES=[["90","90 nights",90],["365","a year",365],["all","all time",spanAll]];
@@ -635,10 +642,10 @@ function paintScopeCard(cam){
     const H=yL+shown.length*laneH+22;
     const svg=svgEl("svg",{viewBox:"0 0 "+W+" "+H,width:"100%",role:"img","aria-label":"Sessions on the "+cm.id+" by object, last "+N+" nights"});
     svg.style.minWidth=(N>120?760:560)+"px";
-    const quiet=D.quietPeriodDays||14;
-    const qx=X(Math.max(0,N-quiet))-dayW/2;
+    const quiet=D.quietPeriodDays||14, qn=Math.min(quiet,N);
+    const qx=X(Math.max(0,N-qn))-dayW/2;
     svg.append(svgEl("rect",{x:qx,y:yA-6,width:x1-qx,height:H-yA-10,fill:"var(--wash)",rx:3}));
-    const qt=svgEl("text",{x:x1,y:yA-28,"text-anchor":"end",class:"axis mono"}); qt.textContent="quiet period: the last "+quiet+" nights"; svg.append(qt);
+    const qt=svgEl("text",{x:x1,y:yA-28,"text-anchor":"end",class:"axis mono"}); qt.textContent="quiet period: the last "+quiet+" nights"+(quiet>N?" (wider than this view)":""); svg.append(qt);
     /* month lines and labels */
     let lastM="";
     for(let i=0;i<N;i++){
@@ -669,7 +676,8 @@ function paintScopeCard(cam){
     for(const [night,a] of [...perN.entries()].sort()){
       const i=nightIdx(night,start), bw=Math.max(2,dayW-1.5);
       const h=Math.max(2,a.hours/maxN*(actH-6));
-      const r=svgEl("rect",{x:X(i)-bw/2,y:yA+actH-h,width:bw,height:h,rx:1,class:"tl-dot",tabindex:"0"});
+      const r=svgEl("rect",{x:X(i)-bw/2,y:yA+actH-h,width:bw,height:h,rx:1,class:"tl-dot",tabindex:"0",role:"img",
+        "aria-label":fmtDY(night)+" · "+(CAMSHORT[cam]||cam)+" · "+(a.hours>0?fmtH(a.hours,2):fmtI(a.frames)+" frames")});
       r.style.animationDelay=(di++*6)+"ms";
       svgCamFill(r,cam);
       hoverable(r,box=>{
@@ -700,7 +708,8 @@ function paintScopeCard(cam){
       }
       for(const s of ln.ss){
         const i=nightIdx(s.night,start);
-        const c=svgEl("circle",{cx:X(i),cy:mid,r:rOf(s.hours),class:"tl-dot",tabindex:"0"});
+        const c=svgEl("circle",{cx:X(i),cy:mid,r:rOf(s.hours),class:"tl-dot",tabindex:"0",role:"img",
+          "aria-label":s.target+" · "+(CAMSHORT[cam]||cam)+" · "+(s.hours>0?fmtH(s.hours,2):fmtI(s.frames)+" frames")+" · "+fmtDY(s.night)});
         c.style.animationDelay=Math.round(i/N*420)+"ms";
         svgCamFill(c,cam);
         if(!(s.hours>0)){ c.setAttribute("fill","none"); c.setAttribute("stroke",camFillOf(cam).hex||"var("+(camFillOf(cam).v||"--muted")+")"); c.setAttribute("stroke-width","1.5"); }
@@ -715,7 +724,7 @@ function paintScopeCard(cam){
       }
       /* the dataset's state, at the right */
       if(cd){
-        const stg=STAGE[cd.state]||STAGE.captured;
+        const stg=stageOf(cd.state);
         const dot=svgEl("circle",{cx:x1+4,cy:mid,r:4,fill:stg.outline?"none":"var("+stg.v+")"});
         if(stg.outline) { dot.setAttribute("stroke","var("+stg.v+")"); dot.setAttribute("stroke-width","1.5"); }
         const ti=svgEl("title"); ti.textContent=stg.label+(cd.readyOn&&cd.state==="captured"?" · ready from "+fmtDY(cd.readyOn):"")+(cd.evidence?" · "+cd.evidence:""); dot.append(ti);
@@ -878,7 +887,7 @@ RENDER.overview = function(root){
         const r=svgEl("rect",{x:x,y:y,width:w,height:bw,rx:3});
         svgCamFill(r,cam.id);
         svg.append(r);
-        hoverable(r,box=>{ box.append(el("div","tt-t",cam.id)); ttRow(box,"integration",fmtH(s.hours),cam.id); ttRow(box,"share",Math.round(s.hours/total*100)+"%"); ttRow(box,"frames",fmtI(s.frames)); ttRow(box,"nights",String(s.nights)); });
+        hoverable(r,box=>{ box.append(el("div","tt-t",cam.id)); ttRow(box,"integration",fmtH(s.hours),cam.id); ttRow(box,"share",total>0?Math.round(s.hours/total*100)+"%":"—"); ttRow(box,"frames",fmtI(s.frames)); ttRow(box,"nights",String(s.nights)); });
         if(w>90){
           const t1=svgEl("text",{x:x+8,y:y+bw+20,class:"dlabel strong"}); t1.textContent=cam.short; svg.append(t1);
           const t2=svgEl("text",{x:x+8,y:y+bw+36,class:"dlabel"}); t2.textContent=fmtH(s.hours); svg.append(t2);
@@ -907,7 +916,7 @@ RENDER.overview = function(root){
         for(const cam of CAMS){
           const h=t.camHours[cam.id]||0; if(h<=0.01) continue;
           const w=Math.max(1.5,h*scale-2);
-          const r=svgEl("rect",{x:x,y:y,width:w,height:20,rx:3,tabindex:"0"});
+          const r=svgEl("rect",{x:x,y:y,width:w,height:20,rx:3,tabindex:"0",role:"img","aria-label":t.name+" · "+cam.id+" · "+fmtH(h)});
           svgCamFill(r,cam.id);
           svg.append(r);
           hoverable(r,box=>{ box.append(el("div","tt-t",t.name)); ttRow(box,cam.id,fmtH(h),cam.id); ttRow(box,"total",fmtH(t.hours)); ttRow(box,"nights",String(t.nights)); });
@@ -1011,7 +1020,7 @@ RENDER.targets = function(root){
       const n1=el("div","num"); n1.append(el("b",null,t.hours.toFixed(1))); r.append(n1);
       r.append(el("div","num",String(t.nights)));
       r.append(el("div","num",fmtI(t.lights)));
-      r.append(el("div","num",fmtD? fmtDY(t.lastNight):t.lastNight));
+      r.append(el("div","num",fmtDY(t.lastNight)));
       r.addEventListener("click",()=>openTarget(t.name));
       list.append(r);
     }
@@ -1020,41 +1029,6 @@ RENDER.targets = function(root){
   sort.addEventListener("change",paint);
   paint();
 };
-
-/* ================= INSTAGRAM POSTED TRACKER =================
-   Shared, durable posted-per-target state via the artifact db capability.
-   Brett ticks a target when it goes on instagram.com/brettjoastro; every
-   view of this page sees the same list, it survives republishes, and a
-   session can read it back to sync AstroLog. Degrades to read-only marks
-   when the capability is absent (local preview, no grant). */
-const IG={ map:{}, ready:false, canWrite:true, busy:new Set(), db:null, listeners:new Set() };
-function igSlug(name){ return name.toLowerCase().replace(/[^a-z0-9]+/g,"-").replace(/^-+|-+$/g,"").slice(0,80); }
-function igPing(){ IG.listeners.forEach(f=>{ try{ f(); }catch(e){} }); }
-(function(){
-  if(!(window.claude && window.claude.use)){ IG.ready=null; return; }
-  window.claude.use("db").then(db=>{
-    if(!db){ IG.ready=null; igPing(); return; }
-    IG.db=db;
-    db.collection("published").onSnapshot(snap=>{
-      const m={};
-      for(const d of snap.docs){ const b=d.data(); if(b && b.posted) m[b.target||d.id]={ at:b.at||null }; }
-      IG.map=m; IG.ready=true; igPing();
-    }, err=>{ IG.ready=null; igPing(); });
-  }).catch(()=>{ IG.ready=null; igPing(); });
-})();
-async function igToggle(name){
-  if(!IG.db || !IG.canWrite || IG.busy.has(name)) return;
-  IG.busy.add(name); igPing();
-  const ref=IG.db.doc("published/"+igSlug(name));
-  try{
-    if(IG.map[name]) await ref.delete();
-    else await ref.set({ target:name, posted:true, at:new Date().toISOString().slice(0,10) });
-  }catch(e){
-    if(e && e.code==="invalid_argument") IG.canWrite=false;
-  }finally{
-    IG.busy.delete(name); igPing();
-  }
-}
 
 /* ================= COVERAGE MATRIX =================
    One glance answers: have I shot this target with this scope?
@@ -1081,7 +1055,6 @@ RENDER.coverage = function(root){
     const ch=el("span","chip"); ch.append(camDot(cm.id), CAMSHORT[cm.id]+" "+n+" of "+TG.length);
     summ.append(ch);
   }
-  const igSumm=el("span","chip");
   root.append(summ);
 
   const tb=el("div","toolbar");
@@ -1090,17 +1063,6 @@ RENDER.coverage = function(root){
   const gaps=el("button","tbtn","gaps only"); gaps.setAttribute("aria-pressed","false");
   gaps.addEventListener("click",()=>{ const on=gaps.getAttribute("aria-pressed")!=="true"; gaps.setAttribute("aria-pressed",String(on)); paint(); });
   tb.append(gaps);
-  let igFilter="";
-  const igOn=el("button","tbtn","posted"), igOff=el("button","tbtn","not posted");
-  igOn.setAttribute("aria-pressed","false"); igOff.setAttribute("aria-pressed","false");
-  function setIgFilter(v){
-    igFilter = igFilter===v ? "" : v;
-    igOn.setAttribute("aria-pressed",String(igFilter==="on"));
-    igOff.setAttribute("aria-pressed",String(igFilter==="off"));
-    paint();
-  }
-  igOn.addEventListener("click",()=>setIgFilter("on"));
-  igOff.addEventListener("click",()=>setIgFilter("off"));
   const sort=el("select"); sort.setAttribute("aria-label","Sort coverage matrix");
   [["name","Sort: name"],["hours","Sort: hours"],["most","Sort: most scopes"],["fewest","Sort: fewest scopes"],["last","Sort: most recent"]].forEach(([v,l])=>{const o=el("option",null,l);o.value=v;sort.append(o);});
   tb.append(sort);
@@ -1108,6 +1070,7 @@ RENDER.coverage = function(root){
   root.append(tb);
 
   const wrap=el("div","mxwrap"), mx=el("div","mx");
+  mx.style.minWidth=(210+cols.length*92+56+(cols.length+2)*6+24)+"px";
   const head=el("div","mxhead"); head.style.gridTemplateColumns=gridCols;
   head.append(el("span",null,"Target"));
   for(const cm of cols){ const c=el("span","mxcol"); c.append(camDot(cm.id), CAMSHORT[cm.id]); head.append(c); }
@@ -1144,8 +1107,8 @@ RENDER.coverage = function(root){
         const a=m[cm.id];
         const cell=el("span","mxcell"+(a?"":" off"));
         if(a){
-          const f=CAMFILL[cm.id]||{v:"--muted"};
-          cell.style.background="color-mix(in srgb, var("+f.v+") 14%, transparent)";
+          const f=camFillOf(cm.id);
+          cell.style.background="color-mix(in srgb, "+(f.hex?f.hex:"var("+f.v+")")+" 14%, transparent)";
           const d=el("span","dot"); paintSwatch(d,cm.id); cell.append(d);
           const label=a.hours>0 ? (a.hours>=100?Math.round(a.hours)+" h":a.hours.toFixed(1)+" h") : (a.frames>0 ? fmtI(a.frames)+" fr" : "stacks");
           cell.append(el("b",null,label));
@@ -1181,22 +1144,41 @@ RENDER.coverage = function(root){
 "use strict";
 /* ================= TARGET DRAWER ================= */
 const drawer=document.getElementById("drawer"), scrim=document.getElementById("scrim");
-function closeDrawer(){ drawer.classList.remove("open"); scrim.style.display="none"; ttHide(); }
+let lastFocus=null;
+function showDrawer(){
+  if(!drawer.classList.contains("open")) lastFocus=document.activeElement;
+  ttHide();
+  scrim.style.display="block";
+  drawer.classList.add("open");
+  drawer.setAttribute("role","dialog"); drawer.setAttribute("aria-modal","true");
+  document.body.style.overflow="hidden";
+  drawer.scrollTop=0;
+  const c=drawer.querySelector(".close"); if(c) c.focus();
+}
+function closeDrawer(){
+  drawer.classList.remove("open"); scrim.style.display="none";
+  document.body.style.overflow=""; ttHide();
+  if(lastFocus && document.contains(lastFocus) && lastFocus.focus){ try{ lastFocus.focus(); }catch(e){} }
+  lastFocus=null;
+}
 scrim.addEventListener("click",closeDrawer);
 document.addEventListener("keydown",e=>{ if(e.key==="Escape") closeDrawer(); });
 
-/* Buttons ask the panel that frames this page; alone in a browser they can only say so */
+/* Buttons ask the panel that frames this page; alone in a browser they can only say so.
+   Messages go to, and come from, the same origin only (a file: page has none, so it never posts). */
+const SAME=(location.origin&&location.origin!=="null")?location.origin:null;
 const OPEN_SAID=new Map();
 function ask(msg){
-  if(window.parent===window){ const s=OPEN_SAID.get(msg.rel); if(s) s.textContent="Open this page from the importer's Observatory tab to use the buttons."; return; }
-  try{ window.parent.postMessage(msg, location.origin); }catch(e){}
+  if(window.parent===window || !SAME){ const s=OPEN_SAID.get(msg.rel); if(s) s.textContent="Open this page from the importer's Observatory tab to use the buttons."; return; }
+  try{ window.parent.postMessage(msg, SAME); }catch(e){}
 }
 window.addEventListener("message",e=>{
-  if(e.origin!==location.origin || e.source!==window.parent || !e.data || e.data.kind!=="archive-opened") return;
+  if(!SAME || e.origin!==SAME || e.source!==window.parent || !e.data || e.data.kind!=="archive-opened") return;
   const s=OPEN_SAID.get(e.data.rel); if(s) s.textContent=e.data.ok?"Opened.":("Couldn't open: "+(e.data.error||"see the panel"));
 });
 function openTarget(name){
   const t=byName[name]; if(!t) return;
+  OPEN_SAID.clear();
   drawer.replaceChildren();
   const close=el("button","close","Close"); close.addEventListener("click",closeDrawer); drawer.append(close);
   drawer.append(el("div","eyebrow",[t.type||"target",t.constellation,...t.codes].filter(Boolean).join(" · ")));
@@ -1238,7 +1220,8 @@ function openTarget(name){
         ts.forEach((s,i)=>{
           const x=padL+i*(bw+2);
           const h=Math.max(1.5,s.hours/maxH*Hpl);
-          const r=svgEl("rect",{x:x,y:padT+Hpl-h,width:bw,height:h,rx:Math.min(3,bw/3),tabindex:"0"});
+          const r=svgEl("rect",{x:x,y:padT+Hpl-h,width:bw,height:h,rx:Math.min(3,bw/3),tabindex:"0",role:"img",
+            "aria-label":fmtDY(s.night)+" · "+(CAMSHORT[s.camera]||s.camera)+" · "+(s.stackOnly?"auto-stack only":fmtH(s.hours))});
           svgCamFill(r,s.camera);
           if(s.stackOnly) r.setAttribute("opacity","0.45");
           svg.append(r);
@@ -1311,9 +1294,7 @@ function openTarget(name){
     }
     drawer.append(box);
   }
-  scrim.style.display="block";
-  drawer.classList.add("open");
-  drawer.scrollTop=0;
+  showDrawer();
 }
 /* what calibration a session has: null = the Seestar's own (none of ours needed) */
 function calText(c){
@@ -1405,14 +1386,18 @@ RENDER.nights = function(root){
     for(let i=0;i<bins.length;i++) if(v<=bins[i]) return "--heat"+(i+1);
     return "--heat5";
   }
+  const yearNow=new Date().getFullYear();
+  const plausible=n=>{ const y=+String(n).slice(0,4); return y>=2015 && y<=yearNow+1; };
   function paint(){
     holder.replaceChildren();
-    const years=[...new Set([...nightly.keys()].map(n=>+n.slice(0,4)))].sort(); if(!years.length) years.push(new Date().getFullYear());
+    const years=[...new Set([...nightly.keys()].filter(plausible).map(n=>+n.slice(0,4)))].sort(); if(!years.length) years.push(yearNow);
     const cell=12, gap=2.5, step=cell+gap;
     let totalNights=0, totalH=0, best=null, streak=0, bestStreak=0, prev=null, gapBest=0, gapPrev=null;
     const monthAgg={};
     const active=[];
+    const oddSess=SESS.filter(s=>!plausible(s.night) && (!camSel.size||camSel.has(s.camera))).length;
     for(const [night,recN] of [...nightly.entries()].sort()){
+      if(!plausible(night)) continue;
       const {h,f,v}=valOf(recN);
       if(v>0){ active.push(night); totalNights++; totalH+=h;
         if(!best||h>best.h) best={night,h,f};
@@ -1460,7 +1445,8 @@ RENDER.nights = function(root){
           const r=svgEl("rect",{x:34+w*step,y:14+dow*step,width:cell,height:cell,rx:2.5,fill:"var("+binVar(res.v)+")"});
           if(res.v<=0) r.setAttribute("stroke","var(--grid)");
           if(recN&&res.v>0){
-            r.setAttribute("tabindex","0"); r.style.cursor="pointer";
+            r.setAttribute("tabindex","0"); r.style.cursor="pointer"; r.setAttribute("role","img");
+            r.setAttribute("aria-label",fmtDY(iso)+" · "+res.h.toFixed(2)+" h · "+fmtI(res.f)+" frames");
             hoverable(r,box=>{
               box.append(el("div","tt-t",fmtDY(iso)));
               ttRow(box,"hours",res.h.toFixed(2)); ttRow(box,"frames",fmtI(res.f));
@@ -1485,6 +1471,7 @@ RENDER.nights = function(root){
     s6("longest run",bestStreak+" nights in a row");
     s6("longest dry spell",Math.round(gapBest)+" nights");
     if(bestMonth) s6("busiest month",fmtMonth(bestMonth[0])+" ("+bestMonth[1].toFixed(0)+" h)");
+    if(oddSess){ const s8=el("span"); s8.append(el("b",null,String(oddSess)), " session"+(oddSess===1?"":"s")+" with an implausible night left out"); stx.append(s8); }
     card.append(stx);
     holder.append(card);
   }
@@ -1518,7 +1505,7 @@ RENDER.sky = function(root){
     svg.append(svgEl("line",{x1:padL,x2:padL+plotW,y1:y,y2:y,class:"gridline"}));
     const t=svgEl("text",{x:padL-7,y:y+3.5,"text-anchor":"end",class:"axis mono"}); t.textContent=(dec>0?"+":"")+dec+"°"; svg.append(t);
   }
-  const pts=TG.filter(t=>t.ra!=null).map(t=>({t,ra:t.ra,dec:t.dec,h:t.hours,state:t.state,name:t.name}));
+  const pts=TG.filter(t=>t.ra!=null && t.dec!=null).map(t=>({t,ra:t.ra,dec:t.dec,h:t.hours,state:t.state,name:t.name}));
   pts.sort((a,b)=>b.h-a.h);
   const R=h=>Math.min(24, 3.2+Math.sqrt(Math.max(h,0.05))*2.15);
   const labelSet=new Set(pts.slice(0,9).map(p=>p.name));
@@ -1533,13 +1520,13 @@ RENDER.sky = function(root){
       : p.state==="captured" ? "--st-captured" : "--muted";
     const c=svgEl("circle",{cx:cx,cy:cy,r:r,fill:isTodo?"transparent":"var("+fillVar+")",
       stroke:isTodo?"var(--st-todo)":"var(--card)","stroke-width":isTodo?"1.6":"2",
-      opacity:isDone?"0.5":"0.92",tabindex:"0"});
+      opacity:isDone?"0.5":"0.92",tabindex:"0",role:"img","aria-label":p.name+" · "+fmtH(p.h)+" · "+stageOf(p.state).label});
     c.style.cursor=p.t?"pointer":"default";
     hoverable(c,box=>{
       box.append(el("div","tt-t",p.name));
       if(p.t){ ttRow(box,"integration",fmtH(p.t.hours)); ttRow(box,"nights",String(p.t.nights));
         ttRow(box,"scopes",p.t.cameras.map(x=>CAMSHORT[x]||x).join(", "));
-        ttRow(box,"state",STAGE[p.state].label);
+        ttRow(box,"state",stageOf(p.state).label);
         if(p.t.type) ttRow(box,"type",p.t.type+(p.t.constellation?" · "+p.t.constellation:""));
       } else { ttRow(box,"state","quarantined, awaiting identification"); ttRow(box,"integration","about 4 h"); }
     });
@@ -1550,7 +1537,8 @@ RENDER.sky = function(root){
   /* collision-aware labels, drawn after every dot */
   const placedL=pts.filter(q=>R(q.h)>=9).map(q=>({x:X(q.ra)-R(q.h),y:Y(q.dec)-R(q.h),w:2*R(q.h),h:2*R(q.h),dot:true}));
   for(const job of labelJobs){
-    const name=job.p.name.replace(" (unidentified)","");
+    const full=job.p.name.replace(" (unidentified)","");
+    const name=full.length>28?full.slice(0,27)+"…":full;
     const w=name.length*6.6, h=13;
     const cands=[[job.cx-w/2,job.cy-job.r-17],[job.cx-w/2,job.cy+job.r+5],[job.cx+job.r+7,job.cy-h/2],[job.cx-job.r-7-w,job.cy-h/2]];
     for(const [lx,ly] of cands){
@@ -1558,7 +1546,9 @@ RENDER.sky = function(root){
       if(placedL.some(q=>!(lx+w<q.x||q.x+q.w<lx||ly+h<q.y||q.y+q.h<ly))) continue;
       placedL.push({x:lx,y:ly,w:w,h:h});
       const lab=svgEl("text",{x:lx,y:ly+10,class:"dlabel"});
-      lab.textContent=name; svg.append(lab);
+      lab.textContent=name;
+      if(name!==full){ const ti=svgEl("title"); ti.textContent=full; lab.append(ti); }
+      svg.append(lab);
       break;
     }
   }
@@ -1579,7 +1569,7 @@ RENDER.sky = function(root){
   root.append(chartCard("Coverage list","the same map as a list, north to south",
     c=>{ const t2=el("div","sub"); t2.textContent="Use the table view button."; c.append(t2); },
     w=>simpleTable(w,["Target","RA","Dec","Constellation","Hours","State"],
-      pts.filter(p=>p.t).sort((a,b)=>b.dec-a.dec).map(p=>[p.name, p.ra.toFixed(2)+"h",(p.dec>0?"+":"")+p.dec.toFixed(1)+"°",p.t.constellation||"·",p.t.hours.toFixed(1),STAGE[p.state].label]))
+      pts.filter(p=>p.t).sort((a,b)=>b.dec-a.dec).map(p=>[p.name, p.ra.toFixed(2)+"h",(p.dec>0?"+":"")+p.dec.toFixed(1)+"°",p.t.constellation||"·",p.t.hours.toFixed(1),stageOf(p.state).label]))
   ));
 };
 
@@ -1661,6 +1651,7 @@ RENDER.equipment = function(root){
   const monthsAll=[...byMonth.keys()].sort();
   root.append(chartCard("The rhythm of the hobby","integration hours per calendar month, stacked by scope",
     c=>{
+      if(!monthsAll.length){ c.append(el("p","sub","Not enough months yet.")); return; }
       const W=1000,padL2=44,padR2=12,padT2=14,padB2=40;
       const plotW2=W-padL2-padR2, Hpl=210, Hv=Hpl+padT2+padB2;
       const svg=svgEl("svg",{viewBox:"0 0 "+W+" "+Hv,width:"100%",role:"img","aria-label":"Hours per month by scope"});
@@ -1680,7 +1671,7 @@ RENDER.equipment = function(root){
           const h=rec2[cm.id]||0; if(h<=0.02) continue;
           const hh=Math.max(1.5,h/maxM*Hpl-2);
           y-=hh;
-          const r=svgEl("rect",{x:x,y:y,width:colW,height:hh,rx:2.5,tabindex:"0"});
+          const r=svgEl("rect",{x:x,y:y,width:colW,height:hh,rx:2.5,tabindex:"0",role:"img","aria-label":fmtMonth(m)+" · "+cm.short+" · "+h.toFixed(1)+" h"});
           svgCamFill(r,cm.id);
           hoverable(r,box=>{
             box.append(el("div","tt-t",fmtMonth(m)));
@@ -1709,6 +1700,7 @@ RENDER.equipment = function(root){
   const expKeys=Object.keys(expAgg).map(Number).sort((a,b)=>a-b);
   root.append(chartCard("Exposure lengths","light frames per exposure time, all scopes",
     c=>{
+      if(!expKeys.length){ c.append(el("p","sub","No exposure lengths recorded.")); return; }
       const W=1000,padL2=52,padT2=14,padB2=34,Hpl=170,Hv=Hpl+padT2+padB2;
       const svg=svgEl("svg",{viewBox:"0 0 "+W+" "+Hv,width:"100%",role:"img","aria-label":"Frames per exposure length"});
       const maxV=Math.max(...expKeys.map(k=>expAgg[k]));
@@ -1722,7 +1714,7 @@ RENDER.equipment = function(root){
       expKeys.forEach((k,i)=>{
         const v=expAgg[k], x=padL2+(i+0.5)*slot-colW/2;
         const hh=Math.max(1.5,v/maxV*Hpl);
-        const r=svgEl("rect",{x:x,y:padT2+Hpl-hh,width:colW,height:hh,rx:3,fill:"var(--heat3)",tabindex:"0"});
+        const r=svgEl("rect",{x:x,y:padT2+Hpl-hh,width:colW,height:hh,rx:3,fill:"var(--heat3)",tabindex:"0",role:"img","aria-label":k+" s subs · "+fmtI(v)+" frames"});
         hoverable(r,box=>{ box.append(el("div","tt-t",k+" second subs")); ttRow(box,"frames",fmtI(v)); ttRow(box,"integration",(v*k/3600).toFixed(1)+" h"); });
         svg.append(r);
         const t5=svgEl("text",{x:x+colW/2,y:padT2+Hpl+18,"text-anchor":"middle",class:"axis mono"}); t5.textContent=k+"s"; svg.append(t5);
@@ -1774,7 +1766,7 @@ function fpProgrammes(t){
   return [...m.values()].sort((a,b)=>b.hours-a.hours);
 }
 RENDER.footprints = function(root){
-  const placed=TG.filter(t=>t.ra!=null && fpProgrammes(t).length).sort((a,b)=>b.hours-a.hours);
+  const placed=TG.filter(t=>t.ra!=null && t.dec!=null && fpProgrammes(t).length).sort((a,b)=>b.hours-a.hours);
   if(!placed.length){ root.append(el("p","sub","No footprints to draw yet: none of the imaged targets has a sky position in contract/targets.json (add ra and dec to an entry to place it).")); return; }
   let cur = placed.find(t=>t.name===mem.fpTarget) || placed[0];
   let tonight = null;
@@ -1807,7 +1799,8 @@ RENDER.footprints = function(root){
         const f=FOV[p.scope], m=p.mosaic?2:1;
         const w=Math.max(f[0]*m*degX*EXAG,6), h=Math.max(f[1]*m*degY*EXAG,4);
         const r=svgEl("rect",{x:X(t.ra)-w/2,y:Y(t.dec)-h/2,width:w,height:h,rx:1.5,
-          "fill-opacity":Math.min(.14+p.nights*.04,.6),"stroke-width":"1.2","stroke-dasharray":p.mosaic?"4 2.5":"none",style:"cursor:pointer",tabindex:"0",role:"button"});
+          "fill-opacity":Math.min(.14+p.nights*.04,.6),"stroke-width":"1.2","stroke-dasharray":p.mosaic?"4 2.5":"none",style:"cursor:pointer",tabindex:"0",role:"button",
+          "aria-label":t.name+" · "+(CAMSHORT[p.scope]||p.scope)+(p.mosaic?" mosaic":"")+" · "+fmtH(p.hours)});
         svgCamFill(r,p.scope); r.setAttribute("stroke","var("+CAMV[p.scope]+")");
         hoverable(r,()=>{ tt.replaceChildren(); tt.append(el("div","tt-t",t.name));
           ttRow(tt,(CAMSHORT[p.scope]||p.scope)+(p.mosaic?" mosaic":""),fmtH(p.hours)+" · "+p.nights+" night"+(p.nights===1?"":"s"),CAMV[p.scope]); });
@@ -1958,7 +1951,7 @@ RENDER.health = function(root){
 
 /* ================= INIT ================= */
 go((mem.tab && RENDER[mem.tab]) ? mem.tab : "overview");
-try{ if(window.parent!==window) window.parent.postMessage({kind:"observatory-ready", generatedAt:D.generatedAt, servedFrom:D.servedFrom||null, warnings:WARN_N}, location.origin); }catch(e){}
+try{ if(SAME && window.parent!==window) window.parent.postMessage({kind:"observatory-ready", generatedAt:D.generatedAt, servedFrom:D.servedFrom||null, warnings:WARN_N}, SAME); }catch(e){}
 </script>
 
 </body></html>

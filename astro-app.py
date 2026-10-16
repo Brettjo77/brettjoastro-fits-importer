@@ -20,6 +20,7 @@ import contextlib
 import io
 import hashlib
 import importlib.util
+import inspect
 import json
 import os
 import re
@@ -137,8 +138,31 @@ class App:
         els = t.get("elsewhere") or []
         return {"elsewhere": len(els), "elsewhereBytes": t.get("elsewhere_bytes") or 0,
                 "elsewhereArchived": t.get("elsewhere_archived") or 0,
-                "elsewhereMachine": t.get("elsewhere_machine"),
+                "elsewhereMachine": App._other_name(t.get("elsewhere_machine")),
+                # frames of this row this computer's own ledger holds (ASIAir rows,
+                # engines that say it); None from an older engine
+                "importedHere": t.get("imported_here"),
                 "otherSkip": bool(t.get("other_skip"))}
+
+    @staticmethod
+    def _other_name(name):
+        """The other computer's name as the engine's record gives it, or the
+        side's name (PC / Mac) when the record doesn't say (1.7.1 review)."""
+        if isinstance(name, str) and name and name != "the other computer":
+            return name
+        return App._sides()["there"]
+
+    @staticmethod
+    def _other_all(t, unproven):
+        """Every file this computer can't prove is one the other computer
+        verified (1.7.1): judged by names, where the SAFE gate's list is."""
+        els = {f.get("filename") for f in (t.get("elsewhere") or [])}
+        if not els or t.get("new") or t.get("new_stacks") or t.get("new_jpgs"):
+            return False
+        names = unproven if isinstance(unproven, (list, set, tuple)) else None
+        if names is None:
+            return True
+        return all(os.path.basename(str(u)) in els for u in names)
 
     @staticmethod
     def _sides():
@@ -184,6 +208,10 @@ class App:
         if need_camera and not self._camera_ok():
             return False
         if not self.oplock.acquire(blocking=False):
+            # the answer says why (and the banner, next poll), instead of a
+            # silent False that left the button looking pressed (1.7.1 review)
+            self.last_result = (f"The importer is busy ({self.status}); try again when it "
+                                f"has finished.")
             return False
         # status flips BEFORE the request returns, so a poll right after
         # "started" can never read the previous op's idle (T6)
@@ -253,10 +281,15 @@ class App:
             finally:
                 if got_lock:
                     eng.release_lock()
+                # no question can reach a card once the operation is over: the
+                # engine falls back to its safe defaults (1.7.1 review)
+                eng.PROMPT_FN = None
+                eng.EVENT_FN = None
                 self.phase = None
                 self.status = "idle"
                 self.oplock.release()
                 STATUS.refresh()          # the status line, after every operation (U9)
+                DASH.refresh()            # ...and the Dashboard, when the ledger changed
         threading.Thread(target=work, daemon=True).start()
         return True
 
@@ -314,6 +347,10 @@ class App:
                     self.logline(f"⚠ pairing preview failed: {e}")
                 for t in scan["targets"]:
                     targets.append({
+                        "otherAll": bool(t.get("elsewhere")) and not t["new"]
+                                    and len(t["elsewhere"]) >= len(t["files"]) - sum(
+                                        1 for f in t["files"] if state.has_ledger()
+                                        and state.is_imported(f["relpath"], f["size"]) == "yes"),
                         "name": t["name"], "device": "asiair",
                         "display": eng.display_name_for(state, t["name"]),
                         "source": t["source_label"], "skipped": t["skipped"],
@@ -331,6 +368,7 @@ class App:
             if s:
                 scope_s = s["camera"].replace("ZWO ", "")
                 groups = {g["id"]: g for g in eng.seestar_groups(state, s)}
+                _unp = {}            # the SAFE gate's unproven names per group (1.7.1, otherAll)
 
                 def safety(gid):
                     """The pill must say what the SAFE gate says, not what
@@ -347,6 +385,7 @@ class App:
                     except Exception as ex:
                         self.logline(f"⚠ SAFE check failed for {g['display']}: {ex}")
                         return "notsafe", 0
+                    _unp[gid] = list(unproven)
                     return ("safe" if not unproven else "notsafe"), len(unproven)
 
                 for t in s["targets"]:
@@ -371,6 +410,7 @@ class App:
                             self.logline(f"⚠ could not describe {t['name']}: {ex}")
                     st, nun = safety(t["sub_name"])
                     targets.append({
+                        "otherAll": self._other_all(t, _unp.get(t["sub_name"])),
                         "name": t["name"], "device": "seestar", "kind": "target",
                         "display": eng.seestar_display(state, t["project_name"]),
                         "source": "", "skipped": t["skipped"],
@@ -394,6 +434,7 @@ class App:
                 for p in s["panel_sets"]:
                     st, nun = safety(p["pt_name"])
                     targets.append({
+                        "otherAll": self._other_all(p, _unp.get(p["pt_name"])),
                         "name": p["mosaic_name"].split("_mosaic")[0],
                         "device": "seestar", "kind": "panels",
                         "display": eng.seestar_display(state, p["mosaic_name"]) + " (panels)",
@@ -414,6 +455,7 @@ class App:
                     # rows now — no more invisible riders on an import
                     st, nun = safety(nd["src_name"])
                     targets.append({
+                        "otherAll": self._other_all(nd, _unp.get(nd["src_name"])),
                         "name": nd["dest_name"], "device": "seestar", "kind": "mode",
                         "display": f"{nd['dest_name']} — "
                                    f"{nd['src_name'].replace('_', ' ')}",
@@ -476,19 +518,34 @@ class App:
                         self.labels[t[k]] = t["display"]
             self.scanned_at = time.strftime("%H:%M:%S")
             o = self.scan["other"]
+            who = self._other_name((o or {}).get("machine"))
             self.logline(f"▸ Scan: {self.scan['newTargets']} target(s) with new frames, "
                          f"{self.scan['newFiles']} files"
-                         + (f" · {self.scan['elsewhereFiles']} already backed up by the {o['machine']}"
+                         + (f" · {self.scan['elsewhereFiles']} already backed up by the {who}"
                             if self.scan["elsewhereFiles"] else "")
                          + (f" (its record from {str(o.get('at') or '')[:10]}"
                             f"{', ' + str(int(o['ageHours'] // 24)) + ' day(s) old' if o.get('stale') and o.get('ageHours') else ''})"
                             if o else ""))
+            if o is None and not getattr(self, "_no_record_said", False):
+                # once per panel run: without the other computer's record, its
+                # imports look new here (1.7.1 review)
+                self._no_record_said = True
+                self.logline(f"▸ The {who}'s record isn't on the archive (or the archive isn't "
+                             f"reachable), so anything the {who} imported shows as new here.")
         return self._run("scanning", fn)
 
     def do_import(self, names, cal_decisions=None):
         t0 = time.time()
 
         def fn():
+            try:
+                body()
+            finally:
+                # fresh counts after ANY import, a failed one too: the old
+                # counts and a live Import button never outlive it (1.7.1 review)
+                self.scan = None
+
+        def body():
             state = self._state_to_write()
             if state is None:
                 return
@@ -511,7 +568,8 @@ class App:
                 o = (self.scan or {}).get("other")
                 if o:
                     self.logline(f"▸ First import on this {eng.MACHINE_LABEL}: starting a new ledger. "
-                                 f"The {o['machine']}'s record from {str(o.get('at') or '')[:10]} says "
+                                 f"The {self._other_name(o.get('machine'))}'s record from "
+                                 f"{str(o.get('at') or '')[:10]} says "
                                  f"what it already holds; the rest counts as new.")
                 else:
                     self.logline("▸ First import: starting a new ledger — everything "
@@ -549,16 +607,9 @@ class App:
             # then straight into the archive when the share is already up,
             # as a Terminal import does (1.7.0); quiet when it isn't, and
             # never asks Finder to connect from here
-            eng.ship_after_import(state, mount_share=False)
-            try:
-                filed, _why = eng.archive_check(eng.ARCHIVE_MOUNT, write_test=False)
-            except Exception:
-                filed = False
+            shipped = eng.ship_after_import(state, mount_share=False)
             self.last_result = (f"Imported {total_f} frame(s) across {total_t} target(s)"
-                                + (f", filed into the archive ({eng.ARCHIVE_LABEL})."
-                                   if filed else
-                                   ". The archive isn't reachable from here right now; the scheduled "
-                                   "ship files them later."))
+                                + self._ship_words(shipped))
             dur = int(time.time() - t0)
             self.last_done = {
                 "op": "import", "targets": total_t, "frames": total_f,
@@ -569,8 +620,29 @@ class App:
                 eng.notify(f"{total_f} frame(s) imported and verified across "
                            f"{total_t} target(s).", "FITS Importer — import complete",
                            sound=True)
-            self.scan = None  # force rescan for fresh counts
         return self._run("importing", fn)
+
+    @staticmethod
+    def _ship_words(shipped):
+        """How the import banner ends, from the ship's REAL result (1.7.1
+        review). An engine that reports it (SHIP_AFTER_IMPORT_REPORTS) says
+        finished / didn't finish / unreachable / failed; an older one returns
+        nothing, and the archive's reachability is the best that can be said."""
+        later = " the scheduled ship files them later."
+        filed = f", filed into the archive ({eng.ARCHIVE_LABEL})."
+        if getattr(eng, "SHIP_AFTER_IMPORT_REPORTS", False):
+            if shipped is True:
+                return filed
+            if shipped is False:
+                return "; the ship to the archive didn't finish — see the log;" + later
+            if shipped is None:
+                return ". The archive isn't reachable from here right now;" + later
+            return "; the ship to the archive failed — see the log;" + later
+        try:
+            ok, _why = eng.archive_check(eng.ARCHIVE_MOUNT, write_test=False)
+        except Exception:
+            ok = False
+        return filed if ok else ". The archive isn't reachable from here right now;" + later
 
     def do_report(self):
         def fn():
@@ -586,6 +658,7 @@ class App:
             except OSError:
                 pass
             self.report_text = text
+            self.report_at = time.time()
             self.last_result = "Report refreshed."
         return self._run("reporting", fn, need_camera=False)
 
@@ -691,13 +764,14 @@ class App:
         eng.refresh_camera_volumes()          # Windows: drive letters come and go
         with self.loglock:
             tail = list(self.log)[-250:]
+        asiair = os.path.isdir(eng.ASIAIR_VOLUME)
+        svol = eng.seestar_volume()           # once per poll: it walks the volumes (1.7.1 review)
         return {
             "version": APP_VERSION,
             "status": self.status,
             "phase": self.phase,
-            "cameraPresent": os.path.isdir(eng.ASIAIR_VOLUME) or bool(eng.seestar_volume()),
-            "devices": (["ASIAir"] if os.path.isdir(eng.ASIAIR_VOLUME) else [])
-                       + (["Seestar"] if eng.seestar_volume() else []),
+            "cameraPresent": asiair or bool(svol),
+            "devices": (["ASIAir"] if asiair else []) + (["Seestar"] if svol else []),
             "scan": self.scan,
             "scannedAt": self.scanned_at,
             "question": self.question,
@@ -705,6 +779,9 @@ class App:
             "lastResult": self.last_result,
             "lastDone": self.last_done,
             "hasReport": self.report_text is not None,
+            "reportAt": getattr(self, "report_at", None),
+            # when the Dashboard was last built (the page reloads its frame on a change)
+            "dashboardAt": DASH.at,
             # "status" above is the operation; this is the status line (U9)
             "statusSummary": STATUS.value,
             "sides": self._sides(),
@@ -806,6 +883,132 @@ class SafeStatus:
 STATUS = SafeStatus()
 
 
+class DashboardCache:
+    """The Dashboard tab's page (1.7.1 review): built by one thread, never on
+    a request thread per click (it loads the whole ledger). Like SafeStatus:
+    worked out at start and whenever ledger.json or the other computer's
+    snapshot changes (mtime, size), looking straight after each operation and
+    never during one; /dashboard serves the file it last wrote, and /api/state
+    says when (dashboardAt) so the page reloads the frame only then."""
+
+    poll_s = 3
+
+    def __init__(self):
+        self.result = None                    # ("file", path) | ("note", text) | ("error", text)
+        self.at = None                        # when `result` was built; None until the first
+        self.ready = threading.Event()
+        self._kick = threading.Event()
+        self._started = False
+        self._n = 0                           # builds so far
+        self._seen = None                     # the signature the last build was made from
+
+    def start(self):
+        if not self._started:
+            self._started = True
+            threading.Thread(target=self._loop, daemon=True).start()
+
+    def refresh(self):
+        self._kick.set()
+
+    def wait_fresh(self, timeout):
+        """Before serving: when the inputs changed since the last build (a
+        click right after an import), ask the worker for one and wait for it
+        a little, so the tab shows the new state; still nothing is built on
+        the request thread, and during an operation the last build is served."""
+        self.ready.wait(timeout)
+        if self.signature() == self._seen:
+            return
+        gen = self._n
+        self._kick.set()
+        end = time.time() + timeout
+        while time.time() < end and self._n == gen:
+            time.sleep(0.05)
+
+    @staticmethod
+    def signature():
+        """(ledger mtime, size, snapshot mtime, size): the two inputs."""
+        try:
+            snap = eng.other_ledger_snapshot()
+        except Exception:
+            snap = None
+        sig = []
+        for p in (os.path.join(eng.STATE_DIR, "ledger.json"), snap):
+            try:
+                st = os.stat(p)
+                sig.append((st.st_mtime_ns, st.st_size))
+            except (OSError, TypeError):
+                sig.append(None)
+        return tuple(sig)
+
+    @staticmethod
+    def build():
+        """The dashboard as the two computers' records stand: ("file", path)
+        or ("note", text). Both computers import (1.7.1): this one's rows and
+        the other's record together, the other's as its last ship left it."""
+        state = eng.State()
+        here_side, there_side = eng.ship_sides()
+        here = "PC" if here_side == "pc" else "Mac"
+        other = "PC" if there_side == "pc" else "Mac"
+        snap = eng.other_ledger_snapshot()
+        files, meta = (eng.load_ledger_snapshot(snap, []) if snap else ({}, {}))
+        own = (state.ledger or {}).get("files") or {}
+        if not files and not own:
+            return ("note", f"Nothing has been imported on this {here} yet, and the {other}'s record "
+                            f"isn't on the archive. Once either computer has imported and shipped, "
+                            f"the dashboard shows here. Meanwhile the To process tab lists what is "
+                            f"ready to process.")
+        age = meta.get("age_hours")
+        when = (meta.get("at") or "")[:10]
+        kw = {}
+        if files:
+            merged = dict(files)
+            merged.update(own)          # the same camera file on both: this computer's row
+            kw["files"] = merged
+            # this computer's calibration count, which `files` alone drops
+            # (engines that take it; an older one shows 0 as before)
+            try:
+                takes_cal = "calibration" in inspect.signature(eng.generate_dashboard).parameters
+            except (TypeError, ValueError):
+                takes_cal = False
+            if takes_cal:
+                kw["calibration"] = (state.ledger or {}).get("calibration") or {}
+            if own:
+                kw["banner"] = (f"This {here}'s imports and the {other}'s record together (the {other}'s "
+                                f"as its last ship left it on the archive on {when}"
+                                + (f", {int(age // 24)} day(s) ago" if isinstance(age, float) and age >= 24 else "")
+                                + "). Space and calibration figures are this computer's.")
+            else:
+                kw["banner"] = (f"Nothing has been imported on this {here} yet. This is the {other}'s "
+                                f"record, as its last ship left it on the archive on {when}"
+                                + (f" ({int(age // 24)} day(s) ago)" if isinstance(age, float) and age >= 24 else "")
+                                + ". Space figures are this computer's.")
+        path = eng.generate_dashboard(state, **kw)
+        if not path:
+            return ("note", "The dashboard couldn't be saved in the state folder; see the Activity log.")
+        return ("file", path)
+
+    def _loop(self):
+        seen, first = None, True
+        while True:
+            sig = self.signature()
+            if (first or sig != seen) and not APP.oplock.locked():
+                first, seen = False, sig
+                try:
+                    res = self.build()
+                except Exception as e:
+                    res = ("error", f"The dashboard couldn't be built ({e}).")
+                self.result = res
+                self._seen = sig
+                self._n += 1
+                self.at = f"{time.strftime('%H:%M:%S')}#{self._n}"
+                self.ready.set()
+            self._kick.wait(self.poll_s)
+            self._kick.clear()
+
+
+DASH = DashboardCache()
+
+
 # ═══════════════════════════════════════════════════════════════════════════
 # HTTP server
 # ═══════════════════════════════════════════════════════════════════════════
@@ -830,6 +1033,20 @@ STATUS_TIP = (f"Cleared from the camera; the only verified copy is on this "
               f"{'PC' if eng.IS_WINDOWS else 'Mac'} until the archive's sweep checks it"
               + (" (the 03:30 sweep, then the next ship)" if eng.IS_WINDOWS else ""))
 LOCAL_HOSTS = ("127.0.0.1", "localhost", "::1")
+# GET routes that build a page, read the archive or carry state: refused when
+# the browser says the request came from another site (1.7.1 review)
+COSTLY_GET = ("/dashboard", "/observatory", "/api/archive/", "/api/state", "/api/status",
+              "/api/report-text", "/report")
+
+
+def _app_bundle(path):
+    """A folder macOS would LAUNCH rather than show (1.7.1 review): named
+    *.app, or carrying Contents/Info.plist. Never opened from the panel."""
+    try:
+        name = os.path.basename(os.path.normpath(path)).lower()
+        return name.endswith(".app") or os.path.isfile(os.path.join(path, "Contents", "Info.plist"))
+    except (OSError, ValueError):
+        return True
 
 
 def _split_hostport(raw):
@@ -849,6 +1066,16 @@ def _note_page(text, title="Dashboard"):
             "<style>body{margin:0;padding:28px;font:15px/1.5 system-ui,-apple-system,sans-serif;"
             "color:#1f2937;background:#f8fafc}@media(prefers-color-scheme:dark){body{color:#e5e7eb;"
             "background:#0b1220}}p{max-width:60ch}</style></head><body><p>" + safe + "</p></body></html>")
+
+def _started(ok):
+    """The answer to a request that starts an operation: when it didn't start,
+    the reason the panel just put in its banner (busy, no camera) goes back
+    with it, so the page can say so at once (1.7.1 review)."""
+    if ok:
+        return {"started": True}
+    return {"started": False,
+            "error": APP.last_result or "The importer couldn't start that; see the Activity log."}
+
 
 class Handler(BaseHTTPRequestHandler):
     timeout = 15                              # a stalled client can't hold a thread
@@ -878,6 +1105,15 @@ class Handler(BaseHTTPRequestHandler):
             if u.scheme != "http" or ohost not in LOCAL_HOSTS or oport != PORT:
                 return False
         return True
+
+    def _cross_site_costly(self):
+        """A GET that acts or costs, sent from another site: the browser says so
+        in Sec-Fetch-Site (absent = allowed: our own page, curl, older browsers)."""
+        if (self.headers.get("Sec-Fetch-Site") or "").strip().lower() != "cross-site":
+            return False
+        p = self.path
+        return any(p == r or p.startswith(r + "?") or (r.endswith("/") and p.startswith(r))
+                   for r in COSTLY_GET)
 
     def _post_ok(self):
         """State-changing requests: JSON only (a text/plain 'simple request'
@@ -931,7 +1167,7 @@ class Handler(BaseHTTPRequestHandler):
         return data if isinstance(data, dict) else None
 
     def do_GET(self):
-        if not self._local_ok():
+        if not self._local_ok() or self._cross_site_costly():
             self._json({"error": "forbidden"}, 403)
             return
         if self.path == "/" or self.path.startswith("/index"):
@@ -947,7 +1183,8 @@ class Handler(BaseHTTPRequestHandler):
             self._json(snap)
         elif self.path == "/api/status":
             STATUS.ready.wait(5)               # just after start: the first computation
-            self._json(STATUS.value)
+            self._json(STATUS.value if STATUS.value is not None
+                       else eng.status_unknown("still working it out"))
         elif self.path == "/api/report-text":
             self._json({"text": APP.report_text or ""})
         elif self.path == "/archive" or self.path.startswith("/archive?"):
@@ -1025,51 +1262,24 @@ class Handler(BaseHTTPRequestHandler):
                 self._html(_note_page(f"The Observatory couldn't be shown ({e}).", "Observatory"), 500, frame_self=True)
         elif self.path == "/dashboard" or self.path.startswith("/dashboard?"):
             # Framable always (it lives in the panel's own Dashboard tab): a
-            # reply that forbids framing shows as "refused to connect".
-            try:
-                state = eng.State()
-                path = None
-                here_side, there_side = eng.ship_sides()
-                here = "PC" if here_side == "pc" else "Mac"
-                other = "PC" if there_side == "pc" else "Mac"
-                # both computers import (1.7.1): this one's rows and the other's
-                # record together, the other's as its last ship left it
-                snap = eng.other_ledger_snapshot()
-                files, meta = (eng.load_ledger_snapshot(snap, []) if snap else ({}, {}))
-                own = (state.ledger or {}).get("files") or {}
-                if files or own:
-                    age = meta.get("age_hours")
-                    when = (meta.get("at") or "")[:10]
-                    merged = dict(files)
-                    merged.update(own)          # the same camera file on both: this computer's row
-                    if files and own:
-                        banner = (f"This {here}'s imports and the {other}'s record together (the {other}'s "
-                                  f"as its last ship left it on the archive on {when}"
-                                  + (f", {int(age // 24)} day(s) ago" if isinstance(age, float) and age >= 24 else "")
-                                  + "). Space figures are this computer's.")
-                    elif files:
-                        banner = (f"Nothing has been imported on this {here} yet. This is the {other}'s "
-                                  f"record, as its last ship left it on the archive on {when}"
-                                  + (f" ({int(age // 24)} day(s) ago)" if isinstance(age, float) and age >= 24 else "")
-                                  + ". Space figures are this computer's.")
-                    else:
-                        banner = None
-                    path = eng.generate_dashboard(state, files=merged if files else None, banner=banner)
-                else:
-                    self._html(_note_page(
-                        f"Nothing has been imported on this {here} yet, and the {other}'s record "
-                        f"isn't on the archive. Once either computer has imported and shipped, "
-                        f"the dashboard shows here. Meanwhile the To process tab lists what is "
-                        f"ready to process."), frame_self=True)
-                    return
-                if not path:
-                    self._html(_note_page("The dashboard couldn't be saved in the state folder; "
-                                          "see the Activity log."), frame_self=True)
-                    return
-                with open(path, encoding="utf-8") as f:
-                    self._html(f.read(), frame_self=True)
-            except Exception as e:
-                self._html(_note_page(f"The dashboard couldn't be built ({e})."), 500, frame_self=True)
+            # reply that forbids framing shows as "refused to connect". Served
+            # from the file the worker last built (DashboardCache), never
+            # built here: a click costs nothing (1.7.1 review).
+            DASH.wait_fresh(5)
+            kind, what = DASH.result or (None, None)
+            if kind == "file":
+                try:
+                    with open(what, encoding="utf-8") as f:
+                        self._html(f.read(), frame_self=True)
+                except OSError as e:
+                    self._html(_note_page(f"The dashboard couldn't be read ({e})."), 500, frame_self=True)
+            elif kind == "note":
+                self._html(_note_page(what), frame_self=True)
+            elif kind == "error":
+                self._html(_note_page(what), 500, frame_self=True)
+            else:
+                self._html(_note_page("The dashboard is being worked out from your records; "
+                                      "it shows here in a moment."), frame_self=True)
         else:
             self._json({"error": "not found"}, 404)
 
@@ -1082,19 +1292,20 @@ class Handler(BaseHTTPRequestHandler):
             self._json({"error": "bad request"}, 400)
             return
         if self.path == "/api/scan":
-            self._json({"started": APP.do_scan()})
+            self._json(_started(APP.do_scan()))
         elif self.path == "/api/import":
             names = body.get("names") or []
             decisions = body.get("calDecisions") or {}
             if not isinstance(names, list) or not all(isinstance(x, str) for x in names) \
-                    or not isinstance(decisions, dict):
+                    or not isinstance(decisions, dict) \
+                    or not all(isinstance(m, dict) for m in decisions.values()):
                 self._json({"started": False, "error": "bad request"}, 400)
             elif not names:
                 self._json({"started": False, "error": "no targets selected"}, 400)
             else:
-                self._json({"started": APP.do_import(names, decisions)})
+                self._json(_started(APP.do_import(names, decisions)))
         elif self.path == "/api/report":
-            self._json({"started": APP.do_report()})
+            self._json(_started(APP.do_report()))
         elif self.path == "/api/discard":
             name, night, reason = body.get("name"), body.get("night"), body.get("reason")
             if not isinstance(name, str) or not name.strip() \
@@ -1102,22 +1313,22 @@ class Handler(BaseHTTPRequestHandler):
                     or not isinstance(reason, (str, type(None))):
                 self._json({"started": False, "error": "no target named"}, 400)
             else:
-                self._json({"started": APP.do_discard(name.strip(), night or None,
-                                                      (reason or "")[:500])})
+                self._json(_started(APP.do_discard(name.strip(), night or None,
+                                                   (reason or "")[:500])))
         elif self.path == "/api/skip":
             name, skip = body.get("name"), body.get("skip")
             if not isinstance(name, str) or not name.strip() or not isinstance(skip, bool):
                 self._json({"started": False, "error": "bad request"}, 400)
             else:
-                self._json({"started": APP.do_skip(name.strip(), skip)})
+                self._json(_started(APP.do_skip(name.strip(), skip)))
         elif self.path == "/api/clear":
             name = body.get("name")
             if not isinstance(name, str) or not name.strip():
                 self._json({"started": False, "error": "bad request"}, 400)
             else:
-                self._json({"started": APP.do_clear(name.strip())})
+                self._json(_started(APP.do_clear(name.strip())))
         elif self.path == "/api/eject":
-            self._json({"started": APP.do_eject()})
+            self._json(_started(APP.do_eject()))
         elif self.path in ("/api/archive/open", "/api/archive/siril"):
             # Astro Desk opens folders and image files inside the archive only,
             # and never runs anything it finds there (no programs or shortcuts)
@@ -1125,6 +1336,10 @@ class Handler(BaseHTTPRequestHandler):
             path = eng.archive_resolve(rel) if isinstance(rel, str) else None
             if not path or not os.path.exists(path):
                 self._json({"ok": False, "error": "not in the archive"}, 400)
+            elif os.path.isdir(path) and _app_bundle(path):
+                # a folder named *.app (or with Contents/Info.plist) is a program
+                # to macOS: "open" would run it (1.7.1 review)
+                self._json({"ok": False, "error": "that folder is an application; it isn't opened from here"}, 400)
             elif self.path == "/api/archive/siril":
                 if not os.path.isdir(path):
                     self._json({"ok": False, "error": "Siril starts in a folder"}, 400)
@@ -1149,10 +1364,18 @@ class Handler(BaseHTTPRequestHandler):
             # engine's own command, in this process; reads, writes that one
             # file. One at a time, never while an import or ship runs.
             if not APP.oplock.acquire(blocking=False):
-                self._json({"ok": False, "error": "The importer is busy with another job; try again "
+                self._json({"ok": False, "error": f"The importer is busy ({APP.status}); try again "
                             "when it has finished."}, 409)
                 return
+            APP.status = "rebuilding"       # the page shows it, and refuses nothing silently
+
+            def no_card(q):
+                # a question has no card here: the engine takes its safe default
+                APP.logline("⚠ The rebuild asked a question it can't ask here; answered with its "
+                            f"default: {str(q.get('prompt', ''))[:120]}")
+                return None
             try:
+                eng.PROMPT_FN = no_card
                 buf = io.StringIO()
                 with contextlib.redirect_stdout(buf), contextlib.redirect_stderr(buf):
                     try:
@@ -1166,7 +1389,10 @@ class Handler(BaseHTTPRequestHandler):
             except Exception as e:
                 self._json({"ok": False, "error": f"The list couldn't be rebuilt: {e}"}, 500)
             finally:
+                eng.PROMPT_FN = None
+                APP.status = "idle"
                 APP.oplock.release()
+                DASH.refresh()
         elif self.path == "/api/answer":
             qid, value = body.get("id"), body.get("value", "")
             if qid is None or not isinstance(value, (str, int, float)):
@@ -1653,12 +1879,24 @@ document.querySelectorAll(".tabs button").forEach(b=>b.addEventListener("click",
   document.querySelectorAll(".tabs button").forEach(x=>x.classList.remove("on"));
   b.classList.add("on");
   ["panel","report","dash","observatory","archive"].forEach(t=>$("#tab-"+t).style.display = b.dataset.tab===t?"":"none");
-  if(b.dataset.tab==="dash") $("#dashFrame").src="/dashboard?t="+Date.now();
+  if(b.dataset.tab==="dash" && !dashShown) showDash();
   if(b.dataset.tab==="observatory") loadObservatory();
   if(b.dataset.tab==="report") loadReport();
   if(b.dataset.tab==="archive") loadDesk();
 }));
 
+// The Dashboard is built by the importer in the background (dashboardAt in
+// /api/state says when): the frame is loaded once, and again only when that
+// changes, never per click (1.7.1 review).
+let dashShown=false, dashAt=null;
+function showDash(){ dashShown=true; $("#dashFrame").src="/dashboard?t="+Date.now(); }
+// Start an operation: when it didn't start (busy, no camera, bad request) the
+// reason goes straight into the banner instead of a button that does nothing.
+async function startOp(path, body){
+  const r=await api(path, body||{});
+  if(r && !r.started && r.error) $("#lastResult").textContent=r.error;
+  return r;
+}
 const TOKEN="__ASTRO_TOKEN__";
 const BOOT="__ASTRO_BOOT__";
 const STATUS_TIP="__STATUS_TIP__";
@@ -1695,10 +1933,12 @@ const unitFor=t=>(t.unit==="frames"||!t.unit)?(t.new===1?"frame":"frames"):t.uni
 // The third state (1.7.1): every file of this row that this computer can't
 // prove is held, verified, by the other computer. Not a proof for a clear
 // (only this ledger is), so no clear and no discard: "clear it from the Mac".
-const otherAll=t=>!!(t.elsewhere>0 && t.new===0 && (t.unproven||0)<=t.elsewhere);
+const otherAll=t=>!!(t.otherAll!=null ? t.otherAll : (t.elsewhere>0 && t.new===0 && (t.unproven||0)<=t.elsewhere));
 const otherWho=t=>t.elsewhereMachine||SIDES.there;
 function pillFor(t){
   if(t.skipped) return `<span class="bak skip">never import</span>`;
+  if(t.device!=="seestar" && (t.importedHere||0)>0 && t.elsewhere>0)   // importedHere: engines that say it
+    return `<span class="bak">backed up: ${(t.importedHere||0).toLocaleString()} on this ${esc(SIDES.here)}, ${t.elsewhere.toLocaleString()} by the ${esc(otherWho(t))} · kept on ASIAir</span>`;
   if(otherAll(t)){
     const arch=t.elsewhereArchived>=t.elsewhere;
     return `<span class="bak${arch?"":" part"}">backed up by the ${esc(otherWho(t))} · ${arch?"verified on the archive":"not yet on the archive"}${t.device==="seestar"?` · clear it from the ${esc(otherWho(t))}`:""}</span>`;
@@ -1755,15 +1995,15 @@ function bindRowActions(root){
   root.querySelectorAll(".disc").forEach(b=>b.addEventListener("click",e=>{
     e.preventDefault(); e.stopPropagation();          // never toggles the row's checkbox
     if(busy) return;
-    api("/api/discard",{name:decodeURIComponent(b.dataset.name)});
+    startOp("/api/discard",{name:decodeURIComponent(b.dataset.name)});
   }));
   root.querySelectorAll(".clr").forEach(b=>b.addEventListener("click",e=>{
     e.preventDefault(); if(busy) return;
-    api("/api/clear",{name:decodeURIComponent(b.dataset.id)});
+    startOp("/api/clear",{name:decodeURIComponent(b.dataset.id)});
   }));
   root.querySelectorAll(".unskip").forEach(b=>b.addEventListener("click",e=>{
     e.preventDefault(); if(busy) return;
-    api("/api/skip",{name:decodeURIComponent(b.dataset.name),skip:false});
+    startOp("/api/skip",{name:decodeURIComponent(b.dataset.name),skip:false});
   }));
 }
 function setEyebrow(text){ $("#scanEyebrow").firstElementChild.textContent=text; }
@@ -1773,7 +2013,7 @@ function renderTargets(scan){
       .sort((a,b)=>byNewest(a,b)||b.new-a.new);   // most recent night first
   $("#notesBox").innerHTML = notesHtml(scan);
   const recNote=scan.other?`<div class="scannote rec${scan.other.stale?" stale":""}">${scan.other.stale?"⚠ ":""}The ${esc(scan.other.machine)}'s record from ${esc(String(scan.other.at||"").slice(0,10))}${typeof scan.other.ageHours==="number"&&scan.other.ageHours>=24?` (${Math.floor(scan.other.ageHours/24)} day${Math.floor(scan.other.ageHours/24)===1?"":"s"} old)`:""} says what it already holds${scan.elsewhereFiles?`: ${scan.elsewhereFiles.toLocaleString()} file${scan.elsewhereFiles===1?"":"s"} on the camera`:""}.${scan.other.stale?` It is old: frames the ${esc(scan.other.machine)} imported since may show as new here.`:""}</div>`
-    :(scan.hasLedger?"":`<div class="scannote rec">The ${esc(SIDES.there)}'s record isn't on the archive (or the archive isn't reachable), so nothing it imported can be recognised here.</div>`);
+    :`<div class="scannote rec">The ${esc(SIDES.there)}'s record isn't on the archive (or the archive isn't reachable), so anything the ${esc(SIDES.there)} imported shows as new here.</div>`;
   $("#notesBox").innerHTML += recNote;
   if(!withNew.length){
     const notSafe=scan.targets.filter(t=>t.device==="seestar"&&!t.skipped&&t.safeState!=="safe"&&!otherAll(t)).length;
@@ -1794,6 +2034,9 @@ function renderTargets(scan){
     return;
   }
   setEyebrow(scan.hasLedger?"Targets with new frames":(scan.other?`First import on this ${SIDES.here} — new to both computers`:"First import — everything on the camera is new"));
+  // what was ticked stays ticked across a rescan; a row new to the list is
+  // ticked unless it is on the other computer's never-import list (1.7.1 review)
+  const wasTicked=new Map([...box.querySelectorAll(".sel")].map(c=>[c.dataset.name,c.checked]));
   box.innerHTML = withNew.map(t=>`
     <label class="trow">
       <input type="checkbox" class="cb sel" data-name="${encodeURIComponent(t.name)}"${t.otherSkip?"":" checked"}
@@ -1808,7 +2051,10 @@ function renderTargets(scan){
       </div>
     </label>`).join("");
   $("#invBox").innerHTML = invSection(scan);
-  box.querySelectorAll(".sel").forEach(c=>c.addEventListener("change",updateImportBtn));
+  box.querySelectorAll(".sel").forEach(c=>{
+    if(wasTicked.has(c.dataset.name)) c.checked=wasTicked.get(c.dataset.name);
+    c.addEventListener("change",updateImportBtn);
+  });
   bindRowActions(box); bindRowActions($("#invBox"));
   updateImportBtn();
 }
@@ -1836,10 +2082,19 @@ function wireKeys(card, yes, no, okToSubmit){
     else if(e.key==="Enter" && e.target.tagName==="INPUT" && okToSubmit()){ e.preventDefault(); yes.click(); }
   });
 }
+let qPrevFocus=null;
 function renderQuestion(q){
   const box=$("#qbox");
-  if(!q){ box.innerHTML=""; box.dataset.qid=""; return; }
+  if(!q){
+    if(box.dataset.qid){            // a card was up: take it down and give focus back
+      box.innerHTML=""; box.dataset.qid="";
+      const el=qPrevFocus; qPrevFocus=null;
+      if(el && el!==document.body && document.contains(el) && !el.disabled){ try{ el.focus(); }catch(e){} }
+    }
+    return;
+  }
   if(box.dataset.qid==String(q.id)) return;
+  if(!box.dataset.qid) qPrevFocus=document.activeElement;   // remember where focus was before the first card
   box.dataset.qid=q.id;
   const isText=q.kind==="text";
   if(q.kind==="typed"){
@@ -2042,6 +2297,7 @@ const fmtWhen=iso=>{ const t=new Date(String(iso||"")); if(isNaN(t)) return ""; 
 const PROJ_STATUS={ready_to_process:"To process",in_progress:"In progress",capturing:"Still capturing",done:"Done"};
 function projectsHtml(pj, opts){
   opts=opts||{};
+  if(pj&&pj.sides) SIDES=pj.sides;   // the engine's names for the two computers
   if(!pj||!pj.ok||!pj.projects){
     const cmd=pj&&pj.command?` In Terminal: <code>${esc(pj.command)}</code>, or press <strong>Refresh now</strong> below.`:"";
     return `<div class="ad-head"><button type="button" id="deskRefresh">Refresh now</button></div><p class="ad-note">${pj&&pj.why==="unreadable"
@@ -2125,7 +2381,7 @@ function renderProjects(){
   }));
   box.querySelectorAll("[data-xsel]").forEach(r=>{
     r.addEventListener("click",()=>deskOpen(r.dataset.xsel));
-    r.addEventListener("keydown",e=>{ if(e.key==="Enter"&&e.target===r) deskOpen(r.dataset.xsel); });
+    r.addEventListener("keydown",e=>{ if((e.key==="Enter"||e.key===" ")&&e.target===r){ e.preventDefault(); deskOpen(r.dataset.xsel); } });
   });
   const sel=$("#deskScope"); if(sel) sel.addEventListener("change",()=>{ deskScopeSel=sel.value; renderProjects(); });
   const rb=$("#deskRefresh"); if(rb) rb.addEventListener("click",async()=>{
@@ -2140,6 +2396,10 @@ function loadObservatory(){
   $("#obsNote").textContent="Working it out…";
   $("#obsFrame").src="/observatory?t="+Date.now();
 }
+// The frame loaded but said nothing (a note page, not the Observatory): the
+// note above it must not keep saying "Working it out…" (1.7.1 review). A
+// late observatory-ready message still overwrites this.
+$("#obsFrame").addEventListener("load",()=>{ setTimeout(()=>{ if($("#obsNote").textContent==="Working it out…") $("#obsNote").textContent="See the note in the frame."; }, 600); });
 $("#obsRefresh").addEventListener("click",async()=>{
   const b=$("#obsRefresh"); b.disabled=true; $("#obsNote").textContent="Rebuilding from your records…";
   let res; try{ res=await api("/api/projects/rebuild",{}); }catch(e){ res={ok:false,error:"The FITS Importer isn't answering."}; }
@@ -2220,7 +2480,7 @@ function renderDeskList(){
     :`<p class="ad-note">${all?"No target folders found.":"Nothing waiting to process. Tick “Show every folder” to see the rest."}</p>`;
   document.querySelectorAll("#deskList .ad-row").forEach(r=>{
     r.addEventListener("click",()=>deskOpen(r.dataset.rel));
-    r.addEventListener("keydown",e=>{ if(e.key==="Enter") deskOpen(r.dataset.rel); });
+    r.addEventListener("keydown",e=>{ if(e.key==="Enter"||e.key===" "){ e.preventDefault(); deskOpen(r.dataset.rel); } });
   });
 }
 async function deskOpen(rel){
@@ -2279,11 +2539,23 @@ if(location.pathname==="/archive"){
   if(b) b.click();
 }
 
+// One poll in flight at a time, and an older answer never paints over a newer
+// one (1.7.1 review). The Report tab reloads when a report finished (the status
+// leaves "reporting", or a new report exists), not on a timer.
+let tickBusy=false, tickSeq=0, prevStatus=null, prevReportAt=undefined, prevHasReport=undefined;
 async function tick(){
+  if(tickBusy) return;
+  tickBusy=true;
+  const seq=++tickSeq;
   try{
     const s=await api("/api/state");
+    if(seq!==tickSeq) return;
     if(s.boot&&s.boot!==BOOT) showStale();
     if(s.sides) SIDES=s.sides;
+    if(s.dashboardAt!==undefined && s.dashboardAt!==dashAt){ dashAt=s.dashboardAt; if(dashShown) showDash(); }
+    if((prevStatus==="reporting" && s.status!=="reporting") || (prevHasReport!==undefined && s.hasReport!==prevHasReport)
+       || (prevReportAt!==undefined && s.reportAt!==prevReportAt)) loadReport();
+    prevStatus=s.status; prevHasReport=s.hasReport; prevReportAt=s.reportAt;
   $("#camDot").className="dot"+(s.cameraPresent?" on":"");
     $("#camText").textContent=s.cameraPresent?((s.devices||[]).join(" + ")||"camera")+" connected":"no camera connected";
     busy = s.status!=="idle";
@@ -2296,10 +2568,13 @@ async function tick(){
     if(sum){ sl.textContent=sum.text; sl.className="safe"+(sum.safe?"":" warn");
              sl.title=sum.onlyHere?STATUS_TIP:""; }
     if(s.scan && (s.scannedAt!==lastScanStamp)){
-      lastScanStamp=s.scannedAt;
+      lastScanStamp=s.scannedAt;      // kept even if the drawing fails: no retry every second
       curScan=s.scan;
+      try{
       renderTargets(s.scan);
       const cs=s.scan.calSummary;
+      // pairing decisions survive a rescan (1.7.1 review)
+      const wasCal=new Map([...document.querySelectorAll(".caldec")].map(cb=>[cb.dataset.t+"|"+cb.dataset.k,cb.checked]));
       if(cs && cs.total){
         const exp=x=>x.exposureSeconds==null?"":(x.exposureSeconds>=1?` ${x.exposureSeconds}s`:` ${Math.round(x.exposureSeconds*1000)}ms`);
         const setLabel=x=>`${x.count} × ${esc(x.type)}${exp(x)}${x.filter?" · "+esc(x.filter):""}${x.type==="Flat"&&x.rotation!=null?" · "+x.rotation+"°":""} · ${esc(x.night)}`;
@@ -2335,6 +2610,7 @@ async function tick(){
         }
         $("#calNote").innerHTML=h;
         $("#calNote").className="result calcard";
+        $("#calNote").querySelectorAll(".caldec").forEach(cb=>{ const k=cb.dataset.t+"|"+cb.dataset.k; if(wasCal.has(k)) cb.checked=wasCal.get(k); });
       } else {
         $("#calNote").textContent="";
       }
@@ -2352,6 +2628,11 @@ async function tick(){
         $("#storPill").style.display="";
       }
       $("#scannedAt").textContent = s.scannedAt ? "scanned "+s.scannedAt : "";
+      }catch(e){
+        // a slip in drawing one scan is a readable note, not a dead page (1.7.1 review)
+        $("#targetList").innerHTML=`<div class="clear"><b>The scan couldn't be shown</b><span>The scan couldn't be shown: ${esc(String(e&&e.message||e))} — press Rescan.</span></div>`;
+        $("#btnImport").disabled=true;
+      }
     }
     if(!s.scan && !busy && s.cameraPresent && !(s.lastResult||"").startsWith("scanning failed")){ /* fresh state after import → rescan */ api("/api/scan",{}); }
     if(!s.cameraPresent && !busy && !s.question){
@@ -2371,14 +2652,17 @@ async function tick(){
     renderLiveBar(s.log);
     $("#lastResult").textContent=s.lastResult||"";
   }catch(e){
+    // only the poll itself failing lands here
     $("#camText").textContent="panel disconnected — is the app running?";
     $("#camDot").className="dot";
+  }finally{
+    tickBusy=false;
   }
 }
 
-$("#btnScan").onclick=()=>{lastScanStamp="";api("/api/scan",{})};
-$("#btnReport").onclick=async()=>{await api("/api/report",{}); setTimeout(loadReport,1500);};
-$("#btnEject").onclick=()=>api("/api/eject",{});
+$("#btnScan").onclick=()=>{lastScanStamp="";startOp("/api/scan",{})};
+$("#btnReport").onclick=()=>startOp("/api/report",{});
+$("#btnEject").onclick=()=>startOp("/api/eject",{});
 $("#btnImport").onclick=()=>{
   const names=[...document.querySelectorAll(".sel:checked")].map(x=>decodeURIComponent(x.dataset.name));
   if(!names.length) return;
@@ -2387,7 +2671,7 @@ $("#btnImport").onclick=()=>{
     const t=decodeURIComponent(cb.dataset.t);
     (dec[t]=dec[t]||{})[decodeURIComponent(cb.dataset.k)]=cb.checked;
   });
-  api("/api/import",{names,calDecisions:dec});
+  startOp("/api/import",{names,calDecisions:dec});
 };
 
 tick(); setInterval(tick, 1000);
@@ -2442,6 +2726,7 @@ def make_server(port):
         return None
     PORT = server.server_address[1]        # the port bound: port 0 means any free one
     STATUS.start()
+    DASH.start()
     return server
 
 
