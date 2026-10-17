@@ -1,5 +1,16 @@
 # Changelog
 
+## 1.7.2 (2026-10-17): the Observatory, rebuilt
+
+Brett's words on 16 and 17 Oct: "it's just a lot of text and numbers, like looking at Excel", "this type of thing is the right direction" (the scope timeline), "be creative and colourful", "the devil is in the detail", "dynamic impact that looks professional", and "there is a macro view, project view, micro view". Three design directions, then five detail reviews (type, colour, motion, truth of every label, layout), then one specification (`docs/ux-observatory-16oct/SPEC.md`). Nothing in the rules changes: the page reads, never writes.
+
+- **The page says facts, never guesses from sentences.** The engine now gives it: each dataset's capture state and where it came from (the 14-night rule, or your `capture-state.json`); a **sample** state for quick looks and test snaps, kept out of the queue (your flag, never an hour rule; a sample with a master stays a project); an **exposure note** for frames whose headers carry none, so their hours add up and are marked as from your note; the unknown target names themselves and every count of what was not counted (names, frames, no scope, no night, duplicates, rows that are not light frames); every warning with a kind and a count; the scopes in the contract's order with their kind; what the last scan found still on a camera (files, targets, a failed eject) and when; the local time the page was built; and the night's facts (see next).
+- **The three levels of the archive.** Macro: the archive. Project: one object across its scopes. Micro: one night. Each dataset carries one row per night: the morning it ended, frames and seconds, exposures, filters, gains, which computer imported it, how many copies the archive verified, its Day folder keys here and on the archive, what sits in that archive folder (autostacks, working files) and, for the ZWO scopes, the calibration linked that night in detail: darks with their exposures and gains, flats with their filters, biases, and how many the archive verified. A Seestar dataset says "in camera" rather than "not needed". The shared-Askar warning is a field (`masterOwnerUncertain`) naming the candidates, not a phrase.
+- **The panel** saves a one-line summary of every scan (`last-scan.json` in the state folder) for the Observatory's "still on the camera" line; `/api/status` carries the Observatory's stamp and whether a rebuild is running; `GET /observatory?json=1` returns the dataset alone, so the page refreshes in place.
+- **The page itself.** (Written up once the build lands.)
+
+Mac / Windows: the same on both.
+
 ## 1.7.1 (2026-10-16): two importing computers, one truth
 
 On 14 and 16 Oct Brett plugged the Seestars and the ASIAir into the Chillblast and imported there. The PC had no ledger, so everything on the cameras looked new, and he decided the PC becomes a second importing computer. The rules stay: each computer keeps its own ledger and writes only its own files; the SAFE gate and DISCARD trust only the ledger of the computer doing it. The archive is the one truth: each computer leaves its record there, and every screen reads both.

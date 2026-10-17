@@ -517,6 +517,13 @@ class App:
                     if t.get(k):
                         self.labels[t[k]] = t["display"]
             self.scanned_at = time.strftime("%H:%M:%S")
+            try:                                     # 1.7.2: the Observatory's "still on a camera" line
+                eng.save_scan_summary(self.scan["newFiles"], self.scan["newTargets"],
+                                      camera=" + ".join(x for x, ok in (("ASIAir", scan_a is not None), ("Seestar", bool(s))) if ok) or None,
+                                      failed_eject=bool(getattr(self, "eject_failed", False)),
+                                      elsewhere=self.scan["elsewhereFiles"])
+            except Exception as e:
+                self.logline(f"⚠ scan summary not saved: {e}")
             o = self.scan["other"]
             who = self._other_name((o or {}).get("machine"))
             self.logline(f"▸ Scan: {self.scan['newTargets']} target(s) with new frames, "
@@ -882,6 +889,13 @@ class SafeStatus:
 
 STATUS = SafeStatus()
 
+def _observatory_stamp():
+    """The engine's stamp of the Observatory dataset this panel would serve."""
+    try:
+        return eng.observatory_stamp()
+    except Exception:
+        return None
+
 
 class DashboardCache:
     """The Dashboard tab's page (1.7.1 review): built by one thread, never on
@@ -1183,8 +1197,12 @@ class Handler(BaseHTTPRequestHandler):
             self._json(snap)
         elif self.path == "/api/status":
             STATUS.ready.wait(5)               # just after start: the first computation
-            self._json(STATUS.value if STATUS.value is not None
-                       else eng.status_unknown("still working it out"))
+            body = dict(STATUS.value if STATUS.value is not None
+                        else eng.status_unknown("still working it out"))
+            # 1.7.2: the Observatory page polls this to know when its record changed
+            body["observatory"] = {"generatedAtIso": _observatory_stamp(),
+                                   "rebuilding": APP.status == "rebuilding", "busy": APP.status}
+            self._json(body)
         elif self.path == "/api/report-text":
             self._json({"text": APP.report_text or ""})
         elif self.path == "/archive" or self.path.startswith("/archive?"):
@@ -1228,6 +1246,11 @@ class Handler(BaseHTTPRequestHandler):
             # a problem is a readable note, never a refused frame.
             try:
                 dataset = eng.load_observatory(prefer_published=True)
+                if "json=1" in urllib.parse.urlsplit(self.path).query.split("&"):
+                    # 1.7.2: the dataset alone, for the page's in-place refresh
+                    self._json(dataset if dataset is not None else {"error": "not built yet"},
+                               200 if dataset is not None else 404)
+                    return
                 if dataset is None:
                     corrupt = False
                     try:

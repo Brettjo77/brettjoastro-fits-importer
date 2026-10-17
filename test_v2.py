@@ -5784,9 +5784,9 @@ _pr_cal = probe(OB2.env, "st = m.State()\nextra, names = m.projects_inputs(st)\n
 check("OB2 calibration follows the lights: an ASIAir session counts the darks and bias linked into its "
       "Day folder and the flats linked to the target folder above it (a mosaic's shared set), never "
       "another target's; a Seestar dataset says none of ours applies",
-      lambda: _pr_cal["NGC7380"] == [{"applies": True, "biases": 1, "darks": 1, "flats": 2, "shipped": 1,
-                                      "nights_with": 1, "nights": 1, "missing": []}]
-      and _pr_cal["M42"] == [{"applies": False}]
+      lambda: _pr_cal["NGC7380"] == [{"applies": True, "mode": "tracked", "biases": 1, "darks": 1, "flats": 2, "shipped": 1,
+                                      "nights_with": 1, "nights": 1, "nights_without": 0, "missing": []}]
+      and _pr_cal["M42"] == [{"applies": False, "mode": "inCamera"}]
       and _pr_cal["NGC2237"][0]["applies"] is False     # the Rosette (its id is NGC 2237), a Seestar row: pl_snap_row's default device
       and next(s for s in _o["sessions"] if s["target"].startswith("Wizard"))["cal"] == {"darks": 1, "flats": 2, "biases": 1}
       and next(s for s in _o["sessions"] if s["target"].startswith("Orion"))["cal"] is None
@@ -5835,8 +5835,9 @@ check("OB3 this computer's own ledger: a light row's Day folder is keyed as the 
       lambda: _pr_own["day"] == "Wizard Nebula/2026-09-01 Day 1"
       and set(_pr_own["links"]) == {"Autorun/Dark/d.fit", "Autorun/Flat/f.fit"}
       and _pr_own["links"]["Autorun/Dark/d.fit"]["shipped"] == ["Wizard Nebula/2026-09-01 Day 1"]
-      and _own["projects"][0]["datasets"][0]["calibration"] == {"applies": True, "biases": 0, "darks": 1, "flats": 1,
-                                                               "shipped": 1, "nights_with": 1, "nights": 1, "missing": []},
+      and _own["projects"][0]["datasets"][0]["calibration"] == {"applies": True, "mode": "tracked", "biases": 0, "darks": 1,
+                                                               "flats": 1, "shipped": 1, "nights_with": 1, "nights": 1,
+                                                               "nights_without": 0, "missing": []},
       json.dumps([_pr_own, _own["projects"][0]["datasets"][0].get("calibration")]))
 _pcdir = os.path.join(OB3.archive, "_verify", "pc"); os.makedirs(_pcdir, exist_ok=True)
 _pub = dict(_own); _pub["generated_at"] = _dt.now(_tz.utc).isoformat(timespec="seconds")
@@ -6045,6 +6046,113 @@ check("IN the suite's check() turns a raising callable into a FAIL with the trac
       and _r.stdout.count("passed,") == 1,
       (_r.stdout + _r.stderr)[-1500:])
 shutil.rmtree(IN_ROOT, ignore_errors=True)
+
+# the Observatory's 1.7.2 fields: facts the page used to regex out of sentences (SPEC §6)
+OB4_DK1 = "ZWO ASI AIR/Wizard Nebula/2026-09-26 Day 1"
+OB4_DK2 = "ZWO ASI AIR/Wizard Nebula/2026-09-28 Day 2"
+OB4_ASI = dict(device="asiair", camera="ZWO ASI585MC Air", scope="Askar FRA400", sourceType="Plan")
+OB4 = pl_pc_env("OB4", {
+    "w1": pl_snap_row("NGC 7380", "NGC 7380 - Wizard Nebula", "2026-09-26", "w1" * 32, exposureSeconds=300.0, gain=100,
+                      archiveLocation="ZWO Askar Scopes/Wizard Nebula (NGC 7380)/Wizard Nebula Day 1/w1.fit",
+                      archiveVerifiedAt="2026-09-27T030000", dayKey=OB4_DK1, **OB4_ASI),
+    "w2": pl_snap_row("NGC 7380", "NGC 7380 - Wizard Nebula", "2026-09-26", "w2" * 32, exposureSeconds=300.0, gain=100,
+                      filter="Ha", dayKey=OB4_DK1, **OB4_ASI),
+    "w3": pl_snap_row("NGC 7380", "NGC 7380 - Wizard Nebula", "2026-09-28", "w3" * 32, exposureSeconds=180.0, gain=200,
+                      dayKey=OB4_DK2, **OB4_ASI),
+    "s1": pl_snap_row("M 13", "M 13 - Hercules Cluster", "2026-08-01", "s1" * 32),      # a sample, by Brett's flag
+    "m1": pl_snap_row("M 27", "M 27 - Dumbbell Nebula", "2026-08-10", "m1" * 32, exposureSeconds=0),   # no exposure recorded
+    "m2": pl_snap_row("M 27", "M 27 - Dumbbell Nebula", "2026-08-10", "m2" * 32, exposureSeconds=0),
+    "u1": pl_snap_row("Old Name Nobody Knows", "Old Name Nobody Knows", "2026-08-11", "u1" * 32),
+    "k1": pl_snap_row("M 42", "M 42 - Orion Nebula", "2026-08-12", "k1" * 32, sourceType="stack"),   # not a light frame
+}, at="2026-10-09T08:00:00Z",
+   calibration={"d1": {"frameType": "Dark", "filename": "Dark_300s.fit", "linkedInto": [OB4_DK1], "shipped": [OB4_DK1],
+                       "exposureSeconds": 300.0, "gain": 100, "filter": ""},
+                "f1": {"frameType": "Flat", "filename": "Flat_Ha.fit", "linkedInto": [OB4_DK1], "shipped": [],
+                       "exposureSeconds": 2.0, "gain": 100, "filter": "Ha"},
+                "b1": {"frameType": "Bias", "filename": "Bias.fit", "linkedInto": [OB4_DK1], "shipped": [], "gain": 100}})
+_pc4 = os.path.join(OB4.archive, "_verify", "pc"); os.makedirs(_pc4, exist_ok=True)
+with open(os.path.join(_pc4, "inventory-E-20261009T033000Z.jsonl"), "w") as f:
+    for r in [pl_inv_row("ZWO Askar Scopes/Wizard Nebula (NGC 7380)/Wizard Nebula Day 1/w1.fit", "ZWO Askar Scopes", "Wizard Nebula (NGC 7380)"),
+              pl_inv_row("ZWO Askar Scopes/Wizard Nebula (NGC 7380)/Wizard Nebula Day 1/Stacked_60_x.fit", "ZWO Askar Scopes", "Wizard Nebula (NGC 7380)"),
+              pl_inv_row("ZWO Askar Scopes/Wizard Nebula (NGC 7380)/Wizard Nebula Day 1/_Working Files (regenerable - safe to delete)/tmp.xisf", "ZWO Askar Scopes", "Wizard Nebula (NGC 7380)")]:
+        r["size"] = 10
+        f.write(json.dumps(r) + "\n")
+with open(os.path.join(_pc4, "inventory-E.status.json"), "w") as f:
+    json.dump({"schema": "inventory-status/1", "generation": "20261009T033000Z"}, f)
+with open(os.path.join(OB4.state, "capture-state.json"), "w") as f:
+    json.dump({"M13|S30P|Shinfield": "sample", "M27|S30P|Shinfield": {"state": "complete", "exposure": 10},
+               "NGC7380|FRA400|Shinfield": {"state": "open"}}, f)
+_o4 = probe(OB4.env, "st = m.State()\nextra, names = m.projects_inputs(st)\n"
+            "m.save_scan_summary(3559, 29, camera='Seestar', failed_eject=True, elsewhere=12)\n"
+            f"print(json.dumps(m.build_observatory(st, extra, today='{PL_TODAY}', custom_names=names)))\n")
+_by4 = {c: x for x in _o4.get("targets", []) for c in x["codes"]}
+_wiz = _by4.get("NGC 7380", {}).get("programmes", [{}])[0]
+_wn = {x["night"]: x for x in _wiz.get("sessions", [])}
+check("OB4 (1.7.2) every dataset carries its capture state and where it came from, Brett's sample flag "
+      "keeps a quick look out of the queue, an exposure note turns unrecorded exposures into hours "
+      "(marked as from the note), and the one rule for the quiet period still stands",
+      lambda: _wiz.get("captureState") == "open" and _wiz.get("captureStateSource") == "capture-state.json"
+      and _wiz.get("status") == "capturing" and _wiz.get("sample") is False
+      and _by4["M 13"]["programmes"][0]["sample"] is True and _by4["M 13"]["programmes"][0]["status"] == "ready_to_process"
+      and _by4["M 13"]["statusCards"][0]["sample"] is True
+      and _by4["M 27"]["programmes"][0]["exposureOverride"] == 10 and _by4["M 27"]["programmes"][0]["hours"] == round(20 / 3600, 2)
+      and _by4["M 27"]["programmes"][0]["sessions"][0]["integrationFromNote"] is True
+      and _by4["M 27"]["programmes"][0]["framesWithoutExposure"] == 2
+      and _by4["M 27"]["programmes"][0]["captureState"] == "complete",
+      json.dumps([_wiz.get("captureState"), _wiz.get("status"), (_by4.get("M 13") or {}).get("programmes"),
+                  (_by4.get("M 27") or {}).get("programmes")])[:900])
+check("OB4 (1.7.2) the night panel's facts: one row per night with the morning date, gains, which computer "
+      "imported it, how many copies the archive verified, the Day folder keys, the archive's Day folder with "
+      "what sits in it (autostacks, working files), and the calibration linked that night in detail",
+      lambda: _wn["2026-09-26"]["morning"] == "2026-09-27" and _wn["2026-09-26"]["gains"] == [100]
+      and _wn["2026-09-26"]["importedOn"] == ["mac"] and _wn["2026-09-26"]["archived"] == 1
+      and _wn["2026-09-26"]["dayKeys"] == [OB4_DK1]
+      and _wn["2026-09-26"]["archiveDays"] == ["ZWO Askar Scopes/Wizard Nebula (NGC 7380)/Wizard Nebula Day 1"]
+      and _wn["2026-09-26"]["archive"] == {"files": 3, "bytes": 30, "autostacks": 1, "autostackBytes": 10, "workingBytes": 10}
+      and _wn["2026-09-26"]["calibration"] == {"darks": 1, "flats": 1, "biases": 1, "shipped": 1,
+                                                "darkExposures": [300.0], "darkGains": [100], "flatFilters": ["Ha"], "biasGains": [100]}
+      and _wn["2026-09-28"]["calibration"]["darks"] == 0 and _wn["2026-09-28"]["gains"] == [200]
+      and "archive" not in _wn["2026-09-28"]
+      and _wiz["calibration"]["mode"] == "tracked" and _wiz["calibration"]["nights_without"] == 1
+      and _by4["M 13"]["programmes"][0]["calibration"] == {"applies": False, "mode": "inCamera"}
+      and next(x for x in _o4["sessions"] if x["target"].startswith("Wizard") and x["night"] == "2026-09-26")["calDetail"]["flatFilters"] == ["Ha"]
+      and next(x for x in _o4["sessions"] if x["target"].startswith("Wizard") and x["night"] == "2026-09-26")["morning"] == "2026-09-27",
+      json.dumps(_wn)[:1200])
+check("OB4 (1.7.2) the page counts facts, not sentences: what was not counted (names, frames, duplicates, rows "
+      "that are not light frames), the unknown names themselves, notices with a kind and a count, the scopes "
+      "in the contract's order with their kind, what the last scan left on the camera, and the local time",
+      lambda: _o4["notCounted"] == {"unknownNames": {"names": 1, "frames": 1}, "noScope": 0, "noNight": 0,
+                                    "unreadable": 0, "duplicates": 0, "notLightFrames": 1}
+      and _o4["unknownNames"] == ["Old Name Nobody Knows"]
+      and any(n["kind"] == "unknown_names" and n["count"] == 1 and n["frames"] == 1 for n in _o4["notices"])
+      and all(set(n) == {"kind", "count", "frames", "text"} for n in _o4["notices"])
+      and len(_o4["notices"]) == len(_o4["warnings"])
+      and [x["id"] for x in _o4["scopes"]] == ["S30P", "FRA400"] and _o4["scopeOrder"] == ["S30P", "FRA400"]
+      and [x["kind"] for x in _o4["scopes"]] == ["seestar", "askar"] and [x["order"] for x in _o4["scopes"]] == [1, 5]
+      and _o4["pendingImport"]["files"] == 3559 and _o4["pendingImport"]["targets"] == 29
+      and _o4["pendingImport"]["failedEject"] is True and _o4["pendingImport"]["camera"] == "Seestar"
+      and _o4["pendingImport"]["elsewhere"] == 12 and isinstance(_o4["pendingImport"]["ageHours"], (int, float))
+      and isinstance(_o4["generatedAtLocal"], str) and "T" in _o4["generatedAtLocal"]
+      and all(k in _o4["reconciliation"][0]["note"] for k in ("1 not counted",)),
+      json.dumps([_o4.get("notCounted"), _o4.get("unknownNames"), _o4.get("notices"), _o4.get("scopeOrder"),
+                  _o4.get("pendingImport"), _o4.get("generatedAtLocal")])[:1200])
+# a sample that has a master stays a project, with a notice saying so; the scan summary is confined and read back
+with open(os.path.join(_pc4, "inventory-E-20261009T033000Z.jsonl"), "a") as f:
+    f.write(json.dumps(dict(pl_inv_row("S30P/Hercules Cluster (M 13)/masterLight.xisf", "S30P", "Hercules Cluster (M 13)"), size=5)) + "\n")
+_o4b = probe(OB4.env, "st = m.State()\nextra, names = m.projects_inputs(st)\n"
+             f"d = m.build_observatory(st, extra, today='{PL_TODAY}', custom_names=names)\n"
+             "import os\n"
+             "print(json.dumps({'m13': [p for t in d['targets'] if t['id'] == 'M13' for p in t['programmes']],"
+             " 'notes': [n for n in d['notices'] if n['kind'] == 'capture_state_bad'],"
+             " 'read': m.read_scan_summary(), 'file': sorted(os.listdir(m.STATE_DIR))}))\n")
+check("OB4 (1.7.2) a sample with a master of Brett's stays a project (a notice says so) and the scan summary is "
+      "one small file in the state folder that reads back as it was written",
+      lambda: _o4b["m13"][0]["sample"] is False and _o4b["m13"][0]["status"] == "in_progress"
+      and any("marks M13|S30P|Shinfield as a sample" in n["text"] for n in _o4b["notes"])
+      and _o4b["read"]["files"] == 3559 and _o4b["read"]["targets"] == 29
+      and "last-scan.json" in _o4b["file"],
+      json.dumps(_o4b)[:900])
+shutil.rmtree(OB4.root, ignore_errors=True)
 
 # ═══════════════ CHAIN OT: two importing computers, one truth (1.7.1) ════════
 # The PC imports too (Brett, 16 Oct 2026). Each computer keeps its own ledger;

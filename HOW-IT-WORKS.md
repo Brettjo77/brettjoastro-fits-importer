@@ -277,13 +277,15 @@ Nights are noon to noon, like the Day folders, and the quiet period is counted i
 
 **Where the data is** says "on this Mac" (or "on this PC") only when the frame is still in the importer's folder on this computer right now — you clear your own disks by hand, and the importer checks the disk, not its memory. "On the archive" means the ship has filed it. "On the PC (per its ledger)" means the other computer's ledger says so and this one can't look.
 
-The one fact you can set by hand is per dataset: **open** ("I'm keeping this going all season — leave it as capturing") or **complete** ("that's enough light — count it as ready now"). AstroLog will set it later; until then, make a file called `capture-state.json` in the same folder as `projects.json`, for example:
+The one fact you can set by hand is per dataset: **open** ("I'm keeping this going all season — leave it as capturing"), **complete** ("that's enough light — count it as ready now") or, from 1.7.2, **sample** ("a quick look or a test, not a project — keep it out of the queue"). AstroLog will set it later; until then, make a file called `capture-state.json` in the same folder as `projects.json`, for example:
 
 ```
-{"datasets": {"NGC7023|FRA400|Shinfield": "open", "M42|S30P|Shinfield": "complete"}}
+{"datasets": {"NGC7023|FRA400|Shinfield": "open", "M42|S30P|Shinfield": "complete",
+              "NGC6229|S30P|Shinfield": "sample",
+              "MW|S30P|Shinfield": {"state": "auto", "exposure": 10}}}
 ```
 
-The key is target id, scope id and site, exactly as `projects.json` writes them. A finished picture or a saved master still wins: an object with a final reads done whatever the file says.
+The key is target id, scope id and site, exactly as `projects.json` writes them. A finished picture or a saved master still wins: an object with a final reads done whatever the file says, and a sample with a master of yours stays a project (the list says so). The object form with `"exposure"` is for frames whose headers carry no exposure (the Seestar's Milky Way frames, say): give the sub length in seconds once, and their hours are added up and marked as "from your note" instead of showing as nothing. The Observatory shows which of these facts you set and which the 14-night rule worked out.
 
 The facts come from this computer's ledger, the PC's inventory of the archive, and the `Final Astro Images` folder.
 
