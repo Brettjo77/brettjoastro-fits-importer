@@ -518,10 +518,11 @@ class App:
                         self.labels[t[k]] = t["display"]
             self.scanned_at = time.strftime("%H:%M:%S")
             try:                                     # 1.7.2: the Observatory's "still on a camera" line
-                eng.save_scan_summary(self.scan["newFiles"], self.scan["newTargets"],
-                                      camera=" + ".join(x for x, ok in (("ASIAir", scan_a is not None), ("Seestar", bool(s))) if ok) or None,
-                                      failed_eject=bool(getattr(self, "eject_failed", False)),
-                                      elsewhere=self.scan["elsewhereFiles"])
+                if scan_a is not None or s:
+                        eng.save_scan_summary(self.scan["newFiles"], self.scan["newTargets"],
+                                          camera=" + ".join(x for x, ok in (("ASIAir", scan_a is not None), ("Seestar", bool(s))) if ok) or None,
+                                          failed_eject=bool(getattr(self, "eject_failed", False)),
+                                          elsewhere=self.scan["elsewhereFiles"])
             except Exception as e:
                 self.logline(f"⚠ scan summary not saved: {e}")
             o = self.scan["other"]
@@ -762,6 +763,14 @@ class App:
                     self.logline(f"⚠ Could not eject {label} — is an import still running?")
                     bad += 1
             self.last_result = "Ejected." if not bad else "Eject failed."
+            self.eject_failed = bool(bad)        # 1.7.2: the Observatory's freshness line says so
+            if bad and self.scan:
+                try:
+                    eng.save_scan_summary(self.scan["newFiles"], self.scan["newTargets"],
+                                          camera=" + ".join(l for l, _v in vols) or None,
+                                          failed_eject=True, elsewhere=self.scan.get("elsewhereFiles", 0))
+                except Exception as e:
+                    self.logline(f"⚠ scan summary not saved: {e}")
             if ok and not bad:
                 self.scan = None
         return self._run("ejecting", fn)
@@ -922,14 +931,17 @@ class DashboardCache:
             threading.Thread(target=self._loop, daemon=True).start()
 
     def refresh(self):
+        DashboardCache._snap_at = 0.0         # look at the archive again on the next signature
         self._kick.set()
 
     def wait_fresh(self, timeout):
         """Before serving: when the inputs changed since the last build (a
         click right after an import), ask the worker for one and wait for it
         a little, so the tab shows the new state; still nothing is built on
-        the request thread, and during an operation the last build is served."""
+        the request thread, and during an operation the last build is served.
+        A request looks at the archive once (the poll looks once a minute)."""
         self.ready.wait(timeout)
+        DashboardCache._snap_at = 0.0
         if self.signature() == self._seen:
             return
         gen = self._n
@@ -938,13 +950,22 @@ class DashboardCache:
         while time.time() < end and self._n == gen:
             time.sleep(0.05)
 
+    _snap_at, _snap_path = 0.0, None
+
     @staticmethod
     def signature():
-        """(ledger mtime, size, snapshot mtime, size): the two inputs."""
-        try:
-            snap = eng.other_ledger_snapshot()
-        except Exception:
-            snap = None
+        """(ledger mtime, size, snapshot mtime, size): the two inputs. The
+        snapshot sits on the archive (an SMB share on the Mac), so it is looked
+        for at most once a minute: a stale mount must never stall the poll."""
+        now = time.time()
+        if now - DashboardCache._snap_at < 60:
+            snap = DashboardCache._snap_path
+        else:
+            try:
+                snap = eng.other_ledger_snapshot()
+            except Exception:
+                snap = None
+            DashboardCache._snap_at, DashboardCache._snap_path = now, snap
         sig = []
         for p in (os.path.join(eng.STATE_DIR, "ledger.json"), snap):
             try:
@@ -1247,6 +1268,12 @@ class Handler(BaseHTTPRequestHandler):
             # a problem is a readable note, never a refused frame.
             try:
                 dataset = eng.load_observatory(prefer_published=True)
+                if isinstance(dataset, dict):
+                    # 1.7.2: what is still on a camera is THIS computer's last scan, even
+                    # when the record served is the PC's published copy
+                    pend = eng.read_scan_summary()
+                    if pend is not None:
+                        dataset["pendingImport"] = pend
                 if "json=1" in urllib.parse.urlsplit(self.path).query.split("&"):
                     # 1.7.2: the dataset alone, for the page's in-place refresh
                     self._json(dataset if dataset is not None else {"error": "not built yet"},
@@ -2350,7 +2377,7 @@ function projectsHtml(pj, opts){
     if(d.status==="capturing") return `last night ${last}${d.capture_state==="open"?" · kept open by you":rf?" · ready from "+fmtNight(rf):""}`;
     return `nothing new since ${last}${d.capture_state==="complete"?" · marked complete by you":""}`; };
   const sect=(status,open)=>{
-    const list=vis.filter(r=>r.d.status===status)
+    const list=vis.filter(r=>r.d.status===status&&!r.d.sample)
       .sort((a,b)=>String(b.d.last_session||"").localeCompare(String(a.d.last_session||"")));
     if(!list.length) return "";
     return `<details class="ad-sec"${open?" open":""}><summary class="eyebrow">${PROJ_STATUS[status]} · ${list.length}</summary>`+

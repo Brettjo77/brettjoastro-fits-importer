@@ -1778,6 +1778,23 @@ try:
           and _dsj["targets"][0]["programmes"][0].get("captureState") == "auto"
           and isinstance(_dsj["targets"][0]["programmes"][0].get("sessions"), list),
           json.dumps([_stq.get("observatory"), {k: _dsj.get(k) for k in ("schema", "notCounted", "scopeOrder", "pendingImport")}])[:600])
+    # the review round of 17 Oct: a scan with no camera leaves no scan summary; what is still on a
+    # camera is THIS computer's last scan, merged at serve time even into a published record
+    api("/api/scan", {}, url=URLN)
+    _t0 = time.time()
+    while time.time() - _t0 < 60 and api("/api/state", url=URLN).get("status") != "idle":
+        time.sleep(0.3)
+    _no_sum = not os.path.isfile(os.path.join(envn.state, "last-scan.json"))
+    with open(os.path.join(envn.state, "last-scan.json"), "w") as f:
+        json.dump({"schema": "scan-summary/1", "files": 3559, "targets": 29, "camera": "Seestar",
+                   "failedEject": True, "seenAt": "2026-10-16T08:50:00+00:00", "machine": "PC"}, f)
+    with urllib.request.urlopen(URLN + "/observatory?json=1&t=3", timeout=30) as resp:
+        _dsp = json.loads(resp.read().decode())
+    check("OB (review, 1.7.2) a scan with no camera writes no scan summary (so the page says 'not checked', never "
+          "'nothing left'); this computer's last scan is merged into the served record at serve time",
+          lambda: _no_sum and (_dsp.get("pendingImport") or {}).get("files") == 3559
+          and _dsp["pendingImport"]["failedEject"] is True and isinstance(_dsp["pendingImport"].get("ageHours"), (int, float)),
+          json.dumps([_no_sum, _dsp.get("pendingImport")])[:400])
     # every script block of the page parses (node), so a slip in the template can't blank the tab
     import shutil as _sh2
     _node = _sh2.which("node") or next((p for p in ("/opt/node22/bin/node", "/usr/local/bin/node")

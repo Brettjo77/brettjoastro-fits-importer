@@ -6154,6 +6154,40 @@ check("OB4 (1.7.2) a sample with a master of Brett's stays a project (a notice s
       json.dumps(_o4b)[:900])
 shutil.rmtree(OB4.root, ignore_errors=True)
 
+# the review round of 17 Oct: a quick look never drives its project's state; gain travels in the
+# snapshot; an unreadable row is not also "not a light frame"; a corrupt scan summary never crashes
+OB4c = pl_pc_env("OB4c", {
+    "a1": pl_snap_row("NGC 7380", "NGC 7380 - Wizard Nebula", "2026-08-01", "a1" * 32, exposureSeconds=300.0, **OB4_ASI),
+    "a2": pl_snap_row("NGC 7380", "NGC 7380 - Wizard Nebula", "2026-08-02", "a2" * 32),     # the same object on the S30P, old, a sample
+    "bad": {"filename": "x.fit", "sourceType": ["not", "a", "string"], "night": "2026-08-03"},
+}, at="2026-10-09T08:00:00Z")
+_pc4c = os.path.join(OB4c.archive, "_verify", "pc"); os.makedirs(_pc4c, exist_ok=True)
+with open(os.path.join(_pc4c, "inventory-E-20261009T033000Z.jsonl"), "w") as f:
+    f.write(json.dumps(pl_inv_row("ZWO Askar Scopes/Wizard Nebula (NGC 7380)/masterLight_FRA400.xisf", "ZWO Askar Scopes", "Wizard Nebula (NGC 7380)")) + "\n")
+with open(os.path.join(_pc4c, "inventory-E.status.json"), "w") as f:
+    json.dump({"schema": "inventory-status/1", "generation": "20261009T033000Z"}, f)
+with open(os.path.join(OB4c.state, "capture-state.json"), "w") as f:
+    json.dump({"NGC7380|S30P|Shinfield": "sample"}, f)
+with open(os.path.join(OB4c.state, "last-scan.json"), "w") as f:
+    json.dump({"schema": "scan-summary/1", "files": "abc", "targets": None, "camera": 7, "seenAt": "garbage"}, f)
+_o4c = probe(OB4c.env, "st = m.State()\nextra, names = m.projects_inputs(st)\n"
+             f"d = m.build_projects(st, extra, today='{PL_TODAY}', custom_names=names)\n"
+             f"o = m.build_observatory(st, extra, today='{PL_TODAY}', custom_names=names)\n"
+             "print(json.dumps({'p': [(p['target_id'], p['status'], p['to_process'], [(e['scope'], e['status'], e['sample'], e['capture_state_source']) for e in p['datasets']]) for p in d['projects']],"
+             " 't': [(t['id'], t['state'], t['pendingProgrammes']) for t in o['targets']], 'nc': o['notCounted'],"
+             " 'pend': o['pendingImport'], 'gain': 'gain' in m._SNAPSHOT_FIELDS, 'n': len(o['notices']) == len(o['warnings'])}))\n")
+check("OB4 (review) a quick look never drives its project's state or the target's (the FRA400 master makes "
+      "it In progress, the S30P sample stays out of the pending count and names capture-state.json as its "
+      "source); gain travels in the snapshot; an unreadable row is counted once; a corrupt last-scan.json reads "
+      "as zeros, never a crash; one notice per warning",
+      lambda: _o4c["p"] == [["NGC7380", "in_progress", False, [["FRA400", "in_progress", False, "rule"], ["S30P", "ready_to_process", True, "capture-state.json"]]]]
+      and _o4c["t"] == [["NGC7380", "processing", 1]]
+      and _o4c["nc"]["unreadable"] == 1 and _o4c["nc"]["notLightFrames"] == 0
+      and _o4c["pend"]["files"] == 0 and _o4c["pend"]["camera"] is None and _o4c["pend"]["ageHours"] is None
+      and _o4c["gain"] is True and _o4c["n"] is True,
+      json.dumps(_o4c)[:900])
+shutil.rmtree(OB4c.root, ignore_errors=True)
+
 # ═══════════════ CHAIN OT: two importing computers, one truth (1.7.1) ════════
 # The PC imports too (Brett, 16 Oct 2026). Each computer keeps its own ledger;
 # the archive carries each one's record; a scan reads the OTHER computer's

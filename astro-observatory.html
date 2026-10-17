@@ -295,7 +295,10 @@ input.ctl::placeholder{color:var(--muted)}
 .mark.none{color:var(--muted)} .mark.none svg{color:var(--muted)}
 .mark .w{display:block;color:var(--ink);font-weight:var(--fw-semi)}
 .mark.none .w,.mark.ok .w{color:var(--ink2)}
-.mark small{display:block;color:var(--muted);font-size:var(--fs-xs)}
+.mark .mw{min-width:0;flex:1 1 auto}
+.mark small{display:block;color:var(--muted);font-size:var(--fs-xs);overflow-wrap:anywhere}
+/* a long master file name in the three-mark cell: one line, ellipsis, the full name in the title */
+.marks3 .mark small,.nights td .mark small{overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
 .marks3{display:grid;grid-template-columns:repeat(3,minmax(0,1fr));gap:var(--s2)}
 
 /* attention rows */
@@ -339,7 +342,7 @@ input.ctl::placeholder{color:var(--muted)}
 .ln .s .v{color:var(--ink2);overflow:hidden;text-overflow:ellipsis;white-space:nowrap;font-size:var(--fs-base)}
 .ln .s .v b{color:var(--ink);font-variant-numeric:tabular-nums}
 .ln .objs{grid-column:2/-1;padding-left:22px;font-size:var(--fs-sm);color:var(--muted)}
-@media (max-width:899px){ .ln .s .v{white-space:normal} }
+@media (max-width:1100px){ .ln .s .v{white-space:normal} }
 @media (max-width:700px){ .ln{grid-template-columns:minmax(0,1fr)} .ln .s{min-height:var(--tap)} }
 
 /* the six-scope strip */
@@ -446,7 +449,7 @@ svg .stage circle.ring{fill:var(--card2);stroke:var(--ink);stroke-width:1.3}
 .proj .flag.soft{color:var(--muted)} .proj .flag.soft svg{color:var(--muted)}
 .ringwrap{position:relative;width:var(--ring-min);height:var(--ring-min)}
 .ringwrap circle.segm{transition:stroke-dasharray var(--dur-long) var(--ease-out);transition-delay:calc((var(--block-delay,0ms) + 240ms + var(--j,0)*140ms)*var(--rscale))}
-.ringwrap circle.segm.pre{stroke-dasharray:0 100 !important}
+.ringwrap circle.segm.pre{stroke-dasharray:0 9999 !important}
 
 /* the expanded panel (a project, a night, a scope): full width under the row */
 .panel{grid-column:1/-1;height:0;overflow:hidden;transition:height var(--dur-long) var(--ease-out)}
@@ -471,6 +474,8 @@ svg .stage circle.ring{fill:var(--card2);stroke:var(--ink);stroke-width:1.3}
 .lanes.narrow .cell.next{flex-direction:row;flex-wrap:wrap;align-items:center;gap:var(--s2)}
 .lanes.narrow .cell.next .when{flex-basis:100%;text-align:right}
 @media (max-width:700px){ .marks3{grid-template-columns:minmax(0,1fr)} .lanes.narrow .cell.next{grid-column:1/-1;align-items:flex-start;justify-content:flex-start} .lanes.narrow .cell.next .when{text-align:left} }
+/* a phone taps: every disclosure and the key's scope buttons are at least 44 px tall */
+@media (max-width:700px){ .disc{min-height:var(--tap);height:auto} .legend button.m{min-height:var(--tap)} }
 .nights{width:100%;border-collapse:collapse;font-size:var(--fs-md)}
 .nights th{text-align:left;padding:4px 8px 4px 0;border-bottom:1px solid var(--line)}
 .nights td{padding:0 8px 0 0;border-bottom:1px solid var(--grid);color:var(--ink2);font-variant-numeric:tabular-nums;height:36px}
@@ -485,7 +490,8 @@ svg .stage circle.ring{fill:var(--card2);stroke:var(--ink);stroke-width:1.3}
 .night{display:grid;grid-template-columns:repeat(auto-fit,minmax(min(240px,100%),1fr));gap:var(--s3) var(--s5)}
 .night .blk h4{font:var(--fw-semi) var(--fs-xs)/1.2 var(--sans);letter-spacing:.06em;text-transform:uppercase;color:var(--muted);margin-bottom:var(--s1)}
 .night .blk .l{display:flex;justify-content:space-between;gap:var(--s3);padding:3px 0;border-bottom:1px solid var(--grid);font-size:var(--fs-md);color:var(--ink2)}
-.night .blk .l b{color:var(--ink);font-variant-numeric:tabular-nums;text-align:right;white-space:nowrap}
+.night .blk .l span:first-child{flex:0 1 auto}
+.night .blk .l b{color:var(--ink);font-variant-numeric:tabular-nums;text-align:right;white-space:normal;overflow-wrap:anywhere;min-width:0;flex:0 1 auto}
 .night .blk .l.soft{color:var(--muted)} .night .blk .l.soft b{color:var(--muted);font-weight:var(--fw-regular)}
 .night .acts{display:flex;gap:var(--s2);align-items:center;flex-wrap:wrap;margin-top:var(--s3)} .night .acts .said{font-size:var(--fs-sm);color:var(--muted)}
 .night h3 .codes{font-size:var(--fs-md)}
@@ -698,7 +704,7 @@ function normalise(d){
   if(typeof d.notCounted.unknownNames!=="object"||d.notCounted.unknownNames===null) d.notCounted.unknownNames={names:0,frames:0};
   if(typeof d.pendingImport!=="object") d.pendingImport=null;
   for(const s of d.sessions){ if(!s) continue; s.hours=+s.hours||0; s.frames=+s.frames||0; s.filters=s.filters||{}; s.exps=s.exps||{}; s.night=String(s.night||""); s.target=String(s.target||""); s.camera=String(s.camera||"");
-    if(!s.morning) s.morning=nightAdd(s.night,1); s.gains=Array.isArray(s.gains)?s.gains:[]; s.importedOn=Array.isArray(s.importedOn)?s.importedOn:[]; s.archived=+s.archived||0; s.framesWithoutExposure=+s.framesWithoutExposure||0; s.dayKeys=Array.isArray(s.dayKeys)?s.dayKeys:[]; s.archiveDays=Array.isArray(s.archiveDays)?s.archiveDays:[]; }
+    if(!s.morning) s.morning=nightAdd(s.night,1); s.gains=Array.isArray(s.gains)?s.gains:[]; s.importedOn=Array.isArray(s.importedOn)?s.importedOn:[]; s.archived=(s.archived==null||isNaN(+s.archived))?null:+s.archived; s.framesWithoutExposure=+s.framesWithoutExposure||0; s.dayKeys=Array.isArray(s.dayKeys)?s.dayKeys:[]; s.archiveDays=Array.isArray(s.archiveDays)?s.archiveDays:[]; }
   d.sessions=d.sessions.filter(s=>s&&s.night);
   for(const t of d.targets){ t.programmes=t.programmes||[]; t.statusCards=t.statusCards||[]; t.codes=Array.isArray(t.codes)?t.codes:[]; t.cameras=t.cameras||[]; t.hours=+t.hours||0; t.lights=+t.lights||0; t.nights=+t.nights||0; t.name=String(t.name||"?"); t.id=String(t.id||t.name);
     for(const p of t.programmes){ p.hours=+p.hours||0; p.lights=+p.lights||0; p.nights=+p.nights||0; p.sessions=Array.isArray(p.sessions)?p.sessions:[]; p.mastersNamed=Array.isArray(p.mastersNamed)?p.mastersNamed:[]; p.finalsNamed=Array.isArray(p.finalsNamed)?p.finalsNamed:[]; p.captureState=p.captureState||"auto"; p.captureStateSource=p.captureStateSource||"rule"; p.sample=!!p.sample; p.framesWithoutExposure=+p.framesWithoutExposure||0; p.filters=p.filters||{}; p.exposures=p.exposures||{}; if(!p.status) p.status=STATUS_OF_STATE[(t.statusCards.find(c=>c.camera===p.camera)||{}).state]||"capturing"; } }
@@ -764,9 +770,12 @@ const CAMSHORT=new Proxy({}, {get:(_,k)=>short(k)});
 /* ---------- formatting: ONE rounding function; unknown is never 0; totals are sums of displayed parts ---------- */
 const r1=h=>Math.round((+h||0)*10)/10;
 const fmtI=n=>(n==null||isNaN(+n))?"?":(+n).toLocaleString("en-GB");
-function fmtH(h){ h=+h||0; if(h>0&&h<0.1) return Math.max(1,Math.round(h*60))+" min"; return r1(h).toLocaleString("en-GB",{minimumFractionDigits:1,maximumFractionDigits:1})+" h"; }
-const fmtHn=h=>r1(h).toLocaleString("en-GB",{minimumFractionDigits:1,maximumFractionDigits:1});
-const sumH=list=>list.reduce((a,x)=>a+r1(x),0);
+/* one rule for small values: under 0.1 h is minutes, never "0.0 h"; fmtHp gives the number and its unit apart */
+function fmtHp(h){ h=+h||0; if(h>0&&h<0.1) return {n:String(Math.max(1,Math.round(h*60))),u:"min"}; return {n:r1(h).toLocaleString("en-GB",{minimumFractionDigits:1,maximumFractionDigits:1}),u:"h"}; }
+function fmtH(h){ const p=fmtHp(h); return p.n+" "+p.u; }
+const fmtHn=h=>fmtHp(h).n;
+/* a total is the sum of its displayed parts: tenths, except a part under 0.1 h is shown in minutes, so it keeps its minutes */
+const sumH=list=>list.reduce((a,x)=>{ x=+x||0; return a+((x>0&&x<0.1)?x:r1(x)); },0);
 const hoursUnknown=(hours,frames)=>!(hours>0)&&frames>0;
 const hoursTxt=(hours,frames)=>hoursUnknown(hours,frames)?"hours unknown":fmtH(hours);
 const fmtGB=b=>{ b=+b||0; const g=b/2**30; return g>=1024?(g/1024).toLocaleString("en-GB",{maximumFractionDigits:2})+" TB":g>=1?g.toLocaleString("en-GB",{maximumFractionDigits:g>=100?0:1})+" GB":(b/2**20).toLocaleString("en-GB",{maximumFractionDigits:0})+" MB"; };
@@ -789,7 +798,9 @@ const agoTxt=iso=>{ const n=ago(iso); return n===0?"last night":n===1?"1 night a
 /* percentages by largest remainder, so they add to 100 */
 function pctLR(vals){ const tot=vals.reduce((a,b)=>a+b,0); if(tot<=0) return vals.map(()=>0); const raw=vals.map(v=>v/tot*100), fl=raw.map(Math.floor); let rem=100-fl.reduce((a,b)=>a+b,0); const idx=raw.map((v,i)=>[v-fl[i],i]).sort((a,b)=>b[0]-a[0]); for(let k=0;k<rem;k++) fl[idx[k%idx.length][1]]++; return fl; }
 /* a name is a common name plus catalogue codes: "Open cluster in the Tadpoles (IC 410) (NGC 1893)" */
-function splitName(n){ n=String(n||""); const i=n.indexOf(" ("); if(i<0) return {common:n,codes:""}; const codes=[...n.slice(i).matchAll(/\(([^)]*)\)/g)].map(m=>m[1]).join(", "); return {common:n.slice(0,i),codes}; }
+/* only a TRAILING run of "(…)" groups is the codes; text after a group belongs to the name, so
+   "Great Globular (M 13) and NGC 6207 widefield" stays whole */
+function splitName(n){ n=String(n||""); const m=n.match(/^(.*?\S)((?:\s*\([^()]*\))+)\s*$/); if(!m) return {common:n,codes:""}; const codes=[...m[2].matchAll(/\(([^)]*)\)/g)].map(x=>x[1].trim()).filter(Boolean).join(", "); return codes?{common:m[1],codes}:{common:n,codes:""}; }
 function nameEl(n,cls,tag){ const {common,codes}=splitName(n); const d=el(tag||"div",(cls||"")+" clamp2"); d.title=n; d.append(document.createTextNode(common)); if(codes){ d.append(document.createTextNode(" ")); d.append(el("span","codes","("+codes+")")); } return d; }
 const commonName=n=>splitName(n).common;
 
@@ -841,14 +852,14 @@ function stageMark(svg,kind,cx,cy,tipBuild){
 }
 function pill(key,opts){ opts=opts||{}; const s=stOf(key); const p=el("span","st "+s.cls+(opts.tap?" tapp":"")); if(opts.cam) p.append(camDot(opts.cam)); p.append(glyph(s.icon)); p.append(document.createTextNode(opts.text||(opts.verb?s.verb:s.word))); return p; }
 function stageChip(state,opts){ return pill(STATUS_OF_STATE[state]||state,opts); }
-function markEl(m){ const s=el("span","mark "+(m.cls||"")); s.append(glyph(m.icon)); const w=el("span"); w.append(el("span","w",m.word)); if(m.sub) w.append(el("small",null,m.sub)); s.append(w); if(m.tip) hoverable(s,box=>{ box.append(el("div","tt-t",m.word)); box.append(el("div",null,m.tip)); }); return s; }
+function markEl(m){ const s=el("span","mark "+(m.cls||"")); s.append(glyph(m.icon)); const w=el("span","mw"); w.append(el("span","w",m.word)); if(m.sub){ const sm=el("small",null,m.sub); sm.title=m.sub; w.append(sm); } s.append(w); if(m.tip) hoverable(s,box=>{ box.append(el("div","tt-t",m.word)); box.append(el("div",null,m.tip)); }); return s; }
 
 /* ---------- the three marks beside an Askar dataset lane (wording: R/truth/wording.md) ---------- */
 function captureMark(p){
   const a=p.lastNight?ago(p.lastNight):null; const by=p.captureStateSource==="capture-state.json";
   if(p.status==="capturing"&&p.captureState==="open") return {icon:"cap",cls:"",word:"Open, kept by you",sub:a==null?"":"last frames "+agoTxt(p.lastNight),tip:"You kept this one open in capture-state.json, so it stays Still capturing until you close it."};
   if(p.status==="capturing") return {icon:"cap",cls:"",word:"Active",sub:a==null?"":"last frames "+agoTxt(p.lastNight),tip:"New frames within the last "+(D.quietPeriodDays||14)+" nights."};
-  if(p.captureState==="complete") return {icon:"check",cls:"ok",word:"Closed by you",sub:by?"in capture-state.json":"",tip:"You marked this dataset complete, so it is ready to process whatever the dates say."};
+  if(p.captureState==="complete") return {icon:"check",cls:"ok",word:"Closed by you",sub:"",tip:"You marked this dataset complete"+(by?" in capture-state.json":"")+", so it is ready to process whatever the dates say."};
   if(p.status==="done") return {icon:"check",cls:"ok",word:"Quiet",sub:a==null?"":"nothing new for "+nts(a),tip:"No new frames; the finished picture closes it."};
   return {icon:"none",cls:"none",word:"Quiet",sub:a==null?"":"nothing new for "+nts(a),tip:"No new frames for more than "+(D.quietPeriodDays||14)+" nights."};
 }
@@ -862,12 +873,18 @@ function calibrationMark(p){
   const c=p.calibration||{}; const modeK=c.mode||(c.applies===false?"inCamera":(c.applies?"tracked":"unknown"));
   if(modeK==="inCamera"||(isSeestar(p.camera)&&c.applies!==true)) return {icon:"none",cls:"none",word:"Not tracked",sub:"the Seestar calibrates in the camera",tip:"The Seestar takes and applies its own calibration; the importer does not file darks or flats for it."};
   if(modeK==="unknown"||c.applies==null) return {icon:"q",cls:"none",word:"Unknown",sub:"no record for this scope",tip:"The record carries no calibration facts for this dataset."};
-  const nights=+c.nights||p.nights||0, withC=+c.nights_with||0, without=c.nights_without!=null?+c.nights_without:Math.max(0,nights-withC);
-  const miss=Array.isArray(c.missing)?c.missing:[];
-  const detail=(nights?"on "+withC+" of "+nts(nights)+(without?" · "+nts(without)+" without":""):"");
-  if(!miss.length) return {icon:"check",cls:"ok",word:"Darks and flats filed",sub:detail,tip:"Darks "+fmtI(c.darks||0)+", flats "+fmtI(c.flats||0)+(c.biases?", bias "+fmtI(c.biases):"")+" filed with these lights"+(detail?", "+detail:"")+"."};
+  /* a record without per-night counts (1.7.1) says nothing about nights: no "0 of 9" */
+  const nights=+c.nights||p.nights||0, known=c.nights_with!=null&&!isNaN(+c.nights_with), withC=known?+c.nights_with:null;
+  const without=c.nights_without!=null?+c.nights_without:(known?Math.max(0,nights-withC):null);
+  const miss=Array.isArray(c.missing)?c.missing:[]; const counts=c.darks!=null||c.flats!=null;
+  const onN=known&&nights?"on "+withC+" of "+nts(nights):"";
+  const detail=onN?onN+(without?" · "+nts(without)+" without":""):"";
+  if(!miss.length) return {icon:"check",cls:"ok",word:"Darks and flats filed",sub:detail,tip:(counts?"Darks "+fmtI(c.darks||0)+", flats "+fmtI(c.flats||0)+(c.biases?", bias "+fmtI(c.biases):"")+" filed with these lights":"Darks and flats filed with these lights; this record carries no counts")+(detail?", "+detail:"")+"."};
   const word=miss.length===2?"Darks and flats missing":(miss[0]==="flats"?"Flats missing":"Darks missing");
-  return {icon:"warn",cls:"warn",word,sub:detail||"none filed with these lights",tip:"No "+miss.join(" or ")+" filed with these lights"+(detail?" ("+detail+")":"")+"."};
+  /* for a missing mark, say what IS there: "darks on 3 of 4 nights · no flats" */
+  const there=miss.length===2?"":(miss[0]==="flats"?"darks":"flats")+(onN?" "+onN:" filed");
+  const sub=miss.length===2?"none filed with these lights":there+" · no "+miss[0];
+  return {icon:"warn",cls:"warn",word,sub,tip:"No "+miss.join(" or ")+" filed with these lights"+(there?" ("+there+")":"")+"."};
 }
 function calLine(c){ /* a night's calibration counts as words */
   if(!c) return "calibrates in the camera";
@@ -904,7 +921,11 @@ let toastT=null;
 function toast(msg,action,fn,ms_){ const t=$("toast"); t.replaceChildren(el("i","led")); t.append(el("span",null,msg)); if(action){ const b=el("button",null,action); b.addEventListener("click",()=>{ fn&&fn(); hideToast(); }); t.append(b); } const x=el("button","x","✕"); x.setAttribute("aria-label","Dismiss"); x.addEventListener("click",hideToast); t.append(x); t.classList.add("show"); clearTimeout(toastT); toastT=setTimeout(hideToast,ms_||7000); }
 function hideToast(){ $("toast").classList.remove("show"); }
 /* a number that really changed counts from old to new; a wash marks the change */
-function tween(node,from,to,fmt){ const dur=ms("--dur-reveal"); if(dur<=0||from===to){ node.textContent=fmt(to); return; } const t0=performance.now(); const ease=x=>1-Math.pow(1-x,3); (function step(now){ const p=Math.min(1,(now-t0)/dur); node.textContent=fmt(from+(to-from)*ease(p)); if(p<1) requestAnimationFrame(step); })(t0); }
+function tween(node,from,to,fmt){ const dur=ms("--dur-reveal"); if(dur<=0||from===to){ node.textContent=fmt(to); return; } const t0=performance.now(); const ease=x=>1-Math.pow(1-x,3); let done=false;
+  /* frames stop in a hidden tab (Safari pauses them longest), so a timer lands the final number regardless */
+  const fin=()=>{ if(done) return; done=true; node.textContent=fmt(to); };
+  (function step(now){ if(done) return; const p=Math.min(1,(now-t0)/dur); if(p>=1){ fin(); return; } node.textContent=fmt(from+(to-from)*ease(p)); requestAnimationFrame(step); })(t0);
+  setTimeout(fin,dur+80); }
 function wash(node){ if(!node) return; node.classList.remove("changed"); void node.offsetWidth; node.classList.add("changed"); }
 
 /* ---------- stars ---------- */
@@ -917,13 +938,13 @@ paintTheme();
 
 /* ---------- header: eyebrow, freshness, hero, share bar, legend ---------- */
 let heroVal=null;
-const scopeWord=n=>["no","one","two","three","four","five","six","seven","eight","nine"][n]||String(n);
 function renderHeader(changed){
   const eb=$("mastEyebrow"); eb.textContent=String(D.machine||"").replace(/\s*·\s*live from the importer\s*$/i,"")+(D.machine?" · from the importer's record":"");
   const hero=$("hero"); const old=heroVal==null?totalHours:heroVal; heroVal=totalHours;
   if(!hero.children.length){ hero.append(el("span","n"), el("span","u","hours of integration"), el("span","gloss","light-frame exposure, added up across every target and scope")); }
-  const n=hero.querySelector(".n"); if(changed){ tween(n,old,totalHours,v=>fmtHn(v)); wash(n); } else n.textContent=fmtHn(totalHours);
-  const comps=$("comps"); const vals=[[fmtI(D.totals.lights),"frames"],[fmtI(D.totals.targets),"targets"],[fmtI(D.totals.nights),"nights"],[scopeWord(SC.length),SC.length===1?"scope":"scopes"]];
+  const n=hero.querySelector(".n"), u=hero.querySelector(".u"); const tiny=totalHours>0&&totalHours<0.1; u.textContent=tiny?"minutes of integration":"hours of integration";
+  if(tiny) n.textContent=fmtHn(totalHours); else if(changed){ tween(n,old,totalHours,v=>fmtHn(v)); wash(n); } else n.textContent=fmtHn(totalHours);
+  const comps=$("comps"); const vals=[[fmtI(D.totals.lights),"frames"],[fmtI(D.totals.targets),"targets"],[fmtI(D.totals.nights),"nights"],[fmtI(SC.length),SC.length===1?"scope":"scopes"]];
   if(!comps.children.length) for(const _ of vals){ const s=el("span"); s.append(el("b"),document.createTextNode(" ")); comps.append(s); }
   vals.forEach(([v,l],i)=>{ const s=comps.children[i]; const b=s.querySelector("b"); if(b.textContent!==String(v)&&changed) wash(s); b.textContent=v; s.lastChild.textContent=" "+l; });
   renderShare(changed); renderLegend(); $("asof").textContent="record built "+(D.generatedAt||"");
@@ -931,11 +952,11 @@ function renderHeader(changed){
 /* the share bar: an SVG at its real width; every slice labelled, in-segment when it fits, by a numbered tick when thin */
 function renderShare(changed){
   const sb=$("sharebar"); const w=Math.max(200,Math.floor(sb.clientWidth||600)); if(!changed&&sb._w===w&&sb.children.length) return; sb._w=w; const H=mode()==="phone"?22:36, barH=mode()==="phone"?14:18, y=(H-barH)/2;
-  const tot=SC.reduce((a,s)=>a+s.hours,0); const pcts=pctLR(SC.map(s=>s.hours));
+  const tot=SC.reduce((a,s)=>a+s.hours,0); const pcts=pctLR(SC.map(s=>s.hours)).map((p,i)=>(p===0&&SC[i].hours>0)?"<1%":p+"%");
   const svg=svgEl("svg",{viewBox:"0 0 "+w+" "+H,width:w,height:H,role:"img","aria-label":"Share of hours by scope"});
   let x=0; const ticks=[]; let ntick=0;
   SC.forEach((s,i)=>{ const sw=tot>0?s.hours/tot*w:w/SC.length; const r=svgEl("rect",{class:"seg",x:x.toFixed(1),y,width:Math.max(1.5,sw).toFixed(1),height:barH,rx:3,fill:col(s.camera)}); r.style.setProperty("--i",i);
-    hoverable(r,box=>{ box.append(el("div","tt-t",s.camera)); ttRow(box,"hours",fmtH(s.hours),col(s.camera)); ttRow(box,"share",pcts[i]+"%"); ttRow(box,"frames",fmtI(s.frames)); ttRow(box,"nights",fmtI(s.nights)); });
+    hoverable(r,box=>{ box.append(el("div","tt-t",s.camera)); ttRow(box,"hours",fmtH(s.hours),col(s.camera)); ttRow(box,"share",pcts[i]); ttRow(box,"frames",fmtI(s.frames)); ttRow(box,"nights",fmtI(s.nights)); });
     r.addEventListener("click",()=>openScope(s.camera)); r.style.cursor="pointer"; svg.append(r);
     const label=s.short+" "+fmtH(s.hours); const need=label.length*6.4+14;
     if(sw>=need&&mode()!=="phone"){ const t=svgEl("text",{x:(x+7).toFixed(1),y:(y+barH/2+4).toFixed(1)}); t.textContent=label; svg.append(t); s._tick=0; }
@@ -945,7 +966,7 @@ function renderShare(changed){
   const sk=$("sharekey"); const fresh=!sk.children.length;
   SC.forEach((s,i)=>{ let k=sk.children[i]; if(!k){ k=el("div","k"); k.append(camDot(s.camera)); const t=el("div"); t.append(el("div","nm"),el("div","v")); k.append(t); sk.append(k); }
     const nm=k.querySelector(".nm"); nm.replaceChildren(); if(s._tick){ nm.append(el("span","no",String(s._tick))); } nm.append(document.createTextNode(mode()==="phone"?s.short:s.camera));
-    const v=k.querySelector(".v"); const html=mode()==="phone"?"<b>"+fmtH(s.hours)+"</b>":"<b>"+fmtH(s.hours)+"</b> · "+pcts[i]+"% · "+nts(s.nights); if(!fresh&&v.innerHTML!==html&&changed) wash(v); v.innerHTML=html; });
+    const v=k.querySelector(".v"); const html=mode()==="phone"?"<b>"+fmtH(s.hours)+"</b>":"<b>"+fmtH(s.hours)+"</b> · "+pcts[i].replace("<","&lt;")+" · "+nts(s.nights); if(!fresh&&v.innerHTML!==html&&changed) wash(v); v.innerHTML=html; });
   while(sk.children.length>SC.length) sk.lastChild.remove();
 }
 function legendInto(lg){
@@ -970,12 +991,11 @@ function renderFresh(){
   if(snap&&snap.at){ const days=typeof snap.ageHours==="number"?Math.floor(snap.ageHours/24):null; const s=el("span","snap"); s.textContent=" · the "+(snap.machine||"other computer")+"'s copy is "+(days==null?"from "+fmtDY(String(snap.at).slice(0,10)):days===0?"from today":days===1?"a day old ("+fmtDS(String(snap.at).slice(0,10))+")":days+" days old ("+fmtDS(String(snap.at).slice(0,10))+")"); t.append(s); }
   f.append(t);
   const lv=el("span","live"); lv.id="live"; lv.append(el("i","led"),el("span","age")); f.append(lv);
-  hoverable(lv,box=>{ box.append(el("div","tt-t","How fresh this page is")); const m={fresh:"The importer is reachable and this is its latest record. The page checks every 30 s and redraws itself when a rebuild finishes.",stale:"This record is more than a day old. Press Refresh on the panel to rebuild it.",rebuilding:"The importer is rebuilding the record from your records. The numbers below stay until the new ones arrive.",updated:"The record was just rebuilt; what changed is highlighted.",offline:"The importer isn't answering, so this page may be out of date. It keeps trying every 30 s.",file:"Opened from a file: the page shows the record it was saved with."}; box.append(el("div",null,m[live.state]||m.fresh)); });
   /* what is still on a camera: only when the engine says so; never a tick when it doesn't know */
   const p=D.pendingImport; const pend=el("span","pend");
   if(p&&typeof p==="object"){ const cam=p.camera?("the "+p.camera):"a camera"; const when=p.seenAt?(" · seen "+ageText(Date.parse(p.seenAt))):"";
-    if(p.files>0){ pend.classList.add("warn"); pend.append(glyph("warn")); const sp=el("span",null,fmtI(p.files)+" files on "+cam+" not yet imported"+(p.targets?" ("+plural(p.targets,"target")+")":"")+(p.failedEject?" · eject failed":"")); sp.append(el("span","long",(p.elsewhere?" · "+fmtI(p.elsewhere)+" already on the other computer":"")+" · the lists below don't include them"+when)); pend.append(sp); }
-    else { pend.append(glyph("check")); pend.append(el("span",null,"nothing left to import on "+cam+" at the last scan"+when)); } }
+    if(p.files>0){ pend.classList.add("warn"); pend.append(glyph("warn")); const sp=el("span",null,fmtI(p.files)+" files on "+cam+" not yet imported"+(p.targets?" ("+plural(p.targets,"target")+")":"")+(p.failedEject?" · eject failed":"")); sp.append(el("span","long",(p.elsewhere?" · "+fmtI(p.elsewhere)+" already on the other computer":"")+" · the lists below don't include them"+when+(p.machine?" · the "+p.machine+"'s scan":""))); pend.append(sp); }
+    else { pend.append(glyph("check")); pend.append(el("span",null,"nothing left to import on "+cam+" at the last scan"+when+(p.machine?" · the "+p.machine+"'s scan":""))); } }
   else { pend.append(glyph("info")); pend.append(el("span",null,"Frames still on a camera: not checked by this record")); }
   f.append(pend);
   setLive(location.protocol==="file:"?"file":live.state);
@@ -985,6 +1005,8 @@ function setLive(state){
   live.state=state; const lv=$("live"); if(!lv) return; lv.dataset.state=state==="file"?"stale":state;
   const txt={fresh:"live · "+ageText(live.at),stale:"a day old · "+ageText(live.at),rebuilding:"rebuilding…",updated:"updated just now",offline:"importer not answering · last seen "+ageText(live.lastOk),file:"saved record · "+ageText(live.at)}[state];
   lv.querySelector(".age").textContent=txt;
+  /* the explanation sits in the pill's title (no tooltip on the live pill) */
+  lv.title={fresh:"The importer is reachable and this is its latest record. The page checks every 30 s and redraws itself when a rebuild finishes.",stale:"This record is more than a day old. Press Refresh on the panel to rebuild it.",rebuilding:"The importer is rebuilding the record from your records. The numbers below stay until the new ones arrive.",updated:"The record was just rebuilt; what changed is highlighted.",offline:"The importer isn't answering, so this page may be out of date. It keeps trying every 30 s.",file:"Opened from a file: the page shows the record it was saved with."}[state]||"";
   $("main").classList.toggle("busy",state==="rebuilding"); $("main").setAttribute("aria-busy",state==="rebuilding"?"true":"false");
 }
 setInterval(()=>{ if(["fresh","stale","offline","file"].includes(live.state)) setLive(live.state); },30000);
@@ -1035,7 +1057,7 @@ function go(id,instant){
   const from=current?sections[current]:null, to=sections[id];
   if(current) scrollMem[current]=scrollY;
   current=id; placeInk(); ttHide();
-  const finish=()=>{ paintView(id); to.classList.add("on"); if(!failed[id]){ mem.tab=id; remember(); } fitAll(); scrollTo({top:scrollMem[id]||0,behavior:"instant"}); };
+  const finish=()=>{ paintView(id); to.classList.add("on"); if(!failed[id]){ mem.tab=id; remember(); } fitAll(); scrollTo({top:scrollMem[id]||0,behavior:"auto"}); };
   if(!from||instant||switching||ms("--dur-fade")===0){ if(from) from.classList.remove("on","leaving"); finish(); return; }
   switching=true; from.classList.add("leaving");
   setTimeout(()=>{ from.classList.remove("on","leaving"); to.classList.add("entering"); finish(); nextFrame(()=>{ to.classList.remove("entering"); to.classList.add("entered"); setTimeout(()=>{ to.classList.remove("entered"); switching=false; },Math.max(ms("--dur-fade"),ms("--dur-base"))); }); },ms("--dur-fade"));
@@ -1059,10 +1081,12 @@ const QUIET=()=>D.quietPeriodDays||14;
    dots keyed so a range change MOVES them; drawn at the real pixel width ---------- */
 const PAD=10;
 const xOf=(k,N,plot)=>PAD+(N-1-k)/(N-1)*plot;
-const rMax=(N,laneH)=>Math.min(laneH/2-2,N<=30?12:N<=90?9:7);
-const rOf=(h,N,laneH,ref)=>h>0?3+(rMax(N,laneH)-3)*Math.sqrt(Math.min(1,h/(ref||MAXSES))):4.5;
-/* a dot is a night while nights are at least 16 px apart; then a week, a fortnight, a month, two months */
-const binFor=(N,plot)=>{ const px=plot/Math.max(1,N); for(const k of [1,7,14,30,61,91,182]) if(px*k>=16) return k; return 182; };
+/* the biggest dot: by the range, the lane height, and (when nights sit close) the room each night has */
+const rMax=(N,laneH,plot)=>Math.min(laneH/2-2,N<=30?12:N<=90?9:7,plot?Math.max(4.5,plot/Math.max(1,N)*0.7):99);
+const rOf=(h,N,laneH,ref,plot)=>h>0?3+(rMax(N,laneH,plot)-3)*Math.sqrt(Math.min(1,h/(ref||MAXSES))):Math.min(4.5,rMax(N,laneH,plot));
+/* at 30 nights a dot is always a night (the key says so; dots may touch on a phone); beyond that a dot is a
+   night while nights are 16 px apart (9 px on a narrow strip), then a week, a fortnight, a month, two months */
+const binFor=(N,plot)=>{ if(N<=30) return 1; const px=plot/Math.max(1,N), min=plot<480?9:16; for(const k of [1,7,14,30,61,91,182]) if(px*k>=min) return k; return 182; };
 const binWord=b=>b===1?"night":b===7?"week":b===14?"fortnight":b===30?"month":b===61?"two months":b===91?"three months":"six months";
 const weekKey=iso=>{ const t=Date.parse(iso+"T12:00:00Z"); const d=new Date(t); const dow=(d.getUTCDay()+6)%7; return new Date(t-dow*dayMs).toISOString().slice(0,10); };
 /* the marks of one lane for a range: by night, or by a bin of nights when the range is wide */
@@ -1078,10 +1102,11 @@ function dotTip(cam,a){ return box=>{
   if(a.week){ box.append(el("div","tt-t",(a.bin===7?"Week of ":binWord(a.bin)[0].toUpperCase()+binWord(a.bin).slice(1)+" from ")+fmtDS(a.week)+" · "+nts(a.nights.size))); for(const n of [...a.nights].sort()){ const ss=a.sessions.filter(z=>z.night===n); const h=ss.reduce((x,z)=>x+z.hours,0), f=ss.reduce((x,z)=>x+z.frames,0); ttRow(box,fmtNight(n,ss[0].morning),hoursUnknown(h,f)?fmtI(f)+" frames, hours unknown":fmtH(h),col(cam)); } }
   else { box.append(el("div","tt-t","Night of "+fmtNight(a.night,a.sessions[0].morning))); for(const z of a.sessions) ttRow(box,commonName(z.target),hoursUnknown(z.hours,z.frames)?fmtI(z.frames)+" frames, hours unknown":fmtH(z.hours),col(cam)); if(a.sessions.length>1) ttRow(box,"together",a.unk?fmtI(a.frames)+" frames":fmtH(sumH(a.sessions.map(z=>z.hours)))); }
   ttRow(box,"scope",short(cam));
-  box.append(el("div","hint",matchMedia("(hover: none)").matches?"tap again for the night's detail":"Enter or click opens the night"));
+  const what=a.week?"its latest night":"the night";
+  box.append(el("div","hint",matchMedia("(hover: none)").matches?"tap again for "+(a.week?"its latest night":"the night's detail"):"Enter or click opens "+what));
 }; }
 function makeDot(st,ln,a,N,plot){
-  const x=xOf(a.k,N,plot), cy=ln.cy; const r=rOf(a.unk?0:a.hours,N,st.laneH,st.ref);
+  const x=xOf(a.k,N,plot), cy=ln.cy; const r=rOf(a.unk?0:a.hours,N,st.laneH,st.ref,st.bin===1?plot:0);
   const g=svgEl("g",{class:"dot"+(a.unk?" unk":""),"data-key":a.key}); g.style.transform="translate("+x.toFixed(1)+"px,"+cy+"px)";
   const pop=svgEl("g",{class:"pop"}); pop.style.setProperty("--k",((N-1-a.k)/(N-1)).toFixed(3));
   const c=svgEl("circle",{class:"c",r:r.toFixed(1),fill:a.unk?"var(--card)":col(ln.cam),stroke:a.unk?col(ln.cam):"var(--mark-ring)","stroke-width":a.unk?2:1.5});
@@ -1121,8 +1146,8 @@ function buildStrip(o){
 }
 function fitStrip(st){ const w=Math.floor(st.svg.clientWidth||0); if(!w) return false; const W=Math.max(200,w); if(W===st.W) return false; st.W=W; st.svg.setAttribute("viewBox","0 0 "+W+" "+st.H); for(const L of st.lanes){ L.hit.setAttribute("width",W); L.base.setAttribute("x2",W-PAD-st.right); } return true; }
 function updateStrip(st,N,first){
-  st.N=N; const x0=PAD+st.labW+st.inset, plot=st.W-2*PAD-st.labW-st.right-st.inset; const rM=rMax(N,st.laneH);
-  const bin=binFor(N,plot); st.bin=bin; const marks=st.lanes.map(L=>marksOf(L.sessions,N,bin));
+  st.N=N; const x0=PAD+st.labW+st.inset, plot=st.W-2*PAD-st.labW-st.right-st.inset;
+  const bin=binFor(N,plot); st.bin=bin; const marks=st.lanes.map(L=>marksOf(L.sessions,N,bin)); const rM=rMax(N,st.laneH,bin===1?plot:0);
   st.ref=bin===1?MAXSES:Math.max(0.1,...marks.flatMap(m=>[...m.values()].map(a=>a.unk?0:a.hours)));
   const qn=Math.min(QUIET(),N); const bw=Math.max(0,(qn-1)/(N-1)*plot+rM);
   if(first){ st.band.classList.add("still"); nextFrame(()=>st.band.classList.remove("still")); }
@@ -1130,13 +1155,13 @@ function updateStrip(st,N,first){
   st.lanes.forEach((L,li)=>{
     const by=marks[li]; const keep=new Set();
     L.nEarlier=new Set(L.sessions.filter(z=>ago(z.night)>=N).map(z=>z.night)).size; L.earlier.textContent=L.nEarlier?"‹"+L.nEarlier:"";
-    /* empty nights at 30: crossfade */
-    const nb=svgEl("g",{class:"bg"}); if(N<=30&&st.emptyDots){ for(let k=0;k<N;k++){ const n=nightAdd(ASOF(),-k); if([...by.values()].some(a=>a.nights.has(n))) continue; nb.append(svgEl("circle",{cx:(x0+(N-1-k)/(N-1)*plot).toFixed(1),cy:L.cy,r:2.2,fill:"var(--track)"})); } }
+    /* empty nights at 30, only while a dot is a night: crossfade */
+    const nb=svgEl("g",{class:"bg"}); if(N<=30&&bin===1&&st.emptyDots){ for(let k=0;k<N;k++){ const n=nightAdd(ASOF(),-k); if([...by.values()].some(a=>a.nights.has(n))) continue; nb.append(svgEl("circle",{cx:(x0+(N-1-k)/(N-1)*plot).toFixed(1),cy:L.cy,r:2.2,fill:"var(--track)"})); } }
     const oldBg=L.bg; if(!first){ nb.classList.add("out"); oldBg.classList.add("out"); setTimeout(()=>oldBg.remove(),ms("--dur-fade")+20); } else oldBg.remove();
     L.g.insertBefore(nb,L.earlier); L.bg=nb; if(!first) nextFrame(()=>nb.classList.remove("out"));
     for(const a of by.values()){ keep.add(a.key); let d=L.dots.get(a.key);
       const x=x0+(N-1-a.k)/(N-1)*plot;
-      if(d){ d.g.style.transform="translate("+x.toFixed(1)+"px,"+L.cy+"px)"; d.c.setAttribute("r",rOf(a.unk?0:a.hours,N,st.laneH,st.ref).toFixed(1)); d.g.classList.remove("out"); if(a.hours!==d.hours||a.frames!==d.frames){ Object.assign(d,a); hoverable(d.g,dotTip(L.cam,a)); } }
+      if(d){ d.g.style.transform="translate("+x.toFixed(1)+"px,"+L.cy+"px)"; d.c.setAttribute("r",rOf(a.unk?0:a.hours,N,st.laneH,st.ref,bin===1?plot:0).toFixed(1)); d.g.classList.remove("out"); if(a.hours!==d.hours||a.frames!==d.frames){ Object.assign(d,a); hoverable(d.g,dotTip(L.cam,a)); } }
       else { d=makeDot(st,L,a,N,plot); d.g.style.transform="translate("+x.toFixed(1)+"px,"+L.cy+"px)"; if(!first){ d.g.classList.add("in"); nextFrame(()=>d.g.classList.remove("in")); } L.dots.set(a.key,d); L.g.append(d.g); } }
     for(const [key,d] of L.dots){ if(keep.has(key)) continue; d.g.classList.add("out"); setTimeout(()=>{ if(d.g.classList.contains("out")){ d.g.remove(); L.dots.delete(key); } },ms("--dur-base")+30); }
     if(st.stageOf){ if(L.stageG) L.stageG.remove(); const sk=st.stageOf(L); if(sk){ L.stageG=stageMark(L.g,stOf(sk.key).icon,st.W-PAD-14,L.cy,box=>{ box.append(el("div","tt-t",stOf(sk.key).word)); if(sk.note) box.append(el("div",null,sk.note)); }); } }
@@ -1161,7 +1186,7 @@ function expandPanel(slot,anchor,panel,opts){
   const h=panel.scrollHeight; panel.style.height="0px"; void panel.offsetHeight; panel.style.height=h+"px"; panel.classList.add("open");
   const dur=ms("--dur-long");
   const pr=panel.getBoundingClientRect(); const need=pr.top+h-(innerHeight-24);
-  if(need>0){ const ar=(opts.scrollRef||anchor).getBoundingClientRect(); scrollBy({top:Math.min(need,Math.max(0,ar.top-80)),behavior:reduced()?"instant":"smooth"}); }
+  if(need>0){ const ar=(opts.scrollRef||anchor).getBoundingClientRect(); scrollBy({top:Math.min(need,Math.max(0,ar.top-80)),behavior:reduced()?"auto":"smooth"}); }
   setTimeout(()=>{ panel.classList.add("auto"); panel.style.height=""; },dur+20);
   if(opts.focus!==false) setTimeout(()=>{ const c=panel.querySelector(".panelin"); if(c){ c.tabIndex=-1; c.focus({preventScroll:true}); } },dur);
 }
@@ -1199,13 +1224,13 @@ function nightPanelFor(cam,night,target){
       else { line(b2,"darks",c.darks?fmtI(c.darks)+(c.darkExposures&&c.darkExposures.length?" · "+c.darkExposures.map(x=>(+x)+" s").join(", "):"")+(c.darkGains&&c.darkGains.length?" · gain "+c.darkGains.join(", "):""):"none",!c.darks);
         line(b2,"flats",c.flats?fmtI(c.flats)+(c.flatFilters&&c.flatFilters.length?" · "+c.flatFilters.map(filtLabel).join(", "):""):"none",!c.flats);
         line(b2,"bias",c.biases?fmtI(c.biases)+(c.biasGains&&c.biasGains.length?" · gain "+c.biasGains.join(", "):""):"none",!c.biases);
-        if(c.shipped!=null) line(b2,"verified on the archive",fmtI(c.shipped)+" of "+fmtI((c.darks||0)+(c.flats||0)+(c.biases||0))); }
-      if(c.matched==null) line(b2,"matched to these lights","the importer matched gain, exposure and date when it filed them",true); }
+        if(c.shipped!=null) line(b2,"verified on the archive",fmtI(c.shipped)+" of "+fmtI((c.darks||0)+(c.flats||0)+(c.biases||0))); } }
     grid.append(b2);
     const b3=el("div","blk"); b3.append(el("h4",null,"On the archive"));
     if(z.archive){ line(b3,"files in the Day folder",fmtI(z.archive.files)+" · "+fmtGB(z.archive.bytes)); if(z.archive.autostacks) line(b3,"Seestar autostacks",fmtI(z.archive.autostacks)+" · "+fmtGB(z.archive.autostackBytes)); if(z.archive.workingBytes) line(b3,"working files (regenerable)",fmtGB(z.archive.workingBytes)); }
     else line(b3,"Day folder size","not in this record",true);
-    line(b3,"verified on the archive",z.archived>=z.frames?"all "+fmtI(z.frames)+" frames":fmtI(z.archived)+" of "+fmtI(z.frames)+" frames",z.archived<z.frames);
+    if(z.archived==null) line(b3,"verified on the archive","not in this record",true);
+    else line(b3,"verified on the archive",z.archived>=z.frames?"all "+fmtI(z.frames)+" frames":fmtI(z.archived)+" of "+fmtI(z.frames)+" frames",z.archived<z.frames);
     const on=(z.importedOn||[]).map(x=>SIDE[x]||x); line(b3,"imported on",on.length?on.join(" and "):"not recorded",!on.length);
     grid.append(b3);
     blk.append(grid);
@@ -1242,7 +1267,7 @@ function nightRowsFor(t,p){
     tr.append(el("td",null,[filtersTxt(z.filters),subsTxt(z.exps)].filter(Boolean).join(" · ")||"·"));
     const tc=el("td"); if(isSeestar(p.camera)) tc.append(el("span","muted","in the camera")); else { const c=z.calDetail||z.cal||{}; const m=(!c.darks&&!c.flats)?{icon:"warn",cls:"warn",word:"none filed"}:{icon:"check",cls:"ok",word:calLine(c)}; tc.append(markEl(m)); } tr.append(tc);
     tr.append(el("td",null,(z.importedOn||[]).map(x=>SIDE[x]||x).join(", ")||"·"));
-    tr.append(el("td","r",z.archived>=z.frames?"all":fmtI(z.archived)+" / "+fmtI(z.frames)));
+    tr.append(el("td","r"+(z.archived==null?" muted":""),z.archived==null?"not in this record":z.archived>=z.frames?"all":fmtI(z.archived)+" / "+fmtI(z.frames)));
     const open=()=>openNight(p.camera,z.night,t.name,wrap,tr);
     tr.addEventListener("click",open); tr.addEventListener("keydown",e=>{ if(e.key==="Enter"||e.key===" "){ e.preventDefault(); open(); } });
     tb.append(tr); }
@@ -1317,17 +1342,19 @@ function scopePanelFor(cam,opts){
 /* the strip card is the scope panel's home; Equipment and the share bar open it too */
 let STRIPCARD=null;
 function openScope(cam){
-  go("overview");
+  /* from another tab (Equipment, or a page that loaded there) the Overview may never have been painted:
+     switch and paint it now, synchronously, so the strip card exists before the panel looks for it */
+  const ret=document.activeElement; go("overview",true);
   const host=STRIPCARD||sections.overview.querySelector(".card"); if(!host) return;
-  const panel=scopePanelFor(cam); panel.classList.add("flow"); panel.returnTo=document.activeElement;
+  const panel=scopePanelFor(cam); panel.classList.add("flow"); panel.returnTo=ret;
   expandPanel("scope",host,panel,{scrollRef:host});
-  const r=host.getBoundingClientRect(); if(r.top<0) host.scrollIntoView({block:"start",behavior:reduced()?"instant":"smooth"});
+  const r=host.getBoundingClientRect(); if(r.top<0) host.scrollIntoView({block:"start",behavior:reduced()?"auto":"smooth"});
 }
 /* the project panel's home is the project card when it is on the page; else the drawer carries it */
 function openProject(name){
   const t=byName[name]; if(!t) return;
   const card=document.querySelector('#view-overview .proj[data-tid="'+CSS.escape(t.id)+'"]');
-  if(card&&current==="overview"){ if(card.classList.contains("hid")) showMore(card.closest(".card")); ttHide(); const r=card.getBoundingClientRect(); if(r.top<80||r.bottom>innerHeight) scrollBy({top:r.top-96,behavior:reduced()?"instant":"smooth"}); setTimeout(()=>{ toggleProj(card,true); card.querySelector(".head").focus({preventScroll:true}); },(r.top<80||r.bottom>innerHeight)&&!reduced()?260:0); return; }
+  if(card&&current==="overview"){ if(card.classList.contains("hid")) showMore(card.closest(".card")); ttHide(); const r=card.getBoundingClientRect(); if(r.top<80||r.bottom>innerHeight) scrollBy({top:r.top-96,behavior:reduced()?"auto":"smooth"}); setTimeout(()=>{ toggleProj(card,true); card.querySelector(".head").focus({preventScroll:true}); },(r.top<80||r.bottom>innerHeight)&&!reduced()?260:0); return; }
   openTarget(name);
 }
 
@@ -1368,7 +1395,8 @@ function attentionJobs(){
   if(shared.length) jobs.push({id:"shared_master",n:sharedT.length,u:sharedT.length===1?"project":"projects",w:sharedT.map(commonName).join(", ")+(sharedT.length===1?"'s":"'") +" Askar folder holds a master and lights from both Askars",s:"the importer can't tell which scope made the master until its name says",act:"Say which Askar",more:()=>{ const b=el("div","more"); b.append(el("div",null,"Rename the master so its file name carries the scope (FRA400 or 107PHQ), for example:")); const ul=el("ul"); for(const p of shared){ const u=p.masterOwnerUncertain; for(const m of (u.masters||[]).slice(0,3)){ const li=el("li"); const c=el("code"); c.textContent=m; li.append(c,document.createTextNode("  → add _FRA400 or _107PHQ before the extension")); ul.append(li); } } b.append(ul); b.append(el("div",null,"Press Refresh afterwards; the note goes away by itself.")); return b; }});
   const calMiss=PROGS.filter(p=>!isSeestar(p.camera)&&p.calibration&&p.calibration.applies!==false&&(p.calibration.mode||"tracked")==="tracked"&&Array.isArray(p.calibration.missing)&&p.calibration.missing.length&&(p.status==="ready_to_process"||p.status==="in_progress")&&stKey(p)!=="sample");
   if(calMiss.length){ const flats=calMiss.filter(p=>p.calibration.missing.length===1&&p.calibration.missing[0]==="flats").length, darks=calMiss.filter(p=>p.calibration.missing.length===1&&p.calibration.missing[0]==="darks").length, both=calMiss.filter(p=>p.calibration.missing.length===2).length;
-    jobs.push({id:"calibration",n:calMiss.length,u:"waiting",w:plural(calMiss.length,"waiting project")+" "+(calMiss.length===1?"has":"have")+" no darks or flats filed with "+(calMiss.length===1?"its":"their")+" lights",s:[flats?flats+" need flats":"",darks?darks+" need darks":"",both?both+" need darks and flats":""].filter(Boolean).join(" · ")+" · done and still-capturing datasets not counted",act:"Show them",more:()=>{ const b=el("div","more"); const ul=el("ul"); for(const p of calMiss){ const li=el("li"); const bt=el("button","disc"); bt.append(document.createTextNode(commonName(p.target)+" · "+short(p.camera)+" · "+calibrationMark(p).word),glyph("right")); bt.addEventListener("click",()=>openProject(p.target)); li.append(bt); ul.append(li); } b.append(ul); return b; }}); }
+    const need=n=>n===1?" needs ":" need ";
+    jobs.push({id:"calibration",n:calMiss.length,u:"waiting",w:plural(calMiss.length,"waiting project")+" "+(calMiss.length===1?"has":"have")+" no darks or flats filed with "+(calMiss.length===1?"its":"their")+" lights",s:[flats?flats+need(flats)+"flats":"",darks?darks+need(darks)+"darks":"",both?both+need(both)+"darks and flats":""].filter(Boolean).join(" · ")+" · done and still-capturing datasets not counted",act:"Show them",more:()=>{ const b=el("div","more"); const ul=el("ul"); for(const p of calMiss){ const li=el("li"); const bt=el("button","disc"); bt.append(document.createTextNode(commonName(p.target)+" · "+short(p.camera)+" · "+calibrationMark(p).word),glyph("right")); bt.addEventListener("click",()=>openProject(p.target)); li.append(bt); ul.append(li); } b.append(ul); return b; }}); }
   const uns=new Set(["unknown_names","no_scope","no_night","unreadable","snapshot_age"]);
   for(const n of D.notices||[]){ if(!n||uns.has(n.kind)) continue;
     if(n.kind==="inventory_missing") jobs.push({id:"inv:"+n.text,n:"",u:"",w:"The archive wasn't checked for masters and finished pictures",s:n.text,act:"Mark as checked"});
@@ -1377,6 +1405,8 @@ function attentionJobs(){
     else if(n.kind==="capture_state_bad") jobs.push({id:"csb:"+n.text,n:"",u:"",w:"capture-state.json names a dataset that doesn't exist",s:n.text,act:"Mark as checked"});
     else if(n.kind==="contract") jobs.push({id:"con:"+n.text,n:"",u:"",w:"A note about the importer's list of targets and scopes",s:n.text,act:"Mark as checked"});
     else jobs.push({id:"n:"+n.kind+":"+n.text,n:n.count!=null?n.count:"",u:n.frames!=null?"frames":"",w:n.text,s:"",act:"Mark as checked"}); }
+  /* an older record (no notices) still carries its warnings: one job each, the text as the engine wrote it */
+  if(!(D.notices||[]).length) for(const w of D.warnings||[]){ if(!w) continue; jobs.push({id:"w:"+String(w),n:"",u:"",w:"Something to know",s:String(w),act:"Mark as checked"}); }
   if(nc.duplicates>0) jobs.push({id:"dup",info:true,n:nc.duplicates,u:"frames",w:fmtI(nc.duplicates)+" frames were imported on both computers",s:"counted once · nothing to do",act:"Nothing to do"});
   if(nc.notLightFrames>0) jobs.push({id:"nlf",info:true,n:nc.notLightFrames,u:"files",w:fmtI(nc.notLightFrames)+" other files in the record are not light frames",s:"darks, flats, stacks and previews: filed, not counted here",act:"Nothing to do"});
   return jobs;
@@ -1434,7 +1464,7 @@ function renderStrips(card,first){
   STRIP.st=st;
   const stripBox=el("div","strip"); stripBox.append(st.svg);
   if(m==="phone"){ L.append(stripBox); const ax=el("div","axis"); ax.id="stripAxis"; L.append(ax); const list=el("div","list"); list.id="stripList"; L.append(list); }
-  else { SC.forEach((s,i)=>{ const nm=el("div","nm"); nm.id="nm-"+i; nm.style.gridRow=i+1; nm.style.gridColumn=1; const b=el("button"); b.append(camDot(s.camera),document.createTextNode(s.camera),el("span","arrow","›")); b.title=s.camera+": its timeline of projects"; hoverable(b,box=>{ box.append(el("div","tt-t",s.camera)); ttRow(box,"all time",fmtH(s.hours),col(s.camera)); ttRow(box,"frames",fmtI(s.frames)); ttRow(box,"nights",fmtI(s.nights)); if(s.first) ttRow(box,"first night",fmtDY(s.first)); box.append(el("div","hint","opens this scope's timeline")); }); b.addEventListener("click",()=>openScope(s.camera)); nm.append(b); if(m==="tablet") nm.append(el("small")); L.append(nm);
+  else { SC.forEach((s,i)=>{ const nm=el("div","nm"); nm.id="nm-"+i; nm.style.gridRow=i+1; nm.style.gridColumn=1; const b=el("button"); b.append(camDot(s.camera),document.createTextNode(s.camera),el("span","arrow","›")); b.title=s.camera+": "+fmtH(s.hours)+" · "+fmtI(s.frames)+" frames · "+nts(s.nights)+(s.first?" · first night "+fmtDY(s.first):"")+" · opens its timeline of projects"; b.addEventListener("click",()=>openScope(s.camera)); nm.append(b); if(m==="tablet") nm.append(el("small")); L.append(nm);
       if(m==="desk"){ const rt=el("div","rt"); rt.id="rt-"+i; rt.style.gridRow=i+1; rt.style.gridColumn=3; L.append(rt); } });
     L.append(stripBox); const ax=el("div","axis"); ax.id="stripAxis"; L.append(ax); }
   card.append(L);
@@ -1478,7 +1508,7 @@ function renderQueue(card){
   card.append(cols);
   const soon=cap.filter(p=>p.readyOn).map(p=>p.readyOn).sort()[0];
   if(!ready.length&&!finish.length) card.append(el("p","sub","Nothing is waiting for you"+(cap.length?": everything is still capturing"+(soon?" (the first is ready from "+fmtDY(soon)+")":""):"")+(real.some(p=>p.status==="done")?"; the rest is done.":".")));
-  if(samples.length){ const sm=el("div","samples"); const h=el("h3"); h.append(document.createTextNode("Quick looks, kept out of the queue"),el("span","count",String(samples.length))); sm.append(h); sm.append(el("div","sub","a test or a one-off snap you flagged in capture-state.json · say it is a real project to put it back in the queue"));
+  if(samples.length){ const sm=el("div","samples"); const h=el("h3"); h.append(document.createTextNode("Quick looks, kept out of the queue"),el("span","count",String(samples.length))); sm.append(h); sm.append(el("div","sub","a test or a one-off snap you flagged as a quick look · say it is a real project to put it back in the queue"));
     for(const p of samples){ const r=el("div","r"); r.append(pill("sample"),camDot(p.camera),el("b",null,commonName(p.target)),el("span",null,"on the "+short(p.camera)+" · "+plural(p.lights,"frame")+" · "+nts(p.nights)+" · "+agoTxt(p.lastNight))); const b=el("button","disc"); b.append(document.createTextNode("It's a real project"),glyph("right")); b.addEventListener("click",()=>toast("Remove its line from capture-state.json ("+p.tid+"|"+((BY[p.camera]||{}).id||p.camera)+") and press Refresh: it goes back in the queue.")); r.append(b); sm.append(r); }
     card.append(sm); }
 }
@@ -1488,11 +1518,12 @@ function ring(progs,size){
   const R=size/2, w=8, r=R-w/2; const wrap=el("div","ringwrap");
   const s=svgEl("svg",{viewBox:"0 0 "+size+" "+size,width:size,height:size,role:"img","aria-label":"hours by scope"});
   const known=progs.filter(p=>!hoursUnknown(p.hours,p.lights)), unk=progs.filter(p=>hoursUnknown(p.hours,p.lights)); const total=known.reduce((a,p)=>a+p.hours,0);
-  const circ=2*Math.PI*r, gapU=progs.length>1?(2.5/circ)*100:0; let start=0;
+  /* the dash lengths are in the circle's own units (its circumference), not pathLength=100: Safari ignores pathLength on a circle */
+  const circ=2*Math.PI*r, gap=progs.length>1?2.5:0; let start=0;
   const parts=total>0?known.map(p=>({p,share:p.hours/total*(unk.length?0.85:1)})):[]; if(unk.length) parts.push(...unk.map(p=>({p,share:(total>0?0.15:1)/unk.length,unknown:true})));
   s.append(svgEl("circle",{cx:R,cy:R,r,fill:"none",stroke:"var(--track)","stroke-width":w}));
-  parts.forEach((q,j)=>{ const len=Math.max(0,q.share*100-gapU); const c=svgEl("circle",{class:"segm pre",cx:R,cy:R,r,fill:"none",stroke:q.unknown?hatchFor(q.p.camera):col(q.p.camera),"stroke-width":w,pathLength:100,"stroke-dasharray":len+" "+(100-len),"stroke-dashoffset":-start,transform:"rotate(-90 "+R+" "+R+")"}); c.style.setProperty("--j",j); c.style.pointerEvents="stroke";
-    hoverable(c,box=>{ box.append(el("div","tt-t",q.p.camera)); ttRow(box,"hours",q.unknown?"unknown · "+fmtI(q.p.lights)+" frames":fmtH(q.p.hours),col(q.p.camera)); ttRow(box,"nights",fmtI(q.p.nights)); }); s.append(c); start+=q.share*100; });
+  parts.forEach((q,j)=>{ const len=Math.max(0,q.share*circ-gap); const c=svgEl("circle",{class:"segm pre",cx:R,cy:R,r,fill:"none",stroke:q.unknown?hatchFor(q.p.camera):col(q.p.camera),"stroke-width":w,"stroke-dasharray":len.toFixed(2)+" "+(circ-len).toFixed(2),"stroke-dashoffset":(-start).toFixed(2),transform:"rotate(-90 "+R+" "+R+")"}); c.style.setProperty("--j",j); c.style.pointerEvents="stroke";
+    hoverable(c,box=>{ box.append(el("div","tt-t",q.p.camera)); ttRow(box,"hours",q.unknown?"unknown · "+fmtI(q.p.lights)+" frames":fmtH(q.p.hours),col(q.p.camera)); ttRow(box,"nights",fmtI(q.p.nights)); }); s.append(c); start+=q.share*circ; });
   wrap.append(s); nextFrame(()=>{ for(const c of s.querySelectorAll(".pre")) c.classList.remove("pre"); }); return wrap;
 }
 const HATCH=new Set();
@@ -1507,9 +1538,8 @@ function projCard(t){
   head.append(txt); head.append(glyph("chev")); head.lastChild.classList.add("chev"); card.append(head);
   const mini=el("div","mini"); const st=buildStrip({lanes:[{key:t.id,cam:progs[0]?progs[0].camera:"",sessions:SESS.filter(z=>z.target===t.name),target:t.name,multi:true}],laneH:30,onDot:(ln,a)=>{ const cams=[...new Set(a.sessions.map(z=>z.camera))]; openNight(cams[0],a.night,t.name,card.closest(".card")||card,ln.g); }});
   /* a mini lane carries several scopes: colour each dot by its own scope */
-  mini.append(st.svg); card.append(mini);
+  mini.append(st.svg); mini.title="the last 120 nights on one line, a dot per night · a grey dot is a night on more than one scope · open the card for one lane per scope"; card.append(mini);
   card.fitMini=()=>{ if(fitStrip(st)||!st.fitted){ st.fitted=true; st.svg.classList.add("still"); updateStrip(st,120,true); for(const d of st.lanes[0].dots.values()){ const cams=[...new Set(d.sessions.map(z=>z.camera))]; if(cams.length===1){ d.c.setAttribute(d.unk?"stroke":"fill",col(cams[0])); } else { d.c.setAttribute("fill",cams.length>1?"var(--ink2)":col(cams[0])); } } } };
-  hoverable(mini,box=>box.append(el("div",null,"the last 120 nights on one line, a dot per night · a grey dot is a night on more than one scope · open the card for one lane per scope")));
   if(progs.some(p=>p.masterOwnerUncertain)){ const f=el("div","flag"); f.append(glyph("q"),el("span",null,"One master in the shared Askar folder, not named for either Askar: open the card.")); card.append(f); }
   head.addEventListener("click",()=>toggleProj(card));
   return card;
@@ -1519,9 +1549,10 @@ function toggleProj(card,force){
   const head=card.querySelector(".head"); head.setAttribute("aria-expanded",open?"true":"false");
   const slot="proj:"+(grid.id||"grid");
   if(!open){ card.classList.remove("open"); closePanel(slot); return; }
-  for(const c of grid.querySelectorAll(".proj.open")){ c.classList.remove("open"); c.querySelector(".head").setAttribute("aria-expanded","false"); }
+  /* only the cards: the expanded panel is div.panel.proj and has no head */
+  for(const c of grid.querySelectorAll("article.proj.open")){ c.classList.remove("open"); const h=c.querySelector(".head"); if(h) h.setAttribute("aria-expanded","false"); }
   const t=TG.find(x=>x.id===card.dataset.tid); if(!t) return; card.classList.add("open");
-  const cards=[...grid.querySelectorAll(".proj:not(.hid)")]; const top=card.offsetTop; let last=card; for(const c of cards){ if(Math.abs(c.offsetTop-top)<4) last=c; }
+  const cards=[...grid.querySelectorAll("article.proj:not(.hid)")]; const top=card.offsetTop; let last=card; for(const c of cards){ if(Math.abs(c.offsetTop-top)<4) last=c; }
   const panel=projectPanelFor(t,{slot}); panel.id="pb-"+t.id.replace(/[^a-z0-9_-]/gi,"_"); panel.returnTo=head; panel.setAttribute("role","region");
   const onClose=panel.onClose; panel.onClose=()=>{ onClose&&onClose(); card.classList.remove("open"); head.setAttribute("aria-expanded","false"); };
   expandPanel(slot,last,panel,{scrollRef:card,focus:false});
@@ -1532,7 +1563,7 @@ function renderProjects(card,list,title,sub,n){
   const g=el("div","pgrid"); g.id="grid-"+title.replace(/\W+/g,"").toLowerCase(); list.forEach((tg,i)=>{ const c=projCard(tg); if(i>=n) c.classList.add("hid"); g.append(c); }); card.append(g);
   if(!list.length) card.append(el("p","sub","No project has had new frames in the last 60 nights."));
   if(list.length>n){ const m=el("button","btn more","+ "+(list.length-n)+" more · show all "+list.length); m.addEventListener("click",()=>{ const hidden=[...g.querySelectorAll(".proj.hid")]; hidden.forEach((c,i)=>{ c.classList.remove("hid"); c.classList.add("reveal"); c.style.setProperty("--block-delay",Math.min(i,8)*40+"ms"); }); m.remove(); fitAll(true); }); card.append(m); }
-  const fitter=()=>{ if(!card.isConnected){ FITTERS.delete(fitter); return; } for(const c of g.querySelectorAll(".proj:not(.hid)")) if(c.fitMini) c.fitMini(); }; FITTERS.add(fitter);
+  const fitter=()=>{ if(!card.isConnected){ FITTERS.delete(fitter); return; } for(const c of g.querySelectorAll("article.proj:not(.hid)")) if(c.fitMini) c.fitMini(); }; FITTERS.add(fitter);
   nextFrame(fitter);
 }
 
@@ -1588,7 +1619,7 @@ function applyDataset(D2){
     renderAttention(OV.at);
     if(STRIP.st){ STRIP.st.lanes.forEach(L=>{ L.sessions=SESS.filter(z=>z.camera===L.cam); }); STRIP.setRange(); }
     renderQueue(OV.q);
-    const openIds=new Set([...document.querySelectorAll("#view-overview .proj.open")].map(c=>c.dataset.tid)); collapseAll();
+    const openIds=new Set([...document.querySelectorAll("#view-overview article.proj.open")].map(c=>c.dataset.tid)); collapseAll();
     const moved=TG.filter(t=>t.lastNight&&ago(t.lastNight)<60).sort((a,b)=>b.lastNight>a.lastNight?1:-1);
     renderProjects(OV.pc,moved,"Projects that moved lately",plural(moved.length,"project")+" with frames in the last 60 nights, newest first · the ring is hours by scope · one pill per scope · click a card for one lane per scope",6);
     for(const c of OV.pc.querySelectorAll(".proj")){ if(openIds.has(c.dataset.tid)) toggleProj(c,true); if(newSess.some(s=>TG.find(t=>t.id===c.dataset.tid&&t.name===s.target))) wash(c); }
@@ -1597,7 +1628,7 @@ function applyDataset(D2){
   if(current&&current!=="overview"){ painted[current]=false; paintView(current); fitAll(true); }
   setLive("updated");
   const add=sumH(newSess.map(s=>s.hours));
-  toast(newSess.length?"Updated · "+plural(newSess.length,"new session")+": "+[...new Set(newSess.map(s=>commonName(s.target)+" on the "+short(s.camera)))].slice(0,3).join(", ")+(newSess.length>3?" …":"")+" · +"+fmtH(add):"Updated · nothing new since last time",newSess.length?"Show":null,()=>{ go("overview"); if(OV.sc) OV.sc.scrollIntoView({behavior:reduced()?"instant":"smooth",block:"start"}); });
+  toast(newSess.length?"Updated · "+plural(newSess.length,"new session")+": "+[...new Set(newSess.map(s=>commonName(s.target)+" on the "+short(s.camera)))].slice(0,3).join(", ")+(newSess.length>3?" …":"")+" · +"+fmtH(add):"Updated · nothing new since last time",newSess.length?"Show":null,()=>{ go("overview"); if(OV.sc) OV.sc.scrollIntoView({behavior:reduced()?"auto":"smooth",block:"start"}); });
   setTimeout(()=>{ if(live.state==="updated") setLive("fresh"); },8000);
 }
 </script>
@@ -1629,7 +1660,7 @@ RENDER.targets=function(root){
       r.append(el("div","tmeta",[t.type,t.constellation].filter(Boolean).join(" · ")||"type not recorded"));
       const dots=el("div","dots"); for(const p of scopeOrder(t.programmes)) dots.append(camDot(p.camera)); r.append(dots);
       const stc=el("div","sts"); for(const p of scopeOrder(t.programmes)) stc.append(pill(stKey(p),{cam:p.camera,text:stOf(stKey(p)).word})); r.append(stc);
-      const n1=el("div","num"); n1.dataset.l="hours"; const unkAll=t.programmes.every(p=>hoursUnknown(p.hours,p.lights)); n1.append(el("b",null,unkAll?"unknown":fmtHn(sumH(t.programmes.map(p=>p.hours)))),document.createTextNode(unkAll?"":" h")); r.append(n1);
+      const n1=el("div","num"); n1.dataset.l="hours"; const unkAll=t.programmes.every(p=>hoursUnknown(p.hours,p.lights)); const hp=fmtHp(sumH(t.programmes.map(p=>p.hours))); n1.append(el("b",null,unkAll?"unknown":hp.n),document.createTextNode(unkAll?"":" "+hp.u)); r.append(n1);
       const n2=el("div","num",fmtI(t.nights)); n2.dataset.l="nights"; const n3=el("div","num",fmtI(t.lights)); n3.dataset.l="frames"; const n4=el("div","num",fmtDY(t.lastNight)); n4.dataset.l="latest"; r.append(n2,n3,n4);
       r.addEventListener("click",()=>openTarget(t.name)); list.append(r); }
     if(!rows.length) list.append(el("p","sub","No target matches."));
@@ -1848,8 +1879,8 @@ RENDER.footprints=function(root){
 /* ================= EQUIPMENT ================= */
 RENDER.equipment=function(root){
   const sc=el("div","scopes");
-  for(const s of SC){ const cardS=el("div","scard"); cardS.style.setProperty("--sc",col(s.camera)); const h=el("h3"); h.append(camDot(s.camera),document.createTextNode(s.camera+((s.kind==="askar")?" · ASI585MC Air":""))); cardS.append(h);
-    const nums=el("div","s-nums"); [[fmtHn(s.hours),"hours"],[fmtI(s.frames),"frames"],[fmtI(s.nights),"nights"]].forEach(([v,l])=>{ const n=el("div","n"); n.append(el("b",null,v),el("span",null,l)); nums.append(n); }); cardS.append(nums);
+  for(const s of SC){ const cardS=el("div","scard"); cardS.style.setProperty("--sc",col(s.camera)); const h=el("h3"); h.append(camDot(s.camera),document.createTextNode(s.camera)); cardS.append(h);
+    const hp=fmtHp(s.hours); const nums=el("div","s-nums"); [[hp.n,hp.u==="min"?"minutes":"hours"],[fmtI(s.frames),"frames"],[fmtI(s.nights),"nights"]].forEach(([v,l])=>{ const n=el("div","n"); n.append(el("b",null,v),el("span",null,l)); nums.append(n); }); cardS.append(nums);
     cardS.append(el("div","s-line",(s.first?"On the sky "+fmtDY(s.first)+" to "+fmtDY(s.last)+" · ":"")+fmtGB(s.bytes)+" of lights (GB as Windows shows it)"));
     const mix={}; for(const p of PROGS) if(p.camera===s.camera) for(const [f,n2] of Object.entries(p.filters)) mix[f]=(mix[f]||0)+n2; const tot=Object.values(mix).reduce((a,b)=>a+b,0);
     if(tot){ const mb=el("div","minibar"); const parts=Object.entries(mix).sort((a,b)=>b[1]-a[1]); const pcts=pctLR(parts.map(x=>x[1])); parts.forEach(([f,n2],i)=>{ const iEl=el("i"); iEl.style.width=(n2/tot*100)+"%"; iEl.style.background=f==="unrecorded"?"var(--track)":"var(--ink2)"; iEl.style.opacity=f==="unrecorded"?1:String(1-i*0.18); mb.append(iEl); }); cardS.append(mb); cardS.append(el("div","s-line",parts.map(([f,n2],i)=>filtLabel(f)+" "+pcts[i]+"%").join(" · "))); }
@@ -1860,7 +1891,7 @@ RENDER.equipment=function(root){
   const byMonth=new Map(); for(const s of SESS){ const m=s.night.slice(0,7); let rec2=byMonth.get(m); if(!rec2){ rec2={}; byMonth.set(m,rec2); } rec2[s.camera]=(rec2[s.camera]||0)+s.hours; } const monthsAll=[...byMonth.keys()].sort();
   const card=el("div","card"); card.style.marginTop="24px"; const hh=el("div","cardhead"); const hd=el("div"); hd.append(el("h2",null,"The rhythm of the hobby"),el("div","sub","hours of integration per calendar month, stacked by scope")); hh.append(hd); const btn=el("button","btn","view as table"); btn.setAttribute("aria-pressed","false"); hh.append(btn); card.append(hh); const body=el("div"); card.append(body); root.append(card); let modeC="chart";
   function paint(){ body.replaceChildren(); if(!monthsAll.length){ body.append(el("p","sub","Not enough months yet.")); return; }
-    if(modeC==="table"){ btn.textContent="view as chart"; btn.setAttribute("aria-pressed","true"); const w=el("div","tablewrap"); simpleTable(w,["Month",...SC.map(c2=>c2.short),"Total"],monthsAll.map(m=>{ const rec2=byMonth.get(m); const vals=SC.map(c2=>(rec2[c2.camera]||0)); return [fmtMonth(m),...vals.map(v=>v?fmtHn(v):"·"),fmtHn(sumH(vals))]; }),SC.map((_,i)=>i+1).concat([SC.length+1])); body.append(w); return; }
+    if(modeC==="table"){ btn.textContent="view as chart"; btn.setAttribute("aria-pressed","true"); const w=el("div","tablewrap"); simpleTable(w,["Month",...SC.map(c2=>c2.short),"Total"],monthsAll.map(m=>{ const rec2=byMonth.get(m); const vals=SC.map(c2=>(rec2[c2.camera]||0)); return [fmtMonth(m),...vals.map(v=>v?fmtH(v):"·"),fmtH(sumH(vals))]; }),SC.map((_,i)=>i+1).concat([SC.length+1])); body.append(w); return; }
     btn.textContent="view as table"; btn.setAttribute("aria-pressed","false");
     const W=Math.max(360,Math.floor(body.clientWidth||900)), padL2=44,padR2=12,padT2=14,padB2=40, plotW2=W-padL2-padR2, Hpl=210, Hv=Hpl+padT2+padB2; const svg=svgEl("svg",{viewBox:"0 0 "+W+" "+Hv,width:W,height:Hv,role:"img","aria-label":"Hours per month by scope"});
     const colW=Math.max(3,Math.min(24,plotW2/monthsAll.length-6)); const maxM=Math.max(0.01,...monthsAll.map(m=>Object.values(byMonth.get(m)).reduce((a,b)=>a+b,0)));
@@ -1906,7 +1937,7 @@ RENDER.health=function(root){
   root.append(hl);
   const inp=D.inputs||{}; const lg=el("div","card"); lg.style.marginTop="24px"; lg.append(el("h2",null,"Where this record came from")); const ul=el("div","sum"); ul.style.marginTop="12px";
   const li=(k,v)=>{ ul.append(el("div","k",k),el("div","v",v)); };
-  li("built",D.generatedAt||"?"); if(D.generatedAtLocal) li("local time",String(D.generatedAtLocal).replace("T"," ").slice(0,16)+(D.timezone?" "+D.timezone:"")); li("on",inp.machine||"?"); li("this computer's record",inp.ledger?(inp.ledgerCorrupt?"can't be read":"read"):"none here"); if(inp.snapshot) li("the "+(inp.snapshot.machine||"other computer")+"'s copy",fmtDY(String(inp.snapshot.at||"").slice(0,10))+(typeof inp.snapshot.ageHours==="number"?" · "+Math.floor(inp.snapshot.ageHours/24)+" days old":"")+(inp.snapshot.rows?" · "+fmtI(inp.snapshot.rows)+" lines":"")); li("the archive's inventory",inp.inventoryAt?fmtDY(String(inp.inventoryAt).slice(0,10)):"not checked"); li("finished pictures",inp.finals?"checked":"not checked"); li("quiet period",(D.quietPeriodDays||14)+" observing nights"); li("as of night",fmtNight(ASOF()));
+  li("built",D.generatedAt||"?"); if(D.generatedAtLocal) li("local time",String(D.generatedAtLocal).replace("T"," ").slice(0,16)+(D.timezone?" "+D.timezone:"")); li("on",inp.machine||"?"); li("this computer's record",inp.ledger?(inp.ledgerCorrupt?"can't be read":"read"):"none here"); if(inp.snapshot) li("the "+(inp.snapshot.machine||"other computer")+"'s copy",fmtDY(String(inp.snapshot.at||"").slice(0,10))+(typeof inp.snapshot.ageHours==="number"?" · "+(Math.floor(inp.snapshot.ageHours/24)===0?"from today":plural(Math.floor(inp.snapshot.ageHours/24),"day")+" old"):"")+(inp.snapshot.rows?" · "+fmtI(inp.snapshot.rows)+" lines":"")); li("the archive's inventory",inp.inventoryAt?fmtDY(String(inp.inventoryAt).slice(0,10)):"not checked"); li("finished pictures",inp.finals?"checked":"not checked"); li("quiet period",(D.quietPeriodDays||14)+" observing nights"); li("as of night",fmtNight(ASOF()));
   lg.append(ul); const p=el("p","sub prose"); p.style.marginTop="12px"; p.textContent=(D.sourceNote||"")+" "+(D.provenance||""); lg.append(p); root.append(lg);
 };
 
@@ -1916,7 +1947,17 @@ renderHeader(false); renderFresh();
 go((mem.tab&&RENDER[mem.tab])?mem.tab:"overview",true);
 setHealthCount(WARN_N);
 $("footNote").append(el("div",null,"Nothing on the archive is touched by this page. Its facts are worked out with the To process list: after each import and each ship, each night on the PC, and whenever you press Refresh now. A night is noon to noon, named by its evening."));
-$("footNote").append(el("div","mono",(D.sourceNote||"")));
+/* the footer in plain words, from the record's inputs; the line count is the one the Data checks tab adds up */
+function footerText(){
+  const known=D.inputs&&typeof D.inputs==="object"; const inp=known?D.inputs:{}; const from=[];
+  if(inp.ledger) from.push("this "+(inp.machine||"computer")+"'s record"+(inp.ledgerCorrupt?" (which couldn't be read)":""));
+  if(inp.snapshot&&inp.snapshot.at) from.push("the "+(inp.snapshot.machine||"other computer")+"'s copy of "+fmtDY(String(inp.snapshot.at).slice(0,10)));
+  if(inp.inventory||inp.inventoryAt) from.push("the archive's inventory"+(inp.inventoryAt?" of "+fmtDY(String(inp.inventoryAt).slice(0,10)):""));
+  if(known) from.push(inp.finals?"the finished pictures":"no check of the finished pictures"); else from.push("the importer's record");
+  const rows=((D.ledgerMeta&&+D.ledgerMeta.rows)||0)+(+D.notCounted.notLightFrames||0);
+  return "Worked out"+(inp.machine?" on the "+inp.machine:"")+(D.generatedAt?" on "+D.generatedAt:"")+" from "+from.join(", ")+(rows?" · "+fmtI(rows)+" lines read, "+fmtI(D.totals.lights||0)+" light frames counted":"")+".";
+}
+$("footNote").append(el("div","mono",footerText()));
 nextFrame(()=>{ placeInk(); fitAll(true); renderShare(false); });
 try{ if(SAME&&window.parent!==window) window.parent.postMessage({kind:"observatory-ready",generatedAt:D.generatedAt,servedFrom:D.servedFrom||null,warnings:WARN_N},SAME); }catch(e){}
 </script>

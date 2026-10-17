@@ -3744,7 +3744,7 @@ def ship_sides():
 # What the other computer's --projects needs of a ledger row, nothing more:
 # the snapshot is a few MB for thousands of frames, not a copy of the ledger.
 _SNAPSHOT_FIELDS = ("filename", "target", "displayName", "scope", "camera", "device",
-                    "sourceType", "night", "exposureSeconds", "filter", "size", "sha256", "origin",
+                    "sourceType", "night", "exposureSeconds", "filter", "gain", "size", "sha256", "origin",
                     "archiveLocation", "archivePath", "archiveShippedAt", "archiveVerifiedAt",
                     "identityGuessed",
                     # 1.7.1: what the other computer's SCAN needs to judge a camera
@@ -9897,10 +9897,17 @@ def read_scan_summary():
         age = _hours_since(d.get("seenAt"))
     except Exception:
         age = None
-    return {"files": int(d.get("files") or 0), "targets": int(d.get("targets") or 0),
-            "elsewhere": int(d.get("elsewhere") or 0), "camera": d.get("camera"),
-            "failedEject": bool(d.get("failedEject")), "seenAt": d.get("seenAt"),
-            "ageHours": age, "machine": d.get("machine")}
+    def _n(v):
+        try:
+            return int(v or 0)
+        except (TypeError, ValueError):
+            return 0
+    return {"files": _n(d.get("files")), "targets": _n(d.get("targets")),
+            "elsewhere": _n(d.get("elsewhere")),
+            "camera": d.get("camera") if isinstance(d.get("camera"), str) else None,
+            "failedEject": bool(d.get("failedEject")),
+            "seenAt": d.get("seenAt") if isinstance(d.get("seenAt"), str) else None,
+            "ageHours": age, "machine": d.get("machine") if isinstance(d.get("machine"), str) else None}
 
 def run_scan_only(state):
     """Tagged lines for the watcher: count / summary / storage — both devices."""
@@ -10529,8 +10536,8 @@ def load_capture_state(verbose=False):
     """The one human-set fact (spec §4): per dataset, auto / open / complete,
     keyed 'TARGET|SCOPE|SITE' as projects.json shows it. Written by AstroLog
     (step 3) or by hand; read here. Missing file means all auto. Values are
-    read whatever their case; with verbose=True returns (state, notes) and
-    the notes say what in the file was not understood."""
+    read whatever their case; with verbose=True returns (state, notes,
+    exposures) and the notes say what in the file was not understood."""
     path = os.path.join(STATE_DIR, "capture-state.json")
     d = _read_json_file(path)
     notes = []
@@ -10557,6 +10564,8 @@ def load_capture_state(verbose=False):
             continue
         if exp_v is not None:
             try:
+                if isinstance(exp_v, bool):
+                    raise ValueError
                 ev = float(exp_v)
                 if math.isfinite(ev) and 0 < ev <= 86400:
                     exposures[k] = ev
@@ -11075,7 +11084,7 @@ def build_projects(state, extra_ledgers=(), today=None, custom_names=None, colle
             entry = {
                 "key": key, "scope": sid, "scope_name": s.get("name"), "site": site,
                 "status": status, "capture_state": cstate,
-                "capture_state_source": "rule" if cstate == "auto" else "capture-state.json",
+                "capture_state_source": "capture-state.json" if (cstate != "auto" or sample) else "rule",
                 "sample": sample,
                 "nights": len(nights), "frames": sum(n["frames"] for n in d["nights"].values()),
                 "integration_seconds": round(sum(n["integration"] for n in d["nights"].values())),
@@ -11146,7 +11155,8 @@ def build_projects(state, extra_ledgers=(), today=None, custom_names=None, colle
     projects = []
     for tid, p in out_projects.items():
         ds = p["datasets"]
-        rank = min(PROJECT_STATUS_ORDER.index(e["status"]) for e in ds)
+        real = [e for e in ds if not e.get("sample")] or ds     # a quick look never drives the project
+        rank = min(PROJECT_STATUS_ORDER.index(e["status"]) for e in real)
         p["status"] = PROJECT_STATUS_ORDER[rank]
         p["to_process"] = any(e["status"] == "ready_to_process" and not e.get("sample") for e in ds)
         p["last_captured"] = max(e["last_session"] for e in ds)
@@ -11154,14 +11164,17 @@ def build_projects(state, extra_ledgers=(), today=None, custom_names=None, colle
         projects.append(p)
     projects.sort(key=lambda p: p["last_captured"], reverse=True)
     # a warning added by a helper (the snapshot loader) is a notice too
-    _texts = {n["text"] for n in notices}
-    for w in warnings:
-        if w not in _texts:
+    _pool, _ordered = list(notices), []
+    for w in warnings:                            # one notice per warning, in the warnings' order
+        hit = next((n for n in _pool if n["text"] == w), None)
+        if hit is not None:
+            _pool.remove(hit)
+        else:
             kind = ("snapshot_age" if ("record on the archive is" in w or "newer importer" in w or "snapshot" in w)
                     else "other")
-            notices.append({"kind": kind, "count": None, "frames": None, "text": w})
-            _texts.add(w)
-    notices.sort(key=lambda n: warnings.index(n["text"]) if n["text"] in warnings else len(warnings))
+            hit = {"kind": kind, "count": None, "frames": None, "text": w}
+        _ordered.append(hit)
+    notices[:] = _ordered
     if isinstance(collect, dict):               # build_observatory reads the working dicts
         collect["datasets"] = datasets
         collect["contract"] = contract
@@ -11383,9 +11396,12 @@ def observatory_from(doc, collect, state=None, now=None, pending=None):
         tg["sessions"] += len(nights)
         tg["firstNight"] = min(x for x in (tg["firstNight"], e["first_session"]) if x)
         tg["lastNight"] = max(x for x in (tg["lastNight"], e["last_session"]) if x)
-        if e["status"] != "done":
+        if e["status"] != "done" and not e.get("sample"):
             tg["pendingProgrammes"] += 1
         rank = PROJECT_STATUS_ORDER.index(e["status"])
+        if e.get("sample"):
+            rank += 10                              # a quick look never drives the project's state
+            tg.setdefault("_sampleState", state_id)
         if rank < tg["_rank"]:                      # the project's state: its least advanced dataset
             tg["_rank"], tg["state"] = rank, state_id
     out_targets = []
@@ -11426,7 +11442,8 @@ def observatory_from(doc, collect, state=None, now=None, pending=None):
     health.append({"severity": "info", "title": "Built from the importer's own record, nothing typed in",
                    "detail": f"Worked out on this {here_label} from " + ", ".join(read_from)
                              + f": {src.get('rows', 0):,} ledger rows read. The one human-set fact is "
-                               f"capture-state.json (open / complete)."})
+                               f"capture-state.json (open / complete / sample, and a sub length for frames "
+                               f"with no exposure recorded)."})
     for w in doc.get("warnings") or []:
         health.append({"severity": "warn", "title": "Warning from the project layer", "detail": w})
     dropped = src.get("dropped") or {}
@@ -11462,7 +11479,8 @@ def observatory_from(doc, collect, state=None, now=None, pending=None):
                    "noScope": int(dropped.get("no_scope") or 0), "noNight": int(dropped.get("no_night") or 0),
                    "unreadable": int(dropped.get("unreadable") or 0),
                    "duplicates": int(dropped.get("duplicates") or 0),
-                   "notLightFrames": max(0, rows_all - int(src.get("rows") or 0))}
+                   "notLightFrames": max(0, rows_all - int(src.get("rows") or 0)
+                                         - int(dropped.get("unreadable") or 0))}
     return {
         "schema": "observatory/1", "generatedAt": when_txt, "generatedAtIso": _utc_iso(),
         "generatedAtLocal": local_iso, "timezone": tzname,
@@ -11657,19 +11675,22 @@ def observatory_stamp():
     """1.7.2: generatedAtIso of the Observatory dataset this computer would
     serve (its own, or the PC's recent published copy), re-read only when one
     of the two files changes. The page polls the panel for it."""
-    cands = [os.path.join(STATE_DIR, "observatory.json")]
-    try:
-        cands.append(_verify_path(ARCHIVE_MOUNT, ship_sides()[1], "observatory.json"))
-    except Exception:
-        pass
-    key = []
-    for p in cands:
+    def _st(p):
         try:
             st = os.stat(p)
-            key.append((p, st.st_mtime_ns, st.st_size))
+            return (p, st.st_mtime_ns, st.st_size)
         except OSError:
-            key.append((p, None, None))
-    key = tuple(key)
+            return (p, None, None)
+    own = _st(os.path.join(STATE_DIR, "observatory.json"))
+    bucket = int(time.time() // 600)                  # the archive (an SMB share on the Mac) is looked
+    prev = _OBS_STAMP_CACHE["key"] or ()              # at every ten minutes, never on every poll
+    if len(prev) == 3 and prev[0] == own and prev[2] == bucket:
+        return _OBS_STAMP_CACHE["value"]
+    try:
+        other = _st(_verify_path(ARCHIVE_MOUNT, ship_sides()[1], "observatory.json"))
+    except Exception:
+        other = None
+    key = (own, other, bucket)
     if _OBS_STAMP_CACHE["key"] != key:
         try:
             d = load_observatory(prefer_published=True) or {}
