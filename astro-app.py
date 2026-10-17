@@ -1197,12 +1197,13 @@ class Handler(BaseHTTPRequestHandler):
             self._json(snap)
         elif self.path == "/api/status":
             STATUS.ready.wait(5)               # just after start: the first computation
-            body = dict(STATUS.value if STATUS.value is not None
-                        else eng.status_unknown("still working it out"))
-            # 1.7.2: the Observatory page polls this to know when its record changed
-            body["observatory"] = {"generatedAtIso": _observatory_stamp(),
-                                   "rebuilding": APP.status == "rebuilding", "busy": APP.status}
-            self._json(body)
+            self._json(STATUS.value if STATUS.value is not None
+                       else eng.status_unknown("still working it out"))
+        elif self.path == "/api/observatory/status":
+            # 1.7.2: the Observatory page polls this (cheap, cached by the files'
+            # mtimes) to know when its record changed or a rebuild is running
+            self._json({"generatedAtIso": _observatory_stamp(),
+                        "rebuilding": APP.status == "rebuilding", "busy": APP.status})
         elif self.path == "/api/report-text":
             self._json({"text": APP.report_text or ""})
         elif self.path == "/archive" or self.path.startswith("/archive?"):

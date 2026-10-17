@@ -11153,6 +11153,15 @@ def build_projects(state, extra_ledgers=(), today=None, custom_names=None, colle
         p["integration_seconds"] = sum(e["integration_seconds"] for e in ds)
         projects.append(p)
     projects.sort(key=lambda p: p["last_captured"], reverse=True)
+    # a warning added by a helper (the snapshot loader) is a notice too
+    _texts = {n["text"] for n in notices}
+    for w in warnings:
+        if w not in _texts:
+            kind = ("snapshot_age" if ("record on the archive is" in w or "newer importer" in w or "snapshot" in w)
+                    else "other")
+            notices.append({"kind": kind, "count": None, "frames": None, "text": w})
+            _texts.add(w)
+    notices.sort(key=lambda n: warnings.index(n["text"]) if n["text"] in warnings else len(warnings))
     if isinstance(collect, dict):               # build_observatory reads the working dicts
         collect["datasets"] = datasets
         collect["contract"] = contract
