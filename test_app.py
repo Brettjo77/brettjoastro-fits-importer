@@ -1743,22 +1743,41 @@ try:
           and _dsn.get("schema") == "observatory/1" and [x["name"] for x in _dsn.get("targets", [])] == ["Andromeda Galaxy (M 31)"]
           and len(_dsn.get("sessions", [])) == 1 and _dsn["inputs"]["snapshot"]["machine"] == "Mac"
           and _dsn["targets"][0]["statusCards"][0]["state"] == "stacked" and "<" not in _m.group(1)
-          and "What each scope captured last" in body,
+          and "What each scope captured" in body and "Needs your attention" in body,
           f"{code} {xfo} rb={json.dumps(_rb)[:200]} " + (json.dumps(_dsn)[:400] if _dsn else body[:300]))
-    check("OB the first card has two faces: each scope's name is a button to its timeline of projects "
-          "(paintScopeCard, 90 nights / a year / all time, the quiet-period band), the hero rows and the "
-          "Equipment cards open it too (openScope), and 'all scopes' comes back",
-          lambda: "function paintScopeCard(cam)" in body and "function openScope(cam)" in body
-          and body.count("openScope(c") >= 2 and 'el("button","scopebtn")' in body
-          and "all scopes" in body and '["90","90 nights",90],["365","a year",365],["all","all time",' in body
-          and "quiet period: the last " in body and "has been doing" in body,
+    check("OB (1.7.2) every scope row opens the scope: a scope's name in the six-scope strip, its share-bar "
+          "slice and its Equipment card open the scope panel (openScope -> scopePanelFor: one row per object, "
+          "90 nights / a year / everything, the quiet band), and every dot opens the night panel (openNight)",
+          lambda: "function openScope(cam)" in body and "function scopePanelFor(cam" in body
+          and body.count("openScope(") >= 4 and "function openNight(cam,night,target,host" in body
+          and "function nightPanelFor(cam,night,target)" in body
+          and '["90","90 nights",90],["365","a year",365],["all","everything",' in body
+          and "what it has been doing" in body and "Timeline of its projects" in body,
           body[:200])
-    check("OB (16 Oct) the page normalises a thin dataset (missing keys filled once, an unknown state falls back, "
-          "the drawer is a dialog, the tooltip is hidden from readers)",
-          lambda: "if(D[k]==null) D[k]=v;" in body and "reconciliation:[],warnings:[]" in body
-          and "stageOf(" in body and "function showDrawer(" in body
-          and '<div class="tt" id="tt" aria-hidden="true">' in body,
+    check("OB (16 Oct, 1.7.2) the page normalises a thin dataset (missing keys filled once, a null pendingImport "
+          "stays null so the page never claims a camera is empty, an unknown state falls back), the drawer is a "
+          "dialog, the tooltip is hidden from readers, and scope colour comes only from the dataset (no palette)",
+          lambda: "function normalise(d)" in body and "reconciliation:[],warnings:[]" in body
+          and "v===null?null:" in body and "stageOf(" in body and "function showDrawer(" in body
+          and '<div class="tt" id="tt" aria-hidden="true" role="tooltip">' in body
+          and "const CAMORDER" not in body and "--cam-s30p" not in body
+          and 'const col=cam=>(BY[cam]&&BY[cam].colour)||"var(--muted)"' in body,
           body[:200])
+    # 1.7.2: the page's live refresh: the status carries the Observatory's stamp, and the dataset
+    # alone is one GET away (same token and origin rules as the page)
+    _stq = {"observatory": api("/api/observatory/status", url=URLN)}
+    with urllib.request.urlopen(URLN + "/observatory?json=1&t=2", timeout=30) as resp:
+        _dsj = json.loads(resp.read().decode())
+    check("OB (1.7.2) /api/observatory/status carries the Observatory's stamp (the dataset's generatedAtIso) and "
+          "whether a rebuild is running, and /observatory?json=1 returns the dataset itself with the new facts",
+          lambda: isinstance(_stq.get("observatory"), dict) and _stq["observatory"]["generatedAtIso"] == _dsn.get("generatedAtIso")
+          and _stq["observatory"]["rebuilding"] is False
+          and _dsj.get("schema") == "observatory/1" and _dsj.get("generatedAtIso") == _dsn.get("generatedAtIso")
+          and isinstance(_dsj.get("notCounted"), dict) and isinstance(_dsj.get("notices"), list)
+          and "scopeOrder" in _dsj and "pendingImport" in _dsj
+          and _dsj["targets"][0]["programmes"][0].get("captureState") == "auto"
+          and isinstance(_dsj["targets"][0]["programmes"][0].get("sessions"), list),
+          json.dumps([_stq.get("observatory"), {k: _dsj.get(k) for k in ("schema", "notCounted", "scopeOrder", "pendingImport")}])[:600])
     # every script block of the page parses (node), so a slip in the template can't blank the tab
     import shutil as _sh2
     _node = _sh2.which("node") or next((p for p in ("/opt/node22/bin/node", "/usr/local/bin/node")
