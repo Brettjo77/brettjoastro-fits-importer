@@ -1,0 +1,300 @@
+<!DOCTYPE html>
+<html lang="en-GB">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width,initial-scale=1">
+<title>Observatory colour tokens — demo</title>
+<style>
+/* The token set from tokens-colour.css, scoped to .pane so both themes render side by side.
+   In the real page the same values sit on :root (dark) and under the light media query / data-theme. */
+.pane{
+  --page:#0e1222; --card:#171c33; --card2:#1d2340; --line:#2c3356; --grid:#252c4a;
+  --wash:rgba(241,239,232,.06); --wash2:rgba(241,239,232,.11); --track:#2a3152; --shadow:0 1px 2px rgba(0,0,0,.35);
+  --ink:#f1efe8; --ink2:#c1c5d9; --muted:#959bba; --faint:#5f6584;
+  --sky1:#070b1e; --sky2:#131a40; --sky3:#1b2660; --sky-ink:#f4f2ec; --sky-ink2:#c9cde6; --sky-muted:#a4aacb; --sky-line:rgba(255,255,255,.14);
+  --st-live-ink:#5cc9de; --st-live-tint:#21344b; --st-live-line:#2f6a7a;
+  --st-work-bg:#2aa5bd; --st-work-ink:#0e1222;
+  --st-action-bg:#f1efe8; --st-action-ink:#0e1222;
+  --st-quiet-ink:#959bba; --st-quiet-line:#3a4168;
+  --attn-wash:#36301d; --attn-line:#5a4c2a; --attn-ink:#f1efe8; --attn-glyph:#f1efe8;
+  --quiet-band:rgba(241,239,232,.07); --today-line:#f1efe8; --mark-ring:var(--card);
+  --focus:#8fd3e6;
+  color-scheme:dark;
+}
+.pane[data-theme="light"]{
+  --page:#f3f0e8; --card:#fffdf9; --card2:#f7f4ec; --line:#e1dbce; --grid:#ebe6da;
+  --wash:rgba(26,25,38,.05); --wash2:rgba(26,25,38,.09); --track:#e6e1d6; --shadow:0 1px 2px rgba(26,25,38,.05);
+  --ink:#1a1926; --ink2:#4e4c60; --muted:#6b6a7e; --faint:#a09ead;
+  --st-live-ink:#086b80; --st-live-tint:#dcf2f6; --st-live-line:#9ed3df;
+  --st-work-bg:#0f7f95; --st-work-ink:#fffdf9;
+  --st-action-bg:#1a1926; --st-action-ink:#fffdf9;
+  --st-quiet-ink:#6b6a7e; --st-quiet-line:#c9c4b8;
+  --attn-wash:#fbf1dc; --attn-line:#ecd9b0; --attn-ink:#1a1926; --attn-glyph:#7a4a12;
+  --quiet-band:rgba(26,25,38,.06); --today-line:#1a1926;
+  --focus:#0f7f95;
+  color-scheme:light;
+}
+
+html,body{margin:0;background:#2a2a30;font:400 14px/1.45 system-ui,-apple-system,"Segoe UI",Roboto,Helvetica,Arial,sans-serif}
+.wrap{display:grid;grid-template-columns:1fr 1fr;gap:0}
+@media (max-width:900px){.wrap{grid-template-columns:1fr}}
+.pane{background:var(--page);color:var(--ink);padding:18px 20px 28px;min-width:0}
+.pane h1{font-size:15px;margin:0 0 12px;font-weight:650;letter-spacing:.01em;display:flex;align-items:baseline;gap:10px}
+.pane h1 small{font-weight:400;color:var(--muted);font-size:12px}
+h2{font-size:13.5px;font-weight:650;margin:0 0 2px}
+.sub{font-size:12px;color:var(--muted);margin-bottom:10px}
+.card{background:var(--card);border:1px solid var(--line);border-radius:14px;padding:14px 16px;box-shadow:var(--shadow);margin-bottom:14px}
+.mono{font-family:ui-monospace,Menlo,Consolas,monospace;font-size:11px;letter-spacing:.06em;text-transform:uppercase;color:var(--muted)}
+
+/* ---- swatch sheet ---- */
+.sw{display:grid;grid-template-columns:repeat(4,1fr);gap:8px;margin-bottom:10px}
+.sw .s{border:1px solid var(--line);border-radius:8px;padding:8px 10px;font-size:11px;color:var(--ink2);min-height:46px}
+.sw .s b{display:block;color:var(--ink);font-size:12px}
+.sw .s i{font-style:normal;color:var(--muted);font-family:ui-monospace,Menlo,monospace;font-size:10.5px}
+.tiers{display:flex;gap:18px;flex-wrap:wrap;align-items:baseline;margin-bottom:10px}
+.tiers span{display:inline-flex;flex-direction:column;gap:1px}
+.tiers span i{font-style:normal;font-size:10.5px;color:var(--muted);font-family:ui-monospace,Menlo,monospace}
+.row{display:flex;gap:8px;flex-wrap:wrap;align-items:center;margin-bottom:8px}
+.row .lab{font-size:11px;color:var(--muted);width:92px;flex:none;font-family:ui-monospace,Menlo,monospace;letter-spacing:.04em;text-transform:uppercase}
+
+/* ---- scope marks: one value, --sc, many uses. No glow: a 2px surface ring. ---- */
+.dot{display:inline-block;width:11px;height:11px;border-radius:50%;flex:none;background:var(--sc);box-shadow:0 0 0 2px var(--mark-ring)}
+.dot.hollow{background:var(--card);box-shadow:inset 0 0 0 2px var(--sc),0 0 0 2px var(--mark-ring)}
+.dot.big{width:16px;height:16px}
+.hatchbox{display:inline-block;width:38px;height:14px;border-radius:4px;background:repeating-linear-gradient(45deg,var(--sc) 0 1.5px,transparent 1.5px 4px),color-mix(in srgb,var(--sc) 22%,transparent)}
+.chip{display:inline-flex;align-items:center;gap:7px;font-size:12.5px;font-weight:600;color:var(--ink)}
+
+/* ---- status pills ---- */
+.st{display:inline-flex;align-items:center;gap:6px;border-radius:999px;padding:2px 9px 2px 6px;font-size:12px;font-weight:650;line-height:1.3;white-space:nowrap;border:1px solid transparent}
+.st svg{width:14px;height:14px;flex:none}
+.st-live{background:var(--st-live-tint);color:var(--st-live-ink);border-color:var(--st-live-line)}
+.st-work{background:var(--st-work-bg);color:var(--st-work-ink)}
+.st-action{background:var(--st-action-bg);color:var(--st-action-ink)}
+.st-done{background:transparent;color:var(--st-quiet-ink);border-color:var(--st-quiet-line)}
+.st-sample{background:transparent;color:var(--st-quiet-ink);border-color:var(--st-quiet-line);border-style:dashed}
+.st .n{font-weight:500;opacity:.85}
+
+/* ---- attention ---- */
+.attn{display:flex;gap:10px;align-items:center;background:var(--attn-wash);border:1px solid var(--attn-line);color:var(--attn-ink);border-radius:10px;padding:8px 12px;font-size:12.5px;margin-bottom:8px}
+.attn svg{width:15px;height:15px;color:var(--attn-glyph);flex:none}
+.attn .act{margin-left:auto;border:1.5px solid var(--attn-ink);color:var(--attn-ink);border-radius:999px;padding:2px 10px;font-size:12px;font-weight:650;white-space:nowrap}
+.attn.ok{background:var(--card);border-color:var(--line);color:var(--muted)}
+.attn.ok svg{color:var(--muted)}
+.note{display:flex;gap:6px;align-items:flex-start;font-size:12px;color:var(--ink);line-height:1.3;margin-top:5px}
+.note svg{width:14px;height:14px;flex:none;color:var(--attn-glyph);margin-top:1px}
+.note.soft{color:var(--muted)} .note.soft svg{color:var(--muted)}
+
+/* ---- legend strip ---- */
+.legend{display:grid;grid-template-columns:auto 1fr;gap:6px 14px;align-items:center;font-size:12px;color:var(--ink2)}
+.legend .k{font-family:ui-monospace,Menlo,monospace;font-size:10.5px;letter-spacing:.06em;text-transform:uppercase;color:var(--muted)}
+.legend .v{display:flex;gap:6px 14px;flex-wrap:wrap;align-items:center}
+.legend .v .m{display:inline-flex;align-items:center;gap:6px}
+
+/* ---- project card ---- */
+.proj{background:var(--card2);border:1px solid var(--line);border-radius:14px;padding:12px 14px;margin-bottom:10px}
+.proj .top{display:grid;grid-template-columns:64px 1fr;gap:12px;align-items:center}
+.proj .nm{font-size:14.5px;font-weight:650;line-height:1.2}
+.proj .ty{font-size:12px;color:var(--muted);margin-top:2px}
+.proj .hl{font-size:12.5px;color:var(--ink2);margin-top:3px}
+.proj .hl b{color:var(--ink)}
+.proj .mix{display:flex;gap:6px;flex-wrap:wrap;align-items:center;margin-top:8px;font-size:12px;color:var(--ink2)}
+.tl text{font-family:ui-monospace,Menlo,monospace;font-size:10px;fill:var(--muted)}
+.tl .lane-lbl{font-family:system-ui,sans-serif;font-size:11px;font-weight:600;fill:var(--ink)}
+.tl .stage{fill:none;stroke:var(--ink);stroke-width:1.4}
+
+/* ---- queue row ---- */
+.job{display:grid;grid-template-columns:6px 1fr auto;gap:0 12px;border:1px solid var(--line);border-radius:12px;background:var(--card2);overflow:hidden;margin-bottom:8px}
+.job .stripe{background:var(--sc)}
+.job .body{padding:9px 0 9px 2px;min-width:0}
+.job .t{font-size:13.5px;font-weight:650}
+.job .m{display:flex;align-items:center;gap:6px;font-size:12px;color:var(--ink2);margin-top:3px;flex-wrap:wrap}
+.job .m b{color:var(--ink)}
+.job .bar{height:7px;border-radius:4px;background:var(--track);margin-top:7px;position:relative;overflow:hidden}
+.job .bar i{position:absolute;left:0;top:0;bottom:0;border-radius:4px;background:var(--sc)}
+.job .bar i.unk{background:repeating-linear-gradient(45deg,var(--sc) 0 1.5px,transparent 1.5px 4px),color-mix(in srgb,var(--sc) 22%,transparent)}
+.job .side{padding:9px 12px 9px 0;display:flex;align-items:center}
+
+/* ---- scope lanes (last N nights) ---- */
+.lanes{display:grid;grid-template-columns:150px 1fr;gap:4px 10px;align-items:center}
+.lanes .nmcell{display:flex;align-items:center;gap:8px;font-size:12.5px;font-weight:600}
+.lanes .nmcell small{display:block;font-weight:400;color:var(--muted);font-size:11px}
+.lanes .lane{height:26px;border-radius:6px;background:color-mix(in srgb,var(--sc) 7%,transparent)}
+.lanes .axis{grid-column:2;display:flex;justify-content:space-between;font-family:ui-monospace,Menlo,monospace;font-size:10px;color:var(--muted);padding:0 2px}
+.foot{font-size:11px;color:var(--muted);margin-top:8px;line-height:1.5}
+</style>
+</head>
+<body>
+<div class="wrap">
+  <section class="pane" data-theme="dark" id="dark"></section>
+  <section class="pane" data-theme="light" id="light"></section>
+</div>
+<script>
+const D = __DATASET__;
+const SC = D.scopes.map(s=>({...s, short:String(s.camera).replace(/^(Seestar|Askar)\s+/,"")}));
+const BY = Object.fromEntries(SC.map(s=>[s.camera,s]));
+const col = cam => (BY[cam]&&BY[cam].colour)||"#8a8a8a";
+const short = cam => (BY[cam]&&BY[cam].short)||cam;
+const ASOF = new Date(D.asOfNight+"T00:00:00Z"); const DAY=864e5;
+const d2 = s=>new Date(s+"T00:00:00Z");
+const MON=["Jan","Feb","Mar","Apr","May","Jun","Jul","Aug","Sep","Oct","Nov","Dec"];
+const fmtDS = s=>{ const d=d2(s); return d.getUTCDate()+" "+MON[d.getUTCMonth()]; };
+const fmtI = n=>Number(n||0).toLocaleString("en-GB");
+const fmtH = h=>(Math.round(h*10)/10).toLocaleString("en-GB",{minimumFractionDigits:1,maximumFractionDigits:1})+" h";
+const nts = n=>n+" night"+(n===1?"":"s");
+const el=(t,c,txt)=>{const e=document.createElement(t); if(c) e.className=c; if(txt!=null) e.textContent=txt; return e;};
+const svgEl=(t,a)=>{const e=document.createElementNS("http://www.w3.org/2000/svg",t); for(const k in (a||{})) e.setAttribute(k,a[k]); return e;};
+const unknownHours = p => (!p.hours || p.hours===0) && p.lights>0;
+const QUIET = D.quietPeriodDays||14;
+const MAXSES = Math.max(1,...D.sessions.map(s=>s.hours||0));
+
+/* status: glyph + word. Five shapes; two of them share the teal, one is ink. */
+const ST = {
+  capturing:        {word:"Still capturing", verb:"Keep capturing", icon:"cap",    cls:"st-live"},
+  in_progress:      {word:"In progress",     verb:"Finish it",      icon:"half",   cls:"st-work"},
+  ready_to_process: {word:"To process",      verb:"Process it",     icon:"play",   cls:"st-action"},
+  done:             {word:"Done",            verb:"Finished",       icon:"check",  cls:"st-done"},
+  sample:           {word:"Sample",          verb:"Decide",         icon:"sample", cls:"st-sample"},
+};
+function glyph(kind){
+  const s=svgEl("svg",{viewBox:"0 0 16 16","aria-hidden":"true"}); const c="currentColor";
+  if(kind==="cap"){ s.append(svgEl("circle",{cx:8,cy:8,r:5.6,fill:"none",stroke:c,"stroke-width":1.8})); s.append(svgEl("circle",{cx:8,cy:8,r:2.4,fill:c})); }
+  else if(kind==="play"){ s.append(svgEl("path",{d:"M5 3.6v8.8L12.2 8z",fill:c})); }
+  else if(kind==="half"){ s.append(svgEl("circle",{cx:8,cy:8,r:5.6,fill:"none",stroke:c,"stroke-width":1.8})); s.append(svgEl("path",{d:"M8 2.4a5.6 5.6 0 0 0 0 11.2z",fill:c})); }
+  else if(kind==="check"){ s.append(svgEl("path",{d:"M3.5 8.4l3 3 6-6.6",fill:"none",stroke:c,"stroke-width":2.2,"stroke-linecap":"round","stroke-linejoin":"round"})); }
+  else if(kind==="sample"){ s.append(svgEl("circle",{cx:8,cy:8,r:5.6,fill:"none",stroke:c,"stroke-width":1.6,"stroke-dasharray":"2.4 2"})); s.append(svgEl("circle",{cx:8,cy:8,r:1.8,fill:c})); }
+  else if(kind==="warn"){ s.append(svgEl("path",{d:"M8 1.8L15 14H1z",fill:"none",stroke:c,"stroke-width":1.6,"stroke-linejoin":"round"})); s.append(svgEl("path",{d:"M8 6v3.6M8 11.6v.4",stroke:c,"stroke-width":1.8,"stroke-linecap":"round"})); }
+  else if(kind==="q"){ s.append(svgEl("circle",{cx:8,cy:8,r:6.5,fill:"none",stroke:c,"stroke-width":1.6,"stroke-dasharray":"2.2 2"})); const t=svgEl("text",{x:8,y:11.3,"text-anchor":"middle","font-size":"9","font-weight":"700",fill:c}); t.textContent="?"; s.append(t); }
+  return s;
+}
+/* the same glyph drawn inside an SVG timeline, in ink, with a surface ring */
+function stageMark(svg, kind, cx, cy){
+  const g=svgEl("g",{transform:`translate(${cx-8},${cy-8})`});
+  g.append(svgEl("circle",{cx:8,cy:8,r:8.5,fill:"var(--card2)",stroke:"var(--ink)","stroke-width":1.3}));
+  const c="var(--ink)";
+  if(kind==="cap"){ g.append(svgEl("circle",{cx:8,cy:8,r:4.6,fill:"none",stroke:c,"stroke-width":1.6})); g.append(svgEl("circle",{cx:8,cy:8,r:1.9,fill:c})); }
+  else if(kind==="play"){ g.append(svgEl("path",{d:"M5.4 4v8L12 8z",fill:c})); }
+  else if(kind==="half"){ g.append(svgEl("circle",{cx:8,cy:8,r:4.6,fill:"none",stroke:c,"stroke-width":1.6})); g.append(svgEl("path",{d:"M8 3.4a4.6 4.6 0 0 0 0 9.2z",fill:c})); }
+  else if(kind==="check"){ g.append(svgEl("path",{d:"M4 8.4l2.8 2.8L12 5.6",fill:"none",stroke:c,"stroke-width":2,"stroke-linecap":"round","stroke-linejoin":"round"})); }
+  else if(kind==="sample"){ g.append(svgEl("circle",{cx:8,cy:8,r:4.6,fill:"none",stroke:c,"stroke-width":1.4,"stroke-dasharray":"2.2 1.8"})); }
+  svg.append(g);
+}
+const pill = (status, extra) => { const s=ST[status]; const p=el("span","st "+s.cls); p.append(glyph(s.icon)); p.append(document.createTextNode(s.word)); if(extra){ const n=el("span","n"," · "+extra); p.append(n);} return p; };
+const actPill = status => { const s=ST[status]; const p=el("span","st "+s.cls); p.append(glyph(s.icon)); p.append(document.createTextNode(s.verb)); return p; };
+const dot = (cam,cls) => { const d=el("i","dot"+(cls?" "+cls:"")); d.style.setProperty("--sc",col(cam)); return d; };
+const chip = cam => { const c=el("span","chip"); c.append(dot(cam), document.createTextNode(short(cam))); return c; };
+
+/* contrast, for the tier labels */
+const lum = rgb=>{ const [r,g,b]=rgb.match(/\d+/g).map(Number).map(v=>{v/=255; return v<=.03928?v/12.92:Math.pow((v+.055)/1.055,2.4)}); return .2126*r+.7152*g+.0722*b; };
+const cr=(a,b)=>{ const [h,l]=[lum(a),lum(b)].sort((x,y)=>y-x); return ((h+.05)/(l+.05)).toFixed(1); };
+
+/* hatch pattern per scope in the SVG */
+function defs(svg, uid){
+  const d=svgEl("defs");
+  for(const s of SC){ const p=svgEl("pattern",{id:uid+"-h-"+s.id,patternUnits:"userSpaceOnUse",width:4,height:4,patternTransform:"rotate(45)"});
+    p.append(svgEl("rect",{width:4,height:4,fill:s.colour,opacity:.22})); p.append(svgEl("line",{x1:0,y1:0,x2:0,y2:4,stroke:s.colour,"stroke-width":1.5})); d.append(p); }
+  svg.append(d); return d;
+}
+/* ring: hours by scope; hatched segment when hours are unknown; 2px surface gaps */
+function ring(progs, uid){
+  const R=32, w=8, r=R-w/2; const s=svgEl("svg",{width:R*2,height:R*2,viewBox:`0 0 ${R*2} ${R*2}`}); defs(s,uid);
+  const known=progs.filter(p=>!unknownHours(p)), unk=progs.filter(unknownHours);
+  const total=known.reduce((a,p)=>a+p.hours,0);
+  const parts = known.map(p=>({p,share:p.hours/total*(unk.length?0.85:1)})); unk.forEach(p=>parts.push({p,share:(total>0?0.15:1)/unk.length,unknown:true}));
+  s.append(svgEl("circle",{cx:R,cy:R,r,fill:"none",stroke:"var(--track)","stroke-width":w}));
+  let off=0; const gap=1.2;
+  for(const q of parts){ const len=Math.max(0,q.share*100-gap);
+    const c=svgEl("circle",{cx:R,cy:R,r,fill:"none",stroke:q.unknown?`url(#${uid}-h-${BY[q.p.camera].id})`:col(q.p.camera),"stroke-width":w,pathLength:100,"stroke-dasharray":`${len} ${100-len}`,"stroke-dashoffset":-off,transform:`rotate(-90 ${R} ${R})`});
+    s.append(c); off+=q.share*100; }
+  return s;
+}
+/* timeline: lanes, a dot per session (bigger = longer), hollow when hours unknown, the quiet band, the stage glyph in ink after it */
+function timeline(lanes, nights, opts){
+  opts=opts||{}; const W=opts.width||520, laneH=opts.laneH||22, L=opts.labelW||60, top=14, H=top+lanes.length*laneH+4;
+  const s=svgEl("svg",{class:"tl",width:"100%",viewBox:`0 0 ${W} ${H}`,preserveAspectRatio:"none"}); const uid="t"+Math.random().toString(36).slice(2,7); defs(s,uid);
+  const start=new Date(ASOF.getTime()-(nights-1)*DAY); const x0=L+2, x1=W-(opts.stage?34:6), dayW=(x1-x0)/nights, X=i=>x0+i*dayW+dayW/2;
+  const qx=X(nights-QUIET)-dayW/2;
+  s.append(svgEl("rect",{x:qx,y:top-2,width:x1-qx+2,height:H-top,fill:"var(--quiet-band)",rx:4}));
+  let lastM="", lastX=-1e9; for(let i=0;i<nights;i++){ const d=new Date(start.getTime()+i*DAY); const ym=d.getUTCFullYear()+"-"+d.getUTCMonth(); if(ym===lastM) continue; lastM=ym; if(d.getUTCDate()>7&&i>0) continue; const every=nights>200?3:nights>100?2:1; if(d.getUTCMonth()%every!==0&&i>0) continue; const x=X(i)-dayW/2; s.append(svgEl("line",{x1:x,y1:top-2,x2:x,y2:H-2,stroke:"var(--grid)","stroke-width":1}));
+    /* a label only when there is room for it: >= 44px from the previous label and >= 30px from the today line */
+    if(opts.labels===false||x-lastX<44||x1-x<30) continue; lastX=x; const t=svgEl("text",{x:x+3,y:9}); t.textContent=MON[d.getUTCMonth()]+(d.getUTCMonth()===0||i===0?" "+String(d.getUTCFullYear()).slice(2):""); s.append(t); }
+  s.append(svgEl("line",{x1:x1,y1:top-2,x2:x1,y2:H-2,stroke:"var(--today-line)","stroke-width":1.5}));
+  lanes.forEach((ln,li)=>{ const cy=top+li*laneH+laneH/2;
+    s.append(svgEl("line",{x1:x0,y1:cy,x2:x1,y2:cy,stroke:"var(--grid)","stroke-width":1}));
+    if(ln.label){ const t=svgEl("text",{x:L-4,y:cy+4,"text-anchor":"end",class:"lane-lbl"}); t.textContent=ln.label; s.append(t); }
+    const byNight={}; for(const z of ln.sessions){ const i=Math.round((d2(z.night)-start)/DAY); if(i<0||i>=nights) continue; (byNight[i]=byNight[i]||[]).push(z); }
+    for(const [i,list] of Object.entries(byNight)){ const hrs=list.reduce((a,z)=>a+(z.hours||0),0), fr=list.reduce((a,z)=>a+(z.frames||0),0); const unk=hrs===0&&fr>0;
+      const r=3+(laneH/2-4)*Math.sqrt(Math.min(1,hrs/MAXSES)); const cam=list[0].camera;
+      /* no glow: a 2px surface ring. Unknown = hollow (fill is the surface, 2px scope stroke). */
+      const c=svgEl("circle",{cx:X(+i),cy,r:unk?5.5:r,fill:unk?(opts.surface||"var(--card2)"):col(cam),stroke:unk?col(cam):(opts.surface||"var(--card2)"),"stroke-width":2});
+      s.append(c); }
+    if(opts.stage&&ln.status){ stageMark(s, ST[ln.status].icon, x1+20, cy); }
+  });
+  return s;
+}
+
+function build(root, theme){
+  root.append((()=>{ const h=el("h1",null,theme==="dark"?"Dark — night, by the scope":"Light — day, at the desk"); h.append(el("small",null,theme==="dark"?"default when the OS says nothing":"follows the OS, or the toggle")); return h; })());
+
+  /* 1 ─ swatch sheet */
+  const c1=el("div","card"); c1.append(el("h2",null,"Swatch sheet")); c1.append(el("div","sub","surfaces · text tiers with their contrast · the five statuses · attention · scope marks and the two 'unknown' marks"));
+  const sw=el("div","sw");
+  for(const [name,v] of [["page","--page"],["card","--card"],["card2 (rows)","--card2"],["line / grid","--line"]]){ const s=el("div","s"); s.style.background=`var(${v})`; const b=el("b",null,name); const i=el("i",null,getComputedStyle(root).getPropertyValue(v).trim()); s.append(b,i); sw.append(s); }
+  c1.append(sw);
+  const tiers=el("div","tiers"); const cardBg=getComputedStyle(root).getPropertyValue("--card").trim();
+  for(const [name,v,px] of [["ink — names, numbers","--ink",14],["ink2 — facts","--ink2",12.5],["muted — captions, axes","--muted",11.5]]){ const sp=el("span"); sp.style.color=`var(${v})`; sp.style.fontSize=px+"px"; sp.style.fontWeight=v==="--ink"?"650":"400"; sp.append(document.createTextNode(name)); const i=el("i"); sp.append(i); tiers.append(sp); requestAnimationFrame(()=>{ const fg=getComputedStyle(sp).color; const tmp=el("i"); tmp.style.color=cardBg; root.append(tmp); const bg=getComputedStyle(tmp).color; tmp.remove(); i.textContent=px+"px · "+cr(fg,bg)+":1 on card"; }); }
+  c1.append(tiers);
+  const r1=el("div","row"); r1.append(el("span","lab","status")); for(const k of ["capturing","in_progress","ready_to_process","done","sample"]) r1.append(pill(k)); c1.append(r1);
+  const r2=el("div","row"); r2.append(el("span","lab","next step")); for(const k of ["capturing","in_progress","ready_to_process"]) r2.append(actPill(k)); const note=el("span",null,"— the same pill, as a verb. 'To process' is ink: the one thing to do now."); note.style.cssText="font-size:12px;color:var(--muted)"; r2.append(note); c1.append(r2);
+  const r3=el("div","row"); r3.append(el("span","lab","scope")); for(const s of SC) r3.append(chip(s.camera)); c1.append(r3);
+  const r4=el("div","row"); r4.append(el("span","lab","unknown")); const hd=dot("Seestar S30 Pro","hollow big"); const hb=el("i","hatchbox"); hb.style.setProperty("--sc",col("Seestar S30 Pro")); const ut=el("span",null,"hollow dot (small marks) · hatched fill (bars, ring segments): frames saved, exposure not recorded, hours unknown — never 0"); ut.style.cssText="font-size:12px;color:var(--ink2)"; r4.append(hd,hb,ut); c1.append(r4);
+  const a1=el("div","attn"); a1.append(glyph("warn")); const at=el("span"); at.innerHTML="<b>To check:</b> 2 target names the contract doesn't know · their 184 frames are not counted"; a1.append(at); a1.append(el("span","act","Review names")); c1.append(a1);
+  const a2=el("div","attn ok"); a2.append(glyph("check")); a2.append(el("span",null,"Fine, nothing to do: 305 rows are second copies of the same bytes, counted once.")); c1.append(a2);
+  root.append(c1);
+
+  /* 2 ─ legend strip */
+  const c2=el("div","card"); c2.append(el("h2",null,"Legend strip")); c2.append(el("div","sub","the one place the pairings are learnt; scopes always in this order"));
+  const lg=el("div","legend");
+  lg.append(el("span","k","scope")); const lv=el("div","v"); for(const s of SC) lv.append(chip(s.camera)); lg.append(lv);
+  lg.append(el("span","k","next step")); const sv=el("div","v"); for(const k of ["capturing","ready_to_process","in_progress","done","sample"]) sv.append(actPill(k)); lg.append(sv);
+  lg.append(el("span","k","marks")); const mv=el("div","v");
+  const m1=el("span","m"); m1.append(dot("Askar FRA400"),document.createTextNode("a session · bigger is longer")); const m2=el("span","m"); m2.append(dot("Seestar S30 Pro","hollow"),document.createTextNode("hours unknown")); const m3=el("span","m"); const qb=el("i"); qb.style.cssText="display:inline-block;width:22px;height:12px;border-radius:3px;background:var(--quiet-band);border:1px solid var(--line)"; m3.append(qb,document.createTextNode("the last 14 nights (quiet period)")); const m4=el("span","m"); const qg=el("span"); qg.style.cssText="display:inline-flex;color:var(--ink);width:14px;height:14px"; qg.append(glyph("q")); m4.append(qg,document.createTextNode("uncertain, see the note"));
+  mv.append(m1,m2,m3,m4); lg.append(mv); c2.append(lg); root.append(c2);
+
+  /* 3 ─ project card: Andromeda */
+  const t=D.targets.find(x=>x.name.startsWith("Andromeda")); const progs=t.programmes.slice().sort((a,b)=>SC.findIndex(s=>s.camera===a.camera)-SC.findIndex(s=>s.camera===b.camera));
+  const c3=el("div","card"); c3.append(el("h2",null,"Project card")); c3.append(el("div","sub","ring = hours by scope · one lane per scope, a dot per session · the stage glyph in ink after the band · one badge per scope"));
+  const pj=el("div","proj"); const top=el("div","top"); top.append(ring(progs,"r"+theme));
+  const tx=el("div"); tx.append(el("div","nm",t.name)); tx.append(el("div","ty",(t.type||"type not recorded")+" · in "+(t.constellation||"constellation not recorded")+(t.mosaic?" · mosaic":""))); const hl=el("div","hl"); hl.innerHTML=`<b>${fmtH(t.hours)}</b> · ${fmtI(t.lights)} frames · ${nts(t.nights)} · last ${fmtDS(t.lastNight)}`; tx.append(hl); top.append(tx); pj.append(top);
+  const first=d2(t.firstNight); const nightsAll=Math.round((ASOF-first)/DAY)+8;
+  pj.append(timeline(progs.map(p=>({label:short(p.camera),status:p.status,sessions:D.sessions.filter(z=>z.target===t.name&&z.camera===p.camera)})), nightsAll, {width:560,laneH:20,labelW:58,stage:true}));
+  const mix=el("div","mix"); for(const p of progs){ const pl=pill(p.status); pl.prepend(dot(p.camera)); pl.firstChild.style.marginRight="2px"; mix.append(pl); } mix.append(el("span",null,"· 4 scopes, mixed stages")); pj.append(mix);
+  const nt=el("div","note"); nt.append(glyph("warn")); nt.append(el("span",null,"One master sits in the shared Askar folder: it may belong to the other Askar. Check before you count it.")); pj.append(nt);
+  c3.append(pj); root.append(c3);
+
+  /* 4 ─ queue row */
+  const c4=el("div","card"); c4.append(el("h2",null,"Queue row")); c4.append(el("div","sub","scope stripe · labelled hours · bar against the biggest dataset · calibration as ink + glyph · the action pill"));
+  const maxH=Math.max(...D.targets.flatMap(x=>x.programmes).filter(p=>p.status==="ready_to_process").map(p=>p.hours));
+  const rows=[ {t,p:progs.find(p=>p.camera==="Askar 107PHQ")}, {t:D.targets.find(x=>x.name.startsWith("Milky")),p:null} ]; rows[1].p=rows[1].t.programmes[0];
+  for(const {t:tt,p} of rows){ const j=el("div","job"); j.style.setProperty("--sc",col(p.camera)); j.append(el("div","stripe")); const b=el("div","body"); b.append(el("div","t",tt.name)); const m=el("div","m"); const unk=unknownHours(p); m.append(dot(p.camera)); const hv=el("span"); hv.innerHTML=unk?`<b>${short(p.camera)}</b>&nbsp; <b>hours unknown</b> · ${fmtI(p.lights)} frames · ${nts(p.nights)}`:`<b>${short(p.camera)}</b>&nbsp; <b>${fmtH(p.hours)}</b> · ${nts(p.nights)} · ${fmtI(p.lights)} frames`; m.append(hv); b.append(m);
+    const bar=el("div","bar"); const f=el("i",unk?"unk":null); f.style.width=(unk?100:Math.max(2,p.hours/maxH*100))+"%"; bar.append(f); b.append(bar);
+    if(p.calibration&&p.calibration.missing&&p.calibration.missing.length){ const n=el("div","note"); n.append(glyph("warn")); n.append(el("span",null,"no "+p.calibration.missing.join(" or ")+" linked to its lights")); b.append(n); }
+    else if(p.calibration&&p.calibration.applies===false){ const n=el("div","note soft"); n.append(glyph("check")); n.append(el("span",null,"calibration not needed: the Seestar handles its own")); b.append(n); }
+    if(unk){ const n=el("div","note soft"); n.append(glyph("q")); n.append(el("span",null,"exposure not recorded in these frames, so the hours can't be added up")); b.append(n); }
+    j.append(b); const side=el("div","side"); side.append(actPill(p.status)); j.append(side); c4.append(j); }
+  root.append(c4);
+
+  /* 5 ─ scope lanes, last 120 nights */
+  const N=120; const c5=el("div","card"); c5.append(el("h2",null,"Timeline lane: what each scope captured in the last "+N+" nights")); c5.append(el("div","sub","one lane per scope in the fixed order · the lane wash is the scope at 7% · dots wear a 2px surface ring, no glow"));
+  const start=new Date(ASOF.getTime()-(N-1)*DAY);
+  const ln=el("div","lanes");
+  for(const s of SC){ const ses=D.sessions.filter(z=>z.camera===s.camera&&d2(z.night)>=start); const nm=el("div","nmcell"); nm.style.setProperty("--sc",s.colour); nm.append(dot(s.camera)); const w=el("span",null,s.camera); const hrs=ses.reduce((a,z)=>a+(z.hours||0),0); const ufr=ses.filter(z=>!z.hours&&z.frames).reduce((a,z)=>a+z.frames,0); const nn=new Set(ses.map(z=>z.night)).size; w.append(el("small",null,ses.length?fmtH(hrs)+" over "+nts(nn)+(ufr?" · +"+fmtI(ufr)+" frames, hours unknown":""):"nothing in "+N+" nights")); nm.append(w); ln.append(nm);
+    const lane=el("div","lane"); lane.style.setProperty("--sc",s.colour); lane.append(timeline([{sessions:ses}], N, {width:500,laneH:26,labelW:0,labels:SC.indexOf(s)===0,surface:"var(--card)"})); ln.append(lane); }
+  const ax=el("div","axis"); ax.append(el("span",null,fmtDS(start.toISOString().slice(0,10))), el("span",null,"quiet period ▸"), el("span",null,fmtDS(D.asOfNight)+" · last night")); ln.append(ax);
+  c5.append(ln); root.append(c5);
+  root.append(el("div","foot","Colour means scope. Status is a glyph and a word; teal says 'alive', ink says 'do this', an outline says 'nothing to do'. Warnings are ink on a warm wash with a ⚠. Unknown is hollow or hatched. No glow anywhere."));
+}
+build(document.getElementById("dark"),"dark");
+build(document.getElementById("light"),"light");
+</script>
+</body>
+</html>
