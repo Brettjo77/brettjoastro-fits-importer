@@ -55,7 +55,7 @@ from collections import defaultdict
 from datetime import date, datetime, timedelta, timezone
 
 # One version for every platform (1.5.0: the Windows 11 edition joins the Mac).
-VERSION = "1.7.2"
+VERSION = "1.7.3"
 IS_WINDOWS = os.name == "nt"
 IS_MAC = sys.platform == "darwin"
 PLATFORM = "windows" if IS_WINDOWS else ("mac" if IS_MAC else "linux")
@@ -5402,6 +5402,167 @@ def slug_problem():
         return ""
     return (f"this computer's short name {ident['slug']!r} breaks the rule (a to z, 0 to 9 "
             f"and -, at most 32): change ASTRO_MACHINE_ID in config.json")
+
+def _adopt_candidates(state):
+    """Ledger frames the archive has not confirmed: verified at import (so
+    their bytes are known), not yet located or verified on the archive, not
+    tidied, not riders. Each with where its copy on this computer should be."""
+    out = []
+    for key, e in (state.ledger.get("files") or {}).items():
+        if not isinstance(e, dict) or not e.get("verifiedAtImport") or not e.get("sha256"):
+            continue
+        if e.get("archiveVerifiedAt") or e.get("archiveLocation") or e.get("tidiedAt"):
+            continue
+        if e.get("origin") in ("baseline", "backfill") or _is_unshipped_rider(e):
+            continue
+        if not e.get("filename") or not isinstance(e.get("size"), int):
+            continue
+        dest = e.get("dest")
+        here = bool(dest and os.path.isfile(os.path.join(dest, e["filename"])))
+        out.append((key, e, here))
+    return out
+
+def run_adopt_archive(state, apply=False, hash_here=False, mount=None, limit=None):
+    """--adopt-archive (1.7.3): frames this computer imported and verified
+    whose copy reached the archive without a ship (moved there by hand before
+    the ship existed), so the ledger never recorded them arriving. For each
+    such frame the PC's inventory is searched: a row with the same bytes
+    (the sha256 the PC's --hash computed) is proof, and the ledger is marked
+    as a ship marks an adopted copy (archiveLocation, archiveShippedAt, and
+    archiveVerifiedAt from the PC's hash) with a "shipped" row (adopted) in
+    this computer's own ship log, so the PC's sweep keeps checking it. A row
+    with the same name and size but no PC hash yet is read back over the
+    share only with hash_here (slow; the ship's own standard). Nothing on the
+    archive is created, renamed or removed; without apply nothing is written
+    anywhere. Returns a summary dict."""
+    mount = mount or ARCHIVE_MOUNT
+    res = {"ok": True, "candidates": 0, "adopted": 0, "readback": 0, "unproven": 0,
+           "mismatch": 0, "absent": 0, "written": False}
+    if not state.has_ledger():
+        info("Nothing has been imported on this computer, so there is nothing to adopt.")
+        return res
+    ok, why = _ship_mount(mount)
+    if not ok:
+        warn(f"Archive not reachable at {mount} ({ARCHIVE_LABEL}): {why}. Nothing adopted.")
+        res["ok"] = False
+        return res
+    inv = _latest_inventory_path()
+    if not inv:
+        warn("No archive inventory was found (the PC's --inventory writes it); nothing can be "
+             "proven, so nothing is adopted.")
+        res["ok"] = False
+        return res
+    cands = _adopt_candidates(state)
+    res["candidates"] = len(cands)
+    if not cands:
+        info("Every frame this computer imported is already located on the archive. Nothing to adopt.")
+        return res
+    wanted_sha = {e["sha256"] for _k, e, _h in cands}
+    wanted_name = {e["filename"].lower() for _k, e, _h in cands}
+    by_sha, by_name = {}, {}
+    for r in _iter_jsonl_rows(inv):
+        rel = r.get("relpath")
+        if r.get("retired") or not isinstance(rel, str) or "/" not in rel:
+            continue
+        sha = r.get("sha256") if isinstance(r.get("sha256"), str) else None
+        name = rel.rsplit("/", 1)[1].lower()
+        if sha and sha in wanted_sha:
+            by_sha.setdefault(sha, []).append(r)
+        if name in wanted_name:
+            by_name.setdefault(name, []).append(r)
+    info(f"{len(cands):,} frame(s) in this computer's ledger are not yet located on the archive; "
+         f"the inventory {os.path.basename(inv)} was read.")
+    stamp = now_stamp()
+    ship_id = uuid.uuid4().hex[:12]
+    slog = ship_log_path(mount)
+    adopted, lines = [], []
+    n_done = 0
+    for key, e, here in cands:
+        if limit and n_done >= limit:
+            break
+        name, size, sha = e["filename"], e["size"], e["sha256"]
+        hit, how = None, None
+        for r in by_sha.get(sha, []):
+            try:
+                if int(r.get("size") or -1) == size:
+                    hit, how = r, "pc-inventory-hash"
+                    break
+            except (TypeError, ValueError):
+                continue
+        if hit is None:
+            same = [r for r in by_name.get(name.lower(), [])
+                    if str(r.get("size")) == str(size)]
+            if not same:
+                res["absent"] += 1
+                continue
+            if any(isinstance(r.get("sha256"), str) and r["sha256"] != sha for r in same) \
+                    and not any(r.get("sha256") is None for r in same):
+                res["mismatch"] += 1
+                lines.append(f"{name}: a file of that name and size is on the archive but its bytes differ")
+                continue
+            if not hash_here:
+                res["unproven"] += 1
+                continue
+            for r in same:
+                if r.get("sha256"):
+                    continue
+                path = os.path.join(mount, r["relpath"].replace("/", os.sep))
+                try:
+                    if os.path.getsize(path) == size and _hash_dest_uncached(path) == sha:
+                        hit, how = r, "mac-readback" if SHIP_FOLDER != "pc" else "readback"
+                        res["readback"] += 1
+                        break
+                except OSError as ex:
+                    lines.append(f"{name}: could not read the archive copy ({ex})")
+            if hit is None:
+                res["mismatch"] += 1
+                lines.append(f"{name}: a file of that name and size is on the archive but its bytes differ")
+                continue
+        loc = hit["relpath"].replace("/", "\\")
+        adopted.append((key, e, loc, how, hit))
+        n_done += 1
+    res["adopted"] = len(adopted)
+    for ln in lines[:20]:
+        warn("  " + ln)
+    if len(lines) > 20:
+        warn(f"  ... and {len(lines) - 20} more")
+    by_target = {}
+    for _k, e, loc, how, _r in adopted:
+        t = loc.split("\\")[1] if "\\" in loc else "?"
+        by_target[t] = by_target.get(t, 0) + 1
+    for t, n in sorted(by_target.items(), key=lambda x: -x[1])[:25]:
+        log(f"  {t}: {n} frame(s)")
+    info(f"Proven on the archive: {len(adopted):,} (by the PC's hash: "
+         f"{len(adopted) - res['readback']:,}; read back here: {res['readback']:,}). "
+         f"Same name and size, not yet hashed by the PC: {res['unproven']:,}"
+         + (" (run again with --hash-here to read them back over the share)" if res["unproven"] and not hash_here else "")
+         + f". Bytes differ: {res['mismatch']:,}. Not on the archive at all: {res['absent']:,}.")
+    if not apply:
+        info("Dry run: nothing written. Add --apply to record the proven ones in the ledger.")
+        return res
+    if not adopted:
+        return res
+    _confine(slog, "the ship log")
+    os.makedirs(os.path.dirname(slog), exist_ok=True)
+    for key, e, loc, how, r in adopted:
+        _ship_row(slog, "shipped", loc, e["size"], e["sha256"], ship_id, shippedAt=stamp,
+                  adopted=True, adoptedBy=how)
+        e["archiveLocation"] = loc
+        e["archiveShippedAt"] = stamp
+        e["adoptedFromArchive"] = {"at": stamp, "by": how}
+        if how == "pc-inventory-hash":
+            e["archiveVerifiedAt"] = str(r.get("hashedAt") or stamp)
+            e["archiveVerifiedBy"] = "pc-inventory"
+        state._dirty = True
+    state.history_event("adopt-archive", adopted=len(adopted), readback=res["readback"])
+    state.save_ledger()
+    res["written"] = True
+    success(f"Recorded {len(adopted):,} frame(s) as on the archive. The PC's next sweep checks "
+            f"the adopted copies again by hash, as it does after a ship.")
+    write_ledger_snapshot(state, mount)
+    state.publish_mirror()
+    rebuild_projects_quietly(state)
+    return res
 
 def run_ship(state, dry_run=False, mount=None, checksum=True):
     mount = mount or ARCHIVE_MOUNT
@@ -11831,6 +11992,14 @@ def main():
     p.add_argument("--ship", action="store_true",
                    help="file verified frames into the archive on the PC over the mounted share "
                         "(no camera needed; safe to repeat; --dry-run lists only)")
+    p.add_argument("--adopt-archive", action="store_true",
+                   help="frames this computer imported that reached the archive without a ship "
+                        "(moved there by hand): record them in the ledger with proof from the PC's "
+                        "inventory hashes; a dry run unless --apply (1.7.3)")
+    p.add_argument("--apply", action="store_true", help="with --adopt-archive: write the ledger")
+    p.add_argument("--hash-here", action="store_true",
+                   help="with --adopt-archive: read back over the share the copies the PC has not "
+                        "hashed yet (slow)")
     p.add_argument("--no-ship", action="store_true",
                    help="do not file frames to the archive after this import")
     p.add_argument("--space", action="store_true",
@@ -12022,6 +12191,15 @@ def main():
         else:
             locked(lambda: run_tidy_stacks(state))
         return
+    if args.adopt_archive:
+        if not acquire_lock("adopt"):
+            sys.exit(1)
+        try:
+            reload()
+            got = run_adopt_archive(state, apply=args.apply, hash_here=args.hash_here)
+        finally:
+            release_lock()
+        sys.exit(0 if got.get("ok") else 1)
     if args.ship:
         if not acquire_lock("ship"):
             sys.exit(1)

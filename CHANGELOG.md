@@ -1,5 +1,20 @@
 # Changelog
 
+## 1.7.3 (2026-10-18): the ledger catches up with frames moved to the archive by hand
+
+Installing 1.7.2 on the Mac, the ship's dry run listed 11,695 frames "missing on this computer": imported and verified between June and August, cleared from the cameras, their Mac copies gone, and never recorded as reaching the archive. They are on E: (2,966 Teddy Bear frames, 5,135 Veil frames and the rest, moved there by hand over the summer before the ship existed); the ledger was never told, so the Observatory, the Space view and the status line counted them as not on the archive.
+
+- **`--adopt-archive`** (both computers). For each such frame the PC's inventory is searched for the same bytes: a row with the sha256 the PC's `--hash` computed is proof, and the ledger is marked as a ship marks an adopted copy (`archiveLocation`, `archiveShippedAt`, `archiveVerifiedAt` from the PC's hash time, `adoptedFromArchive`), with a "shipped" row (adopted) in this computer's own ship log so the PC's sweep keeps checking it. A copy with the same name and size the PC hasn't hashed yet is adopted only with `--hash-here`, by reading it back over the share (the ship's own standard; slow). A copy whose bytes differ is never adopted and is named. Nothing on the archive is created, renamed or removed; a dry run (the default) writes nothing anywhere; `--apply` writes the ledger. Safe to repeat.
+- Chain AA in the engine suite: dry run writes nothing; apply marks only the proven frames; the un-hashed one waits for `--hash-here`; the differing one never; the ship then has nothing to send again; idempotent; under the share's D7 rights nothing but this computer's own log and record is touched.
+
+**After updating** (the Mac, where the frames were imported): install as for 1.7.2, then
+```
+/usr/local/bin/python3 ~/bin/astro-import.py --adopt-archive
+```
+reads the list and writes nothing. When it says what it would prove, `--adopt-archive --apply` records it; `--adopt-archive --apply --hash-here` also reads back the copies the PC hasn't hashed yet (hours over the share; the PC's nightly `--hash` closes that gap by itself over time, so it can also just wait). Mac / Windows: the same on both.
+
+809 end-to-end checks (620 engine + 189 panel).
+
 ## 1.7.2 (2026-10-17): the Observatory, rebuilt
 
 Brett's words on 16 and 17 Oct: "it's just a lot of text and numbers, like looking at Excel", "this type of thing is the right direction" (the scope timeline), "be creative and colourful", "the devil is in the detail", "dynamic impact that looks professional", and "there is a macro view, project view, micro view". Three design directions, then five detail reviews (type, colour, motion, truth of every label, layout), then one specification (`docs/ux-observatory-16oct/SPEC.md`). Nothing in the rules changes: the page reads, never writes.

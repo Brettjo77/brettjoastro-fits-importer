@@ -6188,6 +6188,122 @@ check("OB4 (review) a quick look never drives its project's state or the target'
       json.dumps(_o4c)[:900])
 shutil.rmtree(OB4c.root, ignore_errors=True)
 
+# ═══════════════ CHAIN AA: --adopt-archive (1.7.3) ═══════════════════════════
+# Frames this computer imported and verified that reached the archive without
+# a ship (moved there by hand in the summer): the ledger catches up with proof
+# from the PC's inventory hashes, or a read-back over the share; nothing on the
+# archive is created, renamed or removed; a dry run writes nothing anywhere.
+import hashlib as _adh
+AD = teh.Env("AD", asiair=False, seestar=True)
+AD.env.update(D7_MAC)
+ad_arch = AD.archive
+os.makedirs(os.path.join(ad_arch, "S30P", "Dumbbell by hand"), exist_ok=True)
+for st in ("20260801-224402", "20260801-225402", "20260802-224402", "20260802-225402", "20260803-224402"):
+    AD.add_seestar_sub("M 27", st)
+AD.run("--no-ship")
+_adl = AD.ledger()["files"]
+_ad_rows = sorted((k, e) for k, e in _adl.items() if e.get("sourceType") == "sub")
+check("AA five subs imported and verified, none located on the archive yet",
+      len(_ad_rows) == 5 and all(e.get("verifiedAtImport") and not e.get("archiveLocation") for _k, e in _ad_rows),
+      json.dumps(_ad_rows)[:400])
+def _ad_sha(p):
+    h = _adh.sha256()
+    with open(p, "rb") as f:
+        h.update(f.read())
+    return h.hexdigest()
+# A: moved by hand, the PC hashed it; B: moved by hand, not hashed yet; C: moved by hand but the
+# archive's copy differs (a re-save); D: still here AND a copy on the archive, hashed; E: gone, nowhere
+_ad = {}
+for tag, (k, e) in zip("ABCDE", _ad_rows):
+    src = os.path.join(e["dest"], e["filename"])
+    dst = os.path.join(ad_arch, "S30P", "Dumbbell by hand", e["filename"])
+    if tag in "ABC":
+        os.replace(src, dst)
+    elif tag == "D":
+        shutil.copy(src, dst)
+    else:
+        os.remove(src)
+    if tag == "C":                        # the same size, different bytes (a re-save)
+        with open(dst, "r+b") as f:
+            f.seek(-1, 2); last = f.read(1); f.seek(-1, 2); f.write(b"\x01" if last != b"\x01" else b"\x02")
+    _ad[tag] = (k, e, dst)
+_ad_pc = os.path.join(ad_arch, "_verify", "pc"); os.makedirs(_ad_pc, exist_ok=True)
+with open(os.path.join(_ad_pc, "inventory-E-20261018T030000Z.jsonl"), "w", encoding="utf-8") as f:
+    for tag in "ABCD":
+        k, e, dst = _ad[tag]
+        row = {"schema": "inventory-row/1", "relpath": "S30P/Dumbbell by hand/" + e["filename"], "camera": "S30P",
+               "target": "Dumbbell by hand", "size": os.path.getsize(dst), "mtimeNs": 1, "kind": "light",
+               "retired": False, "sha256": None, "hashedAt": None}
+        if tag in "AD":
+            row["sha256"], row["hashedAt"], row["hashedBy"] = _ad_sha(dst), "2026-10-18T03:10:00+00:00", "pc"
+        if tag == "C":
+            row["sha256"], row["hashedAt"] = _ad_sha(dst), "2026-10-18T03:10:00+00:00"     # the archive's bytes, not the ledger's
+        f.write(json.dumps(row) + "\n")
+with open(os.path.join(_ad_pc, "inventory-E.status.json"), "w") as f:
+    json.dump({"schema": "inventory-status/1", "generation": "20261018T030000Z"}, f)
+ADN = teh.no_delete_env(AD.root, ad_arch)
+_ad_before_tree = d7_tree(ad_arch)
+_ad_before = json.dumps(AD.ledger(), sort_keys=True)
+r = AD.run("--adopt-archive", extra_env=ADN)
+_ad_mlog = os.path.join(ad_arch, "_verify", "mac", "shipped.jsonl")
+check("AA a dry run reads the inventory and says what it would prove (2 by the PC's hash, 1 not hashed "
+      "yet, 1 whose bytes differ, 1 not on the archive) and writes nothing: not the ledger, not the "
+      "ship log, nothing on the archive",
+      r.returncode == 0 and "Proven on the archive: 2" in r.stdout and "by the PC's hash: 2" in r.stdout
+      and "not yet hashed by the PC: 1" in r.stdout and "--hash-here" in r.stdout
+      and "Bytes differ: 1" in r.stdout and "Not on the archive at all: 1" in r.stdout
+      and "Dry run: nothing written" in r.stdout
+      and json.dumps(AD.ledger(), sort_keys=True) == _ad_before and not os.path.exists(_ad_mlog)
+      and d7_tree(ad_arch) == _ad_before_tree,
+      r.stdout[-900:] + r.stderr[-300:])
+r = AD.run("--adopt-archive", "--apply", extra_env=ADN)
+_adl2 = AD.ledger()["files"]
+_ad_after_tree = d7_tree(ad_arch)
+_new = sorted(set(_ad_after_tree) - set(_ad_before_tree))
+_gone = sorted(set(_ad_before_tree) - set(_ad_after_tree))
+_changed = sorted(k for k in _ad_before_tree if k in _ad_after_tree and _ad_before_tree[k] != _ad_after_tree[k])
+_shipped = d7_rows(_ad_mlog, "shipped")
+check("AA --apply records the two proven frames as a ship records an adopted copy: archiveLocation with "
+      "the archive's separators, archiveShippedAt, archiveVerifiedAt from the PC's hash time, adoptedFromArchive; "
+      "a 'shipped' row (adopted, by the PC's hash) in this computer's own log; the other three untouched",
+      r.returncode == 0 and "Recorded 2 frame(s)" in r.stdout
+      and all(_adl2[_ad[t][0]].get("archiveLocation") == "S30P\\Dumbbell by hand\\" + _ad[t][1]["filename"]
+              and _adl2[_ad[t][0]].get("archiveShippedAt") and _adl2[_ad[t][0]].get("archiveVerifiedAt") == "2026-10-18T03:10:00+00:00"
+              and _adl2[_ad[t][0]].get("archiveVerifiedBy") == "pc-inventory"
+              and _adl2[_ad[t][0]].get("adoptedFromArchive", {}).get("by") == "pc-inventory-hash" for t in "AD")
+      and all(not _adl2[_ad[t][0]].get("archiveLocation") and not _adl2[_ad[t][0]].get("archiveVerifiedAt") for t in "BCE")
+      and len(_shipped) == 2 and all(x.get("adopted") is True and x.get("adoptedBy") == "pc-inventory-hash"
+                                     and x.get("sha256") == _adl2[_ad["A"][0]]["sha256"] or x.get("sha256") == _adl2[_ad["D"][0]]["sha256"]
+                                     for x in _shipped),
+      json.dumps([{t: {k: _adl2[_ad[t][0]].get(k) for k in ("archiveLocation", "archiveShippedAt", "archiveVerifiedAt", "adoptedFromArchive")} for t in "ABCDE"}, _shipped])[:900]
+      + r.stdout[-400:])
+check("AA nothing on the archive is created, renamed or removed apart from this computer's own log and "
+      "record in _verify/mac (the share's rights refused nothing)",
+      not _gone and all(p.startswith("_verify/mac/") for p in _new + _changed) and d7_bad(AD.root) == [],
+      f"new={_new} changed={_changed} gone={_gone} denied={teh.denied(AD.root)}"[:600])
+r = AD.run("--adopt-archive", "--apply", "--hash-here", extra_env=ADN)
+_adl3 = AD.ledger()["files"]
+_shipped3 = d7_rows(_ad_mlog, "shipped")
+check("AA --hash-here reads the un-hashed copy back over the share and adopts it on this computer's own "
+      "read-back (located and shipped, verification left to the PC's sweep); the differing copy is never "
+      "adopted; the missing one stays missing",
+      r.returncode == 0 and "read back here: 1" in r.stdout and "Bytes differ: 1" in r.stdout
+      and _adl3[_ad["B"][0]].get("archiveLocation") and not _adl3[_ad["B"][0]].get("archiveVerifiedAt")
+      and _adl3[_ad["B"][0]].get("adoptedFromArchive", {}).get("by") == "mac-readback"
+      and not _adl3[_ad["C"][0]].get("archiveLocation") and not _adl3[_ad["E"][0]].get("archiveLocation")
+      and len(_shipped3) == 3 and d7_bad(AD.root) == [],
+      r.stdout[-700:] + json.dumps({t: _adl3[_ad[t][0]].get("archiveLocation") for t in "BCE"}))
+r = AD.run("--ship", "--dry-run", extra_env=ADN)
+check("AA after adoption the ship has nothing to send: the frame still on this computer whose copy was "
+      "adopted is not shipped again (no second copy on the archive)",
+      r.returncode == 0 and "Ship: 0 file(s)" in r.stdout and _adl3[_ad["D"][0]].get("archiveLocation"),
+      r.stdout[-600:])
+r = AD.run("--adopt-archive", extra_env=ADN)
+check("AA a second dry run finds nothing more to prove for the adopted ones (idempotent)",
+      r.returncode == 0 and "Proven on the archive: 0" in r.stdout and "Bytes differ: 1" in r.stdout
+      and "Not on the archive at all: 1" in r.stdout, r.stdout[-400:])
+shutil.rmtree(AD.root, ignore_errors=True)
+
 # ═══════════════ CHAIN OT: two importing computers, one truth (1.7.1) ════════
 # The PC imports too (Brett, 16 Oct 2026). Each computer keeps its own ledger;
 # the archive carries each one's record; a scan reads the OTHER computer's

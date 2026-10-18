@@ -325,6 +325,10 @@ Its facts are the To process list's. `--projects` writes two files side by side 
 
 **Sky positions.** A target with no position in `contract/targets.json` is listed but sits off the sky map and the footprints. To place it, add `"ra"` (hours, as a decimal) and `"dec"` (degrees, as a decimal) to its entry, as on Andromeda: `"ra": 0.712, "dec": 41.27`. Your copy then counts as edited, so the next update leaves `targets.json.new` beside it to merge.
 
+## Frames that reached the archive without a ship
+
+Before the ship existed, frames were moved from the Mac onto the archive by hand, and the ledger was never told. It still says they were imported and verified here, and nothing else; the Space view, the status line and the Observatory count them as not on the archive, and the ship's dry run lists them as "missing on this computer". From 1.7.3, `--adopt-archive` catches the ledger up: it looks each such frame up in the PC's inventory of the archive, and a copy with the same bytes (the hash the PC computed) is proof. The ledger is then marked exactly as a ship marks a copy it found already there, and the PC's sweep keeps checking it. A copy the PC hasn't hashed yet can be read back over the share with `--hash-here` (slow), or left for the PC's nightly hashing to reach. A copy whose bytes differ is named and never adopted. The command writes nothing on the archive and, without `--apply`, nothing at all.
+
 ## When things go wrong
 
 Interruptions are expected, not exceptional. A copy that dies mid-file leaves
