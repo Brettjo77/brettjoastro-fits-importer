@@ -4282,6 +4282,26 @@ check("U4 main() is the loop around poll_once: an arrival is acted on as before 
       and acted(U4f) == {"notify": 1, "browser": 1, "panel-start": 0},
       json.dumps([got, acted(U4f)]) + watch_log(U4f)[-300:])
 
+# 1.7.4: the panel is always on. With no camera the watcher starts the panel as it
+# starts and keeps checking; while the app owns the machine it never does
+WATCH_KEEP = WATCH_LOOP.replace("w.panel_up = lambda: True", "w.panel_up = lambda: False")
+U4k = teh.Env("U4keep", asiair=False, seestar=False)
+u4k_env = dict(U4k.env, ASTRO_KEEP_PANEL_S="0", ASTRO_PANEL_RETRY_S="0")
+got_k = upr(u4k_env, WATCH_KEEP, before="STEPS = [lambda: None, lambda: None]\n")
+U4ka = teh.Env("U4keepapp", asiair=False, seestar=False)
+owner_record(U4ka, the_app(U4ka)[0])
+got_ka = upr(dict(U4ka.env, ASTRO_KEEP_PANEL_S="0", ASTRO_PANEL_RETRY_S="0"), WATCH_KEEP,
+             before="STEPS = [lambda: None]\n")
+check("U4 the panel is always on (1.7.4): with no camera the watcher starts the panel as it "
+      "starts and again at every check while it is not answering, with no notification and no "
+      "browser; a start that fails names the Restart button in the log; while the app is in "
+      "charge it starts nothing",
+      got_k.get("rc") == "still polling" and got_k.get("polls") == 3
+      and acted(U4k) == {"notify": 0, "browser": 0, "panel-start": 4}
+      and "Restart FITS Importer" in watch_log(U4k)
+      and got_ka.get("rc") == 0 and acted(U4ka)["panel-start"] == 0,
+      json.dumps([got_k, acted(U4k), got_ka, acted(U4ka)]) + watch_log(U4k)[-300:])
+
 # U5 — NOTIFY_FN: the app shows notifications itself
 U5 = teh.Env("U5", asiair=False, seestar=False)
 e = dict(U5.env)
@@ -5979,6 +5999,22 @@ check("IN install-scripts.sh reads config.json with the same Python as the owner
 check("IN install-scripts.sh leaves the web ship agent off while the FITs Importer App is in charge",
       'if [ -n "$APP_OWNS" ]; then' in IN_SH
       and IN_SH.find('if [ -n "$APP_OWNS" ]; then') < IN_SH.find('elif [ -z "$ARCHIVE_CONFIGURED" ]; then'))
+_wsh = open(os.path.join(HERE, "astro-watch.sh"), encoding="utf-8").read()
+_wsh_none = _wsh[_wsh.find('if [ "$CUR" = "none" ]; then'):]
+_wsh_none = _wsh_none[:_wsh_none.find("\nfi\n")]
+_plist = open(os.path.join(HERE, "com.brettjohnson.astro-import.plist"), encoding="utf-8").read()
+check("IN the Mac watcher keeps the panel up too (1.7.4): its no-camera branch calls "
+      "ensure_panel_silently (ping, start only when silent, never a tab), and the LaunchAgent "
+      "runs it at load, on /Volumes changes and every five minutes (StartInterval 300)",
+      "ensure_panel_silently" in _wsh_none and "<key>WatchPaths</key>" in _plist
+      and "<key>RunAtLoad</key>\n    <true/>" in _plist
+      and "<key>StartInterval</key>\n    <integer>300</integer>" in _plist)
+check("IN both installers say the panel is always running, the Mac installer no longer says the "
+      "panel waits for the next plug-in, and the install check says the watcher starts it",
+      "any time, camera or not" in IN_SH and "any time, camera or not" in IN_PS
+      and "next plug-in" not in IN_SH
+      and "the watcher starts it within a minute" in open(os.path.join(HERE, "selftest.py"),
+                                                           encoding="utf-8").read())
 check("IN the ship agent runs under caffeinate -i, from a plain bash -c, and still falls back "
       "to Apple's python3",
       "/usr/bin/caffeinate -i" in IN_PLIST and "<string>-c</string>" in IN_PLIST

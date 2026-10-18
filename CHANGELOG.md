@@ -1,5 +1,17 @@
 # Changelog
 
+## 1.7.4 (2026-10-18): the panel is always on
+
+Brett opened the Observatory on the PC with no camera plugged in and got "can't reach this page": the panel only ever started when a camera arrived, or from the Restart button. The Observatory has to be there whenever it is wanted.
+
+- **The watcher keeps the panel up.** On Windows `astro-watch.py` (started at logon) starts the panel as it starts, camera or not, and every 30 s checks it still answers; a panel that was quit or died comes back by itself. A start that fails is logged once, naming the Restart button, and tried again after ten minutes, never in a tight loop. On the Mac `astro-watch.sh` does the same on its no-camera path, and its LaunchAgent now also runs every five minutes (`StartInterval`), besides at login and on every `/Volumes` change, so the same holds there. Nothing is notified and no tab is opened by a silent start; open tabs reconnect by themselves. While the FITs Importer App is in charge the web watcher starts nothing, as before.
+- The installers and the install check say so; the Mac installer no longer says the panel waits for the next plug-in (it comes back within a few seconds of the install).
+- Engine suite: the U4 keep-alive check (in test mode the start is recorded, never done) and two IN checks (the Mac watcher's no-camera path and its agent; the installers' words).
+
+Mac / Windows: the same on both. **After updating**: install as before on each computer; the panel is up a few seconds later and stays up. `http://127.0.0.1:8765` any time.
+
+816 end-to-end checks (627 engine + 189 panel).
+
 ## 1.7.3 (2026-10-18): the ledger catches up with frames moved to the archive by hand
 
 Installing 1.7.2 on the Mac, the ship's dry run listed 11,695 frames "missing on this computer": imported and verified between June and August, cleared from the cameras, their Mac copies gone, and never recorded as reaching the archive. They are on E: (2,966 Teddy Bear frames, 5,135 Veil frames and the rest, moved there by hand over the summer before the ship existed); the ledger was never told, so the Observatory, the Space view and the status line counted them as not on the archive.

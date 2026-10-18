@@ -20,7 +20,7 @@ Smart telescopes fill up fast, and hand-copying folders leaves you guessing. Mos
 
 **For both cameras**
 
-- Notices a camera the moment it's plugged in (macOS: a LaunchAgent watching `/Volumes`; Windows: a small watcher started at logon that recognises a camera drive by what's on it), scans read-only, notifies you, and opens the control panel at `http://127.0.0.1:8765`
+- Notices a camera the moment it's plugged in (macOS: a LaunchAgent watching `/Volumes`; Windows: a small watcher started at logon that recognises a camera drive by what's on it), scans read-only, notifies you, and opens the control panel at `http://127.0.0.1:8765`. The panel is always running (1.7.4): the watcher starts it at login and brings it back if it stops, so the Observatory is there camera or not
 - Verified copies: stream-hash from camera → write to `.partial` → fsync → re-read from disk → re-hash → rename. Interrupted copies leave a `.partial`, never a fake backup
 - One JSON ledger for every frame ever imported (SHA-256, exposure, night, scope, day number, device) — entries are never deleted, so history survives archiving
 - Day-folder numbering per target with night-continuation handling, shared display-name tables (catalogue → common names) plus your own custom names
@@ -233,7 +233,7 @@ The panel covers day-to-day use; everything is also scriptable:
 
 ## Testing
 
-813 end-to-end checks run the real engine and the real panel against simulated cameras (hand-built minimal FITS files, every device layout, crash/rename/mosaic/Milky-Way/cleanup/consent/interruption/multi-Seestar scenarios — including that the destination preview must equal the folders the import then actually creates, that a folder holding any unproven file is never offered as SAFE, and that the panel refuses foreign-origin requests):
+816 end-to-end checks run the real engine and the real panel against simulated cameras (hand-built minimal FITS files, every device layout, crash/rename/mosaic/Milky-Way/cleanup/consent/interruption/multi-Seestar scenarios — including that the destination preview must equal the folders the import then actually creates, that a folder holding any unproven file is never offered as SAFE, and that the panel refuses foreign-origin requests):
 
 ```bash
 python3 test_v2.py     # 556 engine checks (chain W1 simulates the Windows drive layer)

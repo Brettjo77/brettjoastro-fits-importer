@@ -119,6 +119,8 @@ Administrator window and prints what to do.
      for you to merge.
 4. **Plug in the Seestar or ASIAir.** A notification appears and the panel
    opens (`http://127.0.0.1:8765`). Tick what you want and press **Import**.
+   The panel is always running from 1.7.4, so that address works any time,
+   camera or not: the Observatory lives there.
    The first import starts this PC's own ledger.
    - Frames the Mac already imported and verified show as "backed up by the
      Mac", unticked (1.7.1): the PC reads the Mac's record on the archive.

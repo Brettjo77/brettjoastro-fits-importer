@@ -20,7 +20,10 @@ ever delete from the ASIAir — is that promise applied consistently.
 ## What happens when you plug a camera in
 
 A small watcher notices the drive mount, sends a notification, and opens the
-control panel in your browser. The panel scans the camera — reading only —
+control panel in your browser. (The panel itself is always running, from
+1.7.4: the watcher starts it when you log in and brings it back if it stops,
+so `http://127.0.0.1:8765` and the Observatory are there camera or not.)
+The panel scans the camera — reading only —
 and shows you three things: which targets have new frames (newest night at
 the top), which calibration frames would pair with them, and a preview of
 exactly which folders the import would create. Nothing has been copied yet;

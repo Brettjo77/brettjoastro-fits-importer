@@ -61,6 +61,7 @@ way. Every release updates it.
 | Report, dashboard, mirror | ✓ | ✓ | engine |
 | Camera detection | `/Volumes/…` | drive letters, by what's on them (`Autorun\` / `MyWorks\`) | platform layer |
 | Auto-open panel when a camera is plugged in | launchd + `astro-watch.sh` | Startup-folder `astro-watch.py` | platform |
+| The panel is always on (1.7.4): started at login, camera or not, and brought back if it stops; a silent start never notifies or opens a tab; nothing while the app is in charge | `astro-watch.sh` at load, on `/Volumes` changes and every 5 min (`StartInterval`), `ensure_panel_silently` | `astro-watch.py` at logon, `keep_panel_up()` every 30 s, a failed start retried after 10 min | platform |
 | Notifications | Notification Centre | Windows toast | platform layer |
 | Eject from the panel / CLI | `diskutil` | Shell "Eject" | platform layer |
 | Twice-daily ship | LaunchAgent, 09:00 / 21:00 | Scheduled Task, 09:30 / 21:30 | installers |
