@@ -1,7 +1,7 @@
 {
  "schema": "targets/1",
  "note": "One entry per object. 'codes': every catalogue code that is the SAME object (M 31 and NGC 224 are one Andromeda). 'aliases': the other names you use for it. How to edit safely: (1) a plain-text editor (Notepad on the PC; on the Mac TextEdit only in plain-text mode with smart quotes off): one curly quote breaks the file, and then nothing resolves. (2) To add a name, put it in an entry's aliases: \"aliases\": [\"Wizard\", \"Wizard Nebula\"]. To add an object, copy a whole { ... } entry, paste it after another one, give it a new id. Straight double quotes only, a comma between entries, NO comma after the last one in a list, no comments. (3) Never change or reuse an id: your open/complete choices are keyed by it; to merge two entries, move the codes and aliases onto the one you keep and delete the other. (4) Write codes like M 31, NGC 224, IC 1318A (letter joined on), Sh2-157, C 25, Barnard 33 (never B 33), LDN 1235, vdB 126, Ced 214, Mel 22, HIP 106890, no leading zeros. (5) A code, a name or an alias may sit on only one entry; two entries with the same name make that name match neither (--targets-draft warns). (6) A name that contains a catalogue code always files by the code, whatever the words say. (7) Each computer has its own copy of this file: make the same change on both. (8) An update replaces this file by itself while you haven't edited it; if you have, it leaves targets.json.new beside it: merge the two by hand. Then run --targets-draft: it checks the file and says what it still doesn't know. Optional per target, read by the Observatory page: 'type' (Galaxy, Emission nebula, Open cluster...), 'constellation', 'ra' (hours, decimal) and 'dec' (degrees, decimal). A target without ra/dec is listed but not drawn on the sky map. The first set came from the Astro Archive Observatory's catalogue (29 Aug 2026).",
- "review": "Seed built 10 Oct 2026 from the importer's own name list plus a merge pass; 37 targets added 12 Oct from the Mac's --targets-draft (48 names; all resolve except 'Unknown', 3 frames, no object). For Brett: 'NGC 1893 - Flaming Star' files under NGC 1893 (the Tadpoles' cluster, IC 410) because the code wins, not under IC 405; Fish on a Platter is Barnard 144; Middle Heart (LDN 1373) is the Heart's own core; Markarian's Chain, the Milky Way core and the comet are name-only. Kept apart on purpose until Brett says: Sh2-171 (Teddy Bear) and NGC 7822; NGC 6910 (the cluster) and IC 1318 (the Sadr nebula); NGC 6823 and NGC 6820 / Sh2-86; NGC 1893 and IC 410.",
+ "review": "Seed built 10 Oct 2026 from the importer's own name list plus a merge pass; 37 targets added 12 Oct from the Mac's --targets-draft (48 names; all resolve except 'Unknown', 3 frames, no object). For Brett: 'NGC 1893 - Flaming Star' files under IC 410 (NGC 1893 is the Tadpoles' cluster) because the code wins, not under IC 405; Fish on a Platter is Barnard 144; Middle Heart (LDN 1373) is the Heart's own core; Markarian's Chain, the Milky Way core and the comet are name-only. Merged on Brett's word, 18 Oct 2026: NGC 1893 into IC 410 (Tadpoles Nebula); NGC 6910 into IC 1318 (Sadr Region); NGC 7822 and Ced 214 into Sh2-171 (Teddy Bear Nebula); LDN 386 into M 16 (the Eagle is in the frame); the Squid (Ou 4, the Seestar's Gaia number) into Sh2-129 (Flying Bat and Squid Nebulae). Still apart: NGC 6823 and NGC 6820 / Sh2-86.",
  "targets": [
   {
    "id": "M1",
@@ -47,9 +47,12 @@
    "name": "Eagle Nebula",
    "codes": [
     "M 16",
-    "NGC 6611"
+    "NGC 6611",
+    "LDN 386"
    ],
-   "aliases": [],
+   "aliases": [
+    "Dark nebula LDN 386"
+   ],
    "ra": 18.313,
    "dec": -13.82,
    "type": "Nebula",
@@ -900,19 +903,6 @@
    "constellation": "Cassiopeia"
   },
   {
-   "id": "NGC7822",
-   "name": "Cederblad 214",
-   "codes": [
-    "NGC 7822",
-    "Ced 214"
-   ],
-   "aliases": [],
-   "ra": 0.06,
-   "dec": 68.62,
-   "type": "Emission nebula",
-   "constellation": "Cepheus"
-  },
-  {
    "id": "IC405",
    "name": "Flaming Star Nebula",
    "codes": [
@@ -930,12 +920,17 @@
   },
   {
    "id": "IC410",
-   "name": "Tadpole Nebula",
+   "name": "Tadpoles Nebula",
    "codes": [
     "IC 410",
-    "Sh2-236"
+    "Sh2-236",
+    "NGC 1893"
    ],
-   "aliases": [],
+   "aliases": [
+    "Open cluster in the Tadpoles (IC 410)",
+    "Tadpoles",
+    "Tadpole Nebula"
+   ],
    "ra": 5.378,
    "dec": 33.42,
    "type": "Emission nebula",
@@ -975,11 +970,13 @@
    "codes": [
     "IC 1318",
     "IC 1318B",
-    "IC 1318C"
+    "IC 1318C",
+    "NGC 6910"
    ],
    "aliases": [
     "Sadr",
-    "Gamma Cygni Nebula"
+    "Gamma Cygni Nebula",
+    "Rocking Horse Cluster"
    ],
    "ra": 20.37,
    "dec": 40.4,
@@ -1131,11 +1128,19 @@
   },
   {
    "id": "Sh2-129",
-   "name": "Flying Bat Nebula",
+   "name": "Flying Bat and Squid Nebulae",
    "codes": [
-    "Sh2-129"
+    "Sh2-129",
+    "GAIA 2192287033139966848",
+    "Ou 4"
    ],
-   "aliases": [],
+   "aliases": [
+    "Squid Nebula",
+    "Flying Bat",
+    "Squid",
+    "Flying Bat and Squid",
+    "Flying Bat Nebula"
+   ],
    "ra": 21.203,
    "dec": 59.98,
    "type": "Nebula",
@@ -1158,13 +1163,16 @@
   },
   {
    "id": "Sh2-171",
-   "name": "Phantom Nebula",
+   "name": "Teddy Bear Nebula",
    "codes": [
-    "Sh2-171"
+    "Sh2-171",
+    "NGC 7822",
+    "Ced 214"
    ],
    "aliases": [
     "Teddy Bear",
-    "Teddy Bear Nebula"
+    "Cederblad 214",
+    "Phantom Nebula"
    ],
    "ra": 0.05,
    "dec": 67.25,
@@ -1196,14 +1204,6 @@
    "name": "Boogeyman Nebula",
    "codes": [
     "LDN 1622"
-   ],
-   "aliases": []
-  },
-  {
-   "id": "GAIA2192287033139966848",
-   "name": "Squid Nebula",
-   "codes": [
-    "GAIA 2192287033139966848"
    ],
    "aliases": []
   },
@@ -1249,16 +1249,6 @@
    "dec": 38.88,
    "type": "Globular cluster",
    "constellation": "Lynx"
-  },
-  {
-   "id": "LDN386",
-   "name": "Dark nebula LDN 386",
-   "codes": [
-    "LDN 386"
-   ],
-   "aliases": [
-    "Dark Nebula LDN 386"
-   ]
   },
   {
    "id": "LDN1235",
@@ -1492,18 +1482,6 @@
    "constellation": "Sagittarius"
   },
   {
-   "id": "NGC1893",
-   "name": "Open cluster in the Tadpoles (IC 410)",
-   "codes": [
-    "NGC 1893"
-   ],
-   "aliases": [],
-   "ra": 5.379,
-   "dec": 33.4,
-   "type": "Open cluster",
-   "constellation": "Auriga"
-  },
-  {
    "id": "NGC2071",
    "name": "Reflection nebula near M 78",
    "codes": [
@@ -1602,18 +1580,6 @@
     "Lobster Claw Nebula",
     "Lobster Claw"
    ]
-  },
-  {
-   "id": "NGC6910",
-   "name": "Rocking Horse Cluster",
-   "codes": [
-    "NGC 6910"
-   ],
-   "aliases": [],
-   "ra": 20.385,
-   "dec": 40.78,
-   "type": "Open cluster",
-   "constellation": "Cygnus"
   },
   {
    "id": "NGC891",
