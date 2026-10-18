@@ -13,7 +13,7 @@ Installing 1.7.2 on the Mac, the ship's dry run listed 11,695 frames "missing on
 ```
 reads the list and writes nothing. When it says what it would prove, `--adopt-archive --apply` records it; `--adopt-archive --apply --hash-here` also reads back the copies the PC hasn't hashed yet (hours over the share; the PC's nightly `--hash` closes that gap by itself over time, so it can also just wait). Mac / Windows: the same on both.
 
-809 end-to-end checks (620 engine + 189 panel).
+813 end-to-end checks (624 engine + 189 panel).
 
 ## 1.7.2 (2026-10-17): the Observatory, rebuilt
 
