@@ -1,5 +1,21 @@
 # Changelog
 
+## 1.7.5 (2026-10-19): the Observatory, history first
+
+Brett, after a day with the rebuilt page: the history of what was captured recently and on which scope is what he opens it for; the header took too much space; it should look top class; and some of the 16 Oct design round (the donuts) seemed missing. Five reviewers (hierarchy, history, charts, craft, truth; `docs/ux-observatory-19oct/`) and Brett's own mockup of the scope chart → `SPEC-2.md`, built as one release. The rules hold: every mark means something, colour is the scope and never without its name, unknown hours are hatched, the page reads and never writes.
+
+- **Recent nights** opens the page: one row per night, newest first, one column per scope in the fixed order; each cell names the objects with frames, hours, exposure and filter and, for the ZWO scopes, the darks and flats filed; empty nights collapse to one row; a resting scope shrinks to a narrow column; a week / 14 / 30 nights. Frames still on a camera are one line above it, naming the targets, with "Open the Panel to import".
+- **What each scope captured, rebuilt from Brett's mockup**: bars (height = hours) instead of dots, one stacked column for all scopes, one row per scope in the fixed order (never sorted), the moon's illumination over each night (computed from the date in the page), four summary tiles, a selected-night panel with Previous / Next, resting scopes folded into one line, weeks and months at the longer ranges.
+- **What each scope shot**: under the chart, one bar per scope split by object for the range, every object named beneath.
+- **Project cards**: the ring keeps its place and gets its key, one row per scope (name, hours, next step) replaces the stack of pills, and the mini timeline is one lane per scope in its own colour.
+- **The header** is a third of its height: one freshness line, the camera chip, the hours, a thin share strip and one key line; the panel's own "Worked out … Refresh now" row and footer leave the Observatory tab (the page's Refresh reaches the panel as `observatory-refresh`). The time stamp appears once.
+- **Truth**: week columns always carry their night count; one rounding rule for hours; no numbered ticks on the share bar (the "1 Seestar S50 Pro" of 18 Oct); the pending-import line names the targets and the other computer (`pendingImport.targetNames`, `elsewhereMachine`, from the scan summary); no truncated labels; "Data checks" everywhere.
+- Engine: `save_scan_summary(target_names=, elsewhere_machine=)`; panel: `_pending_names()`, the two new messages, the row and footer rules. OB5 checks in both suites.
+
+Mac / Windows: the same on both. After updating: install as before on each computer; the next Refresh (or the PC's 03:30 build) shows the new page. The page was checked here in Chromium; look once in Safari and Edge.
+
+821 end-to-end checks (629 engine + 192 panel): OB5 in both suites, and the page check in the panel suite. On Linux here: engine 621 passed, 4 skipped, the four Mac/PC-only lines as before; panel 192 passed.
+
 ## 1.7.4 (2026-10-18): the panel is always on
 
 Brett opened the Observatory on the PC with no camera plugged in and got "can't reach this page": the panel only ever started when a camera arrived, or from the Restart button. The Observatory has to be there whenever it is wanted.

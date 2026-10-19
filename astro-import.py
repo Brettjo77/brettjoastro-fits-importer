@@ -55,7 +55,7 @@ from collections import defaultdict
 from datetime import date, datetime, timedelta, timezone
 
 # One version for every platform (1.5.0: the Windows 11 edition joins the Mac).
-VERSION = "1.7.4"
+VERSION = "1.7.5"
 IS_WINDOWS = os.name == "nt"
 IS_MAC = sys.platform == "darwin"
 PLATFORM = "windows" if IS_WINDOWS else ("mac" if IS_MAC else "linux")
@@ -10035,17 +10035,22 @@ def _say_elsewhere(scan):
 
 SCAN_SUMMARY_FILE = "last-scan.json"
 
-def save_scan_summary(files, targets, camera=None, failed_eject=False, elsewhere=0):
+def save_scan_summary(files, targets, camera=None, failed_eject=False, elsewhere=0,
+                      target_names=None, elsewhere_machine=None):
     """1.7.2: what the last scan found still on a camera, for the Observatory's
     freshness line. Written by the panel after each scan and by --scan-only;
-    one small file in the state folder, never anywhere else."""
+    one small file in the state folder, never anywhere else. 1.7.5: the
+    targets' display names (at most 12) and which other computer already holds
+    the 'elsewhere' frames, so the page can say what to do."""
     path = os.path.join(STATE_DIR, SCAN_SUMMARY_FILE)
+    names = [str(n) for n in (target_names or []) if isinstance(n, str) and n.strip()][:12]
     try:
         _confine(path, "scan summary")
         _atomic_write_json(path, {"schema": "scan-summary/1", "files": int(files), "targets": int(targets),
                                   "elsewhere": int(elsewhere), "camera": camera,
                                   "failedEject": bool(failed_eject), "seenAt": _utc_iso(),
-                                  "machine": MACHINE_LABEL})
+                                  "machine": MACHINE_LABEL, "targetNames": names,
+                                  "elsewhereMachine": elsewhere_machine if isinstance(elsewhere_machine, str) else None})
     except Exception as e:
         debug(f"scan summary not written: {e}")
 
@@ -10068,7 +10073,10 @@ def read_scan_summary():
             "camera": d.get("camera") if isinstance(d.get("camera"), str) else None,
             "failedEject": bool(d.get("failedEject")),
             "seenAt": d.get("seenAt") if isinstance(d.get("seenAt"), str) else None,
-            "ageHours": age, "machine": d.get("machine") if isinstance(d.get("machine"), str) else None}
+            "ageHours": age, "machine": d.get("machine") if isinstance(d.get("machine"), str) else None,
+            "targetNames": [str(n) for n in (d.get("targetNames") or []) if isinstance(n, str)][:12]
+            if isinstance(d.get("targetNames"), list) else [],
+            "elsewhereMachine": d.get("elsewhereMachine") if isinstance(d.get("elsewhereMachine"), str) else None}
 
 def run_scan_only(state):
     """Tagged lines for the watcher: count / summary / storage — both devices."""
@@ -10145,10 +10153,19 @@ def run_scan_only(state):
     unhandled_n = attention + a_attention
 
     n_else_all = sum(_elsewhere_count(x)[0] for x in (locals().get("scan"), locals().get("s")) if x)
-    if scan or (svol and s):
-        save_scan_summary(n_files, total_new, elsewhere=n_else_all,
-                          camera=" + ".join(x for x, ok in (("ASIAir", bool(scan)), ("Seestar", bool(svol and s))) if ok))
     who_else = next((_elsewhere_count(x)[2] for x in (locals().get("scan"), locals().get("s")) if x and _elsewhere_count(x)[0]), None)
+    if scan or (svol and s):
+        new_names = []
+        if scan:
+            new_names += [display_name_for(state, t["name"]) for t in scan["targets"] if t["new"] and not t["skipped"]]
+        if svol and s:
+            new_names += [seestar_display(state, t["project_name"])
+                          for t in sorted(s_new, key=lambda t: -len(t["new"]))]
+            new_names += [seestar_display(state, p["mosaic_name"], ask=False) + " (panels)" for p in s_panels]
+            new_names += [str(nd.get("dest_name") or "") for nd in s_nd]
+        save_scan_summary(n_files, total_new, elsewhere=n_else_all,
+                          camera=" + ".join(x for x, ok in (("ASIAir", bool(scan)), ("Seestar", bool(svol and s))) if ok),
+                          target_names=new_names, elsewhere_machine=who_else)
     if asiair_here and not scan and not total_new:
         # the ASIAir could not be read at all: said first, even before a
         # first import (never "the first import backs everything up")

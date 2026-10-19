@@ -341,6 +341,17 @@ try:
     check("T2 scan lists the Seestar project with device tag",
           names.get("M 42", {}).get("device") == "seestar" and names["M 42"]["new"] == 2,
           json.dumps(names.get("M 42", {})))
+    try:
+        with open(os.path.join(env.state, "last-scan.json"), encoding="utf-8") as f:
+            _ls = json.load(f)
+    except (OSError, ValueError) as e:
+        _ls = {"error": str(e)}
+    check("OB5 (1.7.5) the scan summary the panel writes names every target with new frames by its display name, "
+          "biggest first, and says no other computer holds any (none has a record here)",
+          _ls.get("targetNames") == [t["display"] for t in sorted((t for t in s["scan"]["targets"] if t["new"] and not t["skipped"]),
+                                                                  key=lambda t: -t["new"])]
+          and len(_ls.get("targetNames") or []) >= 3 and _ls.get("elsewhereMachine") is None,
+          json.dumps(_ls)[:300])
     check("T2 storage covers both volumes",
           len(s["scan"]["disks"]) == 2 and s["scan"]["disk"] is not None,
           json.dumps(s["scan"].get("disks", [])))
@@ -1714,6 +1725,15 @@ try:
           and "e.source!==fr.contentWindow" in _pagen and 'd.kind==="archive-open"' in _pagen
           and 'd.kind==="archive-show"' in _pagen and 'd.kind==="observatory-ready"' in _pagen,
           _pagen[:200])
+    check("OB5 (1.7.5) the panel's own 'Worked out … Refresh now' row goes once the page says it is ready (the "
+          "page carries the freshness line and Refresh), comes back while the frame loads or is a note; the page's "
+          "Refresh and 'Open the Panel' arrive as observatory-refresh and open-panel and nothing else is accepted; "
+          "the footer line is off the Observatory tab; 'see Data checks', never 'Data health'",
+          lambda: 'd.kind==="observatory-refresh"' in _pagen and '$("#obsRefresh").click()' in _pagen
+          and 'd.kind==="open-panel"' in _pagen and "data-tab=\"panel\"]'); if(b) b.click();" in _pagen
+          and '$("#obsHead").style.display="none"' in _pagen and '$("#obsHead").style.display=""' in _pagen
+          and 'b.dataset.tab==="observatory"?"none":""' in _pagen and "(see Data health)" not in _pagen,
+          _pagen[:200])
     os.makedirs(os.path.join(envn.archive, "_verify", "mac"))
     with open(os.path.join(envn.archive, "_verify", "mac", "ledger-snapshot.json"), "w") as f:
         json.dump({"schema": "ledger-snapshot/1", "machine": "Mac", "machineId": "mac", "machineUid": "m",
@@ -1753,6 +1773,24 @@ try:
           and "function nightPanelFor(cam,night,target)" in body
           and '["90","90 nights",90],["365","a year",365],["all","everything",' in body
           and "what it has been doing" in body and "Timeline of its projects" in body,
+          body[:200])
+    check("OB5 (1.7.5) the page opens on the history: the Recent nights ledger (a week / 14 / 30 nights, blank "
+          "nights collapsed, the pending-import line naming the targets with 'Open the Panel to import'), the scope "
+          "chart rebuilt (tiles, the moon from the date, all-scopes columns, one row per scope, a selected night with "
+          "Previous / Next, resting scopes folded), What each scope shot, cards with one row per scope and one lane "
+          "per scope, one freshness line, Refresh and Key in the bar; no 'Data health', no stamp in the bar",
+          lambda: "function renderRecent(card,changed)" in body and 'id="pendLine"' in body
+          and "Open the Panel to import" in body and "no frames on any scope" in body
+          and "nights after it are not in this list" in body and "function chartData(N)" in body
+          and "function moonAt(night)" in body and "29.530588853" in body
+          and "Nights with the moon under half lit" in body and "Biggest night" in body
+          and "Resting this period" in body and "length is hours imaged" in body
+          and "function renderShotBars(box,d)" in body and "What each scope shot" in body
+          and "function latestTxt(t)" in body and "mosaic on the " in body and '"srow"' in body
+          and "Built on the " in body and 'id="refreshBtn"' in body and 'id="keyBtn"' in body
+          and 'kind:"observatory-refresh"' in body and 'kind:"open-panel"' in body
+          and "ready to process from " in body and "Data health" not in body and 'id="asof"' not in body
+          and "a grey dot is a night on more than one" not in body and "http://" not in body.replace("http://www.w3.org/2000/svg", ""),
           body[:200])
     check("OB (16 Oct, 1.7.2) the page normalises a thin dataset (missing keys filled once, a null pendingImport "
           "stays null so the page never claims a camera is empty, an unknown state falls back), the drawer is a "

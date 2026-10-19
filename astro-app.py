@@ -164,6 +164,12 @@ class App:
             return True
         return all(os.path.basename(str(u)) in els for u in names)
 
+    def _pending_names(self):
+        """1.7.5: the targets with new frames on the camera, display names,
+        biggest first, for the Observatory's 'still on the camera' line."""
+        ts = [t for t in (self.scan or {}).get("targets") or [] if t.get("new") and not t.get("skipped")]
+        return [str(t.get("display") or t.get("name") or "") for t in sorted(ts, key=lambda t: -int(t.get("new") or 0))]
+
     @staticmethod
     def _sides():
         """This computer's name and the other's, as the engine labels them."""
@@ -522,7 +528,9 @@ class App:
                         eng.save_scan_summary(self.scan["newFiles"], self.scan["newTargets"],
                                           camera=" + ".join(x for x, ok in (("ASIAir", scan_a is not None), ("Seestar", bool(s))) if ok) or None,
                                           failed_eject=bool(getattr(self, "eject_failed", False)),
-                                          elsewhere=self.scan["elsewhereFiles"])
+                                          elsewhere=self.scan["elsewhereFiles"],
+                                          target_names=self._pending_names(),
+                                          elsewhere_machine=(self.scan.get("other") or {}).get("machine"))
             except Exception as e:
                 self.logline(f"⚠ scan summary not saved: {e}")
             o = self.scan["other"]
@@ -768,7 +776,9 @@ class App:
                 try:
                     eng.save_scan_summary(self.scan["newFiles"], self.scan["newTargets"],
                                           camera=" + ".join(l for l, _v in vols) or None,
-                                          failed_eject=True, elsewhere=self.scan.get("elsewhereFiles", 0))
+                                          failed_eject=True, elsewhere=self.scan.get("elsewhereFiles", 0),
+                                          target_names=self._pending_names(),
+                                          elsewhere_machine=(self.scan.get("other") or {}).get("machine"))
                 except Exception as e:
                     self.logline(f"⚠ scan summary not saved: {e}")
             if ok and not bad:
@@ -1930,6 +1940,8 @@ document.querySelectorAll(".tabs button").forEach(b=>b.addEventListener("click",
   document.querySelectorAll(".tabs button").forEach(x=>x.classList.remove("on"));
   b.classList.add("on");
   ["panel","report","dash","observatory","archive"].forEach(t=>$("#tab-"+t).style.display = b.dataset.tab===t?"":"none");
+  // 1.7.5: the Observatory fills the window; the panel's footer line stays off it
+  document.querySelectorAll(".foot").forEach(f=>f.style.display = b.dataset.tab==="observatory"?"none":"");
   if(b.dataset.tab==="dash" && !dashShown) showDash();
   if(b.dataset.tab==="observatory") loadObservatory();
   if(b.dataset.tab==="report") loadReport();
@@ -2445,6 +2457,7 @@ function renderProjects(){
 }
 function loadObservatory(){
   $("#obsNote").textContent="Working it out…";
+  $("#obsHead").style.display="";          // shown while the frame loads or is a note (1.7.5)
   $("#obsFrame").src="/observatory?t="+Date.now();
 }
 // The frame loaded but said nothing (a note page, not the Observatory): the
@@ -2468,7 +2481,13 @@ window.addEventListener("message",async e=>{
   const d=e.data;
   if(d.kind==="observatory-ready"){
     const from=d.servedFrom&&d.servedFrom.machine?` · the ${esc(d.servedFrom.machine)}'s complete list`:"";
-    $("#obsNote").textContent=`Worked out ${d.generatedAt||"?"}${from}${d.warnings?` · ${d.warnings} warning${d.warnings===1?"":"s"} (see Data health)`:""}`;
+    $("#obsNote").textContent=`Worked out ${d.generatedAt||"?"}${from}${d.warnings?` · ${d.warnings} warning${d.warnings===1?"":"s"} (see Data checks)`:""}`;
+    // 1.7.5: the page carries its own freshness line and Refresh, so this row goes
+    $("#obsHead").style.display="none";
+  } else if(d.kind==="observatory-refresh"){
+    $("#obsRefresh").click();              // the page's Refresh now: the same rebuild (1.7.5)
+  } else if(d.kind==="open-panel"){
+    const b=document.querySelector('.tabs button[data-tab="panel"]'); if(b) b.click();
   } else if(d.kind==="archive-open" && typeof d.rel==="string"){
     let res; try{ res=await api("/api/archive/open",{rel:d.rel}); }catch(err){ res={ok:false,error:"The FITS Importer isn't answering."}; }
     try{ fr.contentWindow.postMessage({kind:"archive-opened",rel:d.rel,ok:!!(res&&res.ok),error:res&&res.error||""},location.origin); }catch(err){}

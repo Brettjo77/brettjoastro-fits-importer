@@ -6119,7 +6119,8 @@ with open(os.path.join(OB4.state, "capture-state.json"), "w") as f:
     json.dump({"M13|S30P|Shinfield": "sample", "M27|S30P|Shinfield": {"state": "complete", "exposure": 10},
                "NGC7380|FRA400|Shinfield": {"state": "open"}}, f)
 _o4 = probe(OB4.env, "st = m.State()\nextra, names = m.projects_inputs(st)\n"
-            "m.save_scan_summary(3559, 29, camera='Seestar', failed_eject=True, elsewhere=12)\n"
+            "m.save_scan_summary(3559, 29, camera='Seestar', failed_eject=True, elsewhere=12, "
+            "target_names=['Tadpoles Nebula (IC 410)', 'Western Veil Nebula (NGC 6960)', 7, ''], elsewhere_machine='PC')\n"
             f"print(json.dumps(m.build_observatory(st, extra, today='{PL_TODAY}', custom_names=names)))\n")
 _by4 = {c: x for x in _o4.get("targets", []) for c in x["codes"]}
 _wiz = _by4.get("NGC 7380", {}).get("programmes", [{}])[0]
@@ -6172,6 +6173,27 @@ check("OB4 (1.7.2) the page counts facts, not sentences: what was not counted (n
       and all(k in _o4["reconciliation"][0]["note"] for k in ("1 not counted",)),
       json.dumps([_o4.get("notCounted"), _o4.get("unknownNames"), _o4.get("notices"), _o4.get("scopeOrder"),
                   _o4.get("pendingImport"), _o4.get("generatedAtLocal")])[:1200])
+check("OB5 (1.7.5) the scan summary names the targets still on the camera (display names, strings only, at most "
+      "12) and the other computer that already holds the rest, and the Observatory carries both",
+      lambda: _o4["pendingImport"]["targetNames"] == ["Tadpoles Nebula (IC 410)", "Western Veil Nebula (NGC 6960)"]
+      and _o4["pendingImport"]["elsewhereMachine"] == "PC",
+      json.dumps(_o4.get("pendingImport"))[:400])
+_o5 = probe(OB4.env, "import json, os\n"
+            "p = os.path.join(m.STATE_DIR, 'last-scan.json')\n"
+            "json.dump({'schema': 'scan-summary/1', 'files': 5, 'targets': 1, 'elsewhere': 0, 'camera': 'ASIAir',"
+            " 'failedEject': False, 'seenAt': '2026-10-16T08:50:00+00:00', 'machine': 'Mac'}, open(p, 'w'))\n"
+            "old = m.read_scan_summary()\n"
+            "json.dump({'schema': 'scan-summary/1', 'files': 5, 'targets': 1, 'targetNames': 'M 31',"
+            " 'elsewhereMachine': 7, 'seenAt': '2026-10-16T08:50:00+00:00'}, open(p, 'w'))\n"
+            "bad = m.read_scan_summary()\n"
+            "m.save_scan_summary(3559, 29, camera='Seestar', failed_eject=True, elsewhere=12, "
+            "target_names=['Tadpoles Nebula (IC 410)', 'Western Veil Nebula (NGC 6960)'], elsewhere_machine='PC')\n"
+            "print(json.dumps({'old': old, 'bad': bad}))\n")
+check("OB5 a 1.7.2 scan summary without the new fields reads as no names and no other computer, and fields of "
+      "the wrong type read the same way, never a crash",
+      lambda: _o5["old"]["targetNames"] == [] and _o5["old"]["elsewhereMachine"] is None and _o5["old"]["files"] == 5
+      and _o5["bad"]["targetNames"] == [] and _o5["bad"]["elsewhereMachine"] is None,
+      json.dumps(_o5)[:400])
 # a sample that has a master stays a project, with a notice saying so; the scan summary is confined and read back
 with open(os.path.join(_pc4, "inventory-E-20261009T033000Z.jsonl"), "a") as f:
     f.write(json.dumps(dict(pl_inv_row("S30P/Hercules Cluster (M 13)/masterLight.xisf", "S30P", "Hercules Cluster (M 13)"), size=5)) + "\n")
