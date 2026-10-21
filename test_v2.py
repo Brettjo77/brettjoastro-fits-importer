@@ -3127,7 +3127,7 @@ for var in ("ASIAIR_CONFIG", "ASIAIR_VOLUME", "ASIAIR_DEST", "ASIAIR_CAL_LIBRARY
             "SEESTAR_DEST_S30", "SEESTAR_DEST_S50", "SEESTAR_DEST_S30_ORIG",
             "SEESTAR_DEST_S50PRO", "ASIAIR_EQUIPMENT", "ASIAIR_RECEIPTS",
             "ASIAIR_LEGACY_NAMES", "ASTRO_DRIVE_ROOTS", "ASTRO_WATCH_LOG", "ASTRO_WATCH_STATE",
-            "ASTRO_SHIP_LOG"):
+            "ASTRO_SHIP_LOG", "ASTRO_PHONE_DIR"):
     r = I1.run("--version", extra_env={var: os.path.join(outside, var)})
     out = r.stdout + r.stderr
     check(f"I1 {var} outside the test root is refused at start (exit 3), nothing written there",
@@ -6194,6 +6194,50 @@ check("OB5 a 1.7.2 scan summary without the new fields reads as no names and no 
       lambda: _o5["old"]["targetNames"] == [] and _o5["old"]["elsewhereMachine"] is None and _o5["old"]["files"] == 5
       and _o5["bad"]["targetNames"] == [] and _o5["bad"]["elsewhereMachine"] is None,
       json.dumps(_o5)[:400])
+# ── Chain PH: the phone's copy of the Observatory record (1.7.6) ──────────────
+PH = teh.Env("PH", asiair=False, seestar=False)
+ph_dir = os.path.join(PH.root, "Mobile Documents", "iCloud~Brettjo~Astrolog", "Documents")
+ph_env = dict(PH.env, ASTRO_PHONE_DIR=ph_dir, ASTRO_SHIP_FOLDER="mac")
+os.makedirs(os.path.join(PH.root, "Mobile Documents"))                 # iCloud Drive is on
+os.makedirs(PH.state, exist_ok=True)
+_ph_doc = {"schema": "observatory/1", "generatedAtIso": "2026-10-20T03:38:00+00:00", "generatedAt": "20 Oct",
+           "targets": [{"id": "M31"}], "scopes": [], "sessions": [], "totals": {}, "health": [],
+           "reconciliation": [], "warnings": [], "sources": {}}
+with open(os.path.join(PH.state, "observatory.json"), "w") as f:
+    json.dump(_ph_doc, f)
+_ph = probe(ph_env, "import json, os\n"
+            "a = m.publish_phone(); b = m.publish_phone()\n"
+            "p = os.path.join(m.PHONE_DIR, 'observatory.json')\n"
+            "got = json.load(open(p))\n"
+            "print(json.dumps({'a': a, 'b': b, 'same': got == json.load(open(os.path.join(m.STATE_DIR, 'observatory.json'))),"
+            " 'files': sorted(os.listdir(m.PHONE_DIR)), 'tmp': [x for x in os.listdir(m.PHONE_DIR) if x.endswith('.tmp')]}))\n")
+check("PH (1.7.6) publish_phone writes this computer's Observatory record, and only that, into the phone folder "
+      "(created under Mobile Documents), atomically; a second call with the same record writes nothing",
+      lambda: _ph["a"] is True and _ph["b"] is False and _ph["same"] is True
+      and _ph["files"] == ["observatory.json"] and _ph["tmp"] == [], json.dumps(_ph)[:400])
+_ph_pc = os.path.join(PH.archive, "_verify", "pc"); os.makedirs(_ph_pc, exist_ok=True)
+_ph_pub = dict(_ph_doc); _ph_pub["generatedAtIso"] = _dt.now(_tz.utc).isoformat(timespec="seconds"); _ph_pub["targets"] = [{"id": "M42"}]
+with open(os.path.join(_ph_pc, "observatory.json"), "w") as f:
+    json.dump(_ph_pub, f)
+_ph2 = probe(ph_env, "import json, os\n"
+             "s = m.observatory_stamp()\n"
+             "got = json.load(open(os.path.join(m.PHONE_DIR, 'observatory.json')))\n"
+             "print(json.dumps({'stamp': s, 'ids': [t['id'] for t in got['targets']], 'from': (got.get('servedFrom') or {}).get('machine'),"
+             " 'arch': sorted(os.listdir(os.path.join(m.ARCHIVE_MOUNT, '_verify', 'pc')))}))\n")
+check("PH the PC's newer published copy reaches the phone through the panel's stamp check (observatory_stamp), "
+      "labelled as the PC's; nothing is written on the archive",
+      lambda: _ph2["stamp"] == _ph_pub["generatedAtIso"] and _ph2["ids"] == ["M42"] and _ph2["from"] == "PC"
+      and _ph2["arch"] == ["observatory.json"], json.dumps(_ph2)[:400])
+_ph3 = probe(dict(PH.env, ASTRO_SHIP_FOLDER="mac"), "import os\n"
+             "print(json.dumps({'dir': m.PHONE_DIR, 'wrote': m.publish_phone(),"
+             " 'nothing': not os.path.exists(os.path.join(m.TEST_ROOT, 'unset', 'ASTRO_PHONE_DIR'))}))\n")
+_ph4 = probe(dict(ph_env, ASTRO_PHONE_DIR=os.path.join(PH.root, "no-icloud", "iCloud~Brettjo~Astrolog", "Documents")),
+             "import os\nprint(json.dumps({'wrote': m.publish_phone(), 'made': os.path.exists(os.path.join(m.TEST_ROOT, 'no-icloud'))}))\n")
+check("PH with no phone folder configured (the PC, or a Mac without the app) nothing is written anywhere; with "
+      "iCloud Drive off (no Mobile Documents folder) nothing is created either",
+      lambda: _ph3["wrote"] is False and _ph3["nothing"] is True
+      and _ph4["wrote"] is False and _ph4["made"] is False, json.dumps([_ph3, _ph4])[:400])
+
 # a sample that has a master stays a project, with a notice saying so; the scan summary is confined and read back
 with open(os.path.join(_pc4, "inventory-E-20261009T033000Z.jsonl"), "a") as f:
     f.write(json.dumps(dict(pl_inv_row("S30P/Hercules Cluster (M 13)/masterLight.xisf", "S30P", "Hercules Cluster (M 13)"), size=5)) + "\n")

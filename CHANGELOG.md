@@ -1,5 +1,17 @@
 # Changelog
 
+## 1.7.6 (2026-10-21): the Observatory on the phone
+
+Brett asked for the Observatory on his iPhone, done properly: a native read-only screen in the AstroLog iOS app, fed by the importer's own record, live, with the importer never handling a credential (rule 8).
+
+- **The phone copy** (`publish_phone`). On the Mac the AstroLog app's iCloud folder appears under `~/Library/Mobile Documents/iCloud~Brettjo~Astrolog/Documents` (iCloud Drive → AstroLog). The importer writes `observatory.json` there: the record this computer would serve (the PC's complete copy while it is fresh, else its own), after every `--projects` rebuild (so after every import and ship) and whenever the panel's ten-minute stamp check finds a newer PC copy. Only when the record changed; atomic; nothing else is ever written in that folder; a missing iCloud Drive means no copy and no complaint. `ASTRO_PHONE_DIR` in config.json points it elsewhere. The PC has no iCloud Drive: no copy there (PARITY).
+- Chain PH in the engine suite: the copy is written once per record and atomically; the PC's newer copy reaches the phone through the stamp check, labelled as the PC's, with nothing written on the archive; no folder configured or iCloud Drive off means nothing written; `ASTRO_PHONE_DIR` outside the test root is refused at start.
+- The app side is in the AstroLog-iOS repo (branch `claude/observatory-phone`, `spec/08-observatory-phone.md`, DECISIONS #18).
+
+Mac / Windows: the copy is Mac-only by design (the iCloud folder lives there); everything else the same. After updating on the Mac: install as before; open the app once on the phone so the folder exists; the next `--projects` (or Refresh) writes the copy.
+
+825 end-to-end checks (633 engine + 192 panel). On Linux here: engine 625 passed, 4 skipped, the four Mac/PC-only lines as before; panel 192 passed.
+
 ## 1.7.5 (2026-10-19): the Observatory, history first
 
 Brett, after a day with the rebuilt page: the history of what was captured recently and on which scope is what he opens it for; the header took too much space; it should look top class; and some of the 16 Oct design round (the donuts) seemed missing. Five reviewers (hierarchy, history, charts, craft, truth; `docs/ux-observatory-19oct/`) and Brett's own mockup of the scope chart → `SPEC-2.md`, built as one release. The rules hold: every mark means something, colour is the scope and never without its name, unknown hours are hatched, the page reads and never writes.

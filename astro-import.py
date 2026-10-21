@@ -55,7 +55,7 @@ from collections import defaultdict
 from datetime import date, datetime, timedelta, timezone
 
 # One version for every platform (1.5.0: the Windows 11 edition joins the Mac).
-VERSION = "1.7.5"
+VERSION = "1.7.6"
 IS_WINDOWS = os.name == "nt"
 IS_MAC = sys.platform == "darwin"
 PLATFORM = "windows" if IS_WINDOWS else ("mac" if IS_MAC else "linux")
@@ -226,7 +226,7 @@ def _test_root_guard():
              ("ASIAIR_LEGACY_NAMES", LEGACY_CUSTOM_NAMES),
              ("ASTRO_SIRIL_EXE", SIRIL_EXE), ("ASTRO_OBSERVATORY_DATASET", OBSERVATORY_DATASET),
              ("ASTRO_CONTRACT_DIR", CONTRACT_DIR), ("ASTRO_FINALS_DIR", FINALS_DIR),
-             ("ASTRO_OBSERVATORY_TEMPLATE", OBSERVATORY_TEMPLATE)]
+             ("ASTRO_OBSERVATORY_TEMPLATE", OBSERVATORY_TEMPLATE), ("ASTRO_PHONE_DIR", PHONE_DIR)]
     paths += [("SEESTAR_VOLUME", v) for v in SEESTAR_VOLUMES]
     paths += [("ASTRO_DRIVE_ROOTS", r)
               for r in (os.environ.get("ASTRO_DRIVE_ROOTS") or "").split(os.pathsep)]
@@ -274,6 +274,13 @@ DEST_DIR      = _env_path("ASIAIR_DEST", "~/Documents/Astro/ZWO ASI AIR")
 LIBRARY_DIR   = _env_path("ASIAIR_CAL_LIBRARY", "~/Documents/Astro/ASIAir Calibration Library")
 STATE_DIR     = _env_path("ASIAIR_STATE", _DEF_STATE)
 MIRROR_DIR    = _env_path("ASIAIR_MIRROR", "~/Documents/Astro/Import Status")
+# 1.7.6: the phone's copy of the Observatory record. On the Mac the AstroLog
+# iOS app's iCloud container shows up under Mobile Documents; the importer
+# writes observatory.json there and iCloud carries it to the phone. Nothing
+# else is ever written there. The PC has no iCloud Drive: empty, no copy.
+_DEF_PHONE = "~/Library/Mobile Documents/iCloud~Brettjo~Astrolog/Documents"
+PHONE_DIR = (_env_path("ASTRO_PHONE_DIR", _DEF_PHONE)
+             if (IS_MAC or os.environ.get("ASTRO_PHONE_DIR") or _CONFIG.get("ASTRO_PHONE_DIR")) else "")
 # The archive on the PC, as mounted on this Mac (SMB share). --ship files
 # verified frames there; the PC's sweep verifies them independently.
 # On Windows the archive is a local folder (the PC IS the archive machine:
@@ -11847,6 +11854,38 @@ def load_observatory(prefer_published=False):
                              "ageHours": (doc.get("sources") or {}).get("published_age_hours")}
     return doc if doc and doc.get("schema") == "observatory/1" and isinstance(doc.get("targets"), list) else own
 
+def publish_phone(doc=None):
+    """1.7.6: write the Observatory record the phone reads into the AstroLog
+    app's iCloud folder (PHONE_DIR): the record this computer would serve (the
+    PC's complete copy while it is fresh, else its own). Only when the record
+    changed since the last copy; atomic; never anything else in that folder.
+    Returns True when a new copy was written. Quiet about every failure: the
+    phone copy is a convenience, never a reason to stop a job."""
+    if not PHONE_DIR:
+        return False
+    try:
+        if doc is None:
+            doc = load_observatory(prefer_published=True)
+        if not isinstance(doc, dict) or doc.get("schema") != "observatory/1" \
+                or not isinstance(doc.get("targets"), list):
+            return False
+        dst = os.path.join(PHONE_DIR, "observatory.json")
+        _confine(dst, "the phone copy")
+        # iCloud Drive off (no Mobile Documents at all): nowhere to write
+        if not os.path.isdir(os.path.dirname(os.path.dirname(PHONE_DIR))):
+            return False
+        old = _read_json_file(dst) if os.path.isfile(dst) else {}
+        if isinstance(old, dict) and old.get("generatedAtIso") == doc.get("generatedAtIso") \
+                and (old.get("servedFrom") or {}).get("machine") == (doc.get("servedFrom") or {}).get("machine"):
+            return False
+        os.makedirs(PHONE_DIR, exist_ok=True)
+        _atomic_write_json(dst, doc)
+        debug(f"phone copy written → {dst}")
+        return True
+    except Exception as e:
+        debug(f"phone copy not written: {e}")
+        return False
+
 _OBS_STAMP_CACHE = {"key": None, "value": None}
 
 def observatory_stamp():
@@ -11873,6 +11912,7 @@ def observatory_stamp():
         try:
             d = load_observatory(prefer_published=True) or {}
             _OBS_STAMP_CACHE["value"] = d.get("generatedAtIso")
+            publish_phone(d)                          # 1.7.6: a newer record reaches the phone
         except Exception:
             _OBS_STAMP_CACHE["value"] = None
         _OBS_STAMP_CACHE["key"] = key
@@ -11967,6 +12007,8 @@ def run_projects(state, extra_ledgers=(), dry_run=False):
             _atomic_write_json(mpath, doc)
         except OSError:
             pass
+    if publish_phone():                                   # 1.7.6
+        info("Phone copy refreshed (the AstroLog app's iCloud folder).")
     return doc
 
 def main():
