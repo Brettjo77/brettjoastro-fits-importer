@@ -6853,25 +6853,38 @@ check("RB a Seestar scan that could not read the whole card marks nothing cleare
 RB3 = teh.Env("RB3", asiair=True)
 _rb3_light = RB3.add_light("Plan", "M 81", "0001")
 _rb3_broken = os.path.join(RB3.cam, "Plan", "Light", "M 81", "broken.fit")
-os.symlink(os.path.join(RB3.root, "nowhere.fit"), _rb3_broken)          # listed by the walk, unreadable
-_rb3s = probe(RB3.env, _rb_code(
-    "st = m.State(); st.new_ledger()\n"
-    "st.add_file('Plan/Light/M 81/gone.fit', filename='gone.fit', size=1, sha256='0' * 64, origin='import',\n"
-    "            target='M 81', verifiedAtImport=True)\n"
-    "st.save_ledger()\n"
-    "s = m.scan_camera(st)\n"
-    "print(json.dumps({'incomplete': s['incomplete'], 'broken_in': 'Plan/Light/M 81/broken.fit' in s['relpaths'],\n"
-    "                  'files': len(s['targets'][0]['files'])}))\n"))
-check("RB scan_camera: a file the walk lists but cannot size is in the relpath set (never 'gone') and the "
-      "scan is marked incomplete",
-      lambda: _rb3s == {"incomplete": True, "broken_in": True, "files": 1}, json.dumps(_rb3s))
-r = RB3.run("--report")
-_rb3_gone = RB3.ledger()["files"]["Plan/Light/M 81/gone.fit"]
-check("RB --report over an incomplete scan marks nothing cleared and says 'the camera could not be read "
-      "completely; nothing was marked cleared'",
-      lambda: r.returncode == 0 and "nothing was marked cleared" in r.stdout
-      and not _rb3_gone.get("clearedFromCamera"), r.stdout[-400:] + r.stderr[-200:])
-os.remove(_rb3_broken)
+try:
+    os.symlink(os.path.join(RB3.root, "nowhere.fit"), _rb3_broken)      # listed by the walk, unreadable
+    _rb3_linked = True
+except OSError:                      # Windows without Developer Mode can't make links (seen on the PC, 24 Oct)
+    _rb3_linked = False
+if _rb3_linked:
+    _rb3s = probe(RB3.env, _rb_code(
+        "st = m.State(); st.new_ledger()\n"
+        "st.add_file('Plan/Light/M 81/gone.fit', filename='gone.fit', size=1, sha256='0' * 64, origin='import',\n"
+        "            target='M 81', verifiedAtImport=True)\n"
+        "st.save_ledger()\n"
+        "s = m.scan_camera(st)\n"
+        "print(json.dumps({'incomplete': s['incomplete'], 'broken_in': 'Plan/Light/M 81/broken.fit' in s['relpaths'],\n"
+        "                  'files': len(s['targets'][0]['files'])}))\n"))
+    check("RB scan_camera: a file the walk lists but cannot size is in the relpath set (never 'gone') and the "
+          "scan is marked incomplete",
+          lambda: _rb3s == {"incomplete": True, "broken_in": True, "files": 1}, json.dumps(_rb3s))
+    r = RB3.run("--report")
+    _rb3_gone = RB3.ledger()["files"]["Plan/Light/M 81/gone.fit"]
+    check("RB --report over an incomplete scan marks nothing cleared and says 'the camera could not be read "
+          "completely; nothing was marked cleared'",
+          lambda: r.returncode == 0 and "nothing was marked cleared" in r.stdout
+          and not _rb3_gone.get("clearedFromCamera"), r.stdout[-400:] + r.stderr[-200:])
+    os.remove(_rb3_broken)
+else:
+    skip("RB scan_camera: a file the walk lists but cannot size (needs a broken link: Windows without Developer Mode)")
+    skip("RB --report over an incomplete scan marks nothing cleared (needs a broken link: Windows without Developer Mode)")
+    _rb3s = probe(RB3.env, _rb_code(
+        "st = m.State(); st.new_ledger()\n"
+        "st.add_file('Plan/Light/M 81/gone.fit', filename='gone.fit', size=1, sha256='0' * 64, origin='import',\n"
+        "            target='M 81', verifiedAtImport=True)\n"
+        "st.save_ledger()\nprint(json.dumps({'ok': True}))\n"))
 r = RB3.run("--report")
 check("RB ...and once the card reads completely the missing frame is flagged as before",
       lambda: RB3.ledger()["files"]["Plan/Light/M 81/gone.fit"].get("clearedFromCamera") is True,
