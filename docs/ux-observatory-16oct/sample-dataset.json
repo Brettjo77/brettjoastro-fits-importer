@@ -1,0 +1,7432 @@
+{
+ "schema": "observatory/1",
+ "generatedAt": "16 Oct 2026, 09:12",
+ "generatedAtIso": "2026-10-16T09:12:00+00:00",
+ "machine": "PC \u00b7 E:\\ Astro Data Archive \u00b7 live from the importer",
+ "sourceNote": "Worked out on this PC on 16 Oct 2026, 09:12 from this PC's ledger, the Mac's record (its ledger snapshot of 15 Oct 2026), the archive inventory of 16 Oct 2026 and the finished pictures in E:\\Final Astro Images (31,284 ledger rows). The statuses are the project layer's, the same as the To process list.",
+ "provenance": "Still capturing: a session within the quiet period of 14 observing nights, or kept open by hand. Ready to process: the quiet period has passed and nothing is started. In progress: one of your own masters sits in the object's folder on the archive. Done: a finished picture names the object and the scope.",
+ "quietPeriodDays": 14,
+ "asOfNight": "2026-10-16",
+ "inputs": 12,
+ "snapshotRows": 31284,
+ "scopes": [
+  {
+   "camera": "Askar FRA400",
+   "id": "FRA400",
+   "frames": 1834,
+   "hours": 152.8,
+   "nights": 60,
+   "bytes": 113708000000,
+   "first": "2025-08-24",
+   "last": "2026-10-16",
+   "colour": "#e05a5a"
+  },
+  {
+   "camera": "Askar 107PHQ",
+   "id": "107PHQ",
+   "frames": 2032,
+   "hours": 101.6,
+   "nights": 42,
+   "bytes": 125984000000,
+   "first": "2025-09-14",
+   "last": "2026-10-16",
+   "colour": "#5a8fe0"
+  },
+  {
+   "camera": "Seestar S30 Pro",
+   "id": "S30P",
+   "frames": 9494,
+   "hours": 20.4,
+   "nights": 32,
+   "bytes": 37976000000,
+   "first": "2025-07-12",
+   "last": "2026-10-15",
+   "colour": "#eda100"
+  },
+  {
+   "camera": "Seestar S50",
+   "id": "S50",
+   "frames": 576,
+   "hours": 1.6,
+   "nights": 3,
+   "bytes": 2304000000,
+   "first": "2026-04-07",
+   "last": "2026-07-25",
+   "colour": "#8a8a8a"
+  },
+  {
+   "camera": "Seestar S50 Pro",
+   "id": "S50P",
+   "frames": 1530,
+   "hours": 8.5,
+   "nights": 7,
+   "bytes": 6120000000,
+   "first": "2025-04-23",
+   "last": "2026-07-21",
+   "colour": "#4cbf8a"
+  },
+  {
+   "camera": "Starfront S50 Pro",
+   "id": "SFS50P",
+   "frames": 948,
+   "hours": 7.9,
+   "nights": 8,
+   "bytes": 3792000000,
+   "first": "2026-05-07",
+   "last": "2026-10-12",
+   "colour": "#b06ad8"
+  }
+ ],
+ "askarSplit": {},
+ "targets": [
+  {
+   "id": "M31",
+   "name": "Andromeda Galaxy (M 31)",
+   "codes": [
+    "M 31",
+    "NGC 224"
+   ],
+   "type": "Galaxy",
+   "constellation": "Andromeda",
+   "ra": 0.712,
+   "dec": 41.27,
+   "mosaic": true,
+   "programmes": [
+    {
+     "camera": "Askar FRA400",
+     "folder": "Andromeda Galaxy (M 31) (mosaic)",
+     "path": "E:\\ZWO Askar Scopes\\Andromeda Galaxy (M 31) (mosaic)",
+     "rel": "ZWO Askar Scopes/Andromeda Galaxy (M 31) (mosaic)",
+     "lights": 720,
+     "autostacks": 0,
+     "autostackFrames": 0,
+     "processedFiles": 1,
+     "processedFinals": 0,
+     "masters": 1,
+     "working": 0,
+     "thumbs": 0,
+     "other": 0,
+     "mosaic": true,
+     "collectFiles": 0,
+     "collected": false,
+     "hours": 60,
+     "bytes": 44640000000,
+     "sizeAll": 44640000000,
+     "nights": 22,
+     "firstNight": "2025-10-26",
+     "lastNight": "2026-03-25",
+     "filters": {
+      "L-eXtreme": 416,
+      "UV/IR": 304
+     },
+     "exposures": {
+      "300": 720
+     },
+     "panels": [],
+     "gains": {},
+     "askar": {},
+     "where": [
+      "on the archive"
+     ],
+     "status": "in_progress",
+     "readyOn": null,
+     "evidence": "master saved: Andromeda Galaxy_master_FRA400.xisf; the master in the shared Askar folder may belong to the other Askar",
+     "action": "Finish it: process to a final",
+     "calibration": {
+      "applies": true,
+      "missing": [
+       "flats"
+      ]
+     }
+    },
+    {
+     "camera": "Askar 107PHQ",
+     "folder": "Andromeda Galaxy (M 31) (mosaic)",
+     "path": "E:\\ZWO Askar Scopes\\Andromeda Galaxy (M 31) (mosaic)",
+     "rel": "ZWO Askar Scopes/Andromeda Galaxy (M 31) (mosaic)",
+     "lights": 600,
+     "autostacks": 0,
+     "autostackFrames": 0,
+     "processedFiles": 0,
+     "processedFinals": 0,
+     "masters": 0,
+     "working": 0,
+     "thumbs": 0,
+     "other": 0,
+     "mosaic": true,
+     "collectFiles": 0,
+     "collected": false,
+     "hours": 30,
+     "bytes": 37200000000,
+     "sizeAll": 37200000000,
+     "nights": 9,
+     "firstNight": "2026-02-13",
+     "lastNight": "2026-07-12",
+     "filters": {
+      "Ha": 132,
+      "SII": 132,
+      "L": 198,
+      "OIII": 138
+     },
+     "exposures": {
+      "180": 600
+     },
+     "panels": [],
+     "gains": {},
+     "askar": {},
+     "where": [
+      "on the archive"
+     ],
+     "status": "ready_to_process",
+     "readyOn": null,
+     "evidence": "no new frames since 12 Jul 2026 (96 nights); nothing started; the master in the shared Askar folder may belong to the other Askar, no darks or flats linked to its lights",
+     "action": "Process it",
+     "calibration": {
+      "applies": true,
+      "missing": [
+       "darks",
+       "flats"
+      ]
+     }
+    },
+    {
+     "camera": "Seestar S30 Pro",
+     "folder": "Andromeda Galaxy (M 31) (mosaic)",
+     "path": "E:\\S30P\\Andromeda Galaxy (M 31) (mosaic)",
+     "rel": "S30P/Andromeda Galaxy (M 31) (mosaic)",
+     "lights": 3060,
+     "autostacks": 3,
+     "autostackFrames": 0,
+     "processedFiles": 0,
+     "processedFinals": 0,
+     "masters": 0,
+     "working": 0,
+     "thumbs": 0,
+     "other": 0,
+     "mosaic": true,
+     "collectFiles": 0,
+     "collected": false,
+     "hours": 8.5,
+     "bytes": 12240000000,
+     "sizeAll": 12240000000,
+     "nights": 5,
+     "firstNight": "2026-05-27",
+     "lastNight": "2026-10-15",
+     "filters": {
+      "LP": 3060
+     },
+     "exposures": {
+      "10": 3060
+     },
+     "panels": [],
+     "gains": {},
+     "askar": {},
+     "where": [
+      "on the archive"
+     ],
+     "status": "capturing",
+     "readyOn": "2026-10-29",
+     "evidence": "last session 15 Oct 2026; ready to process from 29 Oct 2026",
+     "action": "Keep capturing",
+     "calibration": {
+      "applies": false,
+      "missing": []
+     }
+    },
+    {
+     "camera": "Seestar S50 Pro",
+     "folder": "Andromeda Galaxy (M 31) (mosaic)",
+     "path": "E:\\S50P\\Andromeda Galaxy (M 31) (mosaic)",
+     "rel": "S50P/Andromeda Galaxy (M 31) (mosaic)",
+     "lights": 576,
+     "autostacks": 3,
+     "autostackFrames": 0,
+     "processedFiles": 1,
+     "processedFinals": 0,
+     "masters": 1,
+     "working": 0,
+     "thumbs": 0,
+     "other": 0,
+     "mosaic": true,
+     "collectFiles": 0,
+     "collected": false,
+     "hours": 3.2,
+     "bytes": 2304000000,
+     "sizeAll": 2304000000,
+     "nights": 1,
+     "firstNight": "2025-09-22",
+     "lastNight": "2025-09-22",
+     "filters": {
+      "LP": 576
+     },
+     "exposures": {
+      "20": 576
+     },
+     "panels": [],
+     "gains": {},
+     "askar": {},
+     "where": [
+      "on the archive"
+     ],
+     "status": "in_progress",
+     "readyOn": null,
+     "evidence": "master saved: Andromeda Galaxy_master_S50P.xisf",
+     "action": "Finish it: process to a final",
+     "calibration": {
+      "applies": false,
+      "missing": []
+     }
+    }
+   ],
+   "cameras": [
+    "Askar FRA400",
+    "Askar 107PHQ",
+    "Seestar S30 Pro",
+    "Seestar S50 Pro"
+   ],
+   "lights": 4956,
+   "hours": 101.7,
+   "nights": 35,
+   "sessions": 37,
+   "firstNight": "2025-09-22",
+   "lastNight": "2026-10-15",
+   "state": "captured",
+   "pendingProgrammes": 4,
+   "statusCards": [
+    {
+     "target": "Andromeda Galaxy (M 31)",
+     "label": "Andromeda Galaxy (M 31) (mosaic)",
+     "camera": "Askar FRA400",
+     "state": "processing",
+     "hours": 60,
+     "nights": 22,
+     "lights": 720,
+     "lastNight": "2026-03-25",
+     "readyOn": null,
+     "evidence": "master saved: Andromeda Galaxy_master_FRA400.xisf; the master in the shared Askar folder may belong to the other Askar",
+     "action": "Finish it: process to a final",
+     "source": "worked out by the importer",
+     "badges": [
+      "on the archive"
+     ],
+     "rel": "ZWO Askar Scopes/Andromeda Galaxy (M 31) (mosaic)"
+    },
+    {
+     "target": "Andromeda Galaxy (M 31)",
+     "label": "Andromeda Galaxy (M 31) (mosaic)",
+     "camera": "Askar 107PHQ",
+     "state": "stacked",
+     "hours": 30,
+     "nights": 9,
+     "lights": 600,
+     "lastNight": "2026-07-12",
+     "readyOn": null,
+     "evidence": "no new frames since 12 Jul 2026 (96 nights); nothing started; the master in the shared Askar folder may belong to the other Askar, no darks or flats linked to its lights",
+     "action": "Process it",
+     "source": "worked out by the importer",
+     "badges": [
+      "on the archive"
+     ],
+     "rel": "ZWO Askar Scopes/Andromeda Galaxy (M 31) (mosaic)"
+    },
+    {
+     "target": "Andromeda Galaxy (M 31)",
+     "label": "Andromeda Galaxy (M 31) (mosaic)",
+     "camera": "Seestar S30 Pro",
+     "state": "captured",
+     "hours": 8.5,
+     "nights": 5,
+     "lights": 3060,
+     "lastNight": "2026-10-15",
+     "readyOn": "2026-10-29",
+     "evidence": "last session 15 Oct 2026; ready to process from 29 Oct 2026",
+     "action": "Keep capturing",
+     "source": "worked out by the importer",
+     "badges": [
+      "on the archive"
+     ],
+     "rel": "S30P/Andromeda Galaxy (M 31) (mosaic)"
+    },
+    {
+     "target": "Andromeda Galaxy (M 31)",
+     "label": "Andromeda Galaxy (M 31) (mosaic)",
+     "camera": "Seestar S50 Pro",
+     "state": "processing",
+     "hours": 3.2,
+     "nights": 1,
+     "lights": 576,
+     "lastNight": "2025-09-22",
+     "readyOn": null,
+     "evidence": "master saved: Andromeda Galaxy_master_S50P.xisf",
+     "action": "Finish it: process to a final",
+     "source": "worked out by the importer",
+     "badges": [
+      "on the archive"
+     ],
+     "rel": "S50P/Andromeda Galaxy (M 31) (mosaic)"
+    }
+   ]
+  },
+  {
+   "id": "M81",
+   "name": "Bode's Galaxy (M 81)",
+   "codes": [
+    "M 81",
+    "M 82"
+   ],
+   "type": "Galaxy",
+   "constellation": "Ursa Major",
+   "ra": 9.93,
+   "dec": 69.07,
+   "mosaic": false,
+   "programmes": [
+    {
+     "camera": "Askar 107PHQ",
+     "folder": "Bode's Galaxy (M 81)",
+     "path": "E:\\ZWO Askar Scopes\\Bode's Galaxy (M 81)",
+     "rel": "ZWO Askar Scopes/Bode's Galaxy (M 81)",
+     "lights": 78,
+     "autostacks": 0,
+     "autostackFrames": 0,
+     "processedFiles": 0,
+     "processedFinals": 0,
+     "masters": 0,
+     "working": 0,
+     "thumbs": 0,
+     "other": 0,
+     "mosaic": false,
+     "collectFiles": 0,
+     "collected": false,
+     "hours": 3.9,
+     "bytes": 4836000000,
+     "sizeAll": 4836000000,
+     "nights": 2,
+     "firstNight": "2026-02-27",
+     "lastNight": "2026-07-04",
+     "filters": {
+      "L": 39,
+      "OIII": 39
+     },
+     "exposures": {
+      "180": 78
+     },
+     "panels": [],
+     "gains": {},
+     "askar": {},
+     "where": [
+      "on the archive"
+     ],
+     "status": "ready_to_process",
+     "readyOn": null,
+     "evidence": "no new frames since 4 Jul 2026 (104 nights); nothing started",
+     "action": "Process it",
+     "calibration": {
+      "applies": true,
+      "missing": []
+     }
+    }
+   ],
+   "cameras": [
+    "Askar 107PHQ"
+   ],
+   "lights": 78,
+   "hours": 3.9,
+   "nights": 2,
+   "sessions": 2,
+   "firstNight": "2026-02-27",
+   "lastNight": "2026-07-04",
+   "state": "stacked",
+   "pendingProgrammes": 1,
+   "statusCards": [
+    {
+     "target": "Bode's Galaxy (M 81)",
+     "label": "Bode's Galaxy (M 81)",
+     "camera": "Askar 107PHQ",
+     "state": "stacked",
+     "hours": 3.9,
+     "nights": 2,
+     "lights": 78,
+     "lastNight": "2026-07-04",
+     "readyOn": null,
+     "evidence": "no new frames since 4 Jul 2026 (104 nights); nothing started",
+     "action": "Process it",
+     "source": "worked out by the importer",
+     "badges": [
+      "on the archive"
+     ],
+     "rel": "ZWO Askar Scopes/Bode's Galaxy (M 81)"
+    }
+   ]
+  },
+  {
+   "id": "NGC7635",
+   "name": "Bubble Nebula (NGC 7635)",
+   "codes": [
+    "NGC 7635"
+   ],
+   "type": "Emission nebula",
+   "constellation": "Cassiopeia",
+   "ra": 23.35,
+   "dec": 61.2,
+   "mosaic": false,
+   "programmes": [
+    {
+     "camera": "Askar 107PHQ",
+     "folder": "Bubble Nebula (NGC 7635)",
+     "path": "E:\\ZWO Askar Scopes\\Bubble Nebula (NGC 7635)",
+     "rel": "ZWO Askar Scopes/Bubble Nebula (NGC 7635)",
+     "lights": 60,
+     "autostacks": 0,
+     "autostackFrames": 0,
+     "processedFiles": 0,
+     "processedFinals": 0,
+     "masters": 0,
+     "working": 0,
+     "thumbs": 0,
+     "other": 0,
+     "mosaic": false,
+     "collectFiles": 0,
+     "collected": false,
+     "hours": 3.0,
+     "bytes": 3720000000,
+     "sizeAll": 3720000000,
+     "nights": 2,
+     "firstNight": "2026-05-01",
+     "lastNight": "2026-10-08",
+     "filters": {
+      "SII": 30,
+      "Ha": 30
+     },
+     "exposures": {
+      "180": 60
+     },
+     "panels": [],
+     "gains": {},
+     "askar": {},
+     "where": [
+      "on the archive",
+      "still on the Mac"
+     ],
+     "status": "capturing",
+     "readyOn": "2026-10-22",
+     "evidence": "last session 8 Oct 2026; ready to process from 22 Oct 2026; no flats linked to its lights",
+     "action": "Keep capturing",
+     "calibration": {
+      "applies": true,
+      "missing": [
+       "flats"
+      ]
+     }
+    }
+   ],
+   "cameras": [
+    "Askar 107PHQ"
+   ],
+   "lights": 60,
+   "hours": 3.0,
+   "nights": 2,
+   "sessions": 2,
+   "firstNight": "2026-05-01",
+   "lastNight": "2026-10-08",
+   "state": "captured",
+   "pendingProgrammes": 1,
+   "statusCards": [
+    {
+     "target": "Bubble Nebula (NGC 7635)",
+     "label": "Bubble Nebula (NGC 7635)",
+     "camera": "Askar 107PHQ",
+     "state": "captured",
+     "hours": 3.0,
+     "nights": 2,
+     "lights": 60,
+     "lastNight": "2026-10-08",
+     "readyOn": "2026-10-22",
+     "evidence": "last session 8 Oct 2026; ready to process from 22 Oct 2026; no flats linked to its lights",
+     "action": "Keep capturing",
+     "source": "worked out by the importer",
+     "badges": [
+      "on the archive",
+      "still on the Mac"
+     ],
+     "rel": "ZWO Askar Scopes/Bubble Nebula (NGC 7635)"
+    }
+   ]
+  },
+  {
+   "id": "Sh2-155",
+   "name": "Cave Nebula (Sh2-155)",
+   "codes": [
+    "Sh2-155"
+   ],
+   "type": "Emission nebula",
+   "constellation": "Cepheus",
+   "ra": 22.95,
+   "dec": 62.62,
+   "mosaic": false,
+   "programmes": [
+    {
+     "camera": "Askar FRA400",
+     "folder": "Cave Nebula (Sh2-155)",
+     "path": "E:\\ZWO Askar Scopes\\Cave Nebula (Sh2-155)",
+     "rel": "ZWO Askar Scopes/Cave Nebula (Sh2-155)",
+     "lights": 53,
+     "autostacks": 0,
+     "autostackFrames": 0,
+     "processedFiles": 0,
+     "processedFinals": 0,
+     "masters": 0,
+     "working": 0,
+     "thumbs": 0,
+     "other": 0,
+     "mosaic": false,
+     "collectFiles": 0,
+     "collected": false,
+     "hours": 4.4,
+     "bytes": 3286000000,
+     "sizeAll": 3286000000,
+     "nights": 2,
+     "firstNight": "2026-08-05",
+     "lastNight": "2026-09-21",
+     "filters": {
+      "UV/IR": 53
+     },
+     "exposures": {
+      "300": 53
+     },
+     "panels": [],
+     "gains": {},
+     "askar": {},
+     "where": [
+      "on the archive"
+     ],
+     "status": "ready_to_process",
+     "readyOn": null,
+     "evidence": "no new frames since 21 Sep 2026 (25 nights); nothing started; no darks or flats linked to its lights",
+     "action": "Process it",
+     "calibration": {
+      "applies": true,
+      "missing": [
+       "darks",
+       "flats"
+      ]
+     }
+    }
+   ],
+   "cameras": [
+    "Askar FRA400"
+   ],
+   "lights": 53,
+   "hours": 4.4,
+   "nights": 2,
+   "sessions": 2,
+   "firstNight": "2026-08-05",
+   "lastNight": "2026-09-21",
+   "state": "stacked",
+   "pendingProgrammes": 1,
+   "statusCards": [
+    {
+     "target": "Cave Nebula (Sh2-155)",
+     "label": "Cave Nebula (Sh2-155)",
+     "camera": "Askar FRA400",
+     "state": "stacked",
+     "hours": 4.4,
+     "nights": 2,
+     "lights": 53,
+     "lastNight": "2026-09-21",
+     "readyOn": null,
+     "evidence": "no new frames since 21 Sep 2026 (25 nights); nothing started; no darks or flats linked to its lights",
+     "action": "Process it",
+     "source": "worked out by the importer",
+     "badges": [
+      "on the archive"
+     ],
+     "rel": "ZWO Askar Scopes/Cave Nebula (Sh2-155)"
+    }
+   ]
+  },
+  {
+   "id": "NGC2264",
+   "name": "Christmas Tree Cluster (NGC 2264)",
+   "codes": [
+    "NGC 2264"
+   ],
+   "type": "Open cluster",
+   "constellation": "Monoceros",
+   "ra": 6.68,
+   "dec": 9.9,
+   "mosaic": false,
+   "programmes": [
+    {
+     "camera": "Askar FRA400",
+     "folder": "Christmas Tree Cluster (NGC 2264)",
+     "path": "E:\\ZWO Askar Scopes\\Christmas Tree Cluster (NGC 2264)",
+     "rel": "ZWO Askar Scopes/Christmas Tree Cluster (NGC 2264)",
+     "lights": 49,
+     "autostacks": 0,
+     "autostackFrames": 0,
+     "processedFiles": 0,
+     "processedFinals": 0,
+     "masters": 0,
+     "working": 0,
+     "thumbs": 0,
+     "other": 0,
+     "mosaic": false,
+     "collectFiles": 0,
+     "collected": false,
+     "hours": 4.1,
+     "bytes": 3038000000,
+     "sizeAll": 3038000000,
+     "nights": 2,
+     "firstNight": "2026-06-26",
+     "lastNight": "2026-09-07",
+     "filters": {
+      "L-eXtreme": 24,
+      "UV/IR": 25
+     },
+     "exposures": {
+      "300": 49
+     },
+     "panels": [],
+     "gains": {},
+     "askar": {},
+     "where": [
+      "on the archive"
+     ],
+     "status": "ready_to_process",
+     "readyOn": null,
+     "evidence": "no new frames since 7 Sep 2026 (39 nights); nothing started",
+     "action": "Process it",
+     "calibration": {
+      "applies": true,
+      "missing": []
+     }
+    }
+   ],
+   "cameras": [
+    "Askar FRA400"
+   ],
+   "lights": 49,
+   "hours": 4.1,
+   "nights": 2,
+   "sessions": 2,
+   "firstNight": "2026-06-26",
+   "lastNight": "2026-09-07",
+   "state": "stacked",
+   "pendingProgrammes": 1,
+   "statusCards": [
+    {
+     "target": "Christmas Tree Cluster (NGC 2264)",
+     "label": "Christmas Tree Cluster (NGC 2264)",
+     "camera": "Askar FRA400",
+     "state": "stacked",
+     "hours": 4.1,
+     "nights": 2,
+     "lights": 49,
+     "lastNight": "2026-09-07",
+     "readyOn": null,
+     "evidence": "no new frames since 7 Sep 2026 (39 nights); nothing started",
+     "action": "Process it",
+     "source": "worked out by the importer",
+     "badges": [
+      "on the archive"
+     ],
+     "rel": "ZWO Askar Scopes/Christmas Tree Cluster (NGC 2264)"
+    }
+   ]
+  },
+  {
+   "id": "IC5146",
+   "name": "Cocoon Nebula (IC 5146)",
+   "codes": [
+    "IC 5146"
+   ],
+   "type": "Emission nebula",
+   "constellation": "Cygnus",
+   "ra": 21.89,
+   "dec": 47.27,
+   "mosaic": false,
+   "programmes": [
+    {
+     "camera": "Askar FRA400",
+     "folder": "Cocoon Nebula (IC 5146)",
+     "path": "E:\\ZWO Askar Scopes\\Cocoon Nebula (IC 5146)",
+     "rel": "ZWO Askar Scopes/Cocoon Nebula (IC 5146)",
+     "lights": 29,
+     "autostacks": 0,
+     "autostackFrames": 0,
+     "processedFiles": 0,
+     "processedFinals": 0,
+     "masters": 0,
+     "working": 0,
+     "thumbs": 0,
+     "other": 0,
+     "mosaic": false,
+     "collectFiles": 0,
+     "collected": false,
+     "hours": 2.4,
+     "bytes": 1798000000,
+     "sizeAll": 1798000000,
+     "nights": 2,
+     "firstNight": "2026-08-25",
+     "lastNight": "2026-10-11",
+     "filters": {
+      "L-eXtreme": 29
+     },
+     "exposures": {
+      "300": 29
+     },
+     "panels": [],
+     "gains": {},
+     "askar": {},
+     "where": [
+      "on the archive",
+      "still on the Mac"
+     ],
+     "status": "capturing",
+     "readyOn": "2026-10-25",
+     "evidence": "last session 11 Oct 2026; ready to process from 25 Oct 2026",
+     "action": "Keep capturing",
+     "calibration": {
+      "applies": true,
+      "missing": []
+     }
+    }
+   ],
+   "cameras": [
+    "Askar FRA400"
+   ],
+   "lights": 29,
+   "hours": 2.4,
+   "nights": 2,
+   "sessions": 2,
+   "firstNight": "2026-08-25",
+   "lastNight": "2026-10-11",
+   "state": "captured",
+   "pendingProgrammes": 1,
+   "statusCards": [
+    {
+     "target": "Cocoon Nebula (IC 5146)",
+     "label": "Cocoon Nebula (IC 5146)",
+     "camera": "Askar FRA400",
+     "state": "captured",
+     "hours": 2.4,
+     "nights": 2,
+     "lights": 29,
+     "lastNight": "2026-10-11",
+     "readyOn": "2026-10-25",
+     "evidence": "last session 11 Oct 2026; ready to process from 25 Oct 2026",
+     "action": "Keep capturing",
+     "source": "worked out by the importer",
+     "badges": [
+      "on the archive",
+      "still on the Mac"
+     ],
+     "rel": "ZWO Askar Scopes/Cocoon Nebula (IC 5146)"
+    }
+   ]
+  },
+  {
+   "id": "NGC6888",
+   "name": "Crescent Nebula (NGC 6888)",
+   "codes": [
+    "NGC 6888"
+   ],
+   "type": "Emission nebula",
+   "constellation": "Cygnus",
+   "ra": 20.2,
+   "dec": 38.35,
+   "mosaic": false,
+   "programmes": [
+    {
+     "camera": "Askar 107PHQ",
+     "folder": "Crescent Nebula (NGC 6888)",
+     "path": "E:\\ZWO Askar Scopes\\Crescent Nebula (NGC 6888)",
+     "rel": "ZWO Askar Scopes/Crescent Nebula (NGC 6888)",
+     "lights": 122,
+     "autostacks": 0,
+     "autostackFrames": 0,
+     "processedFiles": 0,
+     "processedFinals": 0,
+     "masters": 0,
+     "working": 0,
+     "thumbs": 0,
+     "other": 0,
+     "mosaic": false,
+     "collectFiles": 0,
+     "collected": false,
+     "hours": 6.1,
+     "bytes": 7564000000,
+     "sizeAll": 7564000000,
+     "nights": 3,
+     "firstNight": "2026-04-04",
+     "lastNight": "2026-08-07",
+     "filters": {
+      "OIII": 40,
+      "L": 40,
+      "SII": 42
+     },
+     "exposures": {
+      "180": 122
+     },
+     "panels": [],
+     "gains": {},
+     "askar": {},
+     "where": [
+      "on the archive"
+     ],
+     "status": "ready_to_process",
+     "readyOn": null,
+     "evidence": "no new frames since 7 Aug 2026 (70 nights); nothing started; no flats linked to its lights",
+     "action": "Process it",
+     "calibration": {
+      "applies": true,
+      "missing": [
+       "flats"
+      ]
+     }
+    }
+   ],
+   "cameras": [
+    "Askar 107PHQ"
+   ],
+   "lights": 122,
+   "hours": 6.1,
+   "nights": 3,
+   "sessions": 3,
+   "firstNight": "2026-04-04",
+   "lastNight": "2026-08-07",
+   "state": "stacked",
+   "pendingProgrammes": 1,
+   "statusCards": [
+    {
+     "target": "Crescent Nebula (NGC 6888)",
+     "label": "Crescent Nebula (NGC 6888)",
+     "camera": "Askar 107PHQ",
+     "state": "stacked",
+     "hours": 6.1,
+     "nights": 3,
+     "lights": 122,
+     "lastNight": "2026-08-07",
+     "readyOn": null,
+     "evidence": "no new frames since 7 Aug 2026 (70 nights); nothing started; no flats linked to its lights",
+     "action": "Process it",
+     "source": "worked out by the importer",
+     "badges": [
+      "on the archive"
+     ],
+     "rel": "ZWO Askar Scopes/Crescent Nebula (NGC 6888)"
+    }
+   ]
+  },
+  {
+   "id": "NGC7000",
+   "name": "Cygnus Wall (NGC 7000)",
+   "codes": [
+    "NGC 7000"
+   ],
+   "type": "Emission nebula",
+   "constellation": "Cygnus",
+   "ra": 20.98,
+   "dec": 43.9,
+   "mosaic": false,
+   "programmes": [
+    {
+     "camera": "Seestar S50 Pro",
+     "folder": "Cygnus Wall (NGC 7000)",
+     "path": "E:\\S50P\\Cygnus Wall (NGC 7000)",
+     "rel": "S50P/Cygnus Wall (NGC 7000)",
+     "lights": 360,
+     "autostacks": 3,
+     "autostackFrames": 0,
+     "processedFiles": 1,
+     "processedFinals": 0,
+     "masters": 1,
+     "working": 0,
+     "thumbs": 0,
+     "other": 0,
+     "mosaic": false,
+     "collectFiles": 0,
+     "collected": false,
+     "hours": 2.0,
+     "bytes": 1440000000,
+     "sizeAll": 1440000000,
+     "nights": 2,
+     "firstNight": "2025-04-23",
+     "lastNight": "2025-09-20",
+     "filters": {
+      "LP": 360
+     },
+     "exposures": {
+      "20": 360
+     },
+     "panels": [],
+     "gains": {},
+     "askar": {},
+     "where": [
+      "on the archive"
+     ],
+     "status": "in_progress",
+     "readyOn": null,
+     "evidence": "master saved: Cygnus Wall_master_S50P.xisf",
+     "action": "Finish it: process to a final",
+     "calibration": {
+      "applies": false,
+      "missing": []
+     }
+    }
+   ],
+   "cameras": [
+    "Seestar S50 Pro"
+   ],
+   "lights": 360,
+   "hours": 2.0,
+   "nights": 2,
+   "sessions": 2,
+   "firstNight": "2025-04-23",
+   "lastNight": "2025-09-20",
+   "state": "processing",
+   "pendingProgrammes": 1,
+   "statusCards": [
+    {
+     "target": "Cygnus Wall (NGC 7000)",
+     "label": "Cygnus Wall (NGC 7000)",
+     "camera": "Seestar S50 Pro",
+     "state": "processing",
+     "hours": 2.0,
+     "nights": 2,
+     "lights": 360,
+     "lastNight": "2025-09-20",
+     "readyOn": null,
+     "evidence": "master saved: Cygnus Wall_master_S50P.xisf",
+     "action": "Finish it: process to a final",
+     "source": "worked out by the importer",
+     "badges": [
+      "on the archive"
+     ],
+     "rel": "S50P/Cygnus Wall (NGC 7000)"
+    }
+   ]
+  },
+  {
+   "id": "M27",
+   "name": "Dumbbell Nebula (M 27)",
+   "codes": [
+    "M 27"
+   ],
+   "type": "Planetary nebula",
+   "constellation": "Vulpecula",
+   "ra": 19.99,
+   "dec": 22.72,
+   "mosaic": false,
+   "programmes": [
+    {
+     "camera": "Seestar S30 Pro",
+     "folder": "Dumbbell Nebula (M 27)",
+     "path": "E:\\S30P\\Dumbbell Nebula (M 27)",
+     "rel": "S30P/Dumbbell Nebula (M 27)",
+     "lights": 324,
+     "autostacks": 3,
+     "autostackFrames": 0,
+     "processedFiles": 0,
+     "processedFinals": 0,
+     "masters": 0,
+     "working": 0,
+     "thumbs": 0,
+     "other": 0,
+     "mosaic": false,
+     "collectFiles": 0,
+     "collected": false,
+     "hours": 0.9,
+     "bytes": 1296000000,
+     "sizeAll": 1296000000,
+     "nights": 2,
+     "firstNight": "2026-07-24",
+     "lastNight": "2026-08-17",
+     "filters": {
+      "LP": 324
+     },
+     "exposures": {
+      "10": 324
+     },
+     "panels": [],
+     "gains": {},
+     "askar": {},
+     "where": [
+      "on the archive"
+     ],
+     "status": "ready_to_process",
+     "readyOn": null,
+     "evidence": "no new frames since 17 Aug 2026 (60 nights); nothing started",
+     "action": "Process it",
+     "calibration": {
+      "applies": false,
+      "missing": []
+     }
+    }
+   ],
+   "cameras": [
+    "Seestar S30 Pro"
+   ],
+   "lights": 324,
+   "hours": 0.9,
+   "nights": 2,
+   "sessions": 2,
+   "firstNight": "2026-07-24",
+   "lastNight": "2026-08-17",
+   "state": "stacked",
+   "pendingProgrammes": 1,
+   "statusCards": [
+    {
+     "target": "Dumbbell Nebula (M 27)",
+     "label": "Dumbbell Nebula (M 27)",
+     "camera": "Seestar S30 Pro",
+     "state": "stacked",
+     "hours": 0.9,
+     "nights": 2,
+     "lights": 324,
+     "lastNight": "2026-08-17",
+     "readyOn": null,
+     "evidence": "no new frames since 17 Aug 2026 (60 nights); nothing started",
+     "action": "Process it",
+     "source": "worked out by the importer",
+     "badges": [
+      "on the archive"
+     ],
+     "rel": "S30P/Dumbbell Nebula (M 27)"
+    }
+   ]
+  },
+  {
+   "id": "M16",
+   "name": "Eagle Nebula (M 16)",
+   "codes": [
+    "M 16"
+   ],
+   "type": "Emission nebula",
+   "constellation": "Serpens",
+   "ra": 18.31,
+   "dec": -13.78,
+   "mosaic": false,
+   "programmes": [
+    {
+     "camera": "Starfront S50 Pro",
+     "folder": "Eagle Nebula (M 16)",
+     "path": "E:\\Starfront\\Eagle Nebula (M 16)",
+     "rel": "Starfront/Eagle Nebula (M 16)",
+     "lights": 252,
+     "autostacks": 0,
+     "autostackFrames": 0,
+     "processedFiles": 0,
+     "processedFinals": 0,
+     "masters": 0,
+     "working": 0,
+     "thumbs": 0,
+     "other": 0,
+     "mosaic": false,
+     "collectFiles": 0,
+     "collected": false,
+     "hours": 2.1,
+     "bytes": 1008000000,
+     "sizeAll": 1008000000,
+     "nights": 2,
+     "firstNight": "2026-07-10",
+     "lastNight": "2026-10-12",
+     "filters": {
+      "LP": 252
+     },
+     "exposures": {
+      "30": 252
+     },
+     "panels": [],
+     "gains": {},
+     "askar": {},
+     "where": [
+      "on the archive",
+      "still on the Mac"
+     ],
+     "status": "capturing",
+     "readyOn": "2026-10-26",
+     "evidence": "last session 12 Oct 2026; ready to process from 26 Oct 2026",
+     "action": "Keep capturing",
+     "calibration": {
+      "applies": false,
+      "missing": []
+     }
+    }
+   ],
+   "cameras": [
+    "Starfront S50 Pro"
+   ],
+   "lights": 252,
+   "hours": 2.1,
+   "nights": 2,
+   "sessions": 2,
+   "firstNight": "2026-07-10",
+   "lastNight": "2026-10-12",
+   "state": "captured",
+   "pendingProgrammes": 1,
+   "statusCards": [
+    {
+     "target": "Eagle Nebula (M 16)",
+     "label": "Eagle Nebula (M 16)",
+     "camera": "Starfront S50 Pro",
+     "state": "captured",
+     "hours": 2.1,
+     "nights": 2,
+     "lights": 252,
+     "lastNight": "2026-10-12",
+     "readyOn": "2026-10-26",
+     "evidence": "last session 12 Oct 2026; ready to process from 26 Oct 2026",
+     "action": "Keep capturing",
+     "source": "worked out by the importer",
+     "badges": [
+      "on the archive",
+      "still on the Mac"
+     ],
+     "rel": "Starfront/Eagle Nebula (M 16)"
+    }
+   ]
+  },
+  {
+   "id": "IC1396",
+   "name": "Elephant's Trunk (IC 1396)",
+   "codes": [
+    "IC 1396"
+   ],
+   "type": "Emission nebula",
+   "constellation": "Cepheus",
+   "ra": 21.65,
+   "dec": 57.5,
+   "mosaic": false,
+   "programmes": [
+    {
+     "camera": "Askar FRA400",
+     "folder": "Elephant's Trunk (IC 1396)",
+     "path": "E:\\ZWO Askar Scopes\\Elephant's Trunk (IC 1396)",
+     "rel": "ZWO Askar Scopes/Elephant's Trunk (IC 1396)",
+     "lights": 112,
+     "autostacks": 0,
+     "autostackFrames": 0,
+     "processedFiles": 1,
+     "processedFinals": 0,
+     "masters": 1,
+     "working": 0,
+     "thumbs": 0,
+     "other": 0,
+     "mosaic": false,
+     "collectFiles": 0,
+     "collected": false,
+     "hours": 9.3,
+     "bytes": 6944000000,
+     "sizeAll": 6944000000,
+     "nights": 4,
+     "firstNight": "2026-01-24",
+     "lastNight": "2026-05-07",
+     "filters": {
+      "UV/IR": 84,
+      "L-eXtreme": 28
+     },
+     "exposures": {
+      "300": 112
+     },
+     "panels": [],
+     "gains": {},
+     "askar": {},
+     "where": [
+      "on the archive"
+     ],
+     "status": "in_progress",
+     "readyOn": null,
+     "evidence": "master saved: Elephant's Trunk_master_FRA400.xisf",
+     "action": "Finish it: process to a final",
+     "calibration": {
+      "applies": true,
+      "missing": [
+       "flats"
+      ]
+     }
+    }
+   ],
+   "cameras": [
+    "Askar FRA400"
+   ],
+   "lights": 112,
+   "hours": 9.3,
+   "nights": 4,
+   "sessions": 4,
+   "firstNight": "2026-01-24",
+   "lastNight": "2026-05-07",
+   "state": "processing",
+   "pendingProgrammes": 1,
+   "statusCards": [
+    {
+     "target": "Elephant's Trunk (IC 1396)",
+     "label": "Elephant's Trunk (IC 1396)",
+     "camera": "Askar FRA400",
+     "state": "processing",
+     "hours": 9.3,
+     "nights": 4,
+     "lights": 112,
+     "lastNight": "2026-05-07",
+     "readyOn": null,
+     "evidence": "master saved: Elephant's Trunk_master_FRA400.xisf",
+     "action": "Finish it: process to a final",
+     "source": "worked out by the importer",
+     "badges": [
+      "on the archive"
+     ],
+     "rel": "ZWO Askar Scopes/Elephant's Trunk (IC 1396)"
+    }
+   ]
+  },
+  {
+   "id": "NGC6946",
+   "name": "Fireworks Galaxy (NGC 6946)",
+   "codes": [
+    "NGC 6946"
+   ],
+   "type": "Galaxy",
+   "constellation": "Cepheus",
+   "ra": 20.58,
+   "dec": 60.15,
+   "mosaic": false,
+   "programmes": [
+    {
+     "camera": "Seestar S50 Pro",
+     "folder": "Fireworks Galaxy (NGC 6946)",
+     "path": "E:\\S50P\\Fireworks Galaxy (NGC 6946)",
+     "rel": "S50P/Fireworks Galaxy (NGC 6946)",
+     "lights": 144,
+     "autostacks": 3,
+     "autostackFrames": 0,
+     "processedFiles": 0,
+     "processedFinals": 0,
+     "masters": 0,
+     "working": 0,
+     "thumbs": 0,
+     "other": 0,
+     "mosaic": false,
+     "collectFiles": 0,
+     "collected": false,
+     "hours": 0.8,
+     "bytes": 576000000,
+     "sizeAll": 576000000,
+     "nights": 1,
+     "firstNight": "2026-07-21",
+     "lastNight": "2026-07-21",
+     "filters": {
+      "LP": 144
+     },
+     "exposures": {
+      "20": 144
+     },
+     "panels": [],
+     "gains": {},
+     "askar": {},
+     "where": [
+      "on the archive"
+     ],
+     "status": "ready_to_process",
+     "readyOn": null,
+     "evidence": "no new frames since 21 Jul 2026 (87 nights); nothing started",
+     "action": "Process it",
+     "calibration": {
+      "applies": false,
+      "missing": []
+     }
+    }
+   ],
+   "cameras": [
+    "Seestar S50 Pro"
+   ],
+   "lights": 144,
+   "hours": 0.8,
+   "nights": 1,
+   "sessions": 1,
+   "firstNight": "2026-07-21",
+   "lastNight": "2026-07-21",
+   "state": "stacked",
+   "pendingProgrammes": 1,
+   "statusCards": [
+    {
+     "target": "Fireworks Galaxy (NGC 6946)",
+     "label": "Fireworks Galaxy (NGC 6946)",
+     "camera": "Seestar S50 Pro",
+     "state": "stacked",
+     "hours": 0.8,
+     "nights": 1,
+     "lights": 144,
+     "lastNight": "2026-07-21",
+     "readyOn": null,
+     "evidence": "no new frames since 21 Jul 2026 (87 nights); nothing started",
+     "action": "Process it",
+     "source": "worked out by the importer",
+     "badges": [
+      "on the archive"
+     ],
+     "rel": "S50P/Fireworks Galaxy (NGC 6946)"
+    }
+   ]
+  },
+  {
+   "id": "IC405",
+   "name": "Flaming Star Nebula (IC 405)",
+   "codes": [
+    "IC 405"
+   ],
+   "type": "Emission nebula",
+   "constellation": "Auriga",
+   "ra": 5.27,
+   "dec": 34.27,
+   "mosaic": false,
+   "programmes": [
+    {
+     "camera": "Askar 107PHQ",
+     "folder": "Flaming Star Nebula (IC 405)",
+     "path": "E:\\ZWO Askar Scopes\\Flaming Star Nebula (IC 405)",
+     "rel": "ZWO Askar Scopes/Flaming Star Nebula (IC 405)",
+     "lights": 136,
+     "autostacks": 0,
+     "autostackFrames": 0,
+     "processedFiles": 0,
+     "processedFinals": 0,
+     "masters": 0,
+     "working": 0,
+     "thumbs": 0,
+     "other": 0,
+     "mosaic": false,
+     "collectFiles": 0,
+     "collected": false,
+     "hours": 6.8,
+     "bytes": 8432000000,
+     "sizeAll": 8432000000,
+     "nights": 5,
+     "firstNight": "2026-05-08",
+     "lastNight": "2026-10-13",
+     "filters": {
+      "SII": 27,
+      "L": 81,
+      "OIII": 28
+     },
+     "exposures": {
+      "180": 136
+     },
+     "panels": [],
+     "gains": {},
+     "askar": {},
+     "where": [
+      "on the archive",
+      "still on the Mac"
+     ],
+     "status": "capturing",
+     "readyOn": "2026-10-27",
+     "evidence": "last session 13 Oct 2026; ready to process from 27 Oct 2026; no flats linked to its lights",
+     "action": "Keep capturing",
+     "calibration": {
+      "applies": true,
+      "missing": [
+       "flats"
+      ]
+     }
+    }
+   ],
+   "cameras": [
+    "Askar 107PHQ"
+   ],
+   "lights": 136,
+   "hours": 6.8,
+   "nights": 5,
+   "sessions": 5,
+   "firstNight": "2026-05-08",
+   "lastNight": "2026-10-13",
+   "state": "captured",
+   "pendingProgrammes": 1,
+   "statusCards": [
+    {
+     "target": "Flaming Star Nebula (IC 405)",
+     "label": "Flaming Star Nebula (IC 405)",
+     "camera": "Askar 107PHQ",
+     "state": "captured",
+     "hours": 6.8,
+     "nights": 5,
+     "lights": 136,
+     "lastNight": "2026-10-13",
+     "readyOn": "2026-10-27",
+     "evidence": "last session 13 Oct 2026; ready to process from 27 Oct 2026; no flats linked to its lights",
+     "action": "Keep capturing",
+     "source": "worked out by the importer",
+     "badges": [
+      "on the archive",
+      "still on the Mac"
+     ],
+     "rel": "ZWO Askar Scopes/Flaming Star Nebula (IC 405)"
+    }
+   ]
+  },
+  {
+   "id": "IC1805",
+   "name": "Heart Nebula (IC 1805)",
+   "codes": [
+    "IC 1805"
+   ],
+   "type": "Emission nebula",
+   "constellation": "Cassiopeia",
+   "ra": 2.55,
+   "dec": 61.45,
+   "mosaic": false,
+   "programmes": [
+    {
+     "camera": "Askar 107PHQ",
+     "folder": "Heart Nebula (IC 1805)",
+     "path": "E:\\ZWO Askar Scopes\\Heart Nebula (IC 1805)",
+     "rel": "ZWO Askar Scopes/Heart Nebula (IC 1805)",
+     "lights": 82,
+     "autostacks": 0,
+     "autostackFrames": 0,
+     "processedFiles": 0,
+     "processedFinals": 0,
+     "masters": 0,
+     "working": 0,
+     "thumbs": 0,
+     "other": 0,
+     "mosaic": false,
+     "collectFiles": 0,
+     "collected": false,
+     "hours": 4.1,
+     "bytes": 5084000000,
+     "sizeAll": 5084000000,
+     "nights": 3,
+     "firstNight": "2026-08-15",
+     "lastNight": "2026-10-11",
+     "filters": {
+      "Ha": 27,
+      "OIII": 27,
+      "L": 28
+     },
+     "exposures": {
+      "180": 82
+     },
+     "panels": [],
+     "gains": {},
+     "askar": {},
+     "where": [
+      "on the archive"
+     ],
+     "status": "capturing",
+     "readyOn": "2026-10-25",
+     "evidence": "last session 11 Oct 2026; ready to process from 25 Oct 2026; no darks or flats linked to its lights",
+     "action": "Keep capturing",
+     "calibration": {
+      "applies": true,
+      "missing": [
+       "darks",
+       "flats"
+      ]
+     }
+    },
+    {
+     "camera": "Seestar S50",
+     "folder": "Heart Nebula (IC 1805)",
+     "path": "E:\\S50\\Heart Nebula (IC 1805)",
+     "rel": "S50/Heart Nebula (IC 1805)",
+     "lights": 432,
+     "autostacks": 3,
+     "autostackFrames": 0,
+     "processedFiles": 0,
+     "processedFinals": 0,
+     "masters": 0,
+     "working": 0,
+     "thumbs": 0,
+     "other": 0,
+     "mosaic": false,
+     "collectFiles": 0,
+     "collected": false,
+     "hours": 1.2,
+     "bytes": 1728000000,
+     "sizeAll": 1728000000,
+     "nights": 2,
+     "firstNight": "2026-04-07",
+     "lastNight": "2026-07-05",
+     "filters": {
+      "LP": 432
+     },
+     "exposures": {
+      "10": 432
+     },
+     "panels": [],
+     "gains": {},
+     "askar": {},
+     "where": [
+      "on the archive"
+     ],
+     "status": "ready_to_process",
+     "readyOn": null,
+     "evidence": "no new frames since 5 Jul 2026 (103 nights); nothing started",
+     "action": "Process it",
+     "calibration": {
+      "applies": false,
+      "missing": []
+     }
+    }
+   ],
+   "cameras": [
+    "Askar 107PHQ",
+    "Seestar S50"
+   ],
+   "lights": 514,
+   "hours": 5.3,
+   "nights": 5,
+   "sessions": 5,
+   "firstNight": "2026-04-07",
+   "lastNight": "2026-10-11",
+   "state": "captured",
+   "pendingProgrammes": 2,
+   "statusCards": [
+    {
+     "target": "Heart Nebula (IC 1805)",
+     "label": "Heart Nebula (IC 1805)",
+     "camera": "Askar 107PHQ",
+     "state": "captured",
+     "hours": 4.1,
+     "nights": 3,
+     "lights": 82,
+     "lastNight": "2026-10-11",
+     "readyOn": "2026-10-25",
+     "evidence": "last session 11 Oct 2026; ready to process from 25 Oct 2026; no darks or flats linked to its lights",
+     "action": "Keep capturing",
+     "source": "worked out by the importer",
+     "badges": [
+      "on the archive"
+     ],
+     "rel": "ZWO Askar Scopes/Heart Nebula (IC 1805)"
+    },
+    {
+     "target": "Heart Nebula (IC 1805)",
+     "label": "Heart Nebula (IC 1805)",
+     "camera": "Seestar S50",
+     "state": "stacked",
+     "hours": 1.2,
+     "nights": 2,
+     "lights": 432,
+     "lastNight": "2026-07-05",
+     "readyOn": null,
+     "evidence": "no new frames since 5 Jul 2026 (103 nights); nothing started",
+     "action": "Process it",
+     "source": "worked out by the importer",
+     "badges": [
+      "on the archive"
+     ],
+     "rel": "S50/Heart Nebula (IC 1805)"
+    }
+   ]
+  },
+  {
+   "id": "M13",
+   "name": "Hercules Cluster (M 13)",
+   "codes": [
+    "M 13"
+   ],
+   "type": "Globular cluster",
+   "constellation": "Hercules",
+   "ra": 16.69,
+   "dec": 36.46,
+   "mosaic": false,
+   "programmes": [
+    {
+     "camera": "Seestar S50",
+     "folder": "Hercules Cluster (M 13)",
+     "path": "E:\\S50\\Hercules Cluster (M 13)",
+     "rel": "S50/Hercules Cluster (M 13)",
+     "lights": 144,
+     "autostacks": 3,
+     "autostackFrames": 0,
+     "processedFiles": 1,
+     "processedFinals": 1,
+     "masters": 0,
+     "working": 0,
+     "thumbs": 0,
+     "other": 0,
+     "mosaic": false,
+     "collectFiles": 0,
+     "collected": false,
+     "hours": 0.4,
+     "bytes": 576000000,
+     "sizeAll": 576000000,
+     "nights": 1,
+     "firstNight": "2026-07-25",
+     "lastNight": "2026-07-25",
+     "filters": {
+      "LP": 144
+     },
+     "exposures": {
+      "10": 144
+     },
+     "panels": [],
+     "gains": {},
+     "askar": {},
+     "where": [
+      "on the archive"
+     ],
+     "status": "done",
+     "readyOn": null,
+     "evidence": "finished picture M13_Hercules-Cluster__2026-09_S50.jpg",
+     "action": "",
+     "calibration": {
+      "applies": false,
+      "missing": []
+     }
+    }
+   ],
+   "cameras": [
+    "Seestar S50"
+   ],
+   "lights": 144,
+   "hours": 0.4,
+   "nights": 1,
+   "sessions": 1,
+   "firstNight": "2026-07-25",
+   "lastNight": "2026-07-25",
+   "state": "complete",
+   "pendingProgrammes": 0,
+   "statusCards": [
+    {
+     "target": "Hercules Cluster (M 13)",
+     "label": "Hercules Cluster (M 13)",
+     "camera": "Seestar S50",
+     "state": "complete",
+     "hours": 0.4,
+     "nights": 1,
+     "lights": 144,
+     "lastNight": "2026-07-25",
+     "readyOn": null,
+     "evidence": "finished picture M13_Hercules-Cluster__2026-09_S50.jpg",
+     "action": "",
+     "source": "worked out by the importer",
+     "badges": [
+      "on the archive"
+     ],
+     "rel": "S50/Hercules Cluster (M 13)"
+    }
+   ]
+  },
+  {
+   "id": "IC434",
+   "name": "Horsehead Nebula (IC 434)",
+   "codes": [
+    "IC 434",
+    "B 33"
+   ],
+   "type": "Dark nebula",
+   "constellation": "Orion",
+   "ra": 5.68,
+   "dec": -2.46,
+   "mosaic": false,
+   "programmes": [
+    {
+     "camera": "Askar FRA400",
+     "folder": "Horsehead Nebula (IC 434)",
+     "path": "E:\\ZWO Askar Scopes\\Horsehead Nebula (IC 434)",
+     "rel": "ZWO Askar Scopes/Horsehead Nebula (IC 434)",
+     "lights": 41,
+     "autostacks": 0,
+     "autostackFrames": 0,
+     "processedFiles": 0,
+     "processedFinals": 0,
+     "masters": 0,
+     "working": 0,
+     "thumbs": 0,
+     "other": 0,
+     "mosaic": false,
+     "collectFiles": 0,
+     "collected": false,
+     "hours": 3.4,
+     "bytes": 2542000000,
+     "sizeAll": 2542000000,
+     "nights": 2,
+     "firstNight": "2026-08-12",
+     "lastNight": "2026-10-16",
+     "filters": {
+      "L-eXtreme": 41
+     },
+     "exposures": {
+      "300": 41
+     },
+     "panels": [],
+     "gains": {},
+     "askar": {},
+     "where": [
+      "on the archive",
+      "still on the Mac"
+     ],
+     "status": "capturing",
+     "readyOn": "2026-10-30",
+     "evidence": "last session 16 Oct 2026; ready to process from 30 Oct 2026; no darks or flats linked to its lights",
+     "action": "Keep capturing",
+     "calibration": {
+      "applies": true,
+      "missing": [
+       "darks",
+       "flats"
+      ]
+     }
+    }
+   ],
+   "cameras": [
+    "Askar FRA400"
+   ],
+   "lights": 41,
+   "hours": 3.4,
+   "nights": 2,
+   "sessions": 2,
+   "firstNight": "2026-08-12",
+   "lastNight": "2026-10-16",
+   "state": "captured",
+   "pendingProgrammes": 1,
+   "statusCards": [
+    {
+     "target": "Horsehead Nebula (IC 434)",
+     "label": "Horsehead Nebula (IC 434)",
+     "camera": "Askar FRA400",
+     "state": "captured",
+     "hours": 3.4,
+     "nights": 2,
+     "lights": 41,
+     "lastNight": "2026-10-16",
+     "readyOn": "2026-10-30",
+     "evidence": "last session 16 Oct 2026; ready to process from 30 Oct 2026; no darks or flats linked to its lights",
+     "action": "Keep capturing",
+     "source": "worked out by the importer",
+     "badges": [
+      "on the archive",
+      "still on the Mac"
+     ],
+     "rel": "ZWO Askar Scopes/Horsehead Nebula (IC 434)"
+    }
+   ]
+  },
+  {
+   "id": "NGC7023",
+   "name": "Iris Nebula (NGC 7023)",
+   "codes": [
+    "NGC 7023"
+   ],
+   "type": "Reflection nebula",
+   "constellation": "Cepheus",
+   "ra": 21.03,
+   "dec": 68.17,
+   "mosaic": false,
+   "programmes": [
+    {
+     "camera": "Seestar S30 Pro",
+     "folder": "Iris Nebula (NGC 7023)",
+     "path": "E:\\S30P\\Iris Nebula (NGC 7023)",
+     "rel": "S30P/Iris Nebula (NGC 7023)",
+     "lights": 396,
+     "autostacks": 3,
+     "autostackFrames": 0,
+     "processedFiles": 0,
+     "processedFinals": 0,
+     "masters": 0,
+     "working": 0,
+     "thumbs": 0,
+     "other": 0,
+     "mosaic": false,
+     "collectFiles": 0,
+     "collected": false,
+     "hours": 1.1,
+     "bytes": 1584000000,
+     "sizeAll": 1584000000,
+     "nights": 2,
+     "firstNight": "2026-07-27",
+     "lastNight": "2026-08-01",
+     "filters": {
+      "LP": 396
+     },
+     "exposures": {
+      "10": 396
+     },
+     "panels": [],
+     "gains": {},
+     "askar": {},
+     "where": [
+      "on the archive"
+     ],
+     "status": "ready_to_process",
+     "readyOn": null,
+     "evidence": "no new frames since 1 Aug 2026 (76 nights); nothing started",
+     "action": "Process it",
+     "calibration": {
+      "applies": false,
+      "missing": []
+     }
+    }
+   ],
+   "cameras": [
+    "Seestar S30 Pro"
+   ],
+   "lights": 396,
+   "hours": 1.1,
+   "nights": 2,
+   "sessions": 2,
+   "firstNight": "2026-07-27",
+   "lastNight": "2026-08-01",
+   "state": "stacked",
+   "pendingProgrammes": 1,
+   "statusCards": [
+    {
+     "target": "Iris Nebula (NGC 7023)",
+     "label": "Iris Nebula (NGC 7023)",
+     "camera": "Seestar S30 Pro",
+     "state": "stacked",
+     "hours": 1.1,
+     "nights": 2,
+     "lights": 396,
+     "lastNight": "2026-08-01",
+     "readyOn": null,
+     "evidence": "no new frames since 1 Aug 2026 (76 nights); nothing started",
+     "action": "Process it",
+     "source": "worked out by the importer",
+     "badges": [
+      "on the archive"
+     ],
+     "rel": "S30P/Iris Nebula (NGC 7023)"
+    }
+   ]
+  },
+  {
+   "id": "IC443",
+   "name": "Jellyfish Nebula (IC 443)",
+   "codes": [
+    "IC 443"
+   ],
+   "type": "Supernova remnant",
+   "constellation": "Gemini",
+   "ra": 6.28,
+   "dec": 22.55,
+   "mosaic": false,
+   "programmes": [
+    {
+     "camera": "Askar FRA400",
+     "folder": "Jellyfish Nebula (IC 443)",
+     "path": "E:\\ZWO Askar Scopes\\Jellyfish Nebula (IC 443)",
+     "rel": "ZWO Askar Scopes/Jellyfish Nebula (IC 443)",
+     "lights": 22,
+     "autostacks": 0,
+     "autostackFrames": 0,
+     "processedFiles": 0,
+     "processedFinals": 0,
+     "masters": 0,
+     "working": 0,
+     "thumbs": 0,
+     "other": 0,
+     "mosaic": false,
+     "collectFiles": 0,
+     "collected": false,
+     "hours": 1.8,
+     "bytes": 1364000000,
+     "sizeAll": 1364000000,
+     "nights": 1,
+     "firstNight": "2026-10-06",
+     "lastNight": "2026-10-06",
+     "filters": {
+      "L-eXtreme": 22
+     },
+     "exposures": {
+      "300": 22
+     },
+     "panels": [],
+     "gains": {},
+     "askar": {},
+     "where": [
+      "on the archive"
+     ],
+     "status": "capturing",
+     "readyOn": "2026-10-20",
+     "evidence": "last session 6 Oct 2026; ready to process from 20 Oct 2026",
+     "action": "Keep capturing",
+     "calibration": {
+      "applies": true,
+      "missing": []
+     }
+    }
+   ],
+   "cameras": [
+    "Askar FRA400"
+   ],
+   "lights": 22,
+   "hours": 1.8,
+   "nights": 1,
+   "sessions": 1,
+   "firstNight": "2026-10-06",
+   "lastNight": "2026-10-06",
+   "state": "captured",
+   "pendingProgrammes": 1,
+   "statusCards": [
+    {
+     "target": "Jellyfish Nebula (IC 443)",
+     "label": "Jellyfish Nebula (IC 443)",
+     "camera": "Askar FRA400",
+     "state": "captured",
+     "hours": 1.8,
+     "nights": 1,
+     "lights": 22,
+     "lastNight": "2026-10-06",
+     "readyOn": "2026-10-20",
+     "evidence": "last session 6 Oct 2026; ready to process from 20 Oct 2026",
+     "action": "Keep capturing",
+     "source": "worked out by the importer",
+     "badges": [
+      "on the archive"
+     ],
+     "rel": "ZWO Askar Scopes/Jellyfish Nebula (IC 443)"
+    }
+   ]
+  },
+  {
+   "id": "M8",
+   "name": "Lagoon Nebula (M 8)",
+   "codes": [
+    "M 8"
+   ],
+   "type": "Emission nebula",
+   "constellation": "Sagittarius",
+   "ra": 18.06,
+   "dec": -24.38,
+   "mosaic": false,
+   "programmes": [
+    {
+     "camera": "Starfront S50 Pro",
+     "folder": "Lagoon Nebula (M 8)",
+     "path": "E:\\Starfront\\Lagoon Nebula (M 8)",
+     "rel": "Starfront/Lagoon Nebula (M 8)",
+     "lights": 336,
+     "autostacks": 0,
+     "autostackFrames": 0,
+     "processedFiles": 0,
+     "processedFinals": 0,
+     "masters": 0,
+     "working": 0,
+     "thumbs": 0,
+     "other": 0,
+     "mosaic": false,
+     "collectFiles": 0,
+     "collected": false,
+     "hours": 2.8,
+     "bytes": 1344000000,
+     "sizeAll": 1344000000,
+     "nights": 3,
+     "firstNight": "2026-05-07",
+     "lastNight": "2026-10-08",
+     "filters": {
+      "LP": 336
+     },
+     "exposures": {
+      "30": 336
+     },
+     "panels": [],
+     "gains": {},
+     "askar": {},
+     "where": [
+      "on the archive",
+      "still on the Mac"
+     ],
+     "status": "capturing",
+     "readyOn": "2026-10-22",
+     "evidence": "last session 8 Oct 2026; ready to process from 22 Oct 2026",
+     "action": "Keep capturing",
+     "calibration": {
+      "applies": false,
+      "missing": []
+     }
+    }
+   ],
+   "cameras": [
+    "Starfront S50 Pro"
+   ],
+   "lights": 336,
+   "hours": 2.8,
+   "nights": 3,
+   "sessions": 3,
+   "firstNight": "2026-05-07",
+   "lastNight": "2026-10-08",
+   "state": "captured",
+   "pendingProgrammes": 1,
+   "statusCards": [
+    {
+     "target": "Lagoon Nebula (M 8)",
+     "label": "Lagoon Nebula (M 8)",
+     "camera": "Starfront S50 Pro",
+     "state": "captured",
+     "hours": 2.8,
+     "nights": 3,
+     "lights": 336,
+     "lastNight": "2026-10-08",
+     "readyOn": "2026-10-22",
+     "evidence": "last session 8 Oct 2026; ready to process from 22 Oct 2026",
+     "action": "Keep capturing",
+     "source": "worked out by the importer",
+     "badges": [
+      "on the archive",
+      "still on the Mac"
+     ],
+     "rel": "Starfront/Lagoon Nebula (M 8)"
+    }
+   ]
+  },
+  {
+   "id": "M65",
+   "name": "Leo Triplet",
+   "codes": [
+    "M 65",
+    "M 66",
+    "NGC 3628"
+   ],
+   "type": "Galaxy group",
+   "constellation": "Leo",
+   "ra": 11.3,
+   "dec": 13.1,
+   "mosaic": false,
+   "programmes": [
+    {
+     "camera": "Askar FRA400",
+     "folder": "Leo Triplet",
+     "path": "E:\\ZWO Askar Scopes\\Leo Triplet",
+     "rel": "ZWO Askar Scopes/Leo Triplet",
+     "lights": 32,
+     "autostacks": 0,
+     "autostackFrames": 0,
+     "processedFiles": 0,
+     "processedFinals": 0,
+     "masters": 0,
+     "working": 0,
+     "thumbs": 0,
+     "other": 0,
+     "mosaic": false,
+     "collectFiles": 0,
+     "collected": false,
+     "hours": 2.7,
+     "bytes": 1984000000,
+     "sizeAll": 1984000000,
+     "nights": 1,
+     "firstNight": "2026-06-28",
+     "lastNight": "2026-06-28",
+     "filters": {
+      "L-eXtreme": 32
+     },
+     "exposures": {
+      "300": 32
+     },
+     "panels": [],
+     "gains": {},
+     "askar": {},
+     "where": [
+      "on the archive"
+     ],
+     "status": "ready_to_process",
+     "readyOn": null,
+     "evidence": "no new frames since 28 Jun 2026 (110 nights); nothing started",
+     "action": "Process it",
+     "calibration": {
+      "applies": true,
+      "missing": []
+     }
+    }
+   ],
+   "cameras": [
+    "Askar FRA400"
+   ],
+   "lights": 32,
+   "hours": 2.7,
+   "nights": 1,
+   "sessions": 1,
+   "firstNight": "2026-06-28",
+   "lastNight": "2026-06-28",
+   "state": "stacked",
+   "pendingProgrammes": 1,
+   "statusCards": [
+    {
+     "target": "Leo Triplet",
+     "label": "Leo Triplet",
+     "camera": "Askar FRA400",
+     "state": "stacked",
+     "hours": 2.7,
+     "nights": 1,
+     "lights": 32,
+     "lastNight": "2026-06-28",
+     "readyOn": null,
+     "evidence": "no new frames since 28 Jun 2026 (110 nights); nothing started",
+     "action": "Process it",
+     "source": "worked out by the importer",
+     "badges": [
+      "on the archive"
+     ],
+     "rel": "ZWO Askar Scopes/Leo Triplet"
+    }
+   ]
+  },
+  {
+   "id": "M84",
+   "name": "Markarian's Chain",
+   "codes": [
+    "M 84",
+    "M 86"
+   ],
+   "type": "Galaxy group",
+   "constellation": "Virgo",
+   "ra": 12.45,
+   "dec": 12.95,
+   "mosaic": false,
+   "programmes": [
+    {
+     "camera": "Askar FRA400",
+     "folder": "Markarian's Chain",
+     "path": "E:\\ZWO Askar Scopes\\Markarian's Chain",
+     "rel": "ZWO Askar Scopes/Markarian's Chain",
+     "lights": 40,
+     "autostacks": 0,
+     "autostackFrames": 0,
+     "processedFiles": 1,
+     "processedFinals": 1,
+     "masters": 0,
+     "working": 0,
+     "thumbs": 0,
+     "other": 0,
+     "mosaic": false,
+     "collectFiles": 0,
+     "collected": false,
+     "hours": 3.3,
+     "bytes": 2480000000,
+     "sizeAll": 2480000000,
+     "nights": 2,
+     "firstNight": "2026-06-28",
+     "lastNight": "2026-07-02",
+     "filters": {
+      "L-eXtreme": 20,
+      "UV/IR": 20
+     },
+     "exposures": {
+      "300": 40
+     },
+     "panels": [],
+     "gains": {},
+     "askar": {},
+     "where": [
+      "on the archive"
+     ],
+     "status": "done",
+     "readyOn": null,
+     "evidence": "finished picture M84_Markarian's-Chain__2026-09_FRA400.jpg",
+     "action": "",
+     "calibration": {
+      "applies": true,
+      "missing": []
+     }
+    }
+   ],
+   "cameras": [
+    "Askar FRA400"
+   ],
+   "lights": 40,
+   "hours": 3.3,
+   "nights": 2,
+   "sessions": 2,
+   "firstNight": "2026-06-28",
+   "lastNight": "2026-07-02",
+   "state": "complete",
+   "pendingProgrammes": 0,
+   "statusCards": [
+    {
+     "target": "Markarian's Chain",
+     "label": "Markarian's Chain",
+     "camera": "Askar FRA400",
+     "state": "complete",
+     "hours": 3.3,
+     "nights": 2,
+     "lights": 40,
+     "lastNight": "2026-07-02",
+     "readyOn": null,
+     "evidence": "finished picture M84_Markarian's-Chain__2026-09_FRA400.jpg",
+     "action": "",
+     "source": "worked out by the importer",
+     "badges": [
+      "on the archive"
+     ],
+     "rel": "ZWO Askar Scopes/Markarian's Chain"
+    }
+   ]
+  },
+  {
+   "id": "MW",
+   "name": "Milky Way Core",
+   "codes": [
+    "MW"
+   ],
+   "type": "Milky Way",
+   "constellation": "Sagittarius",
+   "ra": 17.76,
+   "dec": -29.0,
+   "mosaic": false,
+   "programmes": [
+    {
+     "camera": "Seestar S30 Pro",
+     "folder": "Milky Way Core",
+     "path": "E:\\S30P\\Milky Way Core",
+     "rel": "S30P/Milky Way Core",
+     "lights": 2150,
+     "autostacks": 3,
+     "autostackFrames": 0,
+     "processedFiles": 0,
+     "processedFinals": 0,
+     "masters": 0,
+     "working": 0,
+     "thumbs": 0,
+     "other": 0,
+     "mosaic": false,
+     "collectFiles": 0,
+     "collected": false,
+     "hours": 0.0,
+     "bytes": 8600000000,
+     "sizeAll": 8600000000,
+     "nights": 10,
+     "firstNight": "2026-03-30",
+     "lastNight": "2026-08-28",
+     "filters": {
+      "unrecorded": 2150
+     },
+     "exposures": {},
+     "panels": [],
+     "gains": {},
+     "askar": {},
+     "where": [
+      "on the archive"
+     ],
+     "status": "ready_to_process",
+     "readyOn": null,
+     "evidence": "no new frames since 28 Aug 2026 (49 nights); nothing started; exposure not recorded in these frames; integration unknown",
+     "action": "Process it",
+     "calibration": {
+      "applies": false,
+      "missing": []
+     }
+    }
+   ],
+   "cameras": [
+    "Seestar S30 Pro"
+   ],
+   "lights": 2150,
+   "hours": 0.0,
+   "nights": 10,
+   "sessions": 10,
+   "firstNight": "2026-03-30",
+   "lastNight": "2026-08-28",
+   "state": "stacked",
+   "pendingProgrammes": 1,
+   "statusCards": [
+    {
+     "target": "Milky Way Core",
+     "label": "Milky Way Core",
+     "camera": "Seestar S30 Pro",
+     "state": "stacked",
+     "hours": 0.0,
+     "nights": 10,
+     "lights": 2150,
+     "lastNight": "2026-08-28",
+     "readyOn": null,
+     "evidence": "no new frames since 28 Aug 2026 (49 nights); nothing started; exposure not recorded in these frames; integration unknown",
+     "action": "Process it",
+     "source": "worked out by the importer",
+     "badges": [
+      "on the archive"
+     ],
+     "rel": "S30P/Milky Way Core"
+    }
+   ]
+  },
+  {
+   "id": "NGC2174",
+   "name": "Monkey Head Nebula (NGC 2174)",
+   "codes": [
+    "NGC 2174"
+   ],
+   "type": "Emission nebula",
+   "constellation": "Orion",
+   "ra": 6.16,
+   "dec": 20.5,
+   "mosaic": false,
+   "programmes": [
+    {
+     "camera": "Askar 107PHQ",
+     "folder": "Monkey Head Nebula (NGC 2174)",
+     "path": "E:\\ZWO Askar Scopes\\Monkey Head Nebula (NGC 2174)",
+     "rel": "ZWO Askar Scopes/Monkey Head Nebula (NGC 2174)",
+     "lights": 58,
+     "autostacks": 0,
+     "autostackFrames": 0,
+     "processedFiles": 0,
+     "processedFinals": 0,
+     "masters": 0,
+     "working": 0,
+     "thumbs": 0,
+     "other": 0,
+     "mosaic": false,
+     "collectFiles": 0,
+     "collected": false,
+     "hours": 2.9,
+     "bytes": 3596000000,
+     "sizeAll": 3596000000,
+     "nights": 1,
+     "firstNight": "2026-07-04",
+     "lastNight": "2026-07-04",
+     "filters": {
+      "L": 58
+     },
+     "exposures": {
+      "180": 58
+     },
+     "panels": [],
+     "gains": {},
+     "askar": {},
+     "where": [
+      "on the archive"
+     ],
+     "status": "ready_to_process",
+     "readyOn": null,
+     "evidence": "no new frames since 4 Jul 2026 (104 nights); nothing started; no darks or flats linked to its lights",
+     "action": "Process it",
+     "calibration": {
+      "applies": true,
+      "missing": [
+       "darks",
+       "flats"
+      ]
+     }
+    }
+   ],
+   "cameras": [
+    "Askar 107PHQ"
+   ],
+   "lights": 58,
+   "hours": 2.9,
+   "nights": 1,
+   "sessions": 1,
+   "firstNight": "2026-07-04",
+   "lastNight": "2026-07-04",
+   "state": "stacked",
+   "pendingProgrammes": 1,
+   "statusCards": [
+    {
+     "target": "Monkey Head Nebula (NGC 2174)",
+     "label": "Monkey Head Nebula (NGC 2174)",
+     "camera": "Askar 107PHQ",
+     "state": "stacked",
+     "hours": 2.9,
+     "nights": 1,
+     "lights": 58,
+     "lastNight": "2026-07-04",
+     "readyOn": null,
+     "evidence": "no new frames since 4 Jul 2026 (104 nights); nothing started; no darks or flats linked to its lights",
+     "action": "Process it",
+     "source": "worked out by the importer",
+     "badges": [
+      "on the archive"
+     ],
+     "rel": "ZWO Askar Scopes/Monkey Head Nebula (NGC 2174)"
+    }
+   ]
+  },
+  {
+   "id": "NGC7000",
+   "name": "North America Nebula (NGC 7000)",
+   "codes": [
+    "NGC 7000"
+   ],
+   "type": "Emission nebula",
+   "constellation": "Cygnus",
+   "ra": 20.98,
+   "dec": 44.33,
+   "mosaic": false,
+   "programmes": [
+    {
+     "camera": "Seestar S30 Pro",
+     "folder": "North America Nebula (NGC 7000)",
+     "path": "E:\\S30P\\North America Nebula (NGC 7000)",
+     "rel": "S30P/North America Nebula (NGC 7000)",
+     "lights": 1188,
+     "autostacks": 3,
+     "autostackFrames": 0,
+     "processedFiles": 0,
+     "processedFinals": 0,
+     "masters": 0,
+     "working": 0,
+     "thumbs": 0,
+     "other": 0,
+     "mosaic": false,
+     "collectFiles": 0,
+     "collected": false,
+     "hours": 3.3,
+     "bytes": 4752000000,
+     "sizeAll": 4752000000,
+     "nights": 4,
+     "firstNight": "2026-02-19",
+     "lastNight": "2026-07-28",
+     "filters": {
+      "LP": 1188
+     },
+     "exposures": {
+      "10": 1188
+     },
+     "panels": [],
+     "gains": {},
+     "askar": {},
+     "where": [
+      "on the archive"
+     ],
+     "status": "ready_to_process",
+     "readyOn": null,
+     "evidence": "no new frames since 28 Jul 2026 (80 nights); nothing started",
+     "action": "Process it",
+     "calibration": {
+      "applies": false,
+      "missing": []
+     }
+    },
+    {
+     "camera": "Askar 107PHQ",
+     "folder": "North America Nebula (NGC 7000)",
+     "path": "E:\\ZWO Askar Scopes\\North America Nebula (NGC 7000)",
+     "rel": "ZWO Askar Scopes/North America Nebula (NGC 7000)",
+     "lights": 252,
+     "autostacks": 0,
+     "autostackFrames": 0,
+     "processedFiles": 1,
+     "processedFinals": 0,
+     "masters": 1,
+     "working": 0,
+     "thumbs": 0,
+     "other": 0,
+     "mosaic": false,
+     "collectFiles": 0,
+     "collected": false,
+     "hours": 12.6,
+     "bytes": 15624000000,
+     "sizeAll": 15624000000,
+     "nights": 5,
+     "firstNight": "2025-09-14",
+     "lastNight": "2025-11-24",
+     "filters": {
+      "Ha": 100,
+      "L": 102,
+      "OIII": 50
+     },
+     "exposures": {
+      "180": 252
+     },
+     "panels": [],
+     "gains": {},
+     "askar": {},
+     "where": [
+      "on the archive"
+     ],
+     "status": "in_progress",
+     "readyOn": null,
+     "evidence": "master saved: North America Nebula_master_107PHQ.xisf",
+     "action": "Finish it: process to a final",
+     "calibration": {
+      "applies": true,
+      "missing": [
+       "darks",
+       "flats"
+      ]
+     }
+    }
+   ],
+   "cameras": [
+    "Seestar S30 Pro",
+    "Askar 107PHQ"
+   ],
+   "lights": 1440,
+   "hours": 15.9,
+   "nights": 9,
+   "sessions": 9,
+   "firstNight": "2025-09-14",
+   "lastNight": "2026-07-28",
+   "state": "stacked",
+   "pendingProgrammes": 2,
+   "statusCards": [
+    {
+     "target": "North America Nebula (NGC 7000)",
+     "label": "North America Nebula (NGC 7000)",
+     "camera": "Seestar S30 Pro",
+     "state": "stacked",
+     "hours": 3.3,
+     "nights": 4,
+     "lights": 1188,
+     "lastNight": "2026-07-28",
+     "readyOn": null,
+     "evidence": "no new frames since 28 Jul 2026 (80 nights); nothing started",
+     "action": "Process it",
+     "source": "worked out by the importer",
+     "badges": [
+      "on the archive"
+     ],
+     "rel": "S30P/North America Nebula (NGC 7000)"
+    },
+    {
+     "target": "North America Nebula (NGC 7000)",
+     "label": "North America Nebula (NGC 7000)",
+     "camera": "Askar 107PHQ",
+     "state": "processing",
+     "hours": 12.6,
+     "nights": 5,
+     "lights": 252,
+     "lastNight": "2025-11-24",
+     "readyOn": null,
+     "evidence": "master saved: North America Nebula_master_107PHQ.xisf",
+     "action": "Finish it: process to a final",
+     "source": "worked out by the importer",
+     "badges": [
+      "on the archive"
+     ],
+     "rel": "ZWO Askar Scopes/North America Nebula (NGC 7000)"
+    }
+   ]
+  },
+  {
+   "id": "M17",
+   "name": "Omega Nebula (M 17)",
+   "codes": [
+    "M 17"
+   ],
+   "type": "Emission nebula",
+   "constellation": "Sagittarius",
+   "ra": 18.34,
+   "dec": -16.18,
+   "mosaic": false,
+   "programmes": [
+    {
+     "camera": "Starfront S50 Pro",
+     "folder": "Omega Nebula (M 17)",
+     "path": "E:\\Starfront\\Omega Nebula (M 17)",
+     "rel": "Starfront/Omega Nebula (M 17)",
+     "lights": 156,
+     "autostacks": 0,
+     "autostackFrames": 0,
+     "processedFiles": 0,
+     "processedFinals": 0,
+     "masters": 0,
+     "working": 0,
+     "thumbs": 0,
+     "other": 0,
+     "mosaic": false,
+     "collectFiles": 0,
+     "collected": false,
+     "hours": 1.3,
+     "bytes": 624000000,
+     "sizeAll": 624000000,
+     "nights": 1,
+     "firstNight": "2026-08-18",
+     "lastNight": "2026-08-18",
+     "filters": {
+      "LP": 156
+     },
+     "exposures": {
+      "30": 156
+     },
+     "panels": [],
+     "gains": {},
+     "askar": {},
+     "where": [
+      "on the archive"
+     ],
+     "status": "ready_to_process",
+     "readyOn": null,
+     "evidence": "no new frames since 18 Aug 2026 (59 nights); nothing started",
+     "action": "Process it",
+     "calibration": {
+      "applies": false,
+      "missing": []
+     }
+    }
+   ],
+   "cameras": [
+    "Starfront S50 Pro"
+   ],
+   "lights": 156,
+   "hours": 1.3,
+   "nights": 1,
+   "sessions": 1,
+   "firstNight": "2026-08-18",
+   "lastNight": "2026-08-18",
+   "state": "stacked",
+   "pendingProgrammes": 1,
+   "statusCards": [
+    {
+     "target": "Omega Nebula (M 17)",
+     "label": "Omega Nebula (M 17)",
+     "camera": "Starfront S50 Pro",
+     "state": "stacked",
+     "hours": 1.3,
+     "nights": 1,
+     "lights": 156,
+     "lastNight": "2026-08-18",
+     "readyOn": null,
+     "evidence": "no new frames since 18 Aug 2026 (59 nights); nothing started",
+     "action": "Process it",
+     "source": "worked out by the importer",
+     "badges": [
+      "on the archive"
+     ],
+     "rel": "Starfront/Omega Nebula (M 17)"
+    }
+   ]
+  },
+  {
+   "id": "M42",
+   "name": "Orion Nebula (M 42)",
+   "codes": [
+    "M 42",
+    "NGC 1976"
+   ],
+   "type": "Emission nebula",
+   "constellation": "Orion",
+   "ra": 5.59,
+   "dec": -5.39,
+   "mosaic": false,
+   "programmes": [
+    {
+     "camera": "Seestar S30 Pro",
+     "folder": "Orion Nebula (M 42)",
+     "path": "E:\\S30P\\Orion Nebula (M 42)",
+     "rel": "S30P/Orion Nebula (M 42)",
+     "lights": 540,
+     "autostacks": 3,
+     "autostackFrames": 0,
+     "processedFiles": 1,
+     "processedFinals": 1,
+     "masters": 0,
+     "working": 0,
+     "thumbs": 0,
+     "other": 0,
+     "mosaic": false,
+     "collectFiles": 0,
+     "collected": false,
+     "hours": 1.5,
+     "bytes": 2160000000,
+     "sizeAll": 2160000000,
+     "nights": 3,
+     "firstNight": "2025-07-12",
+     "lastNight": "2025-11-30",
+     "filters": {
+      "LP": 540
+     },
+     "exposures": {
+      "10": 540
+     },
+     "panels": [],
+     "gains": {},
+     "askar": {},
+     "where": [
+      "on the archive"
+     ],
+     "status": "done",
+     "readyOn": null,
+     "evidence": "finished picture M42_Orion-Nebula__2026-09_S30P.jpg",
+     "action": "",
+     "calibration": {
+      "applies": false,
+      "missing": []
+     }
+    },
+    {
+     "camera": "Askar 107PHQ",
+     "folder": "Orion Nebula (M 42)",
+     "path": "E:\\ZWO Askar Scopes\\Orion Nebula (M 42)",
+     "rel": "ZWO Askar Scopes/Orion Nebula (M 42)",
+     "lights": 44,
+     "autostacks": 0,
+     "autostackFrames": 0,
+     "processedFiles": 0,
+     "processedFinals": 0,
+     "masters": 0,
+     "working": 0,
+     "thumbs": 0,
+     "other": 0,
+     "mosaic": false,
+     "collectFiles": 0,
+     "collected": false,
+     "hours": 2.2,
+     "bytes": 2728000000,
+     "sizeAll": 2728000000,
+     "nights": 1,
+     "firstNight": "2026-10-08",
+     "lastNight": "2026-10-08",
+     "filters": {
+      "OIII": 44
+     },
+     "exposures": {
+      "180": 44
+     },
+     "panels": [],
+     "gains": {},
+     "askar": {},
+     "where": [
+      "on the archive"
+     ],
+     "status": "capturing",
+     "readyOn": "2026-10-22",
+     "evidence": "last session 8 Oct 2026; ready to process from 22 Oct 2026",
+     "action": "Keep capturing",
+     "calibration": {
+      "applies": true,
+      "missing": []
+     }
+    }
+   ],
+   "cameras": [
+    "Seestar S30 Pro",
+    "Askar 107PHQ"
+   ],
+   "lights": 584,
+   "hours": 3.7,
+   "nights": 4,
+   "sessions": 4,
+   "firstNight": "2025-07-12",
+   "lastNight": "2026-10-08",
+   "state": "captured",
+   "pendingProgrammes": 1,
+   "statusCards": [
+    {
+     "target": "Orion Nebula (M 42)",
+     "label": "Orion Nebula (M 42)",
+     "camera": "Seestar S30 Pro",
+     "state": "complete",
+     "hours": 1.5,
+     "nights": 3,
+     "lights": 540,
+     "lastNight": "2025-11-30",
+     "readyOn": null,
+     "evidence": "finished picture M42_Orion-Nebula__2026-09_S30P.jpg",
+     "action": "",
+     "source": "worked out by the importer",
+     "badges": [
+      "on the archive"
+     ],
+     "rel": "S30P/Orion Nebula (M 42)"
+    },
+    {
+     "target": "Orion Nebula (M 42)",
+     "label": "Orion Nebula (M 42)",
+     "camera": "Askar 107PHQ",
+     "state": "captured",
+     "hours": 2.2,
+     "nights": 1,
+     "lights": 44,
+     "lastNight": "2026-10-08",
+     "readyOn": "2026-10-22",
+     "evidence": "last session 8 Oct 2026; ready to process from 22 Oct 2026",
+     "action": "Keep capturing",
+     "source": "worked out by the importer",
+     "badges": [
+      "on the archive"
+     ],
+     "rel": "ZWO Askar Scopes/Orion Nebula (M 42)"
+    }
+   ]
+  },
+  {
+   "id": "NGC281",
+   "name": "Pacman Nebula (NGC 281)",
+   "codes": [
+    "NGC 281"
+   ],
+   "type": "Emission nebula",
+   "constellation": "Cassiopeia",
+   "ra": 0.88,
+   "dec": 56.62,
+   "mosaic": false,
+   "programmes": [
+    {
+     "camera": "Askar 107PHQ",
+     "folder": "Pacman Nebula (NGC 281)",
+     "path": "E:\\ZWO Askar Scopes\\Pacman Nebula (NGC 281)",
+     "rel": "ZWO Askar Scopes/Pacman Nebula (NGC 281)",
+     "lights": 104,
+     "autostacks": 0,
+     "autostackFrames": 0,
+     "processedFiles": 0,
+     "processedFinals": 0,
+     "masters": 0,
+     "working": 0,
+     "thumbs": 0,
+     "other": 0,
+     "mosaic": false,
+     "collectFiles": 0,
+     "collected": false,
+     "hours": 5.2,
+     "bytes": 6448000000,
+     "sizeAll": 6448000000,
+     "nights": 2,
+     "firstNight": "2026-04-06",
+     "lastNight": "2026-06-29",
+     "filters": {
+      "Ha": 52,
+      "OIII": 52
+     },
+     "exposures": {
+      "180": 104
+     },
+     "panels": [],
+     "gains": {},
+     "askar": {},
+     "where": [
+      "on the archive"
+     ],
+     "status": "ready_to_process",
+     "readyOn": null,
+     "evidence": "no new frames since 29 Jun 2026 (109 nights); nothing started; no flats linked to its lights",
+     "action": "Process it",
+     "calibration": {
+      "applies": true,
+      "missing": [
+       "flats"
+      ]
+     }
+    }
+   ],
+   "cameras": [
+    "Askar 107PHQ"
+   ],
+   "lights": 104,
+   "hours": 5.2,
+   "nights": 2,
+   "sessions": 2,
+   "firstNight": "2026-04-06",
+   "lastNight": "2026-06-29",
+   "state": "stacked",
+   "pendingProgrammes": 1,
+   "statusCards": [
+    {
+     "target": "Pacman Nebula (NGC 281)",
+     "label": "Pacman Nebula (NGC 281)",
+     "camera": "Askar 107PHQ",
+     "state": "stacked",
+     "hours": 5.2,
+     "nights": 2,
+     "lights": 104,
+     "lastNight": "2026-06-29",
+     "readyOn": null,
+     "evidence": "no new frames since 29 Jun 2026 (109 nights); nothing started; no flats linked to its lights",
+     "action": "Process it",
+     "source": "worked out by the importer",
+     "badges": [
+      "on the archive"
+     ],
+     "rel": "ZWO Askar Scopes/Pacman Nebula (NGC 281)"
+    }
+   ]
+  },
+  {
+   "id": "IC5070",
+   "name": "Pelican Nebula (IC 5070)",
+   "codes": [
+    "IC 5070"
+   ],
+   "type": "Emission nebula",
+   "constellation": "Cygnus",
+   "ra": 20.85,
+   "dec": 44.37,
+   "mosaic": false,
+   "programmes": [
+    {
+     "camera": "Askar 107PHQ",
+     "folder": "Pelican Nebula (IC 5070)",
+     "path": "E:\\ZWO Askar Scopes\\Pelican Nebula (IC 5070)",
+     "rel": "ZWO Askar Scopes/Pelican Nebula (IC 5070)",
+     "lights": 110,
+     "autostacks": 0,
+     "autostackFrames": 0,
+     "processedFiles": 0,
+     "processedFinals": 0,
+     "masters": 0,
+     "working": 0,
+     "thumbs": 0,
+     "other": 0,
+     "mosaic": false,
+     "collectFiles": 0,
+     "collected": false,
+     "hours": 5.5,
+     "bytes": 6820000000,
+     "sizeAll": 6820000000,
+     "nights": 3,
+     "firstNight": "2026-03-12",
+     "lastNight": "2026-07-24",
+     "filters": {
+      "SII": 36,
+      "L": 36,
+      "Ha": 38
+     },
+     "exposures": {
+      "180": 110
+     },
+     "panels": [],
+     "gains": {},
+     "askar": {},
+     "where": [
+      "on the archive"
+     ],
+     "status": "ready_to_process",
+     "readyOn": null,
+     "evidence": "no new frames since 24 Jul 2026 (84 nights); nothing started; no flats linked to its lights",
+     "action": "Process it",
+     "calibration": {
+      "applies": true,
+      "missing": [
+       "flats"
+      ]
+     }
+    }
+   ],
+   "cameras": [
+    "Askar 107PHQ"
+   ],
+   "lights": 110,
+   "hours": 5.5,
+   "nights": 3,
+   "sessions": 3,
+   "firstNight": "2026-03-12",
+   "lastNight": "2026-07-24",
+   "state": "stacked",
+   "pendingProgrammes": 1,
+   "statusCards": [
+    {
+     "target": "Pelican Nebula (IC 5070)",
+     "label": "Pelican Nebula (IC 5070)",
+     "camera": "Askar 107PHQ",
+     "state": "stacked",
+     "hours": 5.5,
+     "nights": 3,
+     "lights": 110,
+     "lastNight": "2026-07-24",
+     "readyOn": null,
+     "evidence": "no new frames since 24 Jul 2026 (84 nights); nothing started; no flats linked to its lights",
+     "action": "Process it",
+     "source": "worked out by the importer",
+     "badges": [
+      "on the archive"
+     ],
+     "rel": "ZWO Askar Scopes/Pelican Nebula (IC 5070)"
+    }
+   ]
+  },
+  {
+   "id": "M101",
+   "name": "Pinwheel Galaxy (M 101)",
+   "codes": [
+    "M 101"
+   ],
+   "type": "Galaxy",
+   "constellation": "Ursa Major",
+   "ra": 14.05,
+   "dec": 54.35,
+   "mosaic": false,
+   "programmes": [
+    {
+     "camera": "Askar 107PHQ",
+     "folder": "Pinwheel Galaxy (M 101)",
+     "path": "E:\\ZWO Askar Scopes\\Pinwheel Galaxy (M 101)",
+     "rel": "ZWO Askar Scopes/Pinwheel Galaxy (M 101)",
+     "lights": 132,
+     "autostacks": 0,
+     "autostackFrames": 0,
+     "processedFiles": 1,
+     "processedFinals": 1,
+     "masters": 0,
+     "working": 0,
+     "thumbs": 0,
+     "other": 0,
+     "mosaic": false,
+     "collectFiles": 0,
+     "collected": false,
+     "hours": 6.6,
+     "bytes": 8184000000,
+     "sizeAll": 8184000000,
+     "nights": 3,
+     "firstNight": "2025-11-15",
+     "lastNight": "2026-03-31",
+     "filters": {
+      "OIII": 88,
+      "Ha": 44
+     },
+     "exposures": {
+      "180": 132
+     },
+     "panels": [],
+     "gains": {},
+     "askar": {},
+     "where": [
+      "on the archive"
+     ],
+     "status": "done",
+     "readyOn": null,
+     "evidence": "finished picture M101_Pinwheel-Galaxy__2026-09_107PHQ.jpg",
+     "action": "",
+     "calibration": {
+      "applies": true,
+      "missing": []
+     }
+    }
+   ],
+   "cameras": [
+    "Askar 107PHQ"
+   ],
+   "lights": 132,
+   "hours": 6.6,
+   "nights": 3,
+   "sessions": 3,
+   "firstNight": "2025-11-15",
+   "lastNight": "2026-03-31",
+   "state": "complete",
+   "pendingProgrammes": 0,
+   "statusCards": [
+    {
+     "target": "Pinwheel Galaxy (M 101)",
+     "label": "Pinwheel Galaxy (M 101)",
+     "camera": "Askar 107PHQ",
+     "state": "complete",
+     "hours": 6.6,
+     "nights": 3,
+     "lights": 132,
+     "lastNight": "2026-03-31",
+     "readyOn": null,
+     "evidence": "finished picture M101_Pinwheel-Galaxy__2026-09_107PHQ.jpg",
+     "action": "",
+     "source": "worked out by the importer",
+     "badges": [
+      "on the archive"
+     ],
+     "rel": "ZWO Askar Scopes/Pinwheel Galaxy (M 101)"
+    }
+   ]
+  },
+  {
+   "id": "M45",
+   "name": "Pleiades (M 45)",
+   "codes": [
+    "M 45"
+   ],
+   "type": "Open cluster",
+   "constellation": "Taurus",
+   "ra": 3.79,
+   "dec": 24.1,
+   "mosaic": false,
+   "programmes": [
+    {
+     "camera": "Seestar S50 Pro",
+     "folder": "Pleiades (M 45)",
+     "path": "E:\\S50P\\Pleiades (M 45)",
+     "rel": "S50P/Pleiades (M 45)",
+     "lights": 342,
+     "autostacks": 3,
+     "autostackFrames": 0,
+     "processedFiles": 0,
+     "processedFinals": 0,
+     "masters": 0,
+     "working": 0,
+     "thumbs": 0,
+     "other": 0,
+     "mosaic": false,
+     "collectFiles": 0,
+     "collected": false,
+     "hours": 1.9,
+     "bytes": 1368000000,
+     "sizeAll": 1368000000,
+     "nights": 2,
+     "firstNight": "2026-05-16",
+     "lastNight": "2026-06-26",
+     "filters": {
+      "LP": 342
+     },
+     "exposures": {
+      "20": 342
+     },
+     "panels": [],
+     "gains": {},
+     "askar": {},
+     "where": [
+      "on the archive"
+     ],
+     "status": "ready_to_process",
+     "readyOn": null,
+     "evidence": "no new frames since 26 Jun 2026 (112 nights); nothing started",
+     "action": "Process it",
+     "calibration": {
+      "applies": false,
+      "missing": []
+     }
+    },
+    {
+     "camera": "Askar FRA400",
+     "folder": "Pleiades (M 45)",
+     "path": "E:\\ZWO Askar Scopes\\Pleiades (M 45)",
+     "rel": "ZWO Askar Scopes/Pleiades (M 45)",
+     "lights": 65,
+     "autostacks": 0,
+     "autostackFrames": 0,
+     "processedFiles": 1,
+     "processedFinals": 1,
+     "masters": 0,
+     "working": 0,
+     "thumbs": 0,
+     "other": 0,
+     "mosaic": false,
+     "collectFiles": 0,
+     "collected": false,
+     "hours": 5.4,
+     "bytes": 4030000000,
+     "sizeAll": 4030000000,
+     "nights": 2,
+     "firstNight": "2026-07-15",
+     "lastNight": "2026-08-23",
+     "filters": {
+      "UV/IR": 65
+     },
+     "exposures": {
+      "300": 65
+     },
+     "panels": [],
+     "gains": {},
+     "askar": {},
+     "where": [
+      "on the archive"
+     ],
+     "status": "done",
+     "readyOn": null,
+     "evidence": "finished picture M45_Pleiades__2026-09_FRA400.jpg",
+     "action": "",
+     "calibration": {
+      "applies": true,
+      "missing": []
+     }
+    }
+   ],
+   "cameras": [
+    "Seestar S50 Pro",
+    "Askar FRA400"
+   ],
+   "lights": 407,
+   "hours": 7.3,
+   "nights": 4,
+   "sessions": 4,
+   "firstNight": "2026-05-16",
+   "lastNight": "2026-08-23",
+   "state": "stacked",
+   "pendingProgrammes": 1,
+   "statusCards": [
+    {
+     "target": "Pleiades (M 45)",
+     "label": "Pleiades (M 45)",
+     "camera": "Seestar S50 Pro",
+     "state": "stacked",
+     "hours": 1.9,
+     "nights": 2,
+     "lights": 342,
+     "lastNight": "2026-06-26",
+     "readyOn": null,
+     "evidence": "no new frames since 26 Jun 2026 (112 nights); nothing started",
+     "action": "Process it",
+     "source": "worked out by the importer",
+     "badges": [
+      "on the archive"
+     ],
+     "rel": "S50P/Pleiades (M 45)"
+    },
+    {
+     "target": "Pleiades (M 45)",
+     "label": "Pleiades (M 45)",
+     "camera": "Askar FRA400",
+     "state": "complete",
+     "hours": 5.4,
+     "nights": 2,
+     "lights": 65,
+     "lastNight": "2026-08-23",
+     "readyOn": null,
+     "evidence": "finished picture M45_Pleiades__2026-09_FRA400.jpg",
+     "action": "",
+     "source": "worked out by the importer",
+     "badges": [
+      "on the archive"
+     ],
+     "rel": "ZWO Askar Scopes/Pleiades (M 45)"
+    }
+   ]
+  },
+  {
+   "id": "M57",
+   "name": "Ring Nebula (M 57)",
+   "codes": [
+    "M 57"
+   ],
+   "type": "Planetary nebula",
+   "constellation": "Lyra",
+   "ra": 18.89,
+   "dec": 33.03,
+   "mosaic": false,
+   "programmes": [
+    {
+     "camera": "Seestar S50 Pro",
+     "folder": "Ring Nebula (M 57)",
+     "path": "E:\\S50P\\Ring Nebula (M 57)",
+     "rel": "S50P/Ring Nebula (M 57)",
+     "lights": 108,
+     "autostacks": 3,
+     "autostackFrames": 0,
+     "processedFiles": 1,
+     "processedFinals": 1,
+     "masters": 0,
+     "working": 0,
+     "thumbs": 0,
+     "other": 0,
+     "mosaic": false,
+     "collectFiles": 0,
+     "collected": false,
+     "hours": 0.6,
+     "bytes": 432000000,
+     "sizeAll": 432000000,
+     "nights": 1,
+     "firstNight": "2026-03-17",
+     "lastNight": "2026-03-17",
+     "filters": {
+      "LP": 108
+     },
+     "exposures": {
+      "20": 108
+     },
+     "panels": [],
+     "gains": {},
+     "askar": {},
+     "where": [
+      "on the archive"
+     ],
+     "status": "done",
+     "readyOn": null,
+     "evidence": "finished picture M57_Ring-Nebula__2026-09_S50P.jpg",
+     "action": "",
+     "calibration": {
+      "applies": false,
+      "missing": []
+     }
+    }
+   ],
+   "cameras": [
+    "Seestar S50 Pro"
+   ],
+   "lights": 108,
+   "hours": 0.6,
+   "nights": 1,
+   "sessions": 1,
+   "firstNight": "2026-03-17",
+   "lastNight": "2026-03-17",
+   "state": "complete",
+   "pendingProgrammes": 0,
+   "statusCards": [
+    {
+     "target": "Ring Nebula (M 57)",
+     "label": "Ring Nebula (M 57)",
+     "camera": "Seestar S50 Pro",
+     "state": "complete",
+     "hours": 0.6,
+     "nights": 1,
+     "lights": 108,
+     "lastNight": "2026-03-17",
+     "readyOn": null,
+     "evidence": "finished picture M57_Ring-Nebula__2026-09_S50P.jpg",
+     "action": "",
+     "source": "worked out by the importer",
+     "badges": [
+      "on the archive"
+     ],
+     "rel": "S50P/Ring Nebula (M 57)"
+    }
+   ]
+  },
+  {
+   "id": "NGC2237",
+   "name": "Rosette Nebula (NGC 2237)",
+   "codes": [
+    "NGC 2237",
+    "NGC 2244"
+   ],
+   "type": "Emission nebula",
+   "constellation": "Monoceros",
+   "ra": 6.53,
+   "dec": 4.95,
+   "mosaic": false,
+   "programmes": [
+    {
+     "camera": "Askar FRA400",
+     "folder": "Rosette Nebula (NGC 2237)",
+     "path": "E:\\ZWO Askar Scopes\\Rosette Nebula (NGC 2237)",
+     "rel": "ZWO Askar Scopes/Rosette Nebula (NGC 2237)",
+     "lights": 107,
+     "autostacks": 0,
+     "autostackFrames": 0,
+     "processedFiles": 0,
+     "processedFinals": 0,
+     "masters": 0,
+     "working": 0,
+     "thumbs": 0,
+     "other": 0,
+     "mosaic": false,
+     "collectFiles": 0,
+     "collected": false,
+     "hours": 8.9,
+     "bytes": 6634000000,
+     "sizeAll": 6634000000,
+     "nights": 4,
+     "firstNight": "2026-05-15",
+     "lastNight": "2026-09-10",
+     "filters": {
+      "UV/IR": 26,
+      "L-eXtreme": 81
+     },
+     "exposures": {
+      "300": 107
+     },
+     "panels": [],
+     "gains": {},
+     "askar": {},
+     "where": [
+      "on the archive"
+     ],
+     "status": "ready_to_process",
+     "readyOn": null,
+     "evidence": "no new frames since 10 Sep 2026 (36 nights); nothing started",
+     "action": "Process it",
+     "calibration": {
+      "applies": true,
+      "missing": []
+     }
+    }
+   ],
+   "cameras": [
+    "Askar FRA400"
+   ],
+   "lights": 107,
+   "hours": 8.9,
+   "nights": 4,
+   "sessions": 4,
+   "firstNight": "2026-05-15",
+   "lastNight": "2026-09-10",
+   "state": "stacked",
+   "pendingProgrammes": 1,
+   "statusCards": [
+    {
+     "target": "Rosette Nebula (NGC 2237)",
+     "label": "Rosette Nebula (NGC 2237)",
+     "camera": "Askar FRA400",
+     "state": "stacked",
+     "hours": 8.9,
+     "nights": 4,
+     "lights": 107,
+     "lastNight": "2026-09-10",
+     "readyOn": null,
+     "evidence": "no new frames since 10 Sep 2026 (36 nights); nothing started",
+     "action": "Process it",
+     "source": "worked out by the importer",
+     "badges": [
+      "on the archive"
+     ],
+     "rel": "ZWO Askar Scopes/Rosette Nebula (NGC 2237)"
+    }
+   ]
+  },
+  {
+   "id": "IC1318",
+   "name": "Sadr Region (IC 1318)",
+   "codes": [
+    "IC 1318"
+   ],
+   "type": "Emission nebula",
+   "constellation": "Cygnus",
+   "ra": 20.37,
+   "dec": 40.25,
+   "mosaic": false,
+   "programmes": [
+    {
+     "camera": "Seestar S30 Pro",
+     "folder": "Sadr Region (IC 1318)",
+     "path": "E:\\S30P\\Sadr Region (IC 1318)",
+     "rel": "S30P/Sadr Region (IC 1318)",
+     "lights": 504,
+     "autostacks": 3,
+     "autostackFrames": 0,
+     "processedFiles": 0,
+     "processedFinals": 0,
+     "masters": 0,
+     "working": 0,
+     "thumbs": 0,
+     "other": 0,
+     "mosaic": false,
+     "collectFiles": 0,
+     "collected": false,
+     "hours": 1.4,
+     "bytes": 2016000000,
+     "sizeAll": 2016000000,
+     "nights": 2,
+     "firstNight": "2026-08-01",
+     "lastNight": "2026-08-07",
+     "filters": {
+      "LP": 504
+     },
+     "exposures": {
+      "10": 504
+     },
+     "panels": [],
+     "gains": {},
+     "askar": {},
+     "where": [
+      "on the archive"
+     ],
+     "status": "ready_to_process",
+     "readyOn": null,
+     "evidence": "no new frames since 7 Aug 2026 (70 nights); nothing started",
+     "action": "Process it",
+     "calibration": {
+      "applies": false,
+      "missing": []
+     }
+    }
+   ],
+   "cameras": [
+    "Seestar S30 Pro"
+   ],
+   "lights": 504,
+   "hours": 1.4,
+   "nights": 2,
+   "sessions": 2,
+   "firstNight": "2026-08-01",
+   "lastNight": "2026-08-07",
+   "state": "stacked",
+   "pendingProgrammes": 1,
+   "statusCards": [
+    {
+     "target": "Sadr Region (IC 1318)",
+     "label": "Sadr Region (IC 1318)",
+     "camera": "Seestar S30 Pro",
+     "state": "stacked",
+     "hours": 1.4,
+     "nights": 2,
+     "lights": 504,
+     "lastNight": "2026-08-07",
+     "readyOn": null,
+     "evidence": "no new frames since 7 Aug 2026 (70 nights); nothing started",
+     "action": "Process it",
+     "source": "worked out by the importer",
+     "badges": [
+      "on the archive"
+     ],
+     "rel": "S30P/Sadr Region (IC 1318)"
+    }
+   ]
+  },
+  {
+   "id": "IC1848",
+   "name": "Soul Nebula (IC 1848)",
+   "codes": [
+    "IC 1848"
+   ],
+   "type": "Emission nebula",
+   "constellation": "Cassiopeia",
+   "ra": 2.86,
+   "dec": 60.4,
+   "mosaic": false,
+   "programmes": [
+    {
+     "camera": "Askar FRA400",
+     "folder": "Soul Nebula (IC 1848)",
+     "path": "E:\\ZWO Askar Scopes\\Soul Nebula (IC 1848)",
+     "rel": "ZWO Askar Scopes/Soul Nebula (IC 1848)",
+     "lights": 92,
+     "autostacks": 0,
+     "autostackFrames": 0,
+     "processedFiles": 0,
+     "processedFinals": 0,
+     "masters": 0,
+     "working": 0,
+     "thumbs": 0,
+     "other": 0,
+     "mosaic": false,
+     "collectFiles": 0,
+     "collected": false,
+     "hours": 7.7,
+     "bytes": 5704000000,
+     "sizeAll": 5704000000,
+     "nights": 3,
+     "firstNight": "2026-04-07",
+     "lastNight": "2026-08-08",
+     "filters": {
+      "L-eXtreme": 30,
+      "UV/IR": 62
+     },
+     "exposures": {
+      "300": 92
+     },
+     "panels": [],
+     "gains": {},
+     "askar": {},
+     "where": [
+      "on the archive"
+     ],
+     "status": "ready_to_process",
+     "readyOn": null,
+     "evidence": "no new frames since 8 Aug 2026 (69 nights); nothing started",
+     "action": "Process it",
+     "calibration": {
+      "applies": true,
+      "missing": []
+     }
+    }
+   ],
+   "cameras": [
+    "Askar FRA400"
+   ],
+   "lights": 92,
+   "hours": 7.7,
+   "nights": 3,
+   "sessions": 3,
+   "firstNight": "2026-04-07",
+   "lastNight": "2026-08-08",
+   "state": "stacked",
+   "pendingProgrammes": 1,
+   "statusCards": [
+    {
+     "target": "Soul Nebula (IC 1848)",
+     "label": "Soul Nebula (IC 1848)",
+     "camera": "Askar FRA400",
+     "state": "stacked",
+     "hours": 7.7,
+     "nights": 3,
+     "lights": 92,
+     "lastNight": "2026-08-08",
+     "readyOn": null,
+     "evidence": "no new frames since 8 Aug 2026 (69 nights); nothing started",
+     "action": "Process it",
+     "source": "worked out by the importer",
+     "badges": [
+      "on the archive"
+     ],
+     "rel": "ZWO Askar Scopes/Soul Nebula (IC 1848)"
+    }
+   ]
+  },
+  {
+   "id": "OU4",
+   "name": "Squid Nebula (OU 4)",
+   "codes": [
+    "OU 4",
+    "Sh2-129"
+   ],
+   "type": "Emission nebula",
+   "constellation": "Cepheus",
+   "ra": 21.19,
+   "dec": 59.98,
+   "mosaic": false,
+   "programmes": [
+    {
+     "camera": "Askar FRA400",
+     "folder": "Squid Nebula (OU 4)",
+     "path": "E:\\ZWO Askar Scopes\\Squid Nebula (OU 4)",
+     "rel": "ZWO Askar Scopes/Squid Nebula (OU 4)",
+     "lights": 170,
+     "autostacks": 0,
+     "autostackFrames": 0,
+     "processedFiles": 0,
+     "processedFinals": 0,
+     "masters": 0,
+     "working": 0,
+     "thumbs": 0,
+     "other": 0,
+     "mosaic": false,
+     "collectFiles": 0,
+     "collected": false,
+     "hours": 14.2,
+     "bytes": 10540000000,
+     "sizeAll": 10540000000,
+     "nights": 6,
+     "firstNight": "2026-04-05",
+     "lastNight": "2026-08-07",
+     "filters": {
+      "L-eXtreme": 84,
+      "UV/IR": 86
+     },
+     "exposures": {
+      "300": 170
+     },
+     "panels": [],
+     "gains": {},
+     "askar": {},
+     "where": [
+      "on the archive"
+     ],
+     "status": "ready_to_process",
+     "readyOn": null,
+     "evidence": "no new frames since 7 Aug 2026 (70 nights); nothing started",
+     "action": "Process it",
+     "calibration": {
+      "applies": true,
+      "missing": []
+     }
+    }
+   ],
+   "cameras": [
+    "Askar FRA400"
+   ],
+   "lights": 170,
+   "hours": 14.2,
+   "nights": 6,
+   "sessions": 6,
+   "firstNight": "2026-04-05",
+   "lastNight": "2026-08-07",
+   "state": "stacked",
+   "pendingProgrammes": 1,
+   "statusCards": [
+    {
+     "target": "Squid Nebula (OU 4)",
+     "label": "Squid Nebula (OU 4)",
+     "camera": "Askar FRA400",
+     "state": "stacked",
+     "hours": 14.2,
+     "nights": 6,
+     "lights": 170,
+     "lastNight": "2026-08-07",
+     "readyOn": null,
+     "evidence": "no new frames since 7 Aug 2026 (70 nights); nothing started",
+     "action": "Process it",
+     "source": "worked out by the importer",
+     "badges": [
+      "on the archive"
+     ],
+     "rel": "ZWO Askar Scopes/Squid Nebula (OU 4)"
+    }
+   ]
+  },
+  {
+   "id": "M33",
+   "name": "Triangulum Galaxy (M 33)",
+   "codes": [
+    "M 33"
+   ],
+   "type": "Galaxy",
+   "constellation": "Triangulum",
+   "ra": 1.56,
+   "dec": 30.66,
+   "mosaic": false,
+   "programmes": [
+    {
+     "camera": "Askar 107PHQ",
+     "folder": "Triangulum Galaxy (M 33)",
+     "path": "E:\\ZWO Askar Scopes\\Triangulum Galaxy (M 33)",
+     "rel": "ZWO Askar Scopes/Triangulum Galaxy (M 33)",
+     "lights": 158,
+     "autostacks": 0,
+     "autostackFrames": 0,
+     "processedFiles": 0,
+     "processedFinals": 0,
+     "masters": 0,
+     "working": 0,
+     "thumbs": 0,
+     "other": 0,
+     "mosaic": false,
+     "collectFiles": 0,
+     "collected": false,
+     "hours": 7.9,
+     "bytes": 9796000000,
+     "sizeAll": 9796000000,
+     "nights": 4,
+     "firstNight": "2026-08-10",
+     "lastNight": "2026-10-16",
+     "filters": {
+      "OIII": 39,
+      "Ha": 39,
+      "SII": 80
+     },
+     "exposures": {
+      "180": 158
+     },
+     "panels": [],
+     "gains": {},
+     "askar": {},
+     "where": [
+      "on the archive",
+      "still on the Mac"
+     ],
+     "status": "capturing",
+     "readyOn": "2026-10-30",
+     "evidence": "last session 16 Oct 2026; ready to process from 30 Oct 2026",
+     "action": "Keep capturing",
+     "calibration": {
+      "applies": true,
+      "missing": []
+     }
+    },
+    {
+     "camera": "Seestar S30 Pro",
+     "folder": "Triangulum Galaxy (M 33)",
+     "path": "E:\\S30P\\Triangulum Galaxy (M 33)",
+     "rel": "S30P/Triangulum Galaxy (M 33)",
+     "lights": 576,
+     "autostacks": 3,
+     "autostackFrames": 0,
+     "processedFiles": 0,
+     "processedFinals": 0,
+     "masters": 0,
+     "working": 0,
+     "thumbs": 0,
+     "other": 0,
+     "mosaic": false,
+     "collectFiles": 0,
+     "collected": false,
+     "hours": 1.6,
+     "bytes": 2304000000,
+     "sizeAll": 2304000000,
+     "nights": 3,
+     "firstNight": "2026-07-06",
+     "lastNight": "2026-09-12",
+     "filters": {
+      "LP": 576
+     },
+     "exposures": {
+      "10": 576
+     },
+     "panels": [],
+     "gains": {},
+     "askar": {},
+     "where": [
+      "on the archive"
+     ],
+     "status": "ready_to_process",
+     "readyOn": null,
+     "evidence": "no new frames since 12 Sep 2026 (34 nights); nothing started",
+     "action": "Process it",
+     "calibration": {
+      "applies": false,
+      "missing": []
+     }
+    }
+   ],
+   "cameras": [
+    "Askar 107PHQ",
+    "Seestar S30 Pro"
+   ],
+   "lights": 734,
+   "hours": 9.5,
+   "nights": 7,
+   "sessions": 7,
+   "firstNight": "2026-07-06",
+   "lastNight": "2026-10-16",
+   "state": "captured",
+   "pendingProgrammes": 2,
+   "statusCards": [
+    {
+     "target": "Triangulum Galaxy (M 33)",
+     "label": "Triangulum Galaxy (M 33)",
+     "camera": "Askar 107PHQ",
+     "state": "captured",
+     "hours": 7.9,
+     "nights": 4,
+     "lights": 158,
+     "lastNight": "2026-10-16",
+     "readyOn": "2026-10-30",
+     "evidence": "last session 16 Oct 2026; ready to process from 30 Oct 2026",
+     "action": "Keep capturing",
+     "source": "worked out by the importer",
+     "badges": [
+      "on the archive",
+      "still on the Mac"
+     ],
+     "rel": "ZWO Askar Scopes/Triangulum Galaxy (M 33)"
+    },
+    {
+     "target": "Triangulum Galaxy (M 33)",
+     "label": "Triangulum Galaxy (M 33)",
+     "camera": "Seestar S30 Pro",
+     "state": "stacked",
+     "hours": 1.6,
+     "nights": 3,
+     "lights": 576,
+     "lastNight": "2026-09-12",
+     "readyOn": null,
+     "evidence": "no new frames since 12 Sep 2026 (34 nights); nothing started",
+     "action": "Process it",
+     "source": "worked out by the importer",
+     "badges": [
+      "on the archive"
+     ],
+     "rel": "S30P/Triangulum Galaxy (M 33)"
+    }
+   ]
+  },
+  {
+   "id": "M20",
+   "name": "Trifid Nebula (M 20)",
+   "codes": [
+    "M 20"
+   ],
+   "type": "Emission nebula",
+   "constellation": "Sagittarius",
+   "ra": 18.04,
+   "dec": -23.03,
+   "mosaic": false,
+   "programmes": [
+    {
+     "camera": "Starfront S50 Pro",
+     "folder": "Trifid Nebula (M 20)",
+     "path": "E:\\Starfront\\Trifid Nebula (M 20)",
+     "rel": "Starfront/Trifid Nebula (M 20)",
+     "lights": 204,
+     "autostacks": 0,
+     "autostackFrames": 0,
+     "processedFiles": 0,
+     "processedFinals": 0,
+     "masters": 0,
+     "working": 0,
+     "thumbs": 0,
+     "other": 0,
+     "mosaic": false,
+     "collectFiles": 0,
+     "collected": false,
+     "hours": 1.7,
+     "bytes": 816000000,
+     "sizeAll": 816000000,
+     "nights": 2,
+     "firstNight": "2026-06-29",
+     "lastNight": "2026-09-06",
+     "filters": {
+      "LP": 204
+     },
+     "exposures": {
+      "30": 204
+     },
+     "panels": [],
+     "gains": {},
+     "askar": {},
+     "where": [
+      "on the archive"
+     ],
+     "status": "ready_to_process",
+     "readyOn": null,
+     "evidence": "no new frames since 6 Sep 2026 (40 nights); nothing started",
+     "action": "Process it",
+     "calibration": {
+      "applies": false,
+      "missing": []
+     }
+    }
+   ],
+   "cameras": [
+    "Starfront S50 Pro"
+   ],
+   "lights": 204,
+   "hours": 1.7,
+   "nights": 2,
+   "sessions": 2,
+   "firstNight": "2026-06-29",
+   "lastNight": "2026-09-06",
+   "state": "stacked",
+   "pendingProgrammes": 1,
+   "statusCards": [
+    {
+     "target": "Trifid Nebula (M 20)",
+     "label": "Trifid Nebula (M 20)",
+     "camera": "Starfront S50 Pro",
+     "state": "stacked",
+     "hours": 1.7,
+     "nights": 2,
+     "lights": 204,
+     "lastNight": "2026-09-06",
+     "readyOn": null,
+     "evidence": "no new frames since 6 Sep 2026 (40 nights); nothing started",
+     "action": "Process it",
+     "source": "worked out by the importer",
+     "badges": [
+      "on the archive"
+     ],
+     "rel": "Starfront/Trifid Nebula (M 20)"
+    }
+   ]
+  },
+  {
+   "id": "Sh2-101",
+   "name": "Tulip Nebula (Sh2-101)",
+   "codes": [
+    "Sh2-101"
+   ],
+   "type": "Emission nebula",
+   "constellation": "Cygnus",
+   "ra": 19.99,
+   "dec": 35.28,
+   "mosaic": false,
+   "programmes": [
+    {
+     "camera": "Askar FRA400",
+     "folder": "Tulip Nebula (Sh2-101)",
+     "path": "E:\\ZWO Askar Scopes\\Tulip Nebula (Sh2-101)",
+     "rel": "ZWO Askar Scopes/Tulip Nebula (Sh2-101)",
+     "lights": 43,
+     "autostacks": 0,
+     "autostackFrames": 0,
+     "processedFiles": 0,
+     "processedFinals": 0,
+     "masters": 0,
+     "working": 0,
+     "thumbs": 0,
+     "other": 0,
+     "mosaic": false,
+     "collectFiles": 0,
+     "collected": false,
+     "hours": 3.6,
+     "bytes": 2666000000,
+     "sizeAll": 2666000000,
+     "nights": 2,
+     "firstNight": "2026-04-18",
+     "lastNight": "2026-08-26",
+     "filters": {
+      "L-eXtreme": 43
+     },
+     "exposures": {
+      "300": 43
+     },
+     "panels": [],
+     "gains": {},
+     "askar": {},
+     "where": [
+      "on the archive"
+     ],
+     "status": "ready_to_process",
+     "readyOn": null,
+     "evidence": "no new frames since 26 Aug 2026 (51 nights); nothing started",
+     "action": "Process it",
+     "calibration": {
+      "applies": true,
+      "missing": []
+     }
+    }
+   ],
+   "cameras": [
+    "Askar FRA400"
+   ],
+   "lights": 43,
+   "hours": 3.6,
+   "nights": 2,
+   "sessions": 2,
+   "firstNight": "2026-04-18",
+   "lastNight": "2026-08-26",
+   "state": "stacked",
+   "pendingProgrammes": 1,
+   "statusCards": [
+    {
+     "target": "Tulip Nebula (Sh2-101)",
+     "label": "Tulip Nebula (Sh2-101)",
+     "camera": "Askar FRA400",
+     "state": "stacked",
+     "hours": 3.6,
+     "nights": 2,
+     "lights": 43,
+     "lastNight": "2026-08-26",
+     "readyOn": null,
+     "evidence": "no new frames since 26 Aug 2026 (51 nights); nothing started",
+     "action": "Process it",
+     "source": "worked out by the importer",
+     "badges": [
+      "on the archive"
+     ],
+     "rel": "ZWO Askar Scopes/Tulip Nebula (Sh2-101)"
+    }
+   ]
+  },
+  {
+   "id": "NGC6960",
+   "name": "Veil Nebula (NGC 6960)",
+   "codes": [
+    "NGC 6960"
+   ],
+   "type": "Supernova remnant",
+   "constellation": "Cygnus",
+   "ra": 20.76,
+   "dec": 30.72,
+   "mosaic": false,
+   "programmes": [
+    {
+     "camera": "Askar FRA400",
+     "folder": "Veil Nebula (NGC 6960)",
+     "path": "E:\\ZWO Askar Scopes\\Veil Nebula (NGC 6960)",
+     "rel": "ZWO Askar Scopes/Veil Nebula (NGC 6960)",
+     "lights": 121,
+     "autostacks": 0,
+     "autostackFrames": 0,
+     "processedFiles": 1,
+     "processedFinals": 1,
+     "masters": 0,
+     "working": 0,
+     "thumbs": 0,
+     "other": 0,
+     "mosaic": false,
+     "collectFiles": 0,
+     "collected": false,
+     "hours": 10.1,
+     "bytes": 7502000000,
+     "sizeAll": 7502000000,
+     "nights": 4,
+     "firstNight": "2026-04-12",
+     "lastNight": "2026-07-31",
+     "filters": {
+      "L-eXtreme": 91,
+      "UV/IR": 30
+     },
+     "exposures": {
+      "300": 121
+     },
+     "panels": [],
+     "gains": {},
+     "askar": {},
+     "where": [
+      "on the archive"
+     ],
+     "status": "done",
+     "readyOn": null,
+     "evidence": "finished picture NGC6960_Veil-Nebula__2026-09_FRA400.jpg",
+     "action": "",
+     "calibration": {
+      "applies": true,
+      "missing": []
+     }
+    }
+   ],
+   "cameras": [
+    "Askar FRA400"
+   ],
+   "lights": 121,
+   "hours": 10.1,
+   "nights": 4,
+   "sessions": 4,
+   "firstNight": "2026-04-12",
+   "lastNight": "2026-07-31",
+   "state": "complete",
+   "pendingProgrammes": 0,
+   "statusCards": [
+    {
+     "target": "Veil Nebula (NGC 6960)",
+     "label": "Veil Nebula (NGC 6960)",
+     "camera": "Askar FRA400",
+     "state": "complete",
+     "hours": 10.1,
+     "nights": 4,
+     "lights": 121,
+     "lastNight": "2026-07-31",
+     "readyOn": null,
+     "evidence": "finished picture NGC6960_Veil-Nebula__2026-09_FRA400.jpg",
+     "action": "",
+     "source": "worked out by the importer",
+     "badges": [
+      "on the archive"
+     ],
+     "rel": "ZWO Askar Scopes/Veil Nebula (NGC 6960)"
+    }
+   ]
+  },
+  {
+   "id": "M51",
+   "name": "Whirlpool Galaxy (M 51)",
+   "codes": [
+    "M 51"
+   ],
+   "type": "Galaxy",
+   "constellation": "Canes Venatici",
+   "ra": 13.5,
+   "dec": 47.2,
+   "mosaic": false,
+   "programmes": [
+    {
+     "camera": "Askar 107PHQ",
+     "folder": "Whirlpool Galaxy (M 51)",
+     "path": "E:\\ZWO Askar Scopes\\Whirlpool Galaxy (M 51)",
+     "rel": "ZWO Askar Scopes/Whirlpool Galaxy (M 51)",
+     "lights": 96,
+     "autostacks": 0,
+     "autostackFrames": 0,
+     "processedFiles": 1,
+     "processedFinals": 1,
+     "masters": 0,
+     "working": 0,
+     "thumbs": 0,
+     "other": 0,
+     "mosaic": false,
+     "collectFiles": 0,
+     "collected": false,
+     "hours": 4.8,
+     "bytes": 5952000000,
+     "sizeAll": 5952000000,
+     "nights": 2,
+     "firstNight": "2026-04-20",
+     "lastNight": "2026-08-28",
+     "filters": {
+      "OIII": 96
+     },
+     "exposures": {
+      "180": 96
+     },
+     "panels": [],
+     "gains": {},
+     "askar": {},
+     "where": [
+      "on the archive"
+     ],
+     "status": "done",
+     "readyOn": null,
+     "evidence": "finished picture M51_Whirlpool-Galaxy__2026-09_107PHQ.jpg",
+     "action": "",
+     "calibration": {
+      "applies": true,
+      "missing": [
+       "darks",
+       "flats"
+      ]
+     }
+    }
+   ],
+   "cameras": [
+    "Askar 107PHQ"
+   ],
+   "lights": 96,
+   "hours": 4.8,
+   "nights": 2,
+   "sessions": 2,
+   "firstNight": "2026-04-20",
+   "lastNight": "2026-08-28",
+   "state": "complete",
+   "pendingProgrammes": 0,
+   "statusCards": [
+    {
+     "target": "Whirlpool Galaxy (M 51)",
+     "label": "Whirlpool Galaxy (M 51)",
+     "camera": "Askar 107PHQ",
+     "state": "complete",
+     "hours": 4.8,
+     "nights": 2,
+     "lights": 96,
+     "lastNight": "2026-08-28",
+     "readyOn": null,
+     "evidence": "finished picture M51_Whirlpool-Galaxy__2026-09_107PHQ.jpg",
+     "action": "",
+     "source": "worked out by the importer",
+     "badges": [
+      "on the archive"
+     ],
+     "rel": "ZWO Askar Scopes/Whirlpool Galaxy (M 51)"
+    }
+   ]
+  },
+  {
+   "id": "NGC7380",
+   "name": "Wizard Nebula (NGC 7380)",
+   "codes": [
+    "NGC 7380"
+   ],
+   "type": "Open cluster",
+   "constellation": "Cepheus",
+   "ra": 22.79,
+   "dec": 58.1,
+   "mosaic": false,
+   "programmes": [
+    {
+     "camera": "Askar FRA400",
+     "folder": "Wizard Nebula (NGC 7380)",
+     "path": "E:\\ZWO Askar Scopes\\Wizard Nebula (NGC 7380)",
+     "rel": "ZWO Askar Scopes/Wizard Nebula (NGC 7380)",
+     "lights": 138,
+     "autostacks": 0,
+     "autostackFrames": 0,
+     "processedFiles": 1,
+     "processedFinals": 1,
+     "masters": 0,
+     "working": 0,
+     "thumbs": 0,
+     "other": 0,
+     "mosaic": false,
+     "collectFiles": 0,
+     "collected": false,
+     "hours": 11.5,
+     "bytes": 8556000000,
+     "sizeAll": 8556000000,
+     "nights": 4,
+     "firstNight": "2025-08-24",
+     "lastNight": "2026-01-04",
+     "filters": {
+      "L-eXtreme": 138
+     },
+     "exposures": {
+      "300": 138
+     },
+     "panels": [],
+     "gains": {},
+     "askar": {},
+     "where": [
+      "on the archive"
+     ],
+     "status": "done",
+     "readyOn": null,
+     "evidence": "finished picture NGC7380_Wizard-Nebula__2026-09_FRA400.jpg",
+     "action": "",
+     "calibration": {
+      "applies": true,
+      "missing": [
+       "flats"
+      ]
+     }
+    },
+    {
+     "camera": "Seestar S30 Pro",
+     "folder": "Wizard Nebula (NGC 7380)",
+     "path": "E:\\S30P\\Wizard Nebula (NGC 7380)",
+     "rel": "S30P/Wizard Nebula (NGC 7380)",
+     "lights": 756,
+     "autostacks": 3,
+     "autostackFrames": 0,
+     "processedFiles": 1,
+     "processedFinals": 1,
+     "masters": 0,
+     "working": 0,
+     "thumbs": 0,
+     "other": 0,
+     "mosaic": false,
+     "collectFiles": 0,
+     "collected": false,
+     "hours": 2.1,
+     "bytes": 3024000000,
+     "sizeAll": 3024000000,
+     "nights": 3,
+     "firstNight": "2026-03-13",
+     "lastNight": "2026-06-13",
+     "filters": {
+      "LP": 756
+     },
+     "exposures": {
+      "10": 756
+     },
+     "panels": [],
+     "gains": {},
+     "askar": {},
+     "where": [
+      "on the archive"
+     ],
+     "status": "done",
+     "readyOn": null,
+     "evidence": "finished picture NGC7380_Wizard-Nebula__2026-09_S30P.jpg",
+     "action": "",
+     "calibration": {
+      "applies": false,
+      "missing": []
+     }
+    }
+   ],
+   "cameras": [
+    "Askar FRA400",
+    "Seestar S30 Pro"
+   ],
+   "lights": 894,
+   "hours": 13.6,
+   "nights": 7,
+   "sessions": 7,
+   "firstNight": "2025-08-24",
+   "lastNight": "2026-06-13",
+   "state": "complete",
+   "pendingProgrammes": 0,
+   "statusCards": [
+    {
+     "target": "Wizard Nebula (NGC 7380)",
+     "label": "Wizard Nebula (NGC 7380)",
+     "camera": "Askar FRA400",
+     "state": "complete",
+     "hours": 11.5,
+     "nights": 4,
+     "lights": 138,
+     "lastNight": "2026-01-04",
+     "readyOn": null,
+     "evidence": "finished picture NGC7380_Wizard-Nebula__2026-09_FRA400.jpg",
+     "action": "",
+     "source": "worked out by the importer",
+     "badges": [
+      "on the archive"
+     ],
+     "rel": "ZWO Askar Scopes/Wizard Nebula (NGC 7380)"
+    },
+    {
+     "target": "Wizard Nebula (NGC 7380)",
+     "label": "Wizard Nebula (NGC 7380)",
+     "camera": "Seestar S30 Pro",
+     "state": "complete",
+     "hours": 2.1,
+     "nights": 3,
+     "lights": 756,
+     "lastNight": "2026-06-13",
+     "readyOn": null,
+     "evidence": "finished picture NGC7380_Wizard-Nebula__2026-09_S30P.jpg",
+     "action": "",
+     "source": "worked out by the importer",
+     "badges": [
+      "on the archive"
+     ],
+     "rel": "S30P/Wizard Nebula (NGC 7380)"
+    }
+   ]
+  }
+ ],
+ "sessions": [
+  {
+   "target": "Andromeda Galaxy (M 31)",
+   "camera": "Askar FRA400",
+   "night": "2025-10-26",
+   "frames": 32,
+   "hours": 2.667,
+   "filters": {
+    "L-eXtreme": 32
+   },
+   "exps": {
+    "300": 32
+   },
+   "askar": {},
+   "stackOnly": false,
+   "cal": {
+    "darks": 0,
+    "flats": 25,
+    "biases": 0
+   }
+  },
+  {
+   "target": "Andromeda Galaxy (M 31)",
+   "camera": "Askar FRA400",
+   "night": "2025-11-03",
+   "frames": 32,
+   "hours": 2.667,
+   "filters": {
+    "L-eXtreme": 32
+   },
+   "exps": {
+    "300": 32
+   },
+   "askar": {},
+   "stackOnly": false,
+   "cal": {
+    "darks": 30,
+    "flats": 25,
+    "biases": 0
+   }
+  },
+  {
+   "target": "Andromeda Galaxy (M 31)",
+   "camera": "Askar FRA400",
+   "night": "2025-11-07",
+   "frames": 32,
+   "hours": 2.667,
+   "filters": {
+    "UV/IR": 32
+   },
+   "exps": {
+    "300": 32
+   },
+   "askar": {},
+   "stackOnly": false,
+   "cal": {
+    "darks": 0,
+    "flats": 0,
+    "biases": 0
+   }
+  },
+  {
+   "target": "Andromeda Galaxy (M 31)",
+   "camera": "Askar FRA400",
+   "night": "2025-11-15",
+   "frames": 32,
+   "hours": 2.667,
+   "filters": {
+    "L-eXtreme": 32
+   },
+   "exps": {
+    "300": 32
+   },
+   "askar": {},
+   "stackOnly": false,
+   "cal": {
+    "darks": 30,
+    "flats": 0,
+    "biases": 0
+   }
+  },
+  {
+   "target": "Andromeda Galaxy (M 31)",
+   "camera": "Askar FRA400",
+   "night": "2025-12-03",
+   "frames": 32,
+   "hours": 2.667,
+   "filters": {
+    "UV/IR": 32
+   },
+   "exps": {
+    "300": 32
+   },
+   "askar": {},
+   "stackOnly": false,
+   "cal": {
+    "darks": 20,
+    "flats": 0,
+    "biases": 0
+   }
+  },
+  {
+   "target": "Andromeda Galaxy (M 31)",
+   "camera": "Askar FRA400",
+   "night": "2025-12-06",
+   "frames": 32,
+   "hours": 2.667,
+   "filters": {
+    "L-eXtreme": 32
+   },
+   "exps": {
+    "300": 32
+   },
+   "askar": {},
+   "stackOnly": false,
+   "cal": {
+    "darks": 30,
+    "flats": 0,
+    "biases": 0
+   }
+  },
+  {
+   "target": "Andromeda Galaxy (M 31)",
+   "camera": "Askar FRA400",
+   "night": "2025-12-07",
+   "frames": 32,
+   "hours": 2.667,
+   "filters": {
+    "L-eXtreme": 32
+   },
+   "exps": {
+    "300": 32
+   },
+   "askar": {},
+   "stackOnly": false,
+   "cal": {
+    "darks": 0,
+    "flats": 25,
+    "biases": 0
+   }
+  },
+  {
+   "target": "Andromeda Galaxy (M 31)",
+   "camera": "Askar FRA400",
+   "night": "2025-12-13",
+   "frames": 32,
+   "hours": 2.667,
+   "filters": {
+    "L-eXtreme": 32
+   },
+   "exps": {
+    "300": 32
+   },
+   "askar": {},
+   "stackOnly": false,
+   "cal": {
+    "darks": 20,
+    "flats": 0,
+    "biases": 0
+   }
+  },
+  {
+   "target": "Andromeda Galaxy (M 31)",
+   "camera": "Askar FRA400",
+   "night": "2025-12-21",
+   "frames": 32,
+   "hours": 2.667,
+   "filters": {
+    "L-eXtreme": 32
+   },
+   "exps": {
+    "300": 32
+   },
+   "askar": {},
+   "stackOnly": false,
+   "cal": {
+    "darks": 30,
+    "flats": 0,
+    "biases": 0
+   }
+  },
+  {
+   "target": "Andromeda Galaxy (M 31)",
+   "camera": "Askar FRA400",
+   "night": "2026-01-22",
+   "frames": 32,
+   "hours": 2.667,
+   "filters": {
+    "L-eXtreme": 32
+   },
+   "exps": {
+    "300": 32
+   },
+   "askar": {},
+   "stackOnly": false,
+   "cal": {
+    "darks": 20,
+    "flats": 25,
+    "biases": 0
+   }
+  },
+  {
+   "target": "Andromeda Galaxy (M 31)",
+   "camera": "Askar FRA400",
+   "night": "2026-01-29",
+   "frames": 32,
+   "hours": 2.667,
+   "filters": {
+    "UV/IR": 32
+   },
+   "exps": {
+    "300": 32
+   },
+   "askar": {},
+   "stackOnly": false,
+   "cal": {
+    "darks": 20,
+    "flats": 0,
+    "biases": 0
+   }
+  },
+  {
+   "target": "Andromeda Galaxy (M 31)",
+   "camera": "Askar FRA400",
+   "night": "2026-02-14",
+   "frames": 32,
+   "hours": 2.667,
+   "filters": {
+    "UV/IR": 32
+   },
+   "exps": {
+    "300": 32
+   },
+   "askar": {},
+   "stackOnly": false,
+   "cal": {
+    "darks": 20,
+    "flats": 0,
+    "biases": 0
+   }
+  },
+  {
+   "target": "Andromeda Galaxy (M 31)",
+   "camera": "Askar FRA400",
+   "night": "2026-02-28",
+   "frames": 32,
+   "hours": 2.667,
+   "filters": {
+    "L-eXtreme": 32
+   },
+   "exps": {
+    "300": 32
+   },
+   "askar": {},
+   "stackOnly": false,
+   "cal": {
+    "darks": 0,
+    "flats": 25,
+    "biases": 0
+   }
+  },
+  {
+   "target": "Andromeda Galaxy (M 31)",
+   "camera": "Askar FRA400",
+   "night": "2026-03-01",
+   "frames": 32,
+   "hours": 2.667,
+   "filters": {
+    "L-eXtreme": 32
+   },
+   "exps": {
+    "300": 32
+   },
+   "askar": {},
+   "stackOnly": false,
+   "cal": {
+    "darks": 0,
+    "flats": 25,
+    "biases": 0
+   }
+  },
+  {
+   "target": "Andromeda Galaxy (M 31)",
+   "camera": "Askar FRA400",
+   "night": "2026-03-02",
+   "frames": 32,
+   "hours": 2.667,
+   "filters": {
+    "UV/IR": 32
+   },
+   "exps": {
+    "300": 32
+   },
+   "askar": {},
+   "stackOnly": false,
+   "cal": {
+    "darks": 30,
+    "flats": 0,
+    "biases": 0
+   }
+  },
+  {
+   "target": "Andromeda Galaxy (M 31)",
+   "camera": "Askar FRA400",
+   "night": "2026-03-06",
+   "frames": 32,
+   "hours": 2.667,
+   "filters": {
+    "UV/IR": 32
+   },
+   "exps": {
+    "300": 32
+   },
+   "askar": {},
+   "stackOnly": false,
+   "cal": {
+    "darks": 30,
+    "flats": 0,
+    "biases": 0
+   }
+  },
+  {
+   "target": "Andromeda Galaxy (M 31)",
+   "camera": "Askar FRA400",
+   "night": "2026-03-07",
+   "frames": 32,
+   "hours": 2.667,
+   "filters": {
+    "UV/IR": 32
+   },
+   "exps": {
+    "300": 32
+   },
+   "askar": {},
+   "stackOnly": false,
+   "cal": {
+    "darks": 30,
+    "flats": 0,
+    "biases": 0
+   }
+  },
+  {
+   "target": "Andromeda Galaxy (M 31)",
+   "camera": "Askar FRA400",
+   "night": "2026-03-09",
+   "frames": 32,
+   "hours": 2.667,
+   "filters": {
+    "L-eXtreme": 32
+   },
+   "exps": {
+    "300": 32
+   },
+   "askar": {},
+   "stackOnly": false,
+   "cal": {
+    "darks": 30,
+    "flats": 0,
+    "biases": 0
+   }
+  },
+  {
+   "target": "Andromeda Galaxy (M 31)",
+   "camera": "Askar FRA400",
+   "night": "2026-03-10",
+   "frames": 32,
+   "hours": 2.667,
+   "filters": {
+    "L-eXtreme": 32
+   },
+   "exps": {
+    "300": 32
+   },
+   "askar": {},
+   "stackOnly": false,
+   "cal": {
+    "darks": 20,
+    "flats": 0,
+    "biases": 0
+   }
+  },
+  {
+   "target": "Andromeda Galaxy (M 31)",
+   "camera": "Askar FRA400",
+   "night": "2026-03-12",
+   "frames": 32,
+   "hours": 2.667,
+   "filters": {
+    "UV/IR": 32
+   },
+   "exps": {
+    "300": 32
+   },
+   "askar": {},
+   "stackOnly": false,
+   "cal": {
+    "darks": 20,
+    "flats": 0,
+    "biases": 0
+   }
+  },
+  {
+   "target": "Andromeda Galaxy (M 31)",
+   "camera": "Askar FRA400",
+   "night": "2026-03-15",
+   "frames": 32,
+   "hours": 2.667,
+   "filters": {
+    "L-eXtreme": 32
+   },
+   "exps": {
+    "300": 32
+   },
+   "askar": {},
+   "stackOnly": false,
+   "cal": {
+    "darks": 30,
+    "flats": 25,
+    "biases": 0
+   }
+  },
+  {
+   "target": "Andromeda Galaxy (M 31)",
+   "camera": "Askar FRA400",
+   "night": "2026-03-25",
+   "frames": 48,
+   "hours": 4.0,
+   "filters": {
+    "UV/IR": 48
+   },
+   "exps": {
+    "300": 48
+   },
+   "askar": {},
+   "stackOnly": false,
+   "cal": {
+    "darks": 20,
+    "flats": 25,
+    "biases": 0
+   }
+  },
+  {
+   "target": "Andromeda Galaxy (M 31)",
+   "camera": "Askar 107PHQ",
+   "night": "2026-02-13",
+   "frames": 66,
+   "hours": 3.3,
+   "filters": {
+    "Ha": 66
+   },
+   "exps": {
+    "180": 66
+   },
+   "askar": {},
+   "stackOnly": false,
+   "cal": {
+    "darks": 30,
+    "flats": 25,
+    "biases": 0
+   }
+  },
+  {
+   "target": "Andromeda Galaxy (M 31)",
+   "camera": "Askar 107PHQ",
+   "night": "2026-03-06",
+   "frames": 66,
+   "hours": 3.3,
+   "filters": {
+    "SII": 66
+   },
+   "exps": {
+    "180": 66
+   },
+   "askar": {},
+   "stackOnly": false,
+   "cal": {
+    "darks": 30,
+    "flats": 25,
+    "biases": 0
+   }
+  },
+  {
+   "target": "Andromeda Galaxy (M 31)",
+   "camera": "Askar 107PHQ",
+   "night": "2026-03-12",
+   "frames": 66,
+   "hours": 3.3,
+   "filters": {
+    "L": 66
+   },
+   "exps": {
+    "180": 66
+   },
+   "askar": {},
+   "stackOnly": false,
+   "cal": {
+    "darks": 20,
+    "flats": 25,
+    "biases": 0
+   }
+  },
+  {
+   "target": "Andromeda Galaxy (M 31)",
+   "camera": "Askar 107PHQ",
+   "night": "2026-03-17",
+   "frames": 66,
+   "hours": 3.3,
+   "filters": {
+    "L": 66
+   },
+   "exps": {
+    "180": 66
+   },
+   "askar": {},
+   "stackOnly": false,
+   "cal": {
+    "darks": 30,
+    "flats": 0,
+    "biases": 0
+   }
+  },
+  {
+   "target": "Andromeda Galaxy (M 31)",
+   "camera": "Askar 107PHQ",
+   "night": "2026-05-03",
+   "frames": 66,
+   "hours": 3.3,
+   "filters": {
+    "Ha": 66
+   },
+   "exps": {
+    "180": 66
+   },
+   "askar": {},
+   "stackOnly": false,
+   "cal": {
+    "darks": 20,
+    "flats": 0,
+    "biases": 0
+   }
+  },
+  {
+   "target": "Andromeda Galaxy (M 31)",
+   "camera": "Askar 107PHQ",
+   "night": "2026-06-18",
+   "frames": 66,
+   "hours": 3.3,
+   "filters": {
+    "OIII": 66
+   },
+   "exps": {
+    "180": 66
+   },
+   "askar": {},
+   "stackOnly": false,
+   "cal": {
+    "darks": 30,
+    "flats": 0,
+    "biases": 0
+   }
+  },
+  {
+   "target": "Andromeda Galaxy (M 31)",
+   "camera": "Askar 107PHQ",
+   "night": "2026-06-24",
+   "frames": 66,
+   "hours": 3.3,
+   "filters": {
+    "L": 66
+   },
+   "exps": {
+    "180": 66
+   },
+   "askar": {},
+   "stackOnly": false,
+   "cal": {
+    "darks": 0,
+    "flats": 0,
+    "biases": 0
+   }
+  },
+  {
+   "target": "Andromeda Galaxy (M 31)",
+   "camera": "Askar 107PHQ",
+   "night": "2026-06-25",
+   "frames": 66,
+   "hours": 3.3,
+   "filters": {
+    "SII": 66
+   },
+   "exps": {
+    "180": 66
+   },
+   "askar": {},
+   "stackOnly": false,
+   "cal": {
+    "darks": 0,
+    "flats": 25,
+    "biases": 0
+   }
+  },
+  {
+   "target": "Andromeda Galaxy (M 31)",
+   "camera": "Askar 107PHQ",
+   "night": "2026-07-12",
+   "frames": 72,
+   "hours": 3.6,
+   "filters": {
+    "OIII": 72
+   },
+   "exps": {
+    "180": 72
+   },
+   "askar": {},
+   "stackOnly": false,
+   "cal": {
+    "darks": 20,
+    "flats": 0,
+    "biases": 0
+   }
+  },
+  {
+   "target": "Andromeda Galaxy (M 31)",
+   "camera": "Seestar S30 Pro",
+   "night": "2026-05-27",
+   "frames": 612,
+   "hours": 1.7,
+   "filters": {
+    "LP": 612
+   },
+   "exps": {
+    "10": 612
+   },
+   "askar": {},
+   "stackOnly": false,
+   "cal": null
+  },
+  {
+   "target": "Andromeda Galaxy (M 31)",
+   "camera": "Seestar S30 Pro",
+   "night": "2026-06-22",
+   "frames": 612,
+   "hours": 1.7,
+   "filters": {
+    "LP": 612
+   },
+   "exps": {
+    "10": 612
+   },
+   "askar": {},
+   "stackOnly": false,
+   "cal": null
+  },
+  {
+   "target": "Andromeda Galaxy (M 31)",
+   "camera": "Seestar S30 Pro",
+   "night": "2026-07-04",
+   "frames": 612,
+   "hours": 1.7,
+   "filters": {
+    "LP": 612
+   },
+   "exps": {
+    "10": 612
+   },
+   "askar": {},
+   "stackOnly": false,
+   "cal": null
+  },
+  {
+   "target": "Andromeda Galaxy (M 31)",
+   "camera": "Seestar S30 Pro",
+   "night": "2026-09-02",
+   "frames": 612,
+   "hours": 1.7,
+   "filters": {
+    "LP": 612
+   },
+   "exps": {
+    "10": 612
+   },
+   "askar": {},
+   "stackOnly": false,
+   "cal": null
+  },
+  {
+   "target": "Andromeda Galaxy (M 31)",
+   "camera": "Seestar S30 Pro",
+   "night": "2026-10-15",
+   "frames": 612,
+   "hours": 1.7,
+   "filters": {
+    "LP": 612
+   },
+   "exps": {
+    "10": 612
+   },
+   "askar": {},
+   "stackOnly": false,
+   "cal": null
+  },
+  {
+   "target": "Andromeda Galaxy (M 31)",
+   "camera": "Seestar S50 Pro",
+   "night": "2025-09-22",
+   "frames": 576,
+   "hours": 3.2,
+   "filters": {
+    "LP": 576
+   },
+   "exps": {
+    "20": 576
+   },
+   "askar": {},
+   "stackOnly": false,
+   "cal": null
+  },
+  {
+   "target": "Milky Way Core",
+   "camera": "Seestar S30 Pro",
+   "night": "2026-03-30",
+   "frames": 215,
+   "hours": 0.0,
+   "filters": {
+    "unrecorded": 215
+   },
+   "exps": {},
+   "askar": {},
+   "stackOnly": false,
+   "cal": null
+  },
+  {
+   "target": "Milky Way Core",
+   "camera": "Seestar S30 Pro",
+   "night": "2026-04-25",
+   "frames": 215,
+   "hours": 0.0,
+   "filters": {
+    "unrecorded": 215
+   },
+   "exps": {},
+   "askar": {},
+   "stackOnly": false,
+   "cal": null
+  },
+  {
+   "target": "Milky Way Core",
+   "camera": "Seestar S30 Pro",
+   "night": "2026-06-21",
+   "frames": 215,
+   "hours": 0.0,
+   "filters": {
+    "unrecorded": 215
+   },
+   "exps": {},
+   "askar": {},
+   "stackOnly": false,
+   "cal": null
+  },
+  {
+   "target": "Milky Way Core",
+   "camera": "Seestar S30 Pro",
+   "night": "2026-06-29",
+   "frames": 215,
+   "hours": 0.0,
+   "filters": {
+    "unrecorded": 215
+   },
+   "exps": {},
+   "askar": {},
+   "stackOnly": false,
+   "cal": null
+  },
+  {
+   "target": "Milky Way Core",
+   "camera": "Seestar S30 Pro",
+   "night": "2026-07-12",
+   "frames": 215,
+   "hours": 0.0,
+   "filters": {
+    "unrecorded": 215
+   },
+   "exps": {},
+   "askar": {},
+   "stackOnly": false,
+   "cal": null
+  },
+  {
+   "target": "Milky Way Core",
+   "camera": "Seestar S30 Pro",
+   "night": "2026-07-13",
+   "frames": 215,
+   "hours": 0.0,
+   "filters": {
+    "unrecorded": 215
+   },
+   "exps": {},
+   "askar": {},
+   "stackOnly": false,
+   "cal": null
+  },
+  {
+   "target": "Milky Way Core",
+   "camera": "Seestar S30 Pro",
+   "night": "2026-07-20",
+   "frames": 215,
+   "hours": 0.0,
+   "filters": {
+    "unrecorded": 215
+   },
+   "exps": {},
+   "askar": {},
+   "stackOnly": false,
+   "cal": null
+  },
+  {
+   "target": "Milky Way Core",
+   "camera": "Seestar S30 Pro",
+   "night": "2026-08-06",
+   "frames": 215,
+   "hours": 0.0,
+   "filters": {
+    "unrecorded": 215
+   },
+   "exps": {},
+   "askar": {},
+   "stackOnly": false,
+   "cal": null
+  },
+  {
+   "target": "Milky Way Core",
+   "camera": "Seestar S30 Pro",
+   "night": "2026-08-24",
+   "frames": 215,
+   "hours": 0.0,
+   "filters": {
+    "unrecorded": 215
+   },
+   "exps": {},
+   "askar": {},
+   "stackOnly": false,
+   "cal": null
+  },
+  {
+   "target": "Milky Way Core",
+   "camera": "Seestar S30 Pro",
+   "night": "2026-08-28",
+   "frames": 215,
+   "hours": 0.0,
+   "filters": {
+    "unrecorded": 215
+   },
+   "exps": {},
+   "askar": {},
+   "stackOnly": false,
+   "cal": null
+  },
+  {
+   "target": "Squid Nebula (OU 4)",
+   "camera": "Askar FRA400",
+   "night": "2026-04-05",
+   "frames": 28,
+   "hours": 2.333,
+   "filters": {
+    "L-eXtreme": 28
+   },
+   "exps": {
+    "300": 28
+   },
+   "askar": {},
+   "stackOnly": false,
+   "cal": {
+    "darks": 0,
+    "flats": 0,
+    "biases": 0
+   }
+  },
+  {
+   "target": "Squid Nebula (OU 4)",
+   "camera": "Askar FRA400",
+   "night": "2026-04-26",
+   "frames": 28,
+   "hours": 2.333,
+   "filters": {
+    "UV/IR": 28
+   },
+   "exps": {
+    "300": 28
+   },
+   "askar": {},
+   "stackOnly": false,
+   "cal": {
+    "darks": 0,
+    "flats": 0,
+    "biases": 0
+   }
+  },
+  {
+   "target": "Squid Nebula (OU 4)",
+   "camera": "Askar FRA400",
+   "night": "2026-04-28",
+   "frames": 28,
+   "hours": 2.333,
+   "filters": {
+    "UV/IR": 28
+   },
+   "exps": {
+    "300": 28
+   },
+   "askar": {},
+   "stackOnly": false,
+   "cal": {
+    "darks": 30,
+    "flats": 0,
+    "biases": 0
+   }
+  },
+  {
+   "target": "Squid Nebula (OU 4)",
+   "camera": "Askar FRA400",
+   "night": "2026-07-11",
+   "frames": 28,
+   "hours": 2.333,
+   "filters": {
+    "L-eXtreme": 28
+   },
+   "exps": {
+    "300": 28
+   },
+   "askar": {},
+   "stackOnly": false,
+   "cal": {
+    "darks": 0,
+    "flats": 25,
+    "biases": 0
+   }
+  },
+  {
+   "target": "Squid Nebula (OU 4)",
+   "camera": "Askar FRA400",
+   "night": "2026-07-22",
+   "frames": 28,
+   "hours": 2.333,
+   "filters": {
+    "L-eXtreme": 28
+   },
+   "exps": {
+    "300": 28
+   },
+   "askar": {},
+   "stackOnly": false,
+   "cal": {
+    "darks": 30,
+    "flats": 0,
+    "biases": 0
+   }
+  },
+  {
+   "target": "Squid Nebula (OU 4)",
+   "camera": "Askar FRA400",
+   "night": "2026-08-07",
+   "frames": 30,
+   "hours": 2.5,
+   "filters": {
+    "UV/IR": 30
+   },
+   "exps": {
+    "300": 30
+   },
+   "askar": {},
+   "stackOnly": false,
+   "cal": {
+    "darks": 30,
+    "flats": 0,
+    "biases": 0
+   }
+  },
+  {
+   "target": "Flaming Star Nebula (IC 405)",
+   "camera": "Askar 107PHQ",
+   "night": "2026-05-08",
+   "frames": 27,
+   "hours": 1.35,
+   "filters": {
+    "SII": 27
+   },
+   "exps": {
+    "180": 27
+   },
+   "askar": {},
+   "stackOnly": false,
+   "cal": {
+    "darks": 30,
+    "flats": 0,
+    "biases": 0
+   }
+  },
+  {
+   "target": "Flaming Star Nebula (IC 405)",
+   "camera": "Askar 107PHQ",
+   "night": "2026-07-08",
+   "frames": 27,
+   "hours": 1.35,
+   "filters": {
+    "L": 27
+   },
+   "exps": {
+    "180": 27
+   },
+   "askar": {},
+   "stackOnly": false,
+   "cal": {
+    "darks": 0,
+    "flats": 0,
+    "biases": 0
+   }
+  },
+  {
+   "target": "Flaming Star Nebula (IC 405)",
+   "camera": "Askar 107PHQ",
+   "night": "2026-08-09",
+   "frames": 27,
+   "hours": 1.35,
+   "filters": {
+    "L": 27
+   },
+   "exps": {
+    "180": 27
+   },
+   "askar": {},
+   "stackOnly": false,
+   "cal": {
+    "darks": 20,
+    "flats": 0,
+    "biases": 0
+   }
+  },
+  {
+   "target": "Flaming Star Nebula (IC 405)",
+   "camera": "Askar 107PHQ",
+   "night": "2026-09-04",
+   "frames": 27,
+   "hours": 1.35,
+   "filters": {
+    "L": 27
+   },
+   "exps": {
+    "180": 27
+   },
+   "askar": {},
+   "stackOnly": false,
+   "cal": {
+    "darks": 20,
+    "flats": 0,
+    "biases": 0
+   }
+  },
+  {
+   "target": "Flaming Star Nebula (IC 405)",
+   "camera": "Askar 107PHQ",
+   "night": "2026-10-13",
+   "frames": 28,
+   "hours": 1.4,
+   "filters": {
+    "OIII": 28
+   },
+   "exps": {
+    "180": 28
+   },
+   "askar": {},
+   "stackOnly": false,
+   "cal": {
+    "darks": 0,
+    "flats": 25,
+    "biases": 0
+   }
+  },
+  {
+   "target": "Wizard Nebula (NGC 7380)",
+   "camera": "Askar FRA400",
+   "night": "2025-08-24",
+   "frames": 34,
+   "hours": 2.833,
+   "filters": {
+    "L-eXtreme": 34
+   },
+   "exps": {
+    "300": 34
+   },
+   "askar": {},
+   "stackOnly": false,
+   "cal": {
+    "darks": 30,
+    "flats": 0,
+    "biases": 0
+   }
+  },
+  {
+   "target": "Wizard Nebula (NGC 7380)",
+   "camera": "Askar FRA400",
+   "night": "2025-11-23",
+   "frames": 34,
+   "hours": 2.833,
+   "filters": {
+    "L-eXtreme": 34
+   },
+   "exps": {
+    "300": 34
+   },
+   "askar": {},
+   "stackOnly": false,
+   "cal": {
+    "darks": 30,
+    "flats": 25,
+    "biases": 0
+   }
+  },
+  {
+   "target": "Wizard Nebula (NGC 7380)",
+   "camera": "Askar FRA400",
+   "night": "2025-12-29",
+   "frames": 34,
+   "hours": 2.833,
+   "filters": {
+    "L-eXtreme": 34
+   },
+   "exps": {
+    "300": 34
+   },
+   "askar": {},
+   "stackOnly": false,
+   "cal": {
+    "darks": 30,
+    "flats": 0,
+    "biases": 0
+   }
+  },
+  {
+   "target": "Wizard Nebula (NGC 7380)",
+   "camera": "Askar FRA400",
+   "night": "2026-01-04",
+   "frames": 36,
+   "hours": 3.0,
+   "filters": {
+    "L-eXtreme": 36
+   },
+   "exps": {
+    "300": 36
+   },
+   "askar": {},
+   "stackOnly": false,
+   "cal": {
+    "darks": 30,
+    "flats": 0,
+    "biases": 0
+   }
+  },
+  {
+   "target": "Wizard Nebula (NGC 7380)",
+   "camera": "Seestar S30 Pro",
+   "night": "2026-03-13",
+   "frames": 252,
+   "hours": 0.7,
+   "filters": {
+    "LP": 252
+   },
+   "exps": {
+    "10": 252
+   },
+   "askar": {},
+   "stackOnly": false,
+   "cal": null
+  },
+  {
+   "target": "Wizard Nebula (NGC 7380)",
+   "camera": "Seestar S30 Pro",
+   "night": "2026-04-16",
+   "frames": 252,
+   "hours": 0.7,
+   "filters": {
+    "LP": 252
+   },
+   "exps": {
+    "10": 252
+   },
+   "askar": {},
+   "stackOnly": false,
+   "cal": null
+  },
+  {
+   "target": "Wizard Nebula (NGC 7380)",
+   "camera": "Seestar S30 Pro",
+   "night": "2026-06-13",
+   "frames": 252,
+   "hours": 0.7,
+   "filters": {
+    "LP": 252
+   },
+   "exps": {
+    "10": 252
+   },
+   "askar": {},
+   "stackOnly": false,
+   "cal": null
+  },
+  {
+   "target": "Elephant's Trunk (IC 1396)",
+   "camera": "Askar FRA400",
+   "night": "2026-01-24",
+   "frames": 28,
+   "hours": 2.333,
+   "filters": {
+    "UV/IR": 28
+   },
+   "exps": {
+    "300": 28
+   },
+   "askar": {},
+   "stackOnly": false,
+   "cal": {
+    "darks": 20,
+    "flats": 25,
+    "biases": 0
+   }
+  },
+  {
+   "target": "Elephant's Trunk (IC 1396)",
+   "camera": "Askar FRA400",
+   "night": "2026-03-09",
+   "frames": 28,
+   "hours": 2.333,
+   "filters": {
+    "L-eXtreme": 28
+   },
+   "exps": {
+    "300": 28
+   },
+   "askar": {},
+   "stackOnly": false,
+   "cal": {
+    "darks": 0,
+    "flats": 0,
+    "biases": 0
+   }
+  },
+  {
+   "target": "Elephant's Trunk (IC 1396)",
+   "camera": "Askar FRA400",
+   "night": "2026-03-16",
+   "frames": 28,
+   "hours": 2.333,
+   "filters": {
+    "UV/IR": 28
+   },
+   "exps": {
+    "300": 28
+   },
+   "askar": {},
+   "stackOnly": false,
+   "cal": {
+    "darks": 20,
+    "flats": 0,
+    "biases": 0
+   }
+  },
+  {
+   "target": "Elephant's Trunk (IC 1396)",
+   "camera": "Askar FRA400",
+   "night": "2026-05-07",
+   "frames": 28,
+   "hours": 2.333,
+   "filters": {
+    "UV/IR": 28
+   },
+   "exps": {
+    "300": 28
+   },
+   "askar": {},
+   "stackOnly": false,
+   "cal": {
+    "darks": 20,
+    "flats": 25,
+    "biases": 0
+   }
+  },
+  {
+   "target": "Heart Nebula (IC 1805)",
+   "camera": "Askar 107PHQ",
+   "night": "2026-08-15",
+   "frames": 27,
+   "hours": 1.35,
+   "filters": {
+    "Ha": 27
+   },
+   "exps": {
+    "180": 27
+   },
+   "askar": {},
+   "stackOnly": false,
+   "cal": {
+    "darks": 0,
+    "flats": 0,
+    "biases": 0
+   }
+  },
+  {
+   "target": "Heart Nebula (IC 1805)",
+   "camera": "Askar 107PHQ",
+   "night": "2026-09-20",
+   "frames": 27,
+   "hours": 1.35,
+   "filters": {
+    "OIII": 27
+   },
+   "exps": {
+    "180": 27
+   },
+   "askar": {},
+   "stackOnly": false,
+   "cal": {
+    "darks": 20,
+    "flats": 0,
+    "biases": 0
+   }
+  },
+  {
+   "target": "Heart Nebula (IC 1805)",
+   "camera": "Askar 107PHQ",
+   "night": "2026-10-11",
+   "frames": 28,
+   "hours": 1.4,
+   "filters": {
+    "L": 28
+   },
+   "exps": {
+    "180": 28
+   },
+   "askar": {},
+   "stackOnly": false,
+   "cal": {
+    "darks": 30,
+    "flats": 25,
+    "biases": 0
+   }
+  },
+  {
+   "target": "Heart Nebula (IC 1805)",
+   "camera": "Seestar S50",
+   "night": "2026-04-07",
+   "frames": 216,
+   "hours": 0.6,
+   "filters": {
+    "LP": 216
+   },
+   "exps": {
+    "10": 216
+   },
+   "askar": {},
+   "stackOnly": false,
+   "cal": null
+  },
+  {
+   "target": "Heart Nebula (IC 1805)",
+   "camera": "Seestar S50",
+   "night": "2026-07-05",
+   "frames": 216,
+   "hours": 0.6,
+   "filters": {
+    "LP": 216
+   },
+   "exps": {
+    "10": 216
+   },
+   "askar": {},
+   "stackOnly": false,
+   "cal": null
+  },
+  {
+   "target": "Soul Nebula (IC 1848)",
+   "camera": "Askar FRA400",
+   "night": "2026-04-07",
+   "frames": 30,
+   "hours": 2.5,
+   "filters": {
+    "L-eXtreme": 30
+   },
+   "exps": {
+    "300": 30
+   },
+   "askar": {},
+   "stackOnly": false,
+   "cal": {
+    "darks": 20,
+    "flats": 25,
+    "biases": 0
+   }
+  },
+  {
+   "target": "Soul Nebula (IC 1848)",
+   "camera": "Askar FRA400",
+   "night": "2026-06-17",
+   "frames": 30,
+   "hours": 2.5,
+   "filters": {
+    "UV/IR": 30
+   },
+   "exps": {
+    "300": 30
+   },
+   "askar": {},
+   "stackOnly": false,
+   "cal": {
+    "darks": 0,
+    "flats": 25,
+    "biases": 0
+   }
+  },
+  {
+   "target": "Soul Nebula (IC 1848)",
+   "camera": "Askar FRA400",
+   "night": "2026-08-08",
+   "frames": 32,
+   "hours": 2.667,
+   "filters": {
+    "UV/IR": 32
+   },
+   "exps": {
+    "300": 32
+   },
+   "askar": {},
+   "stackOnly": false,
+   "cal": {
+    "darks": 20,
+    "flats": 0,
+    "biases": 0
+   }
+  },
+  {
+   "target": "Pleiades (M 45)",
+   "camera": "Seestar S50 Pro",
+   "night": "2026-05-16",
+   "frames": 171,
+   "hours": 0.95,
+   "filters": {
+    "LP": 171
+   },
+   "exps": {
+    "20": 171
+   },
+   "askar": {},
+   "stackOnly": false,
+   "cal": null
+  },
+  {
+   "target": "Pleiades (M 45)",
+   "camera": "Seestar S50 Pro",
+   "night": "2026-06-26",
+   "frames": 171,
+   "hours": 0.95,
+   "filters": {
+    "LP": 171
+   },
+   "exps": {
+    "20": 171
+   },
+   "askar": {},
+   "stackOnly": false,
+   "cal": null
+  },
+  {
+   "target": "Pleiades (M 45)",
+   "camera": "Askar FRA400",
+   "night": "2026-07-15",
+   "frames": 32,
+   "hours": 2.667,
+   "filters": {
+    "UV/IR": 32
+   },
+   "exps": {
+    "300": 32
+   },
+   "askar": {},
+   "stackOnly": false,
+   "cal": {
+    "darks": 30,
+    "flats": 0,
+    "biases": 0
+   }
+  },
+  {
+   "target": "Pleiades (M 45)",
+   "camera": "Askar FRA400",
+   "night": "2026-08-23",
+   "frames": 33,
+   "hours": 2.75,
+   "filters": {
+    "UV/IR": 33
+   },
+   "exps": {
+    "300": 33
+   },
+   "askar": {},
+   "stackOnly": false,
+   "cal": {
+    "darks": 30,
+    "flats": 0,
+    "biases": 0
+   }
+  },
+  {
+   "target": "Orion Nebula (M 42)",
+   "camera": "Seestar S30 Pro",
+   "night": "2025-07-12",
+   "frames": 180,
+   "hours": 0.5,
+   "filters": {
+    "LP": 180
+   },
+   "exps": {
+    "10": 180
+   },
+   "askar": {},
+   "stackOnly": false,
+   "cal": null
+  },
+  {
+   "target": "Orion Nebula (M 42)",
+   "camera": "Seestar S30 Pro",
+   "night": "2025-10-27",
+   "frames": 180,
+   "hours": 0.5,
+   "filters": {
+    "LP": 180
+   },
+   "exps": {
+    "10": 180
+   },
+   "askar": {},
+   "stackOnly": false,
+   "cal": null
+  },
+  {
+   "target": "Orion Nebula (M 42)",
+   "camera": "Seestar S30 Pro",
+   "night": "2025-11-30",
+   "frames": 180,
+   "hours": 0.5,
+   "filters": {
+    "LP": 180
+   },
+   "exps": {
+    "10": 180
+   },
+   "askar": {},
+   "stackOnly": false,
+   "cal": null
+  },
+  {
+   "target": "Orion Nebula (M 42)",
+   "camera": "Askar 107PHQ",
+   "night": "2026-10-08",
+   "frames": 44,
+   "hours": 2.2,
+   "filters": {
+    "OIII": 44
+   },
+   "exps": {
+    "180": 44
+   },
+   "askar": {},
+   "stackOnly": false,
+   "cal": {
+    "darks": 20,
+    "flats": 0,
+    "biases": 0
+   }
+  },
+  {
+   "target": "Horsehead Nebula (IC 434)",
+   "camera": "Askar FRA400",
+   "night": "2026-08-12",
+   "frames": 20,
+   "hours": 1.667,
+   "filters": {
+    "L-eXtreme": 20
+   },
+   "exps": {
+    "300": 20
+   },
+   "askar": {},
+   "stackOnly": false,
+   "cal": {
+    "darks": 20,
+    "flats": 25,
+    "biases": 0
+   }
+  },
+  {
+   "target": "Horsehead Nebula (IC 434)",
+   "camera": "Askar FRA400",
+   "night": "2026-10-16",
+   "frames": 21,
+   "hours": 1.75,
+   "filters": {
+    "L-eXtreme": 21
+   },
+   "exps": {
+    "300": 21
+   },
+   "askar": {},
+   "stackOnly": false,
+   "cal": {
+    "darks": 30,
+    "flats": 0,
+    "biases": 0
+   }
+  },
+  {
+   "target": "Rosette Nebula (NGC 2237)",
+   "camera": "Askar FRA400",
+   "night": "2026-05-15",
+   "frames": 26,
+   "hours": 2.167,
+   "filters": {
+    "UV/IR": 26
+   },
+   "exps": {
+    "300": 26
+   },
+   "askar": {},
+   "stackOnly": false,
+   "cal": {
+    "darks": 30,
+    "flats": 0,
+    "biases": 0
+   }
+  },
+  {
+   "target": "Rosette Nebula (NGC 2237)",
+   "camera": "Askar FRA400",
+   "night": "2026-06-11",
+   "frames": 26,
+   "hours": 2.167,
+   "filters": {
+    "L-eXtreme": 26
+   },
+   "exps": {
+    "300": 26
+   },
+   "askar": {},
+   "stackOnly": false,
+   "cal": {
+    "darks": 30,
+    "flats": 25,
+    "biases": 0
+   }
+  },
+  {
+   "target": "Rosette Nebula (NGC 2237)",
+   "camera": "Askar FRA400",
+   "night": "2026-08-25",
+   "frames": 26,
+   "hours": 2.167,
+   "filters": {
+    "L-eXtreme": 26
+   },
+   "exps": {
+    "300": 26
+   },
+   "askar": {},
+   "stackOnly": false,
+   "cal": {
+    "darks": 20,
+    "flats": 0,
+    "biases": 0
+   }
+  },
+  {
+   "target": "Rosette Nebula (NGC 2237)",
+   "camera": "Askar FRA400",
+   "night": "2026-09-10",
+   "frames": 29,
+   "hours": 2.417,
+   "filters": {
+    "L-eXtreme": 29
+   },
+   "exps": {
+    "300": 29
+   },
+   "askar": {},
+   "stackOnly": false,
+   "cal": {
+    "darks": 0,
+    "flats": 0,
+    "biases": 0
+   }
+  },
+  {
+   "target": "North America Nebula (NGC 7000)",
+   "camera": "Seestar S30 Pro",
+   "night": "2026-02-19",
+   "frames": 297,
+   "hours": 0.825,
+   "filters": {
+    "LP": 297
+   },
+   "exps": {
+    "10": 297
+   },
+   "askar": {},
+   "stackOnly": false,
+   "cal": null
+  },
+  {
+   "target": "North America Nebula (NGC 7000)",
+   "camera": "Seestar S30 Pro",
+   "night": "2026-03-07",
+   "frames": 297,
+   "hours": 0.825,
+   "filters": {
+    "LP": 297
+   },
+   "exps": {
+    "10": 297
+   },
+   "askar": {},
+   "stackOnly": false,
+   "cal": null
+  },
+  {
+   "target": "North America Nebula (NGC 7000)",
+   "camera": "Seestar S30 Pro",
+   "night": "2026-06-27",
+   "frames": 297,
+   "hours": 0.825,
+   "filters": {
+    "LP": 297
+   },
+   "exps": {
+    "10": 297
+   },
+   "askar": {},
+   "stackOnly": false,
+   "cal": null
+  },
+  {
+   "target": "North America Nebula (NGC 7000)",
+   "camera": "Seestar S30 Pro",
+   "night": "2026-07-28",
+   "frames": 297,
+   "hours": 0.825,
+   "filters": {
+    "LP": 297
+   },
+   "exps": {
+    "10": 297
+   },
+   "askar": {},
+   "stackOnly": false,
+   "cal": null
+  },
+  {
+   "target": "North America Nebula (NGC 7000)",
+   "camera": "Askar 107PHQ",
+   "night": "2025-09-14",
+   "frames": 50,
+   "hours": 2.5,
+   "filters": {
+    "Ha": 50
+   },
+   "exps": {
+    "180": 50
+   },
+   "askar": {},
+   "stackOnly": false,
+   "cal": {
+    "darks": 0,
+    "flats": 25,
+    "biases": 0
+   }
+  },
+  {
+   "target": "North America Nebula (NGC 7000)",
+   "camera": "Askar 107PHQ",
+   "night": "2025-09-21",
+   "frames": 50,
+   "hours": 2.5,
+   "filters": {
+    "L": 50
+   },
+   "exps": {
+    "180": 50
+   },
+   "askar": {},
+   "stackOnly": false,
+   "cal": {
+    "darks": 30,
+    "flats": 0,
+    "biases": 0
+   }
+  },
+  {
+   "target": "North America Nebula (NGC 7000)",
+   "camera": "Askar 107PHQ",
+   "night": "2025-10-06",
+   "frames": 50,
+   "hours": 2.5,
+   "filters": {
+    "Ha": 50
+   },
+   "exps": {
+    "180": 50
+   },
+   "askar": {},
+   "stackOnly": false,
+   "cal": {
+    "darks": 20,
+    "flats": 0,
+    "biases": 0
+   }
+  },
+  {
+   "target": "North America Nebula (NGC 7000)",
+   "camera": "Askar 107PHQ",
+   "night": "2025-11-09",
+   "frames": 50,
+   "hours": 2.5,
+   "filters": {
+    "OIII": 50
+   },
+   "exps": {
+    "180": 50
+   },
+   "askar": {},
+   "stackOnly": false,
+   "cal": {
+    "darks": 30,
+    "flats": 0,
+    "biases": 0
+   }
+  },
+  {
+   "target": "North America Nebula (NGC 7000)",
+   "camera": "Askar 107PHQ",
+   "night": "2025-11-24",
+   "frames": 52,
+   "hours": 2.6,
+   "filters": {
+    "L": 52
+   },
+   "exps": {
+    "180": 52
+   },
+   "askar": {},
+   "stackOnly": false,
+   "cal": {
+    "darks": 30,
+    "flats": 25,
+    "biases": 0
+   }
+  },
+  {
+   "target": "Pelican Nebula (IC 5070)",
+   "camera": "Askar 107PHQ",
+   "night": "2026-03-12",
+   "frames": 36,
+   "hours": 1.8,
+   "filters": {
+    "SII": 36
+   },
+   "exps": {
+    "180": 36
+   },
+   "askar": {},
+   "stackOnly": false,
+   "cal": {
+    "darks": 30,
+    "flats": 0,
+    "biases": 0
+   }
+  },
+  {
+   "target": "Pelican Nebula (IC 5070)",
+   "camera": "Askar 107PHQ",
+   "night": "2026-05-21",
+   "frames": 36,
+   "hours": 1.8,
+   "filters": {
+    "L": 36
+   },
+   "exps": {
+    "180": 36
+   },
+   "askar": {},
+   "stackOnly": false,
+   "cal": {
+    "darks": 0,
+    "flats": 0,
+    "biases": 0
+   }
+  },
+  {
+   "target": "Pelican Nebula (IC 5070)",
+   "camera": "Askar 107PHQ",
+   "night": "2026-07-24",
+   "frames": 38,
+   "hours": 1.9,
+   "filters": {
+    "Ha": 38
+   },
+   "exps": {
+    "180": 38
+   },
+   "askar": {},
+   "stackOnly": false,
+   "cal": {
+    "darks": 20,
+    "flats": 0,
+    "biases": 0
+   }
+  },
+  {
+   "target": "Veil Nebula (NGC 6960)",
+   "camera": "Askar FRA400",
+   "night": "2026-04-12",
+   "frames": 30,
+   "hours": 2.5,
+   "filters": {
+    "L-eXtreme": 30
+   },
+   "exps": {
+    "300": 30
+   },
+   "askar": {},
+   "stackOnly": false,
+   "cal": {
+    "darks": 30,
+    "flats": 0,
+    "biases": 0
+   }
+  },
+  {
+   "target": "Veil Nebula (NGC 6960)",
+   "camera": "Askar FRA400",
+   "night": "2026-05-30",
+   "frames": 30,
+   "hours": 2.5,
+   "filters": {
+    "L-eXtreme": 30
+   },
+   "exps": {
+    "300": 30
+   },
+   "askar": {},
+   "stackOnly": false,
+   "cal": {
+    "darks": 0,
+    "flats": 25,
+    "biases": 0
+   }
+  },
+  {
+   "target": "Veil Nebula (NGC 6960)",
+   "camera": "Askar FRA400",
+   "night": "2026-07-12",
+   "frames": 30,
+   "hours": 2.5,
+   "filters": {
+    "UV/IR": 30
+   },
+   "exps": {
+    "300": 30
+   },
+   "askar": {},
+   "stackOnly": false,
+   "cal": {
+    "darks": 0,
+    "flats": 0,
+    "biases": 0
+   }
+  },
+  {
+   "target": "Veil Nebula (NGC 6960)",
+   "camera": "Askar FRA400",
+   "night": "2026-07-31",
+   "frames": 31,
+   "hours": 2.583,
+   "filters": {
+    "L-eXtreme": 31
+   },
+   "exps": {
+    "300": 31
+   },
+   "askar": {},
+   "stackOnly": false,
+   "cal": {
+    "darks": 20,
+    "flats": 0,
+    "biases": 0
+   }
+  },
+  {
+   "target": "Crescent Nebula (NGC 6888)",
+   "camera": "Askar 107PHQ",
+   "night": "2026-04-04",
+   "frames": 40,
+   "hours": 2.0,
+   "filters": {
+    "OIII": 40
+   },
+   "exps": {
+    "180": 40
+   },
+   "askar": {},
+   "stackOnly": false,
+   "cal": {
+    "darks": 0,
+    "flats": 25,
+    "biases": 0
+   }
+  },
+  {
+   "target": "Crescent Nebula (NGC 6888)",
+   "camera": "Askar 107PHQ",
+   "night": "2026-06-26",
+   "frames": 40,
+   "hours": 2.0,
+   "filters": {
+    "L": 40
+   },
+   "exps": {
+    "180": 40
+   },
+   "askar": {},
+   "stackOnly": false,
+   "cal": {
+    "darks": 30,
+    "flats": 0,
+    "biases": 0
+   }
+  },
+  {
+   "target": "Crescent Nebula (NGC 6888)",
+   "camera": "Askar 107PHQ",
+   "night": "2026-08-07",
+   "frames": 42,
+   "hours": 2.1,
+   "filters": {
+    "SII": 42
+   },
+   "exps": {
+    "180": 42
+   },
+   "askar": {},
+   "stackOnly": false,
+   "cal": {
+    "darks": 20,
+    "flats": 0,
+    "biases": 0
+   }
+  },
+  {
+   "target": "Dumbbell Nebula (M 27)",
+   "camera": "Seestar S30 Pro",
+   "night": "2026-07-24",
+   "frames": 162,
+   "hours": 0.45,
+   "filters": {
+    "LP": 162
+   },
+   "exps": {
+    "10": 162
+   },
+   "askar": {},
+   "stackOnly": false,
+   "cal": null
+  },
+  {
+   "target": "Dumbbell Nebula (M 27)",
+   "camera": "Seestar S30 Pro",
+   "night": "2026-08-17",
+   "frames": 162,
+   "hours": 0.45,
+   "filters": {
+    "LP": 162
+   },
+   "exps": {
+    "10": 162
+   },
+   "askar": {},
+   "stackOnly": false,
+   "cal": null
+  },
+  {
+   "target": "Ring Nebula (M 57)",
+   "camera": "Seestar S50 Pro",
+   "night": "2026-03-17",
+   "frames": 108,
+   "hours": 0.6,
+   "filters": {
+    "LP": 108
+   },
+   "exps": {
+    "20": 108
+   },
+   "askar": {},
+   "stackOnly": false,
+   "cal": null
+  },
+  {
+   "target": "Iris Nebula (NGC 7023)",
+   "camera": "Seestar S30 Pro",
+   "night": "2026-07-27",
+   "frames": 198,
+   "hours": 0.55,
+   "filters": {
+    "LP": 198
+   },
+   "exps": {
+    "10": 198
+   },
+   "askar": {},
+   "stackOnly": false,
+   "cal": null
+  },
+  {
+   "target": "Iris Nebula (NGC 7023)",
+   "camera": "Seestar S30 Pro",
+   "night": "2026-08-01",
+   "frames": 198,
+   "hours": 0.55,
+   "filters": {
+    "LP": 198
+   },
+   "exps": {
+    "10": 198
+   },
+   "askar": {},
+   "stackOnly": false,
+   "cal": null
+  },
+  {
+   "target": "Bubble Nebula (NGC 7635)",
+   "camera": "Askar 107PHQ",
+   "night": "2026-05-01",
+   "frames": 30,
+   "hours": 1.5,
+   "filters": {
+    "SII": 30
+   },
+   "exps": {
+    "180": 30
+   },
+   "askar": {},
+   "stackOnly": false,
+   "cal": {
+    "darks": 30,
+    "flats": 0,
+    "biases": 0
+   }
+  },
+  {
+   "target": "Bubble Nebula (NGC 7635)",
+   "camera": "Askar 107PHQ",
+   "night": "2026-10-08",
+   "frames": 30,
+   "hours": 1.5,
+   "filters": {
+    "Ha": 30
+   },
+   "exps": {
+    "180": 30
+   },
+   "askar": {},
+   "stackOnly": false,
+   "cal": {
+    "darks": 0,
+    "flats": 0,
+    "biases": 0
+   }
+  },
+  {
+   "target": "Cave Nebula (Sh2-155)",
+   "camera": "Askar FRA400",
+   "night": "2026-08-05",
+   "frames": 26,
+   "hours": 2.167,
+   "filters": {
+    "UV/IR": 26
+   },
+   "exps": {
+    "300": 26
+   },
+   "askar": {},
+   "stackOnly": false,
+   "cal": {
+    "darks": 0,
+    "flats": 0,
+    "biases": 0
+   }
+  },
+  {
+   "target": "Cave Nebula (Sh2-155)",
+   "camera": "Askar FRA400",
+   "night": "2026-09-21",
+   "frames": 27,
+   "hours": 2.25,
+   "filters": {
+    "UV/IR": 27
+   },
+   "exps": {
+    "300": 27
+   },
+   "askar": {},
+   "stackOnly": false,
+   "cal": {
+    "darks": 20,
+    "flats": 0,
+    "biases": 0
+   }
+  },
+  {
+   "target": "Pacman Nebula (NGC 281)",
+   "camera": "Askar 107PHQ",
+   "night": "2026-04-06",
+   "frames": 52,
+   "hours": 2.6,
+   "filters": {
+    "Ha": 52
+   },
+   "exps": {
+    "180": 52
+   },
+   "askar": {},
+   "stackOnly": false,
+   "cal": {
+    "darks": 20,
+    "flats": 0,
+    "biases": 0
+   }
+  },
+  {
+   "target": "Pacman Nebula (NGC 281)",
+   "camera": "Askar 107PHQ",
+   "night": "2026-06-29",
+   "frames": 52,
+   "hours": 2.6,
+   "filters": {
+    "OIII": 52
+   },
+   "exps": {
+    "180": 52
+   },
+   "askar": {},
+   "stackOnly": false,
+   "cal": {
+    "darks": 20,
+    "flats": 0,
+    "biases": 0
+   }
+  },
+  {
+   "target": "Triangulum Galaxy (M 33)",
+   "camera": "Askar 107PHQ",
+   "night": "2026-08-10",
+   "frames": 39,
+   "hours": 1.95,
+   "filters": {
+    "OIII": 39
+   },
+   "exps": {
+    "180": 39
+   },
+   "askar": {},
+   "stackOnly": false,
+   "cal": {
+    "darks": 0,
+    "flats": 0,
+    "biases": 0
+   }
+  },
+  {
+   "target": "Triangulum Galaxy (M 33)",
+   "camera": "Askar 107PHQ",
+   "night": "2026-09-23",
+   "frames": 39,
+   "hours": 1.95,
+   "filters": {
+    "Ha": 39
+   },
+   "exps": {
+    "180": 39
+   },
+   "askar": {},
+   "stackOnly": false,
+   "cal": {
+    "darks": 20,
+    "flats": 0,
+    "biases": 0
+   }
+  },
+  {
+   "target": "Triangulum Galaxy (M 33)",
+   "camera": "Askar 107PHQ",
+   "night": "2026-09-24",
+   "frames": 39,
+   "hours": 1.95,
+   "filters": {
+    "SII": 39
+   },
+   "exps": {
+    "180": 39
+   },
+   "askar": {},
+   "stackOnly": false,
+   "cal": {
+    "darks": 30,
+    "flats": 0,
+    "biases": 0
+   }
+  },
+  {
+   "target": "Triangulum Galaxy (M 33)",
+   "camera": "Askar 107PHQ",
+   "night": "2026-10-16",
+   "frames": 41,
+   "hours": 2.05,
+   "filters": {
+    "SII": 41
+   },
+   "exps": {
+    "180": 41
+   },
+   "askar": {},
+   "stackOnly": false,
+   "cal": {
+    "darks": 30,
+    "flats": 0,
+    "biases": 0
+   }
+  },
+  {
+   "target": "Triangulum Galaxy (M 33)",
+   "camera": "Seestar S30 Pro",
+   "night": "2026-07-06",
+   "frames": 192,
+   "hours": 0.533,
+   "filters": {
+    "LP": 192
+   },
+   "exps": {
+    "10": 192
+   },
+   "askar": {},
+   "stackOnly": false,
+   "cal": null
+  },
+  {
+   "target": "Triangulum Galaxy (M 33)",
+   "camera": "Seestar S30 Pro",
+   "night": "2026-08-01",
+   "frames": 192,
+   "hours": 0.533,
+   "filters": {
+    "LP": 192
+   },
+   "exps": {
+    "10": 192
+   },
+   "askar": {},
+   "stackOnly": false,
+   "cal": null
+  },
+  {
+   "target": "Triangulum Galaxy (M 33)",
+   "camera": "Seestar S30 Pro",
+   "night": "2026-09-12",
+   "frames": 192,
+   "hours": 0.533,
+   "filters": {
+    "LP": 192
+   },
+   "exps": {
+    "10": 192
+   },
+   "askar": {},
+   "stackOnly": false,
+   "cal": null
+  },
+  {
+   "target": "Pinwheel Galaxy (M 101)",
+   "camera": "Askar 107PHQ",
+   "night": "2025-11-15",
+   "frames": 44,
+   "hours": 2.2,
+   "filters": {
+    "OIII": 44
+   },
+   "exps": {
+    "180": 44
+   },
+   "askar": {},
+   "stackOnly": false,
+   "cal": {
+    "darks": 20,
+    "flats": 0,
+    "biases": 0
+   }
+  },
+  {
+   "target": "Pinwheel Galaxy (M 101)",
+   "camera": "Askar 107PHQ",
+   "night": "2026-01-11",
+   "frames": 44,
+   "hours": 2.2,
+   "filters": {
+    "OIII": 44
+   },
+   "exps": {
+    "180": 44
+   },
+   "askar": {},
+   "stackOnly": false,
+   "cal": {
+    "darks": 20,
+    "flats": 0,
+    "biases": 0
+   }
+  },
+  {
+   "target": "Pinwheel Galaxy (M 101)",
+   "camera": "Askar 107PHQ",
+   "night": "2026-03-31",
+   "frames": 44,
+   "hours": 2.2,
+   "filters": {
+    "Ha": 44
+   },
+   "exps": {
+    "180": 44
+   },
+   "askar": {},
+   "stackOnly": false,
+   "cal": {
+    "darks": 20,
+    "flats": 0,
+    "biases": 0
+   }
+  },
+  {
+   "target": "Whirlpool Galaxy (M 51)",
+   "camera": "Askar 107PHQ",
+   "night": "2026-04-20",
+   "frames": 48,
+   "hours": 2.4,
+   "filters": {
+    "OIII": 48
+   },
+   "exps": {
+    "180": 48
+   },
+   "askar": {},
+   "stackOnly": false,
+   "cal": {
+    "darks": 30,
+    "flats": 0,
+    "biases": 0
+   }
+  },
+  {
+   "target": "Whirlpool Galaxy (M 51)",
+   "camera": "Askar 107PHQ",
+   "night": "2026-08-28",
+   "frames": 48,
+   "hours": 2.4,
+   "filters": {
+    "OIII": 48
+   },
+   "exps": {
+    "180": 48
+   },
+   "askar": {},
+   "stackOnly": false,
+   "cal": {
+    "darks": 20,
+    "flats": 0,
+    "biases": 0
+   }
+  },
+  {
+   "target": "Bode's Galaxy (M 81)",
+   "camera": "Askar 107PHQ",
+   "night": "2026-02-27",
+   "frames": 39,
+   "hours": 1.95,
+   "filters": {
+    "L": 39
+   },
+   "exps": {
+    "180": 39
+   },
+   "askar": {},
+   "stackOnly": false,
+   "cal": {
+    "darks": 30,
+    "flats": 0,
+    "biases": 0
+   }
+  },
+  {
+   "target": "Bode's Galaxy (M 81)",
+   "camera": "Askar 107PHQ",
+   "night": "2026-07-04",
+   "frames": 39,
+   "hours": 1.95,
+   "filters": {
+    "OIII": 39
+   },
+   "exps": {
+    "180": 39
+   },
+   "askar": {},
+   "stackOnly": false,
+   "cal": {
+    "darks": 0,
+    "flats": 0,
+    "biases": 0
+   }
+  },
+  {
+   "target": "Leo Triplet",
+   "camera": "Askar FRA400",
+   "night": "2026-06-28",
+   "frames": 32,
+   "hours": 2.667,
+   "filters": {
+    "L-eXtreme": 32
+   },
+   "exps": {
+    "300": 32
+   },
+   "askar": {},
+   "stackOnly": false,
+   "cal": {
+    "darks": 20,
+    "flats": 0,
+    "biases": 0
+   }
+  },
+  {
+   "target": "Markarian's Chain",
+   "camera": "Askar FRA400",
+   "night": "2026-06-28",
+   "frames": 20,
+   "hours": 1.667,
+   "filters": {
+    "L-eXtreme": 20
+   },
+   "exps": {
+    "300": 20
+   },
+   "askar": {},
+   "stackOnly": false,
+   "cal": {
+    "darks": 30,
+    "flats": 25,
+    "biases": 0
+   }
+  },
+  {
+   "target": "Markarian's Chain",
+   "camera": "Askar FRA400",
+   "night": "2026-07-02",
+   "frames": 20,
+   "hours": 1.667,
+   "filters": {
+    "UV/IR": 20
+   },
+   "exps": {
+    "300": 20
+   },
+   "askar": {},
+   "stackOnly": false,
+   "cal": {
+    "darks": 20,
+    "flats": 0,
+    "biases": 0
+   }
+  },
+  {
+   "target": "Hercules Cluster (M 13)",
+   "camera": "Seestar S50",
+   "night": "2026-07-25",
+   "frames": 144,
+   "hours": 0.4,
+   "filters": {
+    "LP": 144
+   },
+   "exps": {
+    "10": 144
+   },
+   "askar": {},
+   "stackOnly": false,
+   "cal": null
+  },
+  {
+   "target": "Lagoon Nebula (M 8)",
+   "camera": "Starfront S50 Pro",
+   "night": "2026-05-07",
+   "frames": 112,
+   "hours": 0.933,
+   "filters": {
+    "LP": 112
+   },
+   "exps": {
+    "30": 112
+   },
+   "askar": {},
+   "stackOnly": false,
+   "cal": null
+  },
+  {
+   "target": "Lagoon Nebula (M 8)",
+   "camera": "Starfront S50 Pro",
+   "night": "2026-07-27",
+   "frames": 112,
+   "hours": 0.933,
+   "filters": {
+    "LP": 112
+   },
+   "exps": {
+    "30": 112
+   },
+   "askar": {},
+   "stackOnly": false,
+   "cal": null
+  },
+  {
+   "target": "Lagoon Nebula (M 8)",
+   "camera": "Starfront S50 Pro",
+   "night": "2026-10-08",
+   "frames": 112,
+   "hours": 0.933,
+   "filters": {
+    "LP": 112
+   },
+   "exps": {
+    "30": 112
+   },
+   "askar": {},
+   "stackOnly": false,
+   "cal": null
+  },
+  {
+   "target": "Trifid Nebula (M 20)",
+   "camera": "Starfront S50 Pro",
+   "night": "2026-06-29",
+   "frames": 102,
+   "hours": 0.85,
+   "filters": {
+    "LP": 102
+   },
+   "exps": {
+    "30": 102
+   },
+   "askar": {},
+   "stackOnly": false,
+   "cal": null
+  },
+  {
+   "target": "Trifid Nebula (M 20)",
+   "camera": "Starfront S50 Pro",
+   "night": "2026-09-06",
+   "frames": 102,
+   "hours": 0.85,
+   "filters": {
+    "LP": 102
+   },
+   "exps": {
+    "30": 102
+   },
+   "askar": {},
+   "stackOnly": false,
+   "cal": null
+  },
+  {
+   "target": "Eagle Nebula (M 16)",
+   "camera": "Starfront S50 Pro",
+   "night": "2026-07-10",
+   "frames": 126,
+   "hours": 1.05,
+   "filters": {
+    "LP": 126
+   },
+   "exps": {
+    "30": 126
+   },
+   "askar": {},
+   "stackOnly": false,
+   "cal": null
+  },
+  {
+   "target": "Eagle Nebula (M 16)",
+   "camera": "Starfront S50 Pro",
+   "night": "2026-10-12",
+   "frames": 126,
+   "hours": 1.05,
+   "filters": {
+    "LP": 126
+   },
+   "exps": {
+    "30": 126
+   },
+   "askar": {},
+   "stackOnly": false,
+   "cal": null
+  },
+  {
+   "target": "Omega Nebula (M 17)",
+   "camera": "Starfront S50 Pro",
+   "night": "2026-08-18",
+   "frames": 156,
+   "hours": 1.3,
+   "filters": {
+    "LP": 156
+   },
+   "exps": {
+    "30": 156
+   },
+   "askar": {},
+   "stackOnly": false,
+   "cal": null
+  },
+  {
+   "target": "Cocoon Nebula (IC 5146)",
+   "camera": "Askar FRA400",
+   "night": "2026-08-25",
+   "frames": 14,
+   "hours": 1.167,
+   "filters": {
+    "L-eXtreme": 14
+   },
+   "exps": {
+    "300": 14
+   },
+   "askar": {},
+   "stackOnly": false,
+   "cal": {
+    "darks": 20,
+    "flats": 0,
+    "biases": 0
+   }
+  },
+  {
+   "target": "Cocoon Nebula (IC 5146)",
+   "camera": "Askar FRA400",
+   "night": "2026-10-11",
+   "frames": 15,
+   "hours": 1.25,
+   "filters": {
+    "L-eXtreme": 15
+   },
+   "exps": {
+    "300": 15
+   },
+   "askar": {},
+   "stackOnly": false,
+   "cal": {
+    "darks": 20,
+    "flats": 0,
+    "biases": 0
+   }
+  },
+  {
+   "target": "Tulip Nebula (Sh2-101)",
+   "camera": "Askar FRA400",
+   "night": "2026-04-18",
+   "frames": 21,
+   "hours": 1.75,
+   "filters": {
+    "L-eXtreme": 21
+   },
+   "exps": {
+    "300": 21
+   },
+   "askar": {},
+   "stackOnly": false,
+   "cal": {
+    "darks": 0,
+    "flats": 0,
+    "biases": 0
+   }
+  },
+  {
+   "target": "Tulip Nebula (Sh2-101)",
+   "camera": "Askar FRA400",
+   "night": "2026-08-26",
+   "frames": 22,
+   "hours": 1.833,
+   "filters": {
+    "L-eXtreme": 22
+   },
+   "exps": {
+    "300": 22
+   },
+   "askar": {},
+   "stackOnly": false,
+   "cal": {
+    "darks": 0,
+    "flats": 0,
+    "biases": 0
+   }
+  },
+  {
+   "target": "Sadr Region (IC 1318)",
+   "camera": "Seestar S30 Pro",
+   "night": "2026-08-01",
+   "frames": 252,
+   "hours": 0.7,
+   "filters": {
+    "LP": 252
+   },
+   "exps": {
+    "10": 252
+   },
+   "askar": {},
+   "stackOnly": false,
+   "cal": null
+  },
+  {
+   "target": "Sadr Region (IC 1318)",
+   "camera": "Seestar S30 Pro",
+   "night": "2026-08-07",
+   "frames": 252,
+   "hours": 0.7,
+   "filters": {
+    "LP": 252
+   },
+   "exps": {
+    "10": 252
+   },
+   "askar": {},
+   "stackOnly": false,
+   "cal": null
+  },
+  {
+   "target": "Jellyfish Nebula (IC 443)",
+   "camera": "Askar FRA400",
+   "night": "2026-10-06",
+   "frames": 22,
+   "hours": 1.833,
+   "filters": {
+    "L-eXtreme": 22
+   },
+   "exps": {
+    "300": 22
+   },
+   "askar": {},
+   "stackOnly": false,
+   "cal": {
+    "darks": 0,
+    "flats": 25,
+    "biases": 0
+   }
+  },
+  {
+   "target": "Monkey Head Nebula (NGC 2174)",
+   "camera": "Askar 107PHQ",
+   "night": "2026-07-04",
+   "frames": 58,
+   "hours": 2.9,
+   "filters": {
+    "L": 58
+   },
+   "exps": {
+    "180": 58
+   },
+   "askar": {},
+   "stackOnly": false,
+   "cal": {
+    "darks": 20,
+    "flats": 25,
+    "biases": 0
+   }
+  },
+  {
+   "target": "Christmas Tree Cluster (NGC 2264)",
+   "camera": "Askar FRA400",
+   "night": "2026-06-26",
+   "frames": 24,
+   "hours": 2.0,
+   "filters": {
+    "L-eXtreme": 24
+   },
+   "exps": {
+    "300": 24
+   },
+   "askar": {},
+   "stackOnly": false,
+   "cal": {
+    "darks": 0,
+    "flats": 25,
+    "biases": 0
+   }
+  },
+  {
+   "target": "Christmas Tree Cluster (NGC 2264)",
+   "camera": "Askar FRA400",
+   "night": "2026-09-07",
+   "frames": 25,
+   "hours": 2.083,
+   "filters": {
+    "UV/IR": 25
+   },
+   "exps": {
+    "300": 25
+   },
+   "askar": {},
+   "stackOnly": false,
+   "cal": {
+    "darks": 30,
+    "flats": 25,
+    "biases": 0
+   }
+  },
+  {
+   "target": "Fireworks Galaxy (NGC 6946)",
+   "camera": "Seestar S50 Pro",
+   "night": "2026-07-21",
+   "frames": 144,
+   "hours": 0.8,
+   "filters": {
+    "LP": 144
+   },
+   "exps": {
+    "20": 144
+   },
+   "askar": {},
+   "stackOnly": false,
+   "cal": null
+  },
+  {
+   "target": "Cygnus Wall (NGC 7000)",
+   "camera": "Seestar S50 Pro",
+   "night": "2025-04-23",
+   "frames": 180,
+   "hours": 1.0,
+   "filters": {
+    "LP": 180
+   },
+   "exps": {
+    "20": 180
+   },
+   "askar": {},
+   "stackOnly": false,
+   "cal": null
+  },
+  {
+   "target": "Cygnus Wall (NGC 7000)",
+   "camera": "Seestar S50 Pro",
+   "night": "2025-09-20",
+   "frames": 180,
+   "hours": 1.0,
+   "filters": {
+    "LP": 180
+   },
+   "exps": {
+    "20": 180
+   },
+   "askar": {},
+   "stackOnly": false,
+   "cal": null
+  }
+ ],
+ "events": [],
+ "calibration": {},
+ "shelves": {},
+ "quarantine": {},
+ "junk": {
+  "files": 41,
+  "bytes": 2400000000
+ },
+ "totals": {
+  "files": 16414,
+  "bytes": 289884000000,
+  "lights": 16414,
+  "hours": 292.8,
+  "targets": 41,
+  "nights": 130,
+  "sessions": 160
+ },
+ "colourMeaning": {},
+ "parseFailures": {},
+ "ledgerMeta": {
+  "rows": 31284
+ },
+ "askarRigs": {},
+ "rigAttribution": {},
+ "health": [
+  {
+   "severity": "info",
+   "title": "Built from the importer's own record, nothing typed in",
+   "detail": "Worked out on this PC from both computers' records and the archive inventory: 31,284 ledger rows read. The one human-set fact is capture-state.json (open / complete)."
+  },
+  {
+   "severity": "warn",
+   "title": "Warning from the project layer",
+   "detail": "2 target name(s) the contract doesn't know (run --targets-draft to list them); their 184 frames are not counted"
+  },
+  {
+   "severity": "warn",
+   "title": "Warning from the project layer",
+   "detail": "2 rows carry no scope (no focal length and no camera name); not counted"
+  },
+  {
+   "severity": "info",
+   "title": "Duplicate copies excluded",
+   "detail": "305 rows are second copies of the same bytes (the Mac's and the PC's import of one frame); counted once."
+  }
+ ],
+ "delta": null,
+ "reconciliation": [
+  {
+   "check": "Ledger rows read, light frames counted",
+   "expected": 31284,
+   "computed": 16414,
+   "note": "184 not counted: 2 names the contract doesn't know; 305 duplicate copies counted once",
+   "ok": true
+  },
+  {
+   "check": "Datasets on this page, against projects.json",
+   "expected": 50,
+   "computed": 50,
+   "note": "one dataset is one object on one scope",
+   "ok": true
+  },
+  {
+   "check": "Hours by scope, against the total",
+   "expected": 292.8,
+   "computed": 292.8,
+   "note": "",
+   "ok": true
+  }
+ ],
+ "warnings": [
+  "2 target name(s) the contract doesn't know (run --targets-draft to list them); their frames are not counted",
+  "2 rows carry no scope; not counted"
+ ]
+}

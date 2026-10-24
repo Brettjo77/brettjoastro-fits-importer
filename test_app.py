@@ -55,7 +55,7 @@ def check(name, cond, detail=""):
 def skip(name):
     global SKIPPED
     SKIPPED += 1
-    skip(f"{name}")
+    print(f"  SKIP  {name}")
 
 _SUMMARY_DONE = False
 def summary(crash=None):
@@ -319,15 +319,15 @@ try:
     try:
         for what in ("ship", "panel"):
             with open(lockp, "w") as f:         # held by a live process (this runner)
-                json.dump({"pid": os.getpid(), "started": "2026-09-26T101500", "what": what}, f)
+                json.dump({"pid": os.getpid(), "started": time.strftime("%Y-%m-%dT%H%M%S"), "what": what}, f)
             api("/api/report", {})
             s = wait_for(lambda s: s["status"] == "idle", timeout=30)
             said[what] = str(s.get("lastResult"))
     finally:
         os.remove(lockp)
     check("U6 the panel's banner says what holds the lock in the engine's own words: "
-          "'The twice-daily ship to the PC is running right now', 'The panel is busy right now'",
-          said.get("ship", "").startswith("The twice-daily ship to the PC is running right now. ")
+          "'The ship to the archive is running right now', 'The panel is busy right now'",
+          said.get("ship", "").startswith("The ship to the archive is running right now. ")
           and said.get("panel", "").startswith("The panel is busy right now. ")
           and not s.get("hasReport"), json.dumps(said))
 
@@ -341,6 +341,17 @@ try:
     check("T2 scan lists the Seestar project with device tag",
           names.get("M 42", {}).get("device") == "seestar" and names["M 42"]["new"] == 2,
           json.dumps(names.get("M 42", {})))
+    try:
+        with open(os.path.join(env.state, "last-scan.json"), encoding="utf-8") as f:
+            _ls = json.load(f)
+    except (OSError, ValueError) as e:
+        _ls = {"error": str(e)}
+    check("OB5 (1.7.5) the scan summary the panel writes names every target with new frames by its display name, "
+          "biggest first, and says no other computer holds any (none has a record here)",
+          _ls.get("targetNames") == [t["display"] for t in sorted((t for t in s["scan"]["targets"] if t["new"] and not t["skipped"]),
+                                                                  key=lambda t: -t["new"])]
+          and len(_ls.get("targetNames") or []) >= 3 and _ls.get("elsewhereMachine") is None,
+          json.dumps(_ls)[:300])
     check("T2 storage covers both volumes",
           len(s["scan"]["disks"]) == 2 and s["scan"]["disk"] is not None,
           json.dumps(s["scan"].get("disks", [])))
@@ -1042,9 +1053,9 @@ check("U9 ...and no ledger at all: 'Nothing imported yet'",
       u4.get("none") == {"safe": True, "onlyHere": 0, "text": "Nothing imported yet",
                          "machine": HERE_MACHINE}, json.dumps(u4.get("none")))
 TIP = (f"Cleared from the camera; the only verified copy is on this {HERE_MACHINE} "
-       "until the PC's sweep checks it")
+       "until the archive's sweep checks it" + (" (the 03:30 sweep, then the next ship)" if os.name == "nt" else ""))
 check("U9 the status line's tooltip, worded for this computer, explains a count "
-      "('… only on this Mac/PC until the PC's sweep checks it')",
+      "('… only on this Mac/PC until the archive's sweep checks it')",
       f'const STATUS_TIP="{TIP}";' in page4 and "sl.title=sum.onlyHere?STATUS_TIP" in page4,
       re.findall(r"const STATUS_TIP=.*", page4)[:1])
 
@@ -1593,7 +1604,8 @@ try:
               and "Still capturing · 1" in html and 'class="ad-legend"' in html
               and '<select id="deskScope"' in html and "All scopes (3)" in html and "Askar FRA400 (1)" in html
               and 'id="deskRefresh"' in html and "from Mac's record as of 1 Oct 2026 (10 days old)" in html
-              and '<p class="ad-warn">⚠ 43 target name(s)' in html and "on the Mac (per its ledger)" in html,
+              and '<p class="ad-warn">⚠ 43 target name(s)' in html
+              and "on this Mac (per its ledger)" in html,      # rendered as the Mac (the page's default sides, 1.7.1)
               html[-1200:])
         check("PL the scope filter keeps only that scope's rows, and an unreadable list says so without a crash",
               "To process · 1" in filtered and "In progress · " not in filtered and "Still capturing · " not in filtered
@@ -1713,6 +1725,15 @@ try:
           and "e.source!==fr.contentWindow" in _pagen and 'd.kind==="archive-open"' in _pagen
           and 'd.kind==="archive-show"' in _pagen and 'd.kind==="observatory-ready"' in _pagen,
           _pagen[:200])
+    check("OB5 (1.7.5) the panel's own 'Worked out … Refresh now' row goes once the page says it is ready (the "
+          "page carries the freshness line and Refresh), comes back while the frame loads or is a note; the page's "
+          "Refresh and 'Open the Panel' arrive as observatory-refresh and open-panel and nothing else is accepted; "
+          "the footer line is off the Observatory tab; 'see Data checks', never 'Data health'",
+          lambda: 'd.kind==="observatory-refresh"' in _pagen and '$("#obsRefresh").click()' in _pagen
+          and 'd.kind==="open-panel"' in _pagen and "data-tab=\"panel\"]'); if(b) b.click();" in _pagen
+          and '$("#obsHead").style.display="none"' in _pagen and '$("#obsHead").style.display=""' in _pagen
+          and 'b.dataset.tab==="observatory"?"none":""' in _pagen and "(see Data health)" not in _pagen,
+          _pagen[:200])
     os.makedirs(os.path.join(envn.archive, "_verify", "mac"))
     with open(os.path.join(envn.archive, "_verify", "mac", "ledger-snapshot.json"), "w") as f:
         json.dump({"schema": "ledger-snapshot/1", "machine": "Mac", "machineId": "mac", "machineUid": "m",
@@ -1742,16 +1763,76 @@ try:
           and _dsn.get("schema") == "observatory/1" and [x["name"] for x in _dsn.get("targets", [])] == ["Andromeda Galaxy (M 31)"]
           and len(_dsn.get("sessions", [])) == 1 and _dsn["inputs"]["snapshot"]["machine"] == "Mac"
           and _dsn["targets"][0]["statusCards"][0]["state"] == "stacked" and "<" not in _m.group(1)
-          and "What each scope captured last" in body,
+          and "What each scope captured" in body and "Needs your attention" in body,
           f"{code} {xfo} rb={json.dumps(_rb)[:200]} " + (json.dumps(_dsn)[:400] if _dsn else body[:300]))
-    check("OB the first card has two faces: each scope's name is a button to its timeline of projects "
-          "(paintScopeCard, 90 nights / a year / all time, the quiet-period band), the hero rows and the "
-          "Equipment cards open it too (openScope), and 'all scopes' comes back",
-          lambda: "function paintScopeCard(cam)" in body and "function openScope(cam)" in body
-          and body.count("openScope(c") >= 2 and 'el("button","scopebtn")' in body
-          and "all scopes" in body and '["90","90 nights",90],["365","a year",365],["all","all time",' in body
-          and "quiet period: the last " in body and "has been doing" in body,
+    check("OB (1.7.2) every scope row opens the scope: a scope's name in the six-scope strip, its share-bar "
+          "slice and its Equipment card open the scope panel (openScope -> scopePanelFor: one row per object, "
+          "90 nights / a year / everything, the quiet band), and every dot opens the night panel (openNight)",
+          lambda: "function openScope(cam)" in body and "function scopePanelFor(cam" in body
+          and body.count("openScope(") >= 4 and "function openNight(cam,night,target,host" in body
+          and "function nightPanelFor(cam,night,target)" in body
+          and '["90","90 nights",90],["365","a year",365],["all","everything",' in body
+          and "what it has been doing" in body and "Timeline of its projects" in body,
           body[:200])
+    check("OB5 (1.7.5) the page opens on the history: the Recent nights ledger (a week / 14 / 30 nights, blank "
+          "nights collapsed, the pending-import line naming the targets with 'Open the Panel to import'), the scope "
+          "chart rebuilt (tiles, the moon from the date, all-scopes columns, one row per scope, a selected night with "
+          "Previous / Next, resting scopes folded), What each scope shot, cards with one row per scope and one lane "
+          "per scope, one freshness line, Refresh and Key in the bar; no 'Data health', no stamp in the bar",
+          lambda: "function renderRecent(card,changed)" in body and 'id="pendLine"' in body
+          and "Open the Panel to import" in body and "no frames on any scope" in body
+          and "nights after it are not in this list" in body and "function chartData(N)" in body
+          and "function moonAt(night)" in body and "29.530588853" in body
+          and "Nights with the moon under half lit" in body and "Biggest night" in body
+          and "Resting this period" in body and "length is hours imaged" in body
+          and "function renderShotBars(box,d)" in body and "What each scope shot" in body
+          and "function latestTxt(t)" in body and "mosaic on the " in body and '"srow"' in body
+          and "Built on the " in body and 'id="refreshBtn"' in body and 'id="keyBtn"' in body
+          and 'kind:"observatory-refresh"' in body and 'kind:"open-panel"' in body
+          and "ready to process from " in body and "Data health" not in body and 'id="asof"' not in body
+          and "a grey dot is a night on more than one" not in body and "http://" not in body.replace("http://www.w3.org/2000/svg", ""),
+          body[:200])
+    check("OB (16 Oct, 1.7.2) the page normalises a thin dataset (missing keys filled once, a null pendingImport "
+          "stays null so the page never claims a camera is empty, an unknown state falls back), the drawer is a "
+          "dialog, the tooltip is hidden from readers, and scope colour comes only from the dataset (no palette)",
+          lambda: "function normalise(d)" in body and "reconciliation:[],warnings:[]" in body
+          and "v===null?null:" in body and "stageOf(" in body and "function showDrawer(" in body
+          and '<div class="tt" id="tt" aria-hidden="true" role="tooltip">' in body
+          and "const CAMORDER" not in body and "--cam-s30p" not in body
+          and 'const col=cam=>(BY[cam]&&BY[cam].colour)||"var(--muted)"' in body,
+          body[:200])
+    # 1.7.2: the page's live refresh: the status carries the Observatory's stamp, and the dataset
+    # alone is one GET away (same token and origin rules as the page)
+    _stq = {"observatory": api("/api/observatory/status", url=URLN)}
+    with urllib.request.urlopen(URLN + "/observatory?json=1&t=2", timeout=30) as resp:
+        _dsj = json.loads(resp.read().decode())
+    check("OB (1.7.2) /api/observatory/status carries the Observatory's stamp (the dataset's generatedAtIso) and "
+          "whether a rebuild is running, and /observatory?json=1 returns the dataset itself with the new facts",
+          lambda: isinstance(_stq.get("observatory"), dict) and _stq["observatory"]["generatedAtIso"] == _dsn.get("generatedAtIso")
+          and _stq["observatory"]["rebuilding"] is False
+          and _dsj.get("schema") == "observatory/1" and _dsj.get("generatedAtIso") == _dsn.get("generatedAtIso")
+          and isinstance(_dsj.get("notCounted"), dict) and isinstance(_dsj.get("notices"), list)
+          and "scopeOrder" in _dsj and "pendingImport" in _dsj
+          and _dsj["targets"][0]["programmes"][0].get("captureState") == "auto"
+          and isinstance(_dsj["targets"][0]["programmes"][0].get("sessions"), list),
+          json.dumps([_stq.get("observatory"), {k: _dsj.get(k) for k in ("schema", "notCounted", "scopeOrder", "pendingImport")}])[:600])
+    # the review round of 17 Oct: a scan with no camera leaves no scan summary; what is still on a
+    # camera is THIS computer's last scan, merged at serve time even into a published record
+    api("/api/scan", {}, url=URLN)
+    _t0 = time.time()
+    while time.time() - _t0 < 60 and api("/api/state", url=URLN).get("status") != "idle":
+        time.sleep(0.3)
+    _no_sum = not os.path.isfile(os.path.join(envn.state, "last-scan.json"))
+    with open(os.path.join(envn.state, "last-scan.json"), "w") as f:
+        json.dump({"schema": "scan-summary/1", "files": 3559, "targets": 29, "camera": "Seestar",
+                   "failedEject": True, "seenAt": "2026-10-16T08:50:00+00:00", "machine": "PC"}, f)
+    with urllib.request.urlopen(URLN + "/observatory?json=1&t=3", timeout=30) as resp:
+        _dsp = json.loads(resp.read().decode())
+    check("OB (review, 1.7.2) a scan with no camera writes no scan summary (so the page says 'not checked', never "
+          "'nothing left'); this computer's last scan is merged into the served record at serve time",
+          lambda: _no_sum and (_dsp.get("pendingImport") or {}).get("files") == 3559
+          and _dsp["pendingImport"]["failedEject"] is True and isinstance(_dsp["pendingImport"].get("ageHours"), (int, float)),
+          json.dumps([_no_sum, _dsp.get("pendingImport")])[:400])
     # every script block of the page parses (node), so a slip in the template can't blank the tab
     import shutil as _sh2
     _node = _sh2.which("node") or next((p for p in ("/opt/node22/bin/node", "/usr/local/bin/node")
@@ -1773,6 +1854,341 @@ try:
 finally:
     procn.terminate()
     procn.wait(timeout=30)
+
+# ═══════════════ CHAIN OT: two importing computers, one truth (1.7.1) ════════
+# The panel on the PC, with the Mac's record on the archive: rows the Mac
+# verified are a third state (no clear, no discard from here), the scan card
+# names the record and its age, a panel import files into the archive at once
+# and says so, the Dashboard shows both computers, and the page's labels come
+# from the engine (so the same page is right on both machines).
+from datetime import datetime as _otdt, timezone as _ottz
+envo = teh.Env("APPOT", asiair=True, seestar=True)
+envo.env.update({"ASTRO_SHIP_FOLDER": "pc", "ASTRO_SHIP_LOG": "shipped-pc.jsonl", "ASTRO_MACHINE_ID": "pc"})
+for _r in ("ZWO Askar Scopes", "S30P"):
+    os.makedirs(os.path.join(envo.archive, _r), exist_ok=True)
+_oto_mac = os.path.join(envo.archive, "_verify", "mac"); os.makedirs(_oto_mac, exist_ok=True)
+_oto_l1 = envo.add_light("Plan", "M 81", "0001", dt="20261001-220000")   # the Mac's, verified on the archive
+_oto_l2 = envo.add_light("Plan", "M 81", "0002", dt="20261001-221000")   # new to both
+_oto_a = envo.add_seestar_sub("M 42", "20261001-210000")                 # the Mac's
+_oto_b = envo.add_seestar_sub("M 42", "20261001-210500")                 # new
+_oto_m33 = [envo.add_seestar_sub("M 33", f"20261002-21{i}000") for i in (0, 1)]   # all the Mac's
+def _oto_rel(p, root):
+    return os.path.relpath(p, root).replace("\\", "/")
+def _oto_row(p, root, **kw):
+    r = {"filename": os.path.basename(p), "size": os.path.getsize(p), "sha256": "a" * 64,
+         "origin": "import", "verifiedAtImport": True, "archiveVerifiedAt": "2026-10-05T030000"}
+    r.update(kw); return r
+_oto_files = {_oto_rel(_oto_l1, envo.cam): _oto_row(_oto_l1, envo.cam, target="M 81", sourceType="Plan"),
+              _oto_rel(_oto_a, envo.svol): _oto_row(_oto_a, envo.svol, target="M 42", device="seestar",
+                                                    camera="ZWO Seestar S30 Pro", sourceType="sub")}
+for p in _oto_m33:
+    _oto_files[_oto_rel(p, envo.svol)] = _oto_row(p, envo.svol, target="M 33", device="seestar",
+                                                  camera="ZWO Seestar S30 Pro", sourceType="sub")
+with open(os.path.join(_oto_mac, "ledger-snapshot.json"), "w", encoding="utf-8") as f:
+    json.dump({"schema": "ledger-snapshot/1", "machine": "Mac", "machineId": "mac", "machineUid": "mac-uid",
+               "at": _otdt.now(_ottz.utc).isoformat(timespec="seconds"), "files": _oto_files,
+               "calibration": {}, "library": {}, "discarded": {}, "customNames": {}, "skiplist": [],
+               "equipment": {}}, f)
+PORTO = int(envo.env["ASTRO_PANEL_PORT"])
+URLO = f"http://127.0.0.1:{PORTO}"
+proco = start_panel(envo, PORTO)
+try:
+    own_panel(URLO, envo, proco, "OT the two-computer panel answers with its own instance id")
+    pageo = load_token(URLO)
+    def wait_o(pred, timeout=90):
+        t0 = time.time()
+        while time.time() - t0 < timeout:
+            st = api("/api/state", url=URLO)
+            if pred(st):
+                return st
+            time.sleep(0.3)
+        raise TimeoutError("OT: condition not met; last status " + str(st.get("status")))
+    api("/api/scan", {}, url=URLO)
+    so = wait_o(lambda st: st["status"] == "idle" and st["scan"])
+    rows = {t["name"]: t for t in so["scan"]["targets"]}
+    check("OT the scan's rows carry the third state: M 81 one new, one backed up by the Mac (verified on the "
+          "archive); M 42 one new, one the Mac's; M 33 nothing new, both the Mac's; the scan names the record",
+          rows.get("M 81", {}).get("new") == 1 and rows["M 81"].get("elsewhere") == 1
+          and rows["M 81"].get("elsewhereArchived") == 1 and rows["M 81"].get("elsewhereMachine") == "Mac"
+          and rows.get("M 42", {}).get("new") == 1 and rows["M 42"].get("elsewhere") == 1
+          and rows.get("M 33", {}).get("new") == 0 and rows["M 33"].get("elsewhere") == 2
+          and (so["scan"].get("other") or {}).get("machine") == "Mac" and so["scan"].get("elsewhereFiles") == 4
+          and so["scan"]["sides"]["hereSide"] == "pc" and so["scan"]["sides"]["there"] == "Mac",
+          json.dumps({k: {x: v.get(x) for x in ("new", "elsewhere", "elsewhereArchived", "elsewhereMachine")}
+                      for k, v in rows.items()}) + json.dumps(so["scan"].get("other")))
+    check("OT the scan's log line counts what the Mac already holds and names its record",
+          any("already backed up by the Mac" in ln and "its record from" in ln for ln in so["log"]),
+          json.dumps([ln for ln in so["log"] if "Scan:" in ln])[:400])
+    check("OT /api/state carries the two computers' names, and the page builds its 'where' labels from them "
+          "(no hard-coded Mac/PC), with the third-state pill and 'clear it from the …'",
+          so.get("sides", {}).get("there") == "Mac" and "function projWhere(" in pageo
+          and "backed up by the ${esc(otherWho(t))}" in pageo and "clear it from the" in pageo
+          and "on the ${SIDES.there}" not in pageo and 'pc:"on this PC"' not in pageo,
+          json.dumps(so.get("sides")))
+    pj = api("/api/projects", url=URLO)
+    check("OT /api/projects carries the same names", pj.get("sides", {}).get("hereSide") == "pc", json.dumps(pj.get("sides")))
+    with urllib.request.urlopen(URLO + "/dashboard?t=1", timeout=15) as resp:
+        dash0 = resp.read().decode()
+    check("OT the Dashboard with no ledger here shows the Mac's record and says so",
+          "Nothing has been imported on this" in dash0 and "This is the Mac's record" in dash0 and "NoneType" not in dash0,
+          dash0[-300:])
+    # import the one new Seestar sub: the first import here, filed into the (local) archive at once
+    api("/api/import", {"names": ["M 42"]}, url=URLO)
+    t0 = time.time()
+    while time.time() - t0 < 120:
+        st = api("/api/state", url=URLO)
+        if st["status"] == "idle":
+            break
+        if st.get("question"):
+            api("/api/answer", {"id": st["question"]["id"], "value": "n"}, url=URLO)
+        time.sleep(0.3)
+    so = st
+    check("OT the first import on this computer names the Mac's record in the log, copies only the new sub, "
+          "files into the archive at once and says so, and leaves this computer's record on the archive",
+          any("First import on this" in ln and "The Mac's record from" in ln for ln in so["log"])
+          and "filed into the archive" in str(so.get("lastResult"))
+          and os.path.isfile(os.path.join(envo.archive, "_verify", "pc", "ledger-snapshot.json"))
+          and _oto_rel(_oto_b, envo.svol) in json.load(open(os.path.join(envo.state, "ledger.json")))["files"]
+          and _oto_rel(_oto_a, envo.svol) not in json.load(open(os.path.join(envo.state, "ledger.json")))["files"],
+          json.dumps([so.get("lastResult")] + [ln for ln in so["log"] if "First import" in ln or "already backed up" in ln])[:600])
+    with urllib.request.urlopen(URLO + "/dashboard?t=2", timeout=15) as resp:
+        dash1 = resp.read().decode()
+    check("OT the Dashboard now shows this computer's imports and the Mac's record together",
+          "and the Mac's record together" in dash1 and "NoneType" not in dash1, dash1[-300:])
+    api("/api/scan", {}, url=URLO)
+    so = wait_o(lambda st: st["status"] == "idle" and st["scan"] and st.get("scannedAt"))
+    rows = {t["name"]: t for t in so["scan"]["targets"]}
+    check("OT after the import M 42 is all backed up (one here, one the Mac's): no new frames, still one 'elsewhere'",
+          rows.get("M 42", {}).get("new") == 0 and rows["M 42"].get("elsewhere") == 1, json.dumps(rows.get("M 42")))
+    api("/api/discard", {"name": "M 33_sub"}, url=URLO)
+    so = wait_o(lambda st: st["status"] == "idle" and st.get("lastResult"))
+    check("OT DISCARD of a target the Mac verified is refused from here ('clear it from the Mac'), no card, "
+          "nothing leaves the camera",
+          str(so.get("lastResult")).startswith("Discard refused") and so.get("question") is None
+          and all(os.path.isfile(p) for p in _oto_m33)
+          and any("clear it from the Mac" in ln for ln in so["log"]),
+          json.dumps([so.get("lastResult")] + [ln for ln in so["log"] if "Mac" in ln][-3:]))
+finally:
+    proco.terminate()
+    proco.wait(timeout=30)
+
+# ═══════════════ CHAIN PR: the panel after the 1.7.1 review (16 Oct) ═════════
+# The Mac's panel with a reachable archive on which the PC holds the ship
+# lock: the import's banner says the ship didn't finish (not "filed"); a
+# request while the importer is busy is answered with why; cross-site GETs
+# that act or cost are refused; an application bundle on the archive is never
+# opened; bad calDecisions are a 400; the Dashboard is built off the request
+# thread and /api/state says when; the page keeps ticks across rescans, polls
+# one at a time and takes the two computers' names from /api/projects.
+envp = teh.Env("APPPR", asiair=True, seestar=False)
+envp.env["ASTRO_SHIP_FOLDER"] = "mac"
+_pr_root = os.path.join(envp.archive, "ZWO Askar Scopes")
+os.makedirs(_pr_root, exist_ok=True)                       # the archive is reachable
+_pr_m81 = envp.add_light("Plan", "M 81", "0001", dt="20261003-220000")
+_pr_mys = envp.add_light("Live", "MYSTERY 9", "0001", dt="20261003-230000", focallen=402)  # asks its name
+# folders on the archive: a plain one, an application bundle, a bundle in disguise
+_pr_plain = os.path.join(_pr_root, "Wizard Nebula (NGC 7380)")
+_pr_app = os.path.join(_pr_root, "Evil.APP")
+_pr_plist = os.path.join(_pr_root, "Looks Plain")
+for _d in (_pr_plain, _pr_app, os.path.join(_pr_plist, "Contents")):
+    os.makedirs(_d, exist_ok=True)
+with open(os.path.join(_pr_plist, "Contents", "Info.plist"), "w") as f:
+    f.write("<plist/>")
+# the PC is shipping right now: a live lock (renewed this second, another machine)
+_pr_lockdir = os.path.join(envp.archive, "_verify", "lock")
+os.makedirs(_pr_lockdir, exist_ok=True)
+_pr_now = _otdt.now(_ottz.utc).isoformat(timespec="seconds")
+with open(os.path.join(_pr_lockdir, "ship.lock"), "w", encoding="utf-8") as f:
+    json.dump({"schema": "ship-lock/1", "machineId": "pc", "machine": "pc-machine-uid", "host": "SKYLARKPC",
+               "platform": "windows", "pid": os.getpid(), "op": "ship", "startedAt": _pr_now, "renewedAt": _pr_now}, f)
+with open(teh.SCRIPT, encoding="utf-8") as f:
+    _pr_engine_reports = "SHIP_AFTER_IMPORT_REPORTS = True" in f.read()
+PORTP = int(envp.env["ASTRO_PANEL_PORT"])
+URLP = f"http://127.0.0.1:{PORTP}"
+procp = start_panel(envp, PORTP)
+
+def _pr_get(path, headers=None):
+    """A GET as a browser would send it; (status, body)."""
+    req = urllib.request.Request(URLP + path, headers=headers or {})
+    try:
+        with urllib.request.urlopen(req, timeout=15) as r:
+            return r.status, r.read().decode("utf-8", "replace")
+    except urllib.error.HTTPError as e:
+        return e.code, e.read().decode("utf-8", "replace")
+
+try:
+    own_panel(URLP, envp, procp, "PR the reviewed panel answers with its own instance id")
+    pagep = load_token(URLP)
+    def wait_p(pred, timeout=90):
+        t0 = time.time()
+        while time.time() - t0 < timeout:
+            st = api("/api/state", url=URLP)
+            if pred(st):
+                return st
+            time.sleep(0.3)
+        raise TimeoutError("PR: condition not met; last status " + str(st.get("status")))
+    # ── the page (static) ───────────────────────────────────────────────────
+    check("PR the page polls one at a time and drops an older answer, keeps ticks and pairing decisions "
+          "across rescans, draws a scan that can't be shown as a note, loads the Dashboard frame once and "
+          "again only when dashboardAt changes, takes the sides /api/projects gives, reloads the Report when "
+          "a report finished (no 1.5 s timer), gives focus back after a card, takes Space on row buttons, "
+          "says what to do when the Observatory frame is a note, and tells the banner why a button did nothing",
+          "tickBusy" in pagep and "seq!==tickSeq" in pagep and "wasTicked" in pagep and "wasCal" in pagep
+          and "The scan couldn't be shown:" in pagep and "s.dashboardAt!==dashAt" in pagep
+          and 'if(b.dataset.tab==="dash" && !dashShown) showDash();' in pagep
+          and "if(pj&&pj.sides) SIDES=pj.sides;" in pagep and 'prevStatus==="reporting"' in pagep
+          and "setTimeout(loadReport,1500)" not in pagep and "qPrevFocus=document.activeElement" in pagep
+          and pagep.count('e.key===" "') == 2 and "See the note in the frame." in pagep
+          and "function startOp(" in pagep and 'startOp("/api/import"' in pagep and 'startOp("/api/scan"' in pagep
+          and "importedHere" in pagep and "so anything the ${esc(SIDES.there)} imported shows as new here" in pagep,
+          "")
+    import shutil as _shp
+    _nodep = _shp.which("node") or next((p for p in ("/opt/node22/bin/node", "/usr/local/bin/node")
+                                         if os.path.isfile(p)), None)
+    _scriptp = re.search(r"<script>(.*?)</script>", pagep, re.S)
+    if _nodep and _scriptp:
+        _jsp = _scriptp.group(1)
+        r_parse = subprocess.run([_nodep, "-e", "new Function(require('fs').readFileSync(0,'utf8'))"],
+                                 input=_jsp, capture_output=True, text=True, timeout=30)
+        check("PR the panel's inline script still parses (node)", r_parse.returncode == 0, r_parse.stderr[-300:])
+        # projectsHtml rendered as the PC, from the sides the answer carries; the pill as the Mac
+        _piecesp = [re.search(p_, _jsp, re.S).group(0) for p_ in
+                    (r"const MONTHS=[^\n]*", r"const esc=[^\n]*", r"const fmtNight=[^\n]*",
+                     r"const PROJ_WHERE=.*?\nfunction projectsHtml\(pj, opts\)\{.*?\n\}\n",
+                     r"const otherAll=.*?\nfunction pillFor\(t\)\{.*?\n\}\n")]
+        _fixp = {"ok": True, "opener": "Explorer",
+                 "sides": {"here": "PC", "hereSide": "pc", "there": "Mac", "thereSide": "mac"},
+                 "projects": {"schema": "projects/1", "generated_at": "2026-10-16T08:00:00+00:00", "quiet_period_days": 14,
+                              "projects": [{"target_id": "M31", "name": "Andromeda", "datasets": [
+                                  {"scope_name": "Askar FRA400", "status": "capturing", "nights": 1, "integration_seconds": 600,
+                                   "last_session": "2026-10-10", "locations": ["pc-unchecked", "mac"], "archive_rel": None}]}]}}
+        _harp = ("let deskSel=null;\n" + "\n".join(_piecesp)
+                 + f"\nprocess.stdout.write(projectsHtml({json.dumps(_fixp)}));\n"
+                 + "process.stdout.write('\\n---\\n'+pillFor({device:'asiair',new:0,elsewhere:3,importedHere:5,elsewhereMachine:'Mac'}));\n"
+                 + "process.stdout.write('\\n---\\n'+pillFor({device:'asiair',new:0,elsewhere:3,elsewhereMachine:'Mac'}));\n"
+                 + "process.stdout.write('\\n---\\n'+pillFor({device:'asiair',new:0,elsewhere:0,importedHere:5}));\n")
+        r_pr = subprocess.run([_nodep, "-e", _harp], capture_output=True, text=True, timeout=30)
+        _outp = r_pr.stdout.split("\n---\n")
+        check("PR projectsHtml takes the sides it is given (rendered as the PC: 'on this PC (per its ledger) and on "
+              "the Mac'); the ASIAir pill splits what each computer holds, and reads as before when the engine "
+              "doesn't say (nothing 'undefined')",
+              r_pr.returncode == 0 and len(_outp) == 4
+              and "on this PC (per its ledger) and on the Mac" in _outp[0]
+              and _outp[1] == '<span class="bak">backed up: 5 on this PC, 3 by the Mac · kept on ASIAir</span>'
+              and "backed up by the Mac" in _outp[2] and "undefined" not in r_pr.stdout
+              and "kept on ASIAir" in _outp[3] and "by the" not in _outp[3],
+              (r_pr.stderr or r_pr.stdout)[-600:])
+    else:
+        skip("PR node isn't installed: the inline script's parse check and the rendered pieces")
+    # ── cross-site GETs (item 9) ────────────────────────────────────────────
+    _cs = {"Sec-Fetch-Site": "cross-site"}
+    check("PR a GET that acts or costs is refused when the browser says it came from another site "
+          "(Sec-Fetch-Site: cross-site → 403 for /api/state, /dashboard, /api/archive/index), allowed "
+          "without the header, same-origin, or for /api/ping",
+          _pr_get("/api/state", _cs)[0] == 403 and _pr_get("/dashboard?t=1", _cs)[0] == 403
+          and _pr_get("/api/archive/index", _cs)[0] == 403
+          and _pr_get("/api/state")[0] == 200 and _pr_get("/api/state", {"Sec-Fetch-Site": "same-origin"})[0] == 200
+          and _pr_get("/api/ping", _cs)[0] == 200,
+          json.dumps([_pr_get("/api/state", _cs)[0], _pr_get("/dashboard?t=1", _cs)[0], _pr_get("/api/state")[0]]))
+    _stp = status_line(URLP)
+    check("PR /api/status always has the status line's shape (the line itself, or 'Status unknown: still working it out')",
+          isinstance(_stp, dict) and STATUS_KEYS <= set(_stp) and isinstance(_stp.get("text"), str), json.dumps(_stp))
+    # ── the archive open (item 11) ──────────────────────────────────────────
+    r_app = api("/api/archive/open", {"rel": "ZWO Askar Scopes/Evil.APP"}, url=URLP)
+    r_plist = api("/api/archive/open", {"rel": "ZWO Askar Scopes/Looks Plain"}, url=URLP)
+    r_plain = api("/api/archive/open", {"rel": "ZWO Askar Scopes/Wizard Nebula (NGC 7380)"}, url=URLP)
+    _opens = teh.os_calls(envp.root, "open")
+    check("PR a folder named *.app (any case) or carrying Contents/Info.plist is refused by /api/archive/open "
+          "(400, 'application') and nothing is opened; a plain folder still opens",
+          r_app.get("_status") == 400 and "application" in str(r_app.get("error"))
+          and r_plist.get("_status") == 400 and r_plain.get("ok") is True
+          and len(_opens) == 1 and _opens[0].get("target") == _pr_plain,
+          json.dumps([r_app, r_plist, r_plain, _opens]))
+    # ── bad calDecisions (item 20) ──────────────────────────────────────────
+    r_bad = api("/api/import", {"names": ["M 81"], "calDecisions": {"M 81": True}}, url=URLP)
+    check("PR calDecisions whose values aren't maps are a 400, nothing starts",
+          r_bad.get("_status") == 400 and r_bad.get("started") is False
+          and api("/api/state", url=URLP)["status"] == "idle", json.dumps(r_bad))
+    # ── the scan: no record from the PC, said once (items 12, 14) ───────────
+    api("/api/scan", {}, url=URLP)
+    sp = wait_p(lambda st: st["status"] == "idle" and st["scan"])
+    api("/api/scan", {}, url=URLP)
+    sp = wait_p(lambda st: st["status"] == "idle" and st["scan"] and st.get("scannedAt"))
+    _norec = [ln for ln in sp["log"] if "record isn't on the archive" in ln]
+    check("PR with no record from the PC the scan says so once per panel run ('anything the PC imported shows "
+          "as new here'), the rows carry importedHere (None from an engine that doesn't say it), and the "
+          "other computer is named by its side",
+          sp["scan"].get("other") is None and len(_norec) == 1 and "anything the PC imported shows as new here" in _norec[0]
+          and all("importedHere" in t for t in sp["scan"]["targets"])
+          and all(t.get("importedHere") in (None, 0) for t in sp["scan"]["targets"])
+          and sp["scan"]["sides"]["there"] == "PC",
+          json.dumps([_norec, [{k: t.get(k) for k in ("name", "new", "importedHere")} for t in sp["scan"]["targets"]]])[:500])
+    # ── the Dashboard, built by the worker (item 2) ─────────────────────────
+    sp = wait_p(lambda st: st.get("dashboardAt"), timeout=20)
+    _dash_at0 = sp["dashboardAt"]
+    _code0, _dash0 = _pr_get("/dashboard?t=1")
+    check("PR /api/state says when the Dashboard was built; with nothing imported anywhere /dashboard is the note page",
+          bool(_dash_at0) and _code0 == 200 and "Nothing has been imported on this Mac yet, and the PC's record" in _dash0,
+          json.dumps([_dash_at0, _code0, _dash0[-200:]]))
+    # ── import while the PC holds the ship lock; a request while busy (items 1, 6, 13) ─
+    r_imp = api("/api/import", {"names": ["M 81", "MYSTERY 9"]}, url=URLP)
+    sp = wait_p(lambda st: st["question"] is not None or st["status"] == "idle")
+    _busy = None
+    _kinds = []
+    while sp["question"] is not None:
+        q = sp["question"]
+        _kinds.append(q["kind"])
+        if _busy is None:
+            _busy = api("/api/scan", {}, url=URLP)        # the card is up: the importer is busy
+            _busy_state = api("/api/state", url=URLP)
+        api("/api/answer", {"id": q["id"], "value": "" if q["kind"] == "text" else "n"}, url=URLP)
+        time.sleep(0.3)
+        sp = wait_p(lambda st: st["question"] is not None or st["status"] == "idle")
+    sp = wait_p(lambda st: st["status"] == "idle")
+    check("PR a request while the importer is busy is answered with why (started: false, 'The importer is busy "
+          "(importing)…'), and the banner says the same",
+          r_imp.get("started") is True and _busy is not None and _busy.get("started") is False
+          and "busy (importing)" in str(_busy.get("error")) and "busy (importing)" in str(_busy_state.get("lastResult")),
+          json.dumps([r_imp, _kinds, _busy, (_busy_state or {}).get("lastResult") if _busy else None]))
+    _lockline = [ln for ln in sp["log"] if "shipping into the archive right now" in ln]
+    check("PR the import copied both frames, honoured the PC's live ship lock (nothing shipped, said in the log), "
+          "and cleared the scan for fresh counts",
+          "Imported 2 frame(s) across 2 target(s)" in str(sp.get("lastResult")) and len(_lockline) == 1
+          and sp.get("scan") is None and not os.listdir(os.path.join(envp.archive, "ZWO Askar Scopes", "Wizard Nebula (NGC 7380)")),
+          json.dumps([sp.get("lastResult"), _lockline]))
+    if _pr_engine_reports:
+        check("PR the banner is worded on the ship's REAL result: the ship didn't finish (the lock was held), so it "
+              "never says 'filed into the archive'",
+              "the ship to the archive didn't finish — see the log; the scheduled ship files them later" in str(sp.get("lastResult"))
+              and "filed into the archive" not in str(sp.get("lastResult")), str(sp.get("lastResult")))
+    else:
+        skip("PR the banner on the ship's real result: the engine doesn't report it yet (SHIP_AFTER_IMPORT_REPORTS; "
+             "run panel_engine_patch.py)")
+    sp = wait_p(lambda st: st.get("dashboardAt") and st["dashboardAt"] != _dash_at0, timeout=30)
+    _code1, _dash1 = _pr_get("/dashboard?t=2")
+    check("PR after the import the worker rebuilt the Dashboard (dashboardAt changed) and /dashboard is this "
+          "computer's dashboard, served from its file",
+          sp["dashboardAt"] != _dash_at0 and _code1 == 200 and "Nothing has been imported" not in _dash1
+          and "__DATA__" not in _dash1 and '"frames": 2' in _dash1,
+          json.dumps([_dash_at0, sp.get("dashboardAt"), _code1, _dash1[:200]]))
+    # ── a failed import leaves no stale scan (item 13): a newer importer's ledger ─
+    api("/api/scan", {}, url=URLP)
+    sp = wait_p(lambda st: st["status"] == "idle" and st["scan"])
+    _ledp = os.path.join(envp.state, "ledger.json")
+    with open(_ledp, encoding="utf-8") as f:
+        _newer = json.load(f)
+    _newer["version"] = (_newer.get("version") or 1) + 1
+    with open(_ledp, "w", encoding="utf-8") as f:
+        json.dump(_newer, f)
+    envp.add_light("Plan", "M 81", "0002", dt="20261004-220000")
+    api("/api/import", {"names": ["M 81"]}, url=URLP)
+    sp = wait_p(lambda st: st["status"] == "idle" and st.get("lastResult"))
+    check("PR an import refused before it starts (a newer importer's ledger) still clears the scan: no stale "
+          "counts and no live Import button",
+          "newer version" in str(sp.get("lastResult")) and sp.get("scan") is None, json.dumps([sp.get("lastResult"), bool(sp.get("scan"))]))
+finally:
+    procp.terminate()
+    procp.wait(timeout=30)
 
 summary()
 sys.exit(1 if FAIL else 0)

@@ -1,0 +1,556 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Astro Archive Observatory · mock C</title>
+<style>
+:root{
+  --bg:#f3eee4; --card:#fffdf8; --line:#e6dccb; --ink:#1b1a24; --ink2:#524d5c; --ink3:#857f8f;
+  --sky1:#0a0f2e; --sky2:#1d2a6b; --sky3:#3b2d7a;
+  --st-cap:#0891b2; --st-todo:#d97706; --st-prog:#6d28d9; --st-done:#15803d; --st-none:#8a8f99; --st-warn:#b91c1c;
+  --cap-bg:#dff3f8; --todo-bg:#fdeed2; --prog-bg:#ece3fb; --done-bg:#dcf2e3; --none-bg:#ece9e3; --warn-bg:#fde5e5;
+  --mono:ui-monospace,SFMono-Regular,Menlo,Consolas,monospace;
+}
+*{box-sizing:border-box}
+html,body{margin:0;background:var(--bg);color:var(--ink);font:14px/1.45 system-ui,-apple-system,"Segoe UI",Roboto,Helvetica,Arial,sans-serif}
+body{padding:0 0 48px}
+.wrap{max-width:1180px;margin:0 auto;padding:0 16px}
+button{font:inherit;color:inherit;cursor:pointer}
+.mono{font-family:var(--mono);font-size:12px}
+.muted{color:var(--ink3)} .dim{color:var(--ink2)}
+
+/* ---------- night-sky header ---------- */
+.sky{position:relative;background:linear-gradient(160deg,var(--sky1) 0%,var(--sky2) 55%,var(--sky3) 100%);color:#fff;overflow:hidden}
+.sky svg.stars{position:absolute;inset:0;width:100%;height:100%;pointer-events:none}
+.sky .wrap{position:relative;padding-top:18px;padding-bottom:0}
+.sky .top{display:flex;flex-wrap:wrap;gap:6px 24px;align-items:flex-end}
+.sky .src{font-family:var(--mono);font-size:11px;color:#b9c3ff;text-transform:uppercase;letter-spacing:.08em}
+.sky h1{font-size:24px;margin:2px 0 0;letter-spacing:-.01em}
+.sky .fresh{margin-left:auto;text-align:right;font-size:12.5px;color:#c9d0f5;line-height:1.5}
+.sky .fresh b{color:#fff}
+.sky .fresh .pend{color:#ffd48a;font-weight:600}
+.lastnight{display:grid;grid-template-columns:auto 1fr;gap:6px 22px;align-items:center;margin:20px 0 18px;padding:14px 18px;border-radius:14px;background:rgba(255,255,255,.08);border:1px solid rgba(255,255,255,.14);backdrop-filter:blur(2px)}
+.lastnight .when{font-size:12px;color:#c9d0f5;text-transform:uppercase;letter-spacing:.08em}
+.lastnight .big{font-size:30px;font-weight:700;line-height:1.1;letter-spacing:-.01em}
+.lastnight .big small{font-size:14px;font-weight:500;color:#c9d0f5;margin-left:8px;letter-spacing:0}
+.lastnight .sess{display:flex;flex-wrap:wrap;gap:8px}
+.lastnight .sess .s{display:flex;align-items:center;gap:8px;background:rgba(255,255,255,.12);border-radius:10px;padding:7px 12px;font-size:13px}
+.lastnight .sess .s b{font-size:14px}
+.lastnight .sess .s .n{color:#c9d0f5;font-size:12px}
+.lastnight .sess .s .sw{width:12px;height:12px;border-radius:50%;flex:none;box-shadow:0 0 0 2px rgba(255,255,255,.35)}
+nav.tabs{display:flex;gap:2px;overflow:visible}
+nav.tabs a{padding:9px 12px;text-decoration:none;color:#c9d0f5;border-bottom:3px solid transparent;font-size:13.5px;white-space:nowrap}
+nav.tabs a.on{color:#fff;border-color:#ffd48a;font-weight:600}
+nav.tabs a .n{display:inline-block;background:#ffd48a;color:#3a2600;font-weight:700;border-radius:9px;padding:0 6px;font-size:11px;margin-left:5px}
+.viewsel{display:none;align-items:center;gap:10px;padding:0 0 14px;color:#fff}
+.viewsel select{font:inherit;padding:8px 10px;border:1px solid rgba(255,255,255,.3);border-radius:8px;background:#fff;color:var(--ink);flex:1}
+
+/* ---------- legend strip ---------- */
+.legend{display:flex;flex-wrap:wrap;gap:6px 18px;align-items:center;font-size:12px;color:var(--ink2);margin:14px 0;padding:9px 12px;background:var(--card);border:1px solid var(--line);border-radius:10px}
+.legend .grp{display:flex;flex-wrap:wrap;gap:4px 10px;align-items:center}
+.legend .lab{font-weight:700;color:var(--ink3);text-transform:uppercase;letter-spacing:.06em;font-size:10.5px;margin-right:2px}
+
+/* ---------- sections ---------- */
+section.card{background:var(--card);border:1px solid var(--line);border-radius:14px;padding:16px 18px;margin:0 0 14px;box-shadow:0 1px 0 rgba(60,40,0,.03)}
+section.card>h2{margin:0 0 2px;font-size:16px}
+section.card>h2 .k{display:inline-block;width:11px;height:11px;border-radius:3px;margin-right:8px;vertical-align:-1px}
+section.card>.sub{margin:0 0 12px;color:var(--ink3);font-size:12.5px}
+.row2{display:grid;grid-template-columns:1fr 1fr;gap:14px}
+
+/* totals */
+.hero{display:grid;grid-template-columns:minmax(260px,1.1fr) 2fr;gap:18px;align-items:start}
+.hero .big{font-size:56px;font-weight:800;letter-spacing:-.025em;line-height:1;font-variant-numeric:tabular-nums;background:linear-gradient(90deg,#1d2a6b,#6d28d9);-webkit-background-clip:text;background-clip:text;color:transparent}
+.hero .big small{font-size:18px;font-weight:600;color:var(--ink2);margin-left:6px;letter-spacing:0;-webkit-text-fill-color:var(--ink2)}
+.hero .heroSub{color:var(--ink2);margin-top:6px;font-size:13px}
+.tiles{display:grid;grid-template-columns:repeat(5,1fr);gap:8px}
+.tile{border:1px solid var(--line);border-radius:10px;padding:10px 12px;background:#fff}
+.tile .v{font-size:22px;font-weight:700;font-variant-numeric:tabular-nums;line-height:1.1}
+.tile .l{font-size:12px;color:var(--ink2);margin-top:2px}
+.tile .s{font-size:11px;color:var(--ink3);margin-top:3px}
+.scopebar{margin-top:16px}
+.scopebar svg{width:100%;height:48px;display:block}
+.nlegend{display:grid;grid-template-columns:repeat(2,1fr);gap:4px 24px;margin-top:8px;font-size:12.5px}
+.nlegend div{display:flex;align-items:baseline;gap:6px;flex-wrap:wrap}
+.nlegend .nm{flex:1;color:var(--ink)}
+.nlegend .num{font-variant-numeric:tabular-nums;color:var(--ink2)}
+.nlegend .num b{color:var(--ink)}
+/* season strip */
+.season{margin-top:18px}
+.season .strip{display:grid;grid-auto-flow:column;grid-auto-columns:1fr;gap:3px;align-items:end;height:92px;margin-top:8px}
+.season .m{display:flex;flex-direction:column;justify-content:flex-end;height:100%;border-radius:6px;overflow:hidden;background:#f6f1e8;position:relative}
+.season .m .seg{width:100%}
+.season .m .cnt{position:absolute;top:4px;left:0;right:0;text-align:center;font-size:11px;font-weight:700;color:var(--ink2)}
+.season .lbl{display:grid;grid-auto-flow:column;grid-auto-columns:1fr;gap:3px;margin-top:4px;font-size:10.5px;color:var(--ink3);text-align:center}
+.season .lbl span.y{color:var(--ink);font-weight:700}
+.season .lbl .short{display:none}
+@media (max-width:700px){.season .lbl .long{display:none} .season .lbl .short{display:inline}}
+
+/* dots and pills */
+.dot{display:inline-block;width:11px;height:11px;border-radius:50%;vertical-align:-1px;margin-right:5px;box-shadow:0 0 0 1px rgba(0,0,0,.1) inset}
+.scp{white-space:nowrap;font-weight:600}
+.pill{display:inline-flex;align-items:center;gap:5px;padding:3px 9px 3px 7px;border-radius:999px;font-size:12px;font-weight:700;white-space:nowrap;line-height:1.4;color:#fff}
+.pill .g{font-size:11px;width:12px;text-align:center}
+.pill.cap{background:var(--st-cap)} .pill.todo{background:var(--st-todo)} .pill.prog{background:var(--st-prog)} .pill.done{background:var(--st-done)} .pill.none{background:var(--none-bg);color:var(--ink2)} .pill.warn{background:var(--warn-bg);color:var(--st-warn)}
+.pill.soft{color:inherit;font-weight:600}
+.pill.soft.cap{background:var(--cap-bg);color:var(--st-cap)} .pill.soft.todo{background:var(--todo-bg);color:var(--st-todo)} .pill.soft.prog{background:var(--prog-bg);color:var(--st-prog)} .pill.soft.done{background:var(--done-bg);color:var(--st-done)}
+.q{display:inline-flex;align-items:center;justify-content:center;width:16px;height:16px;border-radius:50%;border:1.5px solid var(--ink2);color:var(--ink2);font-size:10.5px;font-weight:700;margin-left:4px;vertical-align:-3px;background:#fff}
+.ind{display:inline-flex;align-items:flex-start;gap:6px;font-size:12.5px;white-space:nowrap}
+.ind .g{display:inline-flex;align-items:center;justify-content:center;width:17px;height:17px;border-radius:50%;font-size:10px;font-weight:700;color:#fff;flex:none;margin-top:1px}
+.ind .g.cap{background:var(--st-cap)} .ind .g.todo{background:var(--st-todo)} .ind .g.prog{background:var(--st-prog)} .ind .g.done{background:var(--st-done)} .ind .g.none{background:#fff;color:var(--st-none);border:1.5px solid var(--st-none)}
+.ind .t{color:var(--ink);font-weight:600} .ind .t small{display:block;color:var(--ink3);font-weight:400;white-space:normal}
+
+/* attention */
+.att{display:grid;gap:6px}
+.att .it{display:grid;grid-template-columns:auto 1fr auto;gap:12px;align-items:center;padding:9px 12px;border-radius:10px;border:1px solid var(--line);background:#fff}
+.att .it.warn{background:#fff7ea;border-color:#f1d9a8}
+.att .n{font-size:24px;font-weight:800;font-variant-numeric:tabular-nums;min-width:72px;line-height:1;color:var(--st-todo)}
+.att .it.info .n{color:var(--ink3)}
+.att .n small{display:block;font-size:11px;color:var(--ink3);font-weight:500;margin-top:2px}
+.att .w b{display:block}
+.att .w span{color:var(--ink2);font-size:12.5px}
+.att .act{border:1.5px solid var(--st-todo);color:var(--st-todo);background:#fff;border-radius:8px;padding:6px 10px;font-size:12.5px;font-weight:700;white-space:nowrap}
+.att .it.info .act{border-color:var(--line);color:var(--ink3);font-weight:500}
+
+/* queue + captures tables */
+table.list{width:100%;border-collapse:collapse;font-size:13px}
+table.list th{text-align:left;font-size:10.5px;text-transform:uppercase;letter-spacing:.05em;color:var(--ink3);font-weight:700;padding:4px 8px;border-bottom:1px solid var(--line)}
+table.list td{padding:8px 8px;border-bottom:1px solid var(--line);vertical-align:middle}
+table.list tr:last-child td{border-bottom:0}
+table.list td.num,table.list th.num{text-align:right;font-variant-numeric:tabular-nums;white-space:nowrap}
+table.list td .t{font-weight:700}
+table.list tr.stripe td:first-child{border-left:4px solid var(--sc,transparent);padding-left:8px}
+.more{margin-top:8px;border:1px solid var(--line);background:#fff;border-radius:8px;padding:5px 10px;font-size:12.5px;color:var(--ink2)}
+.unk{color:var(--st-todo);font-weight:700}
+.unk small{display:block;color:var(--ink3);font-weight:400;font-size:11px}
+
+/* projects */
+.proj{border:1px solid var(--line);border-radius:14px;margin-bottom:10px;overflow:hidden;background:#fff}
+.proj>summary{list-style:none;cursor:pointer;display:grid;grid-template-columns:1.5fr 1fr 1.5fr;gap:12px;align-items:center;padding:12px 16px;border-left:6px solid var(--pc,#ccc)}
+.proj>summary::-webkit-details-marker{display:none}
+.proj>summary .nm{font-weight:800;font-size:16px}
+.proj>summary .nm small{display:block;font-weight:400;color:var(--ink3);font-size:12px}
+.proj>summary .tot{font-variant-numeric:tabular-nums;color:var(--ink2);font-size:12.5px}
+.proj>summary .tot b{color:var(--ink);font-size:15px}
+.proj>summary .mix{display:flex;flex-wrap:wrap;gap:4px;justify-content:flex-end}
+.proj .body{border-top:1px solid var(--line);padding:6px 16px 14px;background:#fffdf8}
+.proj .note{display:grid;grid-template-columns:auto 1fr;gap:10px;align-items:start;margin:10px 0 6px;padding:10px 12px;border-radius:10px;background:var(--warn-bg);border:1px solid #f1c0c0}
+.proj .note .q{width:22px;height:22px;font-size:13px;margin:0;border-color:var(--st-warn);color:var(--st-warn)}
+.proj .note b{color:var(--st-warn)}
+.proj .note span{color:var(--ink2);font-size:12.5px;display:block}
+.proj .ctl{display:flex;gap:6px;align-items:center;margin:10px 0 2px;font-size:12px;color:var(--ink3);flex-wrap:wrap}
+.proj .ctl button{border:1px solid var(--line);background:#fff;border-radius:7px;padding:3px 9px;font-size:12px;color:var(--ink2)}
+.proj .ctl button[aria-pressed="true"]{background:var(--ink);color:#fff;border-color:var(--ink)}
+/* timeline lanes */
+.lanes{display:grid;grid-template-columns:150px 132px minmax(220px,1fr) 350px 128px;gap:0 12px;align-items:center;margin-top:6px}
+.lanes .hd{font-size:10.5px;text-transform:uppercase;letter-spacing:.05em;color:var(--ink3);font-weight:700;padding:4px 0;border-bottom:1px solid var(--line)}
+.lanes .cell{padding:7px 0;border-bottom:1px solid var(--line);min-width:0}
+.lanes .cell.sc{border-left:4px solid var(--sc);padding-left:8px}
+.lanes .cell.sc small{display:block;color:var(--ink3);font-weight:400;font-size:11px}
+.lanes .cell.num{font-variant-numeric:tabular-nums;white-space:normal}
+.lanes .cell.num small{display:block;color:var(--ink3);font-size:11px}
+.lanes .cell.ind3{display:grid;grid-template-columns:1fr 1fr 1fr;gap:6px}
+.lanes .cell.ind3 .ind{white-space:normal}
+.lanes svg.lane{width:100%;height:40px;display:block}
+.lanes svg.axis{width:100%;height:22px;display:block}
+.lanes .axis-row{grid-column:3;padding:2px 0 0}
+.lanes .qlabel{grid-column:3/-1;font-size:11px;color:var(--ink3);text-align:left;padding-top:2px}
+.why{margin:10px 0 0;color:var(--ink3);font-size:12px}
+.why b{color:var(--ink2);font-weight:700}
+
+/* charts */
+.chart svg{width:100%;height:auto;display:block}
+.chart .bar-label{font-size:12px;fill:var(--ink)}
+.chart .val{font-size:12px;fill:var(--ink2)}
+.chart .axis{font-size:11px;fill:var(--ink3)}
+.chart .grid{stroke:var(--line);stroke-width:1}
+.chead{display:flex;justify-content:space-between;align-items:baseline;gap:8px}
+.chead .tbtn{border:1px solid var(--line);background:#fff;border-radius:8px;padding:4px 9px;font-size:12px;color:var(--ink2)}
+table.alt{display:none;width:100%;border-collapse:collapse;font-size:12.5px;margin-top:8px}
+table.alt th,table.alt td{padding:5px 8px;border-bottom:1px solid var(--line);text-align:right;font-variant-numeric:tabular-nums}
+table.alt th:first-child,table.alt td:first-child{text-align:left}
+.chart.astable svg{display:none} .chart.astable table.alt{display:table}
+
+footer{color:var(--ink3);font-size:11.5px;font-family:var(--mono);margin-top:18px;line-height:1.6}
+
+@media (max-width:700px){
+  .sky .top{align-items:flex-start} .sky .fresh{margin-left:0;text-align:left}
+  .sky h1{font-size:21px}
+  .lastnight{grid-template-columns:1fr;gap:8px;padding:12px 14px;margin:14px 0 14px}
+  .lastnight .big{font-size:24px} .lastnight .big small{display:block;margin:4px 0 0}
+  nav.tabs{display:none} .viewsel{display:flex}
+  .legend{gap:6px 12px}
+  .row2{grid-template-columns:1fr}
+  .hero{grid-template-columns:1fr} .hero .big{font-size:46px} .hero .big small{display:block;margin:2px 0 0}
+  .tiles{grid-template-columns:repeat(2,1fr)}
+  .nlegend{grid-template-columns:1fr}
+  .season .strip{height:72px} .season .lbl span:not(.y){font-size:9px}
+  .scopebar svg{height:40px} .scopebar text.inbar{display:none}
+  .att .it{grid-template-columns:auto 1fr}
+  .att .act{grid-column:1/-1;justify-self:start}
+  table.list thead{display:none}
+  table.list,table.list tbody,table.list tr,table.list td{display:block;width:100%}
+  table.list tr{padding:8px 0;border-bottom:1px solid var(--line)}
+  table.list tr.stripe{border-left:4px solid var(--sc);padding-left:10px}
+  table.list tr.stripe td:first-child{border-left:0;padding-left:0}
+  table.list td{padding:2px 0;border:0}
+  table.list td.num{text-align:left}
+  table.list td:empty{display:none}
+  .proj>summary{grid-template-columns:1fr;gap:6px}
+  .proj>summary .mix{justify-content:flex-start}
+  .lanes{grid-template-columns:1fr 1fr;gap:4px 10px}
+  .lanes .hd{display:none}
+  .lanes .cell{border-bottom:0;padding:3px 0}
+  .lanes .cell.num{white-space:normal}
+  .lanes .cell.sc{grid-column:1/-1;border-bottom:0;padding-top:10px;border-top:1px solid var(--line)}
+  .lanes .cell.lane{grid-column:1/-1}
+  .lanes .cell.ind3{grid-column:1/-1;grid-template-columns:1fr}
+  .lanes .cell.next{grid-column:1/-1;padding-bottom:10px}
+  .lanes .axis-row,.lanes .qlabel{grid-column:1/-1}
+}
+</style>
+</head>
+<body>
+
+<div class="sky">
+  <svg class="stars" id="stars" aria-hidden="true"></svg>
+  <div class="wrap">
+    <div class="top">
+      <div><div class="src" id="src"></div><h1>Astro Archive Observatory</h1></div>
+      <div class="fresh" id="fresh"></div>
+    </div>
+    <div class="lastnight" id="lastnight"></div>
+    <nav class="tabs" aria-label="Views">
+      <a class="on" href="#">Overview</a><a href="#">Projects</a><a href="#">Process queue</a><a href="#">Coverage</a><a href="#">Nights</a><a href="#">Sky</a><a href="#">Footprints</a><a href="#">Equipment</a><a href="#">Data health<span class="n" id="navHealth"></span></a>
+    </nav>
+    <div class="viewsel">
+      <label for="viewSel"><b>View</b></label>
+      <select id="viewSel"><option>Overview</option><option>Projects</option><option>Process queue (list)</option><option>Coverage</option><option>Nights</option><option>Sky</option><option>Footprints</option><option>Equipment</option><option>Data health</option></select>
+    </div>
+  </div>
+</div>
+
+<div class="wrap">
+<div class="legend" id="legend"></div>
+
+<section class="card" id="totals">
+  <h2><span class="k" style="background:var(--sky2)"></span>Your archive in numbers</h2>
+  <p class="sub">every light frame the importer knows about, counted once</p>
+  <div class="hero">
+    <div><div class="big" id="heroH"></div><div class="heroSub" id="heroSub"></div></div>
+    <div class="tiles" id="tiles"></div>
+  </div>
+  <div class="scopebar">
+    <div class="chead"><b style="font-size:13px">Integration by scope</b><span class="muted" style="font-size:12px">hours of light-frame exposure, all targets · small scopes are numbered and read in the list below</span></div>
+    <div id="scopeBar"></div>
+    <div class="nlegend" id="scopeLegend"></div>
+  </div>
+  <div class="season">
+    <div class="chead"><b style="font-size:13px">The season strip</b><span class="muted" style="font-size:12px">nights out each month, coloured by scope · the number is nights in that month</span></div>
+    <div class="strip" id="seasonStrip"></div>
+    <div class="lbl" id="seasonLbl"></div>
+  </div>
+</section>
+
+<section class="card" id="attention">
+  <h2><span class="k" style="background:var(--st-todo)"></span>Needs your attention</h2>
+  <p class="sub">things only you can decide, with how many frames each one touches</p>
+  <div class="att" id="attList"></div>
+</section>
+
+<div class="row2">
+<section class="card" id="queue">
+  <h2><span class="k" style="background:var(--st-todo)"></span>Process next</h2>
+  <p class="sub" id="queueSub"></p>
+  <table class="list" id="queueTbl"></table>
+  <button class="more" id="queueMore"></button>
+  <h2 style="margin-top:18px"><span class="k" style="background:var(--st-prog)"></span>Finish what you started</h2>
+  <p class="sub" id="finSub"></p>
+  <table class="list" id="finTbl"></table>
+</section>
+
+<section class="card" id="recent">
+  <h2><span class="k" style="background:var(--st-cap)"></span>Latest capture on each scope</h2>
+  <p class="sub">one session per scope, scopes in their usual order · a session is one object on one night</p>
+  <table class="list" id="recentTbl"></table>
+  <button class="more" id="recentMore">show the last 3 sessions per scope</button>
+</section>
+</div>
+
+<section class="card" id="projects">
+  <h2><span class="k" style="background:var(--st-prog)"></span>Projects</h2>
+  <p class="sub" id="projSub"></p>
+  <div id="projList"></div>
+</section>
+
+<section class="card chart" id="hoursChart">
+  <div class="chead"><div><h2 style="margin:0;font-size:16px">Where the hours went</h2><p class="sub" style="margin:0 0 8px">top 12 targets by integration, split by scope · the number is the target's total</p></div><button class="tbtn" onclick="this.closest('.chart').classList.toggle('astable')">chart / table</button></div>
+  <div id="hoursSvg"></div>
+  <table class="alt" id="hoursAlt"></table>
+</section>
+
+<footer id="foot"></footer>
+</div>
+
+<script>
+const D = __DATASET__;
+/* ---------- helpers ---------- */
+const $ = id => document.getElementById(id);
+const MON = ["Jan","Feb","Mar","Apr","May","Jun","Jul","Aug","Sep","Oct","Nov","Dec"];
+const DOW = ["Sun","Mon","Tue","Wed","Thu","Fri","Sat"];
+const fmtI = n => (n==null?"–":Number(n).toLocaleString("en-GB"));
+const fmtH = h => (h==null?"–":Number(h).toFixed(1)+" h");
+const fmtD = iso => { if(!iso) return "–"; const d=new Date(iso+"T00:00:00Z"); return d.getUTCDate()+" "+MON[d.getUTCMonth()]+" "+d.getUTCFullYear(); };
+const days = (a,b) => Math.round((new Date(b+"T00:00:00Z")-new Date(a+"T00:00:00Z"))/864e5);
+const addDays = (iso,n) => new Date(new Date(iso+"T00:00:00Z").getTime()+n*864e5).toISOString().slice(0,10);
+const esc = s => String(s).replace(/[&<>"]/g,c=>({"&":"&amp;","<":"&lt;",">":"&gt;",'"':"&quot;"}[c]));
+const plural = (n,w) => n+" "+w+(n===1?"":"s");
+const QUIET = D.quietPeriodDays||14, ASOF = D.asOfNight;
+
+/* ONE scope order for the whole page: most integration first. Every list, bar, legend, lane and
+   project row uses SCOPES, so a scope sits in the same place everywhere. */
+const SCOPES = D.scopes.slice().sort((a,b)=>b.hours-a.hours);
+const SCOPE_RANK = Object.fromEntries(SCOPES.map((s,i)=>[s.camera,i]));
+const byScope = (a,b)=>(SCOPE_RANK[a.camera]??99)-(SCOPE_RANK[b.camera]??99);
+const SC = Object.fromEntries(D.scopes.map(s=>[s.camera,s]));
+const short = cam => String(cam).replace(/^(Seestar|Askar)\s+/,"");
+const colour = cam => (SC[cam]&&SC[cam].colour)||"#999";
+const scopeDot = cam => `<span class="scp"><span class="dot" style="background:${colour(cam)}"></span>${esc(short(cam))}</span>`;
+/* a dataset this small on one night is a test snap, not a project: kept out of the queue */
+const SAMPLE_H = 1.0;
+const isSample = p => p.hours>0 && p.hours<SAMPLE_H && p.nights<=1;
+/* "kept open by hand" (capture-state.json) versus "still capturing" inferred from dates */
+const keptOpen = p => /kept open|open by hand|capture-state/i.test(p.evidence||"");
+
+/* the three indicators, worked out per dataset (one object on one scope) */
+const STATUS = {capturing:{k:"cap",g:"◔",w:"Still capturing",next:"Keep capturing"}, ready_to_process:{k:"todo",g:"▶",w:"To process",next:"Process it"}, in_progress:{k:"prog",g:"◑",w:"In progress",next:"Finish it"}, done:{k:"done",g:"✓",w:"Done",next:"Done"}};
+function capture(p){
+  const ago=days(p.lastNight,ASOF);
+  if(p.status==="capturing"){
+    if(keptOpen(p)) return {k:"cap",g:"◔",t:"Kept open by you",s:"capture-state.json says open · last session "+ago+" nights ago"};
+    return {k:"cap",g:"◔",t:"Active",s:(ago===0?"session last night":ago===1?"session the night before last":"last session "+ago+" nights ago")+(p.readyOn?" · quiet from "+fmtD(p.readyOn).replace(/ \d{4}$/,"")+" if nothing new":"")}; }
+  return {k:"none",g:"○",t:"Quiet",s:"no frames for "+plural(ago,"night")};
+}
+function processing(p){
+  const unsure=/other Askar/.test(p.evidence||"");
+  if(p.processedFinals>0) return {k:"done",g:"●",t:"Final found",s:plural(p.processedFinals,"finished picture"),unsure};
+  if(p.masters>0) return {k:"prog",g:"◑",t:"Master saved",s:plural(p.masters,"master")+" in the folder"+(unsure?" · which Askar?":""),unsure};
+  return {k:"none",g:"○",t:"Not started",s:unsure?"unless the folder's master is this scope's":"no master, no final",unsure};
+}
+function calibration(p){
+  const c=p.calibration||{};
+  if(c.applies===false) return {k:"none",g:"–",t:"Not needed",s:"Seestar handles its own"};
+  if(!c.missing||!c.missing.length) return {k:"done",g:"✓",t:"Complete",s:"darks and flats linked"};
+  return {k:"todo",g:"△",t:"Missing "+c.missing.join(" and "),s:"none linked to these lights"};
+}
+const indHtml = i => `<span class="ind"><span class="g ${i.k}">${i.g}</span><span class="t">${esc(i.t)}${i.unsure?'<span class="q" title="uncertain">?</span>':""}<small>${esc(i.s)}</small></span></span>`;
+const nextHtml = st => { const s=STATUS[st]; return `<span class="pill ${s.k}"><span class="g">${s.g}</span>${s.next}</span>`; };
+const integ = p => p.hours>0 ? `<b>${fmtH(p.hours)}</b>` : `<span class="unk">Integration unknown<small>${fmtI(p.lights)} frames, exposure not recorded</small></span>`;
+
+/* all datasets flattened */
+const PROG=[]; for(const t of D.targets) for(const p of t.programmes) PROG.push(Object.assign({target:t.name,tid:t.id},p));
+
+/* ---------- header: stars, freshness, last night ---------- */
+(function(){ let seed=7; const rnd=()=>{ seed=(seed*16807)%2147483647; return seed/2147483647; };
+  let s=""; for(let i=0;i<140;i++){ const r=rnd()<.85?0.8:1.6; s+=`<circle cx="${(rnd()*100).toFixed(2)}%" cy="${(rnd()*100).toFixed(2)}%" r="${r}" fill="#fff" opacity="${(0.25+rnd()*0.6).toFixed(2)}"/>`; }
+  $("stars").innerHTML=s; })();
+$("src").textContent=D.machine||"";
+(function(){ const mac=/snapshot of ([^)]+)\)/.exec(D.sourceNote||""); const pend=D.pendingImport; /* not in schema observatory/1 yet: {files, targets} */
+  $("fresh").innerHTML=`worked out <b>${esc(D.generatedAt)}</b> from ${fmtI(D.snapshotRows)} ledger rows`+(mac?`<br>the Mac's record is from <b>${esc(mac[1])}</b>`:"")+`<br>`+
+   (pend&&pend.files?`<span class="pend">${fmtI(pend.files)} files on the camera not yet imported</span> (${pend.targets} targets)`:`<span style="color:#9aa3d8">on the camera, not yet imported: not reported by this record</span>`); })();
+const nWarn=D.health.filter(h=>h.severity==="warn").length; $("navHealth").textContent=nWarn;
+(function(){
+  const last=D.sessions.reduce((a,s)=>a&&a>s.night?a:s.night,null); if(!last) return;
+  const ss=D.sessions.filter(s=>s.night===last).sort(byScope); const ago=days(last,ASOF);
+  const d=new Date(last+"T00:00:00Z"); const tot=ss.reduce((a,s)=>a+s.hours,0), fr=ss.reduce((a,s)=>a+s.frames,0);
+  $("lastnight").innerHTML=`<div><div class="when">${ago===0?"Last night":ago===1?"The night before last":"Latest night, "+plural(ago,"night")+" ago"}</div><div class="big">${DOW[d.getUTCDay()]} ${fmtD(last)}<small>${fmtH(tot)} in ${fmtI(fr)} frames on ${plural(ss.length,"scope")}</small></div></div>
+   <div class="sess">${ss.map(s=>`<div class="s"><span class="sw" style="background:${colour(s.camera)}"></span><div><b>${esc(s.target)}</b><br><span class="n">${esc(short(s.camera))} · ${fmtH(s.hours)} · ${fmtI(s.frames)} frames${s.cal&&(s.cal.darks||s.cal.flats)?" · "+[s.cal.darks?s.cal.darks+" darks":"",s.cal.flats?s.cal.flats+" flats":""].filter(Boolean).join(", "):""}</span></div></div>`).join("")}</div>`;
+})();
+
+/* ---------- legend: every colour once ---------- */
+$("legend").innerHTML=
+ `<div class="grp"><span class="lab">Scope</span>${SCOPES.map(s=>scopeDot(s.camera)).join("")}<span class="muted">always in this order, most hours first</span></div>
+  <div class="grp"><span class="lab">Next step</span>${["capturing","ready_to_process","in_progress","done"].map(nextHtml).join("")}<span class="pill none"><span class="g">○</span>Sample</span></div>
+  <div class="grp"><span class="lab">Marks</span><span class="ind"><span class="g none">○</span><span class="t" style="font-weight:400">nothing yet / not needed</span></span><span class="ind"><span class="q" style="margin:0">?</span><span class="t" style="font-weight:400">uncertain, see the note</span></span><span class="muted">· on a timeline: a dot is a session, bigger is more hours; the shaded band is the last ${QUIET} nights</span></div>`;
+
+/* ---------- totals ---------- */
+const T=D.totals;
+$("heroH").innerHTML=`${T.hours.toFixed(1)}<small>hours of integration</small>`;
+const firstN=D.scopes.reduce((a,s)=>a&&a<s.first?a:s.first,null), lastN=D.scopes.reduce((a,s)=>a&&a>s.last?a:s.last,null);
+$("heroSub").textContent=`light-frame exposure time, added up across every target and scope, ${fmtD(firstN)} to ${fmtD(lastN)}`;
+const mos=D.targets.filter(t=>t.mosaic).length;
+$("tiles").innerHTML=[
+ [fmtI(T.lights),"light frames",(T.bytes/1e9).toFixed(0)+" GB on the archive"],
+ [T.targets,"targets","objects you have shot · "+mos+" as mosaics"],
+ [PROG.length,"datasets","one target on one scope"],
+ [T.nights,"nights out",fmtI(T.sessions)+" sessions"],
+ [D.scopes.length,"scopes","cameras in the ledgers"]
+].map(([v,l,s])=>`<div class="tile"><div class="v">${v}</div><div class="l">${l}</div><div class="s">${s}</div></div>`).join("");
+
+/* integration by scope: one stacked bar; every segment labelled (inside when wide, numbered when thin) */
+(function(){
+  const W=1000,tot=SCOPES.reduce((a,s)=>a+s.hours,0); let x=0; const segs=[],labels=[];
+  SCOPES.forEach((s,i)=>{ const w=Math.max(4,s.hours/tot*W-2);
+    segs.push(`<rect x="${x}" y="4" width="${w}" height="24" rx="4" fill="${s.colour}"><title>${esc(s.camera)}: ${fmtH(s.hours)}</title></rect>`);
+    if(w>110) labels.push(`<text class="inbar" x="${x+9}" y="21" font-size="12.5" font-weight="700" fill="#fff">${esc(short(s.camera))} · ${fmtH(s.hours)}</text>`);
+    else labels.push(`<line x1="${x+w/2}" x2="${x+w/2}" y1="29" y2="34" stroke="#857f8f"/><text x="${x+w/2}" y="45" text-anchor="middle" font-size="11" font-weight="700" fill="#524d5c">${i+1}</text>`);
+    x+=w+2; });
+  $("scopeBar").innerHTML=`<svg viewBox="0 0 ${W} 48" preserveAspectRatio="none" role="img" aria-label="Integration by scope">${segs.join("")}${labels.join("")}</svg>`;
+  $("scopeLegend").innerHTML=SCOPES.map((s,i)=>`<div><span class="muted mono" style="width:14px">${i+1}</span>${scopeDot(s.camera)}<span class="num"><b>${fmtH(s.hours)}</b> · ${Math.round(s.hours/tot*100)}%</span><span class="nm muted" style="font-size:11.5px">${fmtI(s.frames)} frames · ${plural(s.nights,"night")} · ${esc(s.camera)}</span></div>`).join("");
+})();
+
+/* the season strip: nights per month, stacked by scope, every month from first to as-of */
+(function(){
+  const seen=new Set(), months={};
+  for(const s of D.sessions){ const k=s.camera+"|"+s.night; if(seen.has(k)) continue; seen.add(k); const m=s.night.slice(0,7); (months[m]=months[m]||{})[s.camera]=(months[m][s.camera]||0)+1; }
+  const keys=Object.keys(months).sort(); const all=[]; let [y,m]=keys[0].split("-").map(Number); const [ly,lm]=ASOF.split("-").map(Number);
+  while(y<ly||(y===ly&&m<=lm)){ all.push(y+"-"+String(m).padStart(2,"0")); m++; if(m>12){m=1;y++;} }
+  const max=Math.max(...all.map(k=>Object.values(months[k]||{}).reduce((a,b)=>a+b,0)));
+  $("seasonStrip").innerHTML=all.map(k=>{ const parts=SCOPES.filter(sc=>months[k]&&months[k][sc.camera]); const tot=parts.reduce((a,sc)=>a+months[k][sc.camera],0);
+    return `<div class="m" title="${k}: ${plural(tot,"night")}"><span class="cnt">${tot||""}</span>${parts.slice().reverse().map(sc=>`<div class="seg" style="height:${(months[k][sc.camera]/max*78).toFixed(1)}%;background:${sc.colour};margin-top:2px"><title>${esc(sc.camera)}: ${months[k][sc.camera]}</title></div>`).join("")}</div>`; }).join("");
+  $("seasonLbl").innerHTML=all.map(k=>{ const mm=+k.slice(5); return `<span class="${mm===1?"y":""}"><span class="long">${mm===1?k.slice(0,4):MON[mm-1]}</span><span class="short">${mm===1?k.slice(2,4):MON[mm-1].slice(0,1)}</span></span>`; }).join("");
+})();
+
+/* ---------- needs attention ---------- */
+(function(){
+  const items=[];
+  for(const h of D.health){
+    if(h.severity!=="warn") continue;
+    const m=/(\d[\d,]*)\s+frames/.exec(h.detail), names=/(\d+)\s+target name/.exec(h.detail), rows=/(\d+)\s+rows? carry no scope/.exec(h.detail);
+    if(names) items.push({cls:"warn",n:m?m[1]:"?",u:"frames not counted",w:`${names[1]} target names the contract doesn't know`,s:"their frames are real but sit outside every project until the names are added",act:"Review the names"});
+    else if(rows) items.push({cls:"warn",n:rows[1],u:"ledger rows",w:"carry no scope",s:"no focal length and no camera name, so no scope can claim them",act:"Check those rows"});
+    else items.push({cls:"warn",n:"",u:"",w:h.title,s:h.detail,act:"Look"});
+  }
+  const unk=PROG.filter(p=>!(p.hours>0)&&p.lights>0);
+  if(unk.length) items.push({cls:"warn",n:fmtI(unk.reduce((a,p)=>a+p.lights,0)),u:"frames, exposure unknown",w:unk.map(p=>p.target+" on "+short(p.camera)).join(", "),s:"the exposure was not recorded, so these frames add nothing to the hours total: unknown, not zero",act:"Check the exposure"});
+  const shared=PROG.filter(p=>/other Askar/.test(p.evidence||""));
+  if(shared.length) items.push({cls:"warn",n:shared.length,u:"datasets",w:"share one Askar folder: "+[...new Set(shared.map(p=>p.target))].join(", "),s:"the master found there may belong to "+shared.sort(byScope).map(p=>short(p.camera)).join(" or ")+"; nobody can tell which until you say",act:"Say which Askar"});
+  const cal=PROG.filter(p=>p.calibration&&p.calibration.applies&&p.calibration.missing.length);
+  if(cal.length){ const fl=cal.filter(p=>p.calibration.missing.length===1).length, both=cal.length-fl;
+    items.push({cls:"warn",n:cal.length,u:"datasets",w:"have no calibration linked to their lights",s:`${fl} missing flats only · ${both} missing darks and flats · ${fmtI(cal.reduce((a,p)=>a+p.lights,0))} frames in all`,act:"Link darks and flats"}); }
+  const samples=PROG.filter(p=>p.status==="ready_to_process"&&isSample(p));
+  if(samples.length) items.push({cls:"info",n:samples.length,u:"samples",w:"kept out of the queue: "+samples.map(p=>p.target+" ("+fmtH(p.hours)+")").join(", "),s:`under ${SAMPLE_H.toFixed(1)} h on one night · mark as sample, or process anyway`,act:"Mark as sample"});
+  for(const h of D.health){ if(h.severity==="info"&&/duplicate/i.test(h.title)){ const m=/(\d[\d,]*)\s+rows/.exec(h.detail); items.push({cls:"info",n:m?m[1]:"",u:"duplicate copies",w:"counted once, correctly",s:"the Mac's and the PC's import of the same frame",act:"Nothing to do"}); } }
+  $("attList").innerHTML=items.map(i=>`<div class="it ${i.cls}"><div class="n">${i.n}<small>${esc(i.u)}</small></div><div class="w"><b>${esc(i.w)}</b><span>${esc(i.s)}</span></div><button class="act">${esc(i.act)}</button></div>`).join("");
+})();
+
+/* ---------- process next ---------- */
+(function(){
+  const allReady=PROG.filter(p=>p.status==="ready_to_process");
+  const samples=allReady.filter(isSample), ready=allReady.filter(p=>!isSample(p)).sort((a,b)=>b.hours-a.hours);
+  $("queueSub").innerHTML=`${ready.length} datasets have had no new frames for ${QUIET} nights and nothing started · biggest first`+(samples.length?` · <span class="pill none"><span class="g">○</span>${samples.length} sample${samples.length===1?"":"s"} kept out</span>`:"");
+  const row=p=>`<tr class="stripe" style="--sc:${colour(p.camera)}"><td style="width:38%"><span class="t">${esc(p.target)}</span><br>${scopeDot(p.camera)}</td><td class="num">${integ(p)}<br><span class="muted" style="font-size:11px">${plural(p.nights,"night")} · ${fmtI(p.lights)} frames</span><br><span class="muted" style="font-size:11px">quiet for ${plural(days(p.lastNight,ASOF),"night")}</span></td><td>${indHtml(calibration(p))}</td><td class="num">${nextHtml(p.status)}</td></tr>`;
+  const head=`<thead><tr><th>Target · scope</th><th class="num">Integration</th><th>Calibration</th><th class="num">Next</th></tr></thead>`;
+  const N=6; $("queueTbl").innerHTML=head+"<tbody>"+ready.slice(0,N).map(row).join("")+"</tbody>";
+  const more=$("queueMore"); more.textContent=`show all ${ready.length} as a list`; let open=false;
+  more.onclick=()=>{ open=!open; $("queueTbl").innerHTML=head+"<tbody>"+(open?ready:ready.slice(0,N)).map(row).join("")+"</tbody>"; more.textContent=open?"show the top "+N:"show all "+ready.length+" as a list"; };
+  const fin=PROG.filter(p=>p.status==="in_progress").sort((a,b)=>b.hours-a.hours);
+  $("finSub").textContent=`${fin.length} datasets have a master of yours saved but no finished picture yet`;
+  $("finTbl").innerHTML=`<thead><tr><th>Target · scope</th><th class="num">Integration</th><th>Processing</th><th class="num">Next</th></tr></thead><tbody>`+fin.map(p=>`<tr class="stripe" style="--sc:${colour(p.camera)}"><td><span class="t">${esc(p.target)}</span><br>${scopeDot(p.camera)}</td><td class="num">${integ(p)}<br><span class="muted" style="font-size:11px">${plural(p.nights,"night")}</span></td><td>${indHtml(processing(p))}</td><td class="num">${nextHtml(p.status)}</td></tr>`).join("")+"</tbody>";
+})();
+
+/* ---------- latest capture per scope ---------- */
+(function(){
+  const by={}; for(const s of D.sessions){ (by[s.camera]=by[s.camera]||[]).push(s); }
+  for(const k in by) by[k].sort((a,b)=>b.night<a.night?-1:1);
+  const scopes=Object.keys(by).sort((a,b)=>(SCOPE_RANK[a]??99)-(SCOPE_RANK[b]??99));
+  const filt=s=>Object.keys(s.filters||{}).map(f=>f==="LP"?"LP dual-band":f==="IRCUT"?"UV/IR cut":f==="unrecorded"?"filter unrecorded":f).join(", ");
+  const calt=s=>{ const c=s.cal; if(!c) return "Seestar: its own calibration"; const a=[c.darks?c.darks+" darks":"",c.flats?c.flats+" flats":"",c.biases?c.biases+" bias":""].filter(Boolean); return a.length?a.join(" · "):"no calibration that night"; };
+  const row=(s,first)=>`<tr class="stripe" style="--sc:${colour(s.camera)}"><td style="width:22%">${first?scopeDot(s.camera):""}</td><td style="width:46%"><span class="t">${esc(s.target)}</span><br><span class="muted" style="font-size:11px">${esc(filt(s))} · ${esc(calt(s))}</span></td><td class="num">${fmtD(s.night)}<br><span class="muted" style="font-size:11px">${days(s.night,ASOF)===0?"last night":plural(days(s.night,ASOF),"night")+" ago"}</span></td><td class="num"><b>${s.hours>0?fmtH(s.hours):"unknown"}</b><br><span class="muted" style="font-size:11px">${fmtI(s.frames)} frames</span></td></tr>`;
+  const head=`<thead><tr><th>Scope</th><th>Object</th><th class="num">Night</th><th class="num">Captured</th></tr></thead>`;
+  const render=n=>$("recentTbl").innerHTML=head+"<tbody>"+scopes.map(c=>by[c].slice(0,n).map((s,i)=>row(s,i===0)).join("")).join("")+"</tbody>";
+  render(1); let open=false; $("recentMore").onclick=()=>{ open=!open; render(open?3:1); $("recentMore").textContent=open?"show one session per scope":"show the last 3 sessions per scope"; };
+})();
+
+/* ---------- projects: timeline lanes with the quiet band ---------- */
+function laneSvg(t,p,sessions,start,end,unknownHours,W){
+  W=W||600; const H=40,PAD=8,QW=Math.round(QUIET/Math.max(1,days(start,end))*(W-70)); const span=Math.max(1,days(start,end)); const plotW=W-70;
+  const xOf=iso=>PAD+Math.max(0,Math.min(1,days(start,iso)/span))*plotW;
+  let s=`<svg class="lane" viewBox="0 0 ${W} ${H}" width="${W}" height="${H}" role="img" aria-label="${esc(short(p.camera))} sessions">`;
+  s+=`<line x1="${PAD}" x2="${PAD+plotW}" y1="${H/2}" y2="${H/2}" stroke="#e6dccb"/>`;
+  s+=`<rect x="${PAD+plotW-QW}" y="2" width="${QW}" height="${H-4}" fill="#1d2a6b" opacity=".08"/>`;
+  const maxH=Math.max(0.5,...D.sessions.map(z=>z.hours));
+  const inRange=sessions.filter(z=>z.night>=start);
+  for(const z of inRange){ const r=unknownHours?4.5:3+Math.sqrt(z.hours/maxH)*8; const cx=xOf(z.night);
+    s+=`<circle cx="${cx.toFixed(1)}" cy="${H/2}" r="${r.toFixed(1)}" fill="${unknownHours?"#fff":colour(p.camera)}" stroke="${unknownHours?colour(p.camera):"#fffdf8"}" stroke-width="${unknownHours?2:1.5}" opacity=".92"><title>${fmtD(z.night)}: ${z.hours>0?fmtH(z.hours):"hours unknown"} · ${fmtI(z.frames)} frames</title></circle>`; }
+  if(sessions.length&&!inRange.length) s+=`<text x="${PAD+2}" y="${H/2+4}" font-size="11" fill="#857f8f">${sessions.length} earlier session${sessions.length===1?"":"s"}, before this range ›</text>`;
+  const st=STATUS[p.status]; const col={cap:"#0891b2",todo:"#d97706",prog:"#6d28d9",done:"#15803d"}[st.k];
+  s+=`<circle cx="${W-26}" cy="${H/2}" r="11" fill="${col}"><title>next: ${st.next}</title></circle><text x="${W-26}" y="${H/2+4}" text-anchor="middle" font-size="11" font-weight="700" fill="#fff">${st.g}</text>`;
+  return s+"</svg>";
+}
+function axisSvg(start,end,W){
+  W=W||600; const PAD=8,plotW=W-70,span=Math.max(1,days(start,end)); const xOf=iso=>PAD+days(start,iso)/span*plotW;
+  let s=`<svg class="axis" viewBox="0 0 ${W} 22" width="${W}" height="22">`;
+  let d=new Date(start+"T00:00:00Z"); d=new Date(Date.UTC(d.getUTCFullYear(),d.getUTCMonth()+1,1)); const stepM=W<420?(span>400?3:2):(span>400?2:1);
+  while(d.toISOString().slice(0,10)<=end){ const iso=d.toISOString().slice(0,10); const x=xOf(iso); const m=d.getUTCMonth();
+    if(span<=120||m%stepM===0){ s+=`<line x1="${x}" x2="${x}" y1="0" y2="5" stroke="#857f8f"/><text x="${x}" y="17" text-anchor="middle" font-size="10.5" fill="#857f8f">${m===0?d.getUTCFullYear():MON[m]}</text>`; }
+    d=new Date(Date.UTC(d.getUTCFullYear(),d.getUTCMonth()+1,1)); }
+  if(span<=120){ let dd=new Date(start+"T00:00:00Z"); while(dd.toISOString().slice(0,10)<=end){ const iso=dd.toISOString().slice(0,10); if(dd.getUTCDate()%10===1&&dd.getUTCDate()!==1){ const x=xOf(iso); s+=`<text x="${x}" y="17" text-anchor="middle" font-size="10" fill="#857f8f">${dd.getUTCDate()}</text>`; } dd=new Date(dd.getTime()+864e5); } }
+  s+=`<text x="${W-26}" y="17" text-anchor="middle" font-size="10" fill="#857f8f">next</text>`;
+  return s+"</svg>";
+}
+(function(){
+  const order=["capturing","ready_to_process","in_progress","done"];
+  const mix=t=>{ const c={}; for(const p of t.programmes) c[p.status]=(c[p.status]||0)+1; return order.filter(k=>c[k]).map(k=>`<span class="pill soft ${STATUS[k].k}"><span class="g">${STATUS[k].g}</span>${c[k]} ${STATUS[k].w.toLowerCase()}</span>`).join(""); };
+  const want=["Andromeda Galaxy","Milky Way Core","Squid Nebula"];
+  const list=want.map(w=>D.targets.find(t=>t.name.startsWith(w))).filter(Boolean);
+  $("projSub").textContent=`${D.targets.length} targets, ${PROG.length} datasets · three shown here, the rest on the Projects view · a project's badges count its datasets, one per scope · open one for a lane per scope: the shaded band is the last ${QUIET} nights, and the dot after it is that scope's next step`;
+  $("projList").innerHTML=list.map((t,i)=>{
+    const unsure=t.programmes.filter(p=>/other Askar/.test(p.evidence||"")).sort(byScope);
+    const hours=t.hours>0?`<b>${fmtH(t.hours)}</b> integration`:`<span class="unk">Integration unknown</span>`;
+    const lead=t.programmes.slice().sort(byScope)[0];
+    return `<details class="proj" open data-tid="${esc(t.id)}" style="--pc:${colour(lead.camera)}">
+      <summary><div class="nm">${esc(t.name)}<small>${t.type?esc(t.type):'<i>type not set</i>'} · ${t.constellation?esc(t.constellation):'<i>constellation not set</i>'}${t.mosaic?" · mosaic":""}</small></div>
+      <div class="tot">${hours}<br>${plural(t.nights,"night")} · ${fmtI(t.lights)} frames · ${t.programmes.length===1?"1 scope":t.programmes.length+" scopes"}</div>
+      <div class="mix">${mix(t)}</div></summary>
+      <div class="body">
+      ${unsure.length?`<div class="note"><span class="q">?</span><div><b>Shared Askar folder: the master may belong to the other Askar.</b><span>“${esc(unsure[0].folder)}” holds the lights from ${unsure.map(p=>short(p.camera)).join(" and ")}. One master was found there and the page cannot tell which scope made it, so ${short((unsure.find(p=>p.masters>0)||{}).camera||"")} shows “master saved ?” and ${short((unsure.find(p=>!p.masters)||{}).camera||"")} shows “not started ?”. Say which, and both rows settle.</span></div></div>`:""}
+      ${!(t.hours>0)?`<div class="note" style="background:var(--todo-bg);border-color:#f0d9ad"><span class="q" style="border-color:var(--st-todo);color:var(--st-todo)">?</span><div><b style="color:var(--st-todo)">Integration unknown, not zero.</b><span>${fmtI(t.lights)} frames are on the archive but their exposure time was not recorded, so no hours can be added up. The frames still count; the hours do not. Hollow dots below: a session whose length is unknown.</span></div></div>`:""}
+      <div class="ctl"><span>range</span><button data-r="90" aria-pressed="false">90 nights</button><button data-r="365" aria-pressed="false">a year</button><button data-r="all" aria-pressed="true">all time</button><span style="margin-left:auto">${t.programmes.length===1?"one lane, one scope":t.programmes.length+" lanes, one per scope"}</span></div>
+      <div class="lanes" id="lanes-${esc(t.id)}"></div>
+      <p class="why"><b>Why:</b> ${t.programmes.slice().sort(byScope).map(p=>short(p.camera)+" — "+esc(p.evidence)).join(" · ")}</p>
+      </div></details>`; }).join("");
+  for(const t of list){
+    const box=$("lanes-"+t.id); const ctl=box.previousElementSibling;
+    const sess=D.sessions.filter(z=>z.target===t.name);
+    let curRange="all";
+    const draw=(range,W)=>{ curRange=range;
+      const end=ASOF; const firstAll=sess.reduce((a,z)=>a&&a<z.night?a:z.night,t.firstNight);
+      const start=range==="all"?addDays(firstAll,-3):addDays(end,-(range==="90"?89:364));
+      let h=`<div class="hd">Scope</div><div class="hd">Integration</div><div class="hd">Sessions, oldest to newest</div><div class="hd">Capture · Processing · Calibration</div><div class="hd">Next</div>`;
+      for(const p of t.programmes.slice().sort(byScope)){
+        const ps=sess.filter(z=>z.camera===p.camera).sort((a,b)=>a.night<b.night?-1:1);
+        h+=`<div class="cell sc" style="--sc:${colour(p.camera)}">${scopeDot(p.camera)}<small>${plural(p.nights,"night")}${p.mosaic?" · mosaic":""}</small></div>
+            <div class="cell num">${integ(p)}<small>${fmtI(p.lights)} frames · last ${fmtD(p.lastNight)}</small></div>
+            <div class="cell lane">${laneSvg(t,p,ps,start,end,!(p.hours>0),W)}</div>
+            <div class="cell ind3">${indHtml(capture(p))}${indHtml(processing(p))}${indHtml(calibration(p))}</div>
+            <div class="cell next">${nextHtml(p.status)}</div>`; }
+      h+=`<div class="axis-row">${axisSvg(start,end,W)}</div><div class="qlabel">shaded: the quiet period, the last ${QUIET} nights · a last dot inside it = still capturing, outside = quiet</div>`;
+      box.innerHTML=h;
+      if(!W){ const cell=box.querySelector(".cell.lane"); const w=cell?Math.max(160,Math.floor(cell.clientWidth)):600; draw(range,w); } };
+    draw("all");
+    let rt; window.addEventListener("resize",()=>{ clearTimeout(rt); rt=setTimeout(()=>draw(curRange),120); });
+    for(const b of ctl.querySelectorAll("button")) b.onclick=()=>{ for(const x of ctl.querySelectorAll("button")) x.setAttribute("aria-pressed",x===b?"true":"false"); draw(b.dataset.r); };
+  }
+})();
+
+/* ---------- chart: where the hours went ---------- */
+(function(){
+  const top=D.targets.slice().filter(t=>t.hours>0).sort((a,b)=>b.hours-a.hours).slice(0,12);
+  const W=1100,L=230,R=70,rowH=26,bar=16,H=top.length*rowH+8; const max=top[0].hours; const plotW=W-L-R;
+  let s=`<svg viewBox="0 0 ${W} ${H}" role="img" aria-label="Where the hours went">`;
+  top.forEach((t,i)=>{ const y=i*rowH+4; let x=L;
+    s+=`<text x="${L-10}" y="${y+bar/2+4}" text-anchor="end" class="bar-label">${esc(t.name)}</text>`;
+    const ps=t.programmes.slice().sort(byScope).filter(p=>p.hours>0);
+    ps.forEach((p,j)=>{ const w=Math.max(2,p.hours/max*plotW-(j<ps.length-1?2:0)); const last=j===ps.length-1;
+      s+= last&&w>8 ? `<path d="M${x} ${y}h${w-4}a4 4 0 0 1 4 4v${bar-8}a4 4 0 0 1 -4 4h-${w-4}z" fill="${colour(p.camera)}"><title>${esc(short(p.camera))}: ${fmtH(p.hours)}</title></path>` : `<rect x="${x}" y="${y}" width="${w}" height="${bar}" fill="${colour(p.camera)}"><title>${esc(short(p.camera))}: ${fmtH(p.hours)}</title></rect>`;
+      x+=w+2; });
+    s+=`<text x="${x+4}" y="${y+bar/2+4}" class="val">${fmtH(t.hours)}</text>`; });
+  s+="</svg>"; $("hoursSvg").innerHTML=s;
+  $("hoursAlt").innerHTML=`<tr><th>Target</th>${SCOPES.map(sc=>`<th>${esc(short(sc.camera))}</th>`).join("")}<th>Total</th></tr>`+top.map(t=>`<tr><td>${esc(t.name)}</td>${SCOPES.map(sc=>{const p=t.programmes.find(p=>p.camera===sc.camera);return `<td>${p&&p.hours>0?p.hours.toFixed(1):"·"}</td>`}).join("")}<td><b>${t.hours.toFixed(1)}</b></td></tr>`).join("");
+})();
+
+$("foot").textContent=(D.sourceNote||"")+" "+(D.provenance||"");
+</script>
+</body>
+</html>

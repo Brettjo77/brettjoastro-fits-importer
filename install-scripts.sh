@@ -215,7 +215,7 @@ echo ""
 # Stop any running panel so the next launch picks up the new build: only the
 # web version's own (~/bin), never the app's (1.5.3)
 if [ -z "$APP_OWNS" ] && pkill -f "[Pp]ython[^ ]* .*$HOME/bin/(asiair|astro)-app\.py" 2>/dev/null; then
-    success "Stopped the running panel (the watcher restarts it on next plug-in)"
+    success "Stopped the running panel (the watcher starts the new one in a moment)"
 fi
 
 info "Retiring old LaunchAgents (replaced by com.brettjohnson.astro-import)..."
@@ -318,8 +318,9 @@ success "All done! BrettjoAstro FITS Importer installed."
 echo ""
 if [ -z "$APP_OWNS" ]; then
     log "First run:"
-    log "  1. Plug in a camera (ASIAir and/or Seestar) — the panel opens by itself"
-    log "     (or open http://127.0.0.1:8765). Scanning only reads the camera."
+    log "  1. Plug in a camera (ASIAir and/or Seestar) — the panel opens by itself."
+    log "     It is always running: http://127.0.0.1:8765 any time, camera or not."
+    log "     Scanning only reads the camera."
     log "  2. Tick what you want and press Import. The first import starts the"
     log "     ledger and backs everything up, verified byte for byte."
     log "  Already have copies of everything on this Mac? Instead of step 2, run"

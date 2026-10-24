@@ -24,7 +24,7 @@ and `astropy`.
    release zip) and double-click it in Downloads to unpack it.
 5. In Terminal, paste (use the folder name you actually got):
 
-       cd ~/Downloads/importer-1.7.0 && bash install-scripts.sh
+       cd ~/Downloads/importer-1.7.2 && bash install-scripts.sh
 
    It copies the engine, panel, camera watcher, the Observatory page and the
    `contract` folder into `~/bin`, installs the
@@ -54,7 +54,7 @@ this tool.
 1. Quit the panel if it is running (or just carry on — the installer stops it).
 2. Download and unpack the new zip in Downloads, then in Terminal:
 
-       cd ~/Downloads/importer-1.7.0 && bash install-scripts.sh
+       cd ~/Downloads/importer-1.7.2 && bash install-scripts.sh
 
 3. Start the panel again: double-click **Restart FITS Importer** on your
    Desktop, or plug a camera in.
@@ -119,10 +119,16 @@ Administrator window and prints what to do.
      for you to merge.
 4. **Plug in the Seestar or ASIAir.** A notification appears and the panel
    opens (`http://127.0.0.1:8765`). Tick what you want and press **Import**.
+   The panel is always running from 1.7.4, so that address works any time,
+   camera or not: the Observatory lives there.
    The first import starts this PC's own ledger.
+   - Frames the Mac already imported and verified show as "backed up by the
+     Mac", unticked (1.7.1): the PC reads the Mac's record on the archive.
    - Frames go to your C: workbench, `%USERPROFILE%\Documents\Astro\…`.
-   - Verified frames are then filed into `E:\Astro Image Data`, the same as
-     the Mac's ship does.
+   - Verified frames are then filed into `E:\Astro Image Data` at once, the
+     same as the Mac's ship does, and the panel says so.
+   - If the self-test's "drives checked" line lists a data drive (say D:),
+     add `"ASTRO_DRIVE_EXCLUDE": "D:"` to `%LOCALAPPDATA%\Astro Import\config.json`.
 5. **Check the install** any time. Open **Terminal** (right-click Start →
    Terminal; it opens PowerShell) and paste this line as it is:
 

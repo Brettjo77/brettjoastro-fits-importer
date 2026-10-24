@@ -20,7 +20,7 @@ Smart telescopes fill up fast, and hand-copying folders leaves you guessing. Mos
 
 **For both cameras**
 
-- Notices a camera the moment it's plugged in (macOS: a LaunchAgent watching `/Volumes`; Windows: a small watcher started at logon that recognises a camera drive by what's on it), scans read-only, notifies you, and opens the control panel at `http://127.0.0.1:8765`
+- Notices a camera the moment it's plugged in (macOS: a LaunchAgent watching `/Volumes`; Windows: a small watcher started at logon that recognises a camera drive by what's on it), scans read-only, notifies you, and opens the control panel at `http://127.0.0.1:8765`. The panel is always running (1.7.4): the watcher starts it at login and brings it back if it stops, so the Observatory is there camera or not
 - Verified copies: stream-hash from camera → write to `.partial` → fsync → re-read from disk → re-hash → rename. Interrupted copies leave a `.partial`, never a fake backup
 - One JSON ledger for every frame ever imported (SHA-256, exposure, night, scope, day number, device) — entries are never deleted, so history survives archiving
 - Day-folder numbering per target with night-continuation handling, shared display-name tables (catalogue → common names) plus your own custom names
@@ -151,10 +151,13 @@ overwrites an existing config.
 Nothing here is installed or run until you configure it (`ASTRO_ARCHIVE_URL`
 in `config.json`); the step-by-step is in [PC-SYNC.md](PC-SYNC.md).
 
-In the author's setup the Mac takes frames off the cameras and holds the ledger,
-and the archive of record lives on a Windows PC (`E:\Astro Image Data`), shared
-over SMB and mounted on the Mac at `/Volumes/AstroImageData`. Three things keep
-the two in step, none of which you run by hand:
+In the author's setup both computers take frames off the cameras, each with
+its own ledger, and the archive of record lives on the Windows PC
+(`E:\Astro Image Data`), shared over SMB and mounted on the Mac at
+`/Volumes/AstroImageData`; the PC files into it from its own C: drive. Each
+computer leaves its record on the archive and reads the other's, so a frame
+one computer already imported is not offered again on the other (1.7.1).
+Three things keep the two in step, none of which you run by hand:
 
 1. **After every import** the engine ships what just arrived to the archive
    (`--no-ship` to skip): a Terminal import connects the share first, a panel
@@ -230,7 +233,7 @@ The panel covers day-to-day use; everything is also scriptable:
 
 ## Testing
 
-717 end-to-end checks run the real engine and the real panel against simulated cameras (hand-built minimal FITS files, every device layout, crash/rename/mosaic/Milky-Way/cleanup/consent/interruption/multi-Seestar scenarios — including that the destination preview must equal the folders the import then actually creates, that a folder holding any unproven file is never offered as SAFE, and that the panel refuses foreign-origin requests):
+825 end-to-end checks run the real engine and the real panel against simulated cameras (hand-built minimal FITS files, every device layout, crash/rename/mosaic/Milky-Way/cleanup/consent/interruption/multi-Seestar scenarios — including that the destination preview must equal the folders the import then actually creates, that a folder holding any unproven file is never offered as SAFE, and that the panel refuses foreign-origin requests):
 
 ```bash
 python3 test_v2.py     # 556 engine checks (chain W1 simulates the Windows drive layer)

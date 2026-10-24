@@ -9,6 +9,8 @@ No permanent connection between the machines is needed. When the Mac has somethi
 
 The PC then checks every shipped frame from its own disk. Only that check counts as proof that a frame is safe on the archive.
 
+Since 1.7.1 the PC imports too (see "If the PC runs the importer too" below): it files from its C: workbench into E: the same way, at once after an import and at 09:30 and 21:30. Each computer leaves its record (`_verify\mac\ledger-snapshot.json`, `_verify\pc\…`) and its AstroLog receipts (`_verify\…\receipts`) on the archive, and each one's scan reads the other's record so a frame already imported on one is not offered again on the other.
+
 ## Part A: on the Mac (about 10 minutes, once)
 
 1. Save the share password in the keychain, once.
@@ -120,9 +122,9 @@ Copies a 1.6 ship left behind (names ending `.partial`, `.mac.partial` or `.BAD`
 
     py -3 -X utf8 "$env:LOCALAPPDATA\BrettjoAstro\bin\astro-import.py" --sweep --move-old-partials
 
-## If the PC runs the importer too (1.5.0)
+## If the PC runs the importer too (1.5.0; the normal case since 1.7.1)
 
-The importer also runs on Windows 11: see the Windows section of [INSTALL.md](INSTALL.md) and [PARITY.md](PARITY.md). The PC then imports to its own workbench on C: and ships into `E:\Astro Image Data` with the same code, at 09:30 and 21:30, half an hour after the Mac. It keeps its own ledger, and from 1.7.0 writes its ship log in its own folder, `_verify\pc\shipped-pc.jsonl`. The sweep reads every computer's log, the old ones in `_verify` too. Only one computer ships at a time: the lock is `_verify\lock\ship.lock`, renewed every minute by the computer that holds it. Another computer breaks it only after ten minutes without renewal, and notes that in its own ship log.
+The importer also runs on Windows 11: see the Windows section of [INSTALL.md](INSTALL.md) and [PARITY.md](PARITY.md). The PC then imports to its own workbench on C: and ships into `E:\Astro Image Data` with the same code, straight after each import (the archive is its own drive) and at 09:30 and 21:30, half an hour after the Mac. It keeps its own ledger, and from 1.7.0 writes its ship log in its own folder, `_verify\pc\shipped-pc.jsonl`. Its scan reads the Mac's record from `_verify\mac\ledger-snapshot.json`, so what the Mac already imported and verified shows as "backed up by the Mac" and is not copied again; the Mac's scan reads the PC's record the same way. A camera is cleared only from the computer whose ledger proves the copies ("clear it from the Mac"). Bring the Mac's settings over once with `--export-settings` there and `--import-settings` here (names, the never-import list, the scope table); after that the record carries the names and the list. Add `"ASTRO_DRIVE_EXCLUDE": "D:"` to the PC's config.json to keep a data drive out of the camera search. The sweep reads every computer's log, the old ones in `_verify` too. Only one computer ships at a time: the lock is `_verify\lock\ship.lock`, renewed every minute by the computer that holds it. Another computer breaks it only after ten minutes without renewal, and notes that in its own ship log.
 
 ## If something looks wrong
 

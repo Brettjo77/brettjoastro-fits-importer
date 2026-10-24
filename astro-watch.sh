@@ -122,12 +122,15 @@ while [ "$CUR" = "none" ] && [ "$tries" -lt 15 ]; do
     CUR="$(presence)"
 done
 
-# ── No cameras at all: record absence quietly and leave ────────────────────
+# ── No cameras at all: record absence quietly, keep the panel up, leave ────
+# The panel is always on (1.7.4): launchd runs this at login and every five
+# minutes (StartInterval), so the Observatory is there camera or not.
 if [ "$CUR" = "none" ]; then
     if [ "$PREV" != "none" ]; then
         wlog "cameras gone (was: $PREV) — recorded, silent"
         write_state "none" "$PREV_TS" "$PREV_NOTIFIED"
     fi
+    ensure_panel_silently
     exit 0
 fi
 
