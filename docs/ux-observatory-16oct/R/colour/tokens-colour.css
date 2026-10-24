@@ -1,0 +1,154 @@
+/* ============================================================================
+   Astro Archive Observatory — colour tokens (round 3, lens: colour & meaning)
+   One rule: COLOUR MEANS SCOPE. Everything else is ink, with one accent (teal)
+   for "alive" states and the darkest/lightest ink for the one thing to do now.
+   Both themes are *selected*, not flipped: every value below was checked
+   against its own surface with the dataviz validator / WCAG contrast().
+   ---------------------------------------------------------------------------
+   How a page uses this file: paste it inline (the page is one offline file).
+   Theme resolution, in order: <html data-theme="light|dark"> (the user's own
+   toggle, kept in localStorage) wins; otherwise the OS setting; otherwise dark.
+   ========================================================================== */
+
+:root{
+  color-scheme: dark light;
+
+  /* ---- surface (dark is the base: the page is used at night) ------------- */
+  --page:   #0e1222;   /* page plane */
+  --card:   #171c33;   /* card surface */
+  --card2:  #1d2340;   /* nested card / row surface */
+  --line:   #2c3356;   /* hairline borders */
+  --grid:   #252c4a;   /* chart gridlines, one shade off the card */
+  --wash:   rgba(241,239,232,.06);  /* hover wash, quiet band, empty bar track */
+  --wash2:  rgba(241,239,232,.11);  /* pressed chip, selected row */
+  --track:  #2a3152;   /* empty part of a bar */
+  --shadow: 0 1px 2px rgba(0,0,0,.35);
+
+  /* ---- text tiers (all >= 4.5:1 on --card and --card2; see findings table) */
+  --ink:    #f1efe8;   /* 14.6:1 on card — names, numbers, headings */
+  --ink2:   #c1c5d9;   /*  9.8:1 — secondary facts, legend words */
+  --muted:  #959bba;   /*  6.1:1 — captions, axis labels, 11-12px allowed */
+  --faint:  #5f6584;   /*  decoration ONLY (tick marks, dividers). Never text. */
+
+  /* ---- header: the night sky, identical in both themes ------------------- */
+  --sky1:#070b1e; --sky2:#131a40; --sky3:#1b2660;
+  --sky-ink:#f4f2ec; --sky-ink2:#c9cde6; --sky-muted:#a4aacb; --sky-line:rgba(255,255,255,.14);
+  --sky-accent:#f1efe8;             /* selected tab underline: ink, not yellow */
+
+  /* ---- status: ONE accent hue (teal) + ink. Shape and fill carry meaning. --
+     Still capturing = teal tint, open-aperture glyph  (alive, nothing to do yet)
+     In progress     = teal solid, half-moon glyph     (alive, you are mid-way)
+     To process      = ink solid,  play glyph          (THE action; highest contrast on the page)
+     Done            = outline,    tick glyph, muted   (recedes)
+     Sample          = dashed outline, dashed-ring glyph, muted (kept out of the queue)
+     Teal sits 60° from the 107PHQ blue; a status is never a bare dot, always glyph + word. */
+  --st-live-ink:   #5cc9de;         /* 6.6:1 on its tint */
+  --st-live-tint:  #21344b;         /* = teal 14% over card */
+  --st-live-line:  #2f6a7a;
+  --st-work-bg:    #2aa5bd;         /* solid teal */
+  --st-work-ink:   #0e1222;         /* 6.4:1 */
+  --st-action-bg:  #f1efe8;         /* ink solid: light paper on a dark page */
+  --st-action-ink: #0e1222;         /* 16:1 */
+  --st-quiet-ink:  #959bba;         /* done / sample text */
+  --st-quiet-line: #3a4168;
+
+  /* ---- attention (warnings, "to check"): a warm wash + ink + ⚠ glyph. ------
+     No amber text, no amber icon: amber is the S30 Pro. The wash is 5% chroma,
+     a background, and never appears as a mark. */
+  --attn-wash:  #36301d;
+  --attn-line:  #5a4c2a;
+  --attn-ink:   #f1efe8;            /* 11.4:1 */
+  --attn-glyph: #f1efe8;
+  /* "fine, nothing to do" rows and ✓ marks use --muted ink + a tick glyph. No green: green is the S50 Pro. */
+
+  /* ---- unknown (frames but no exposure): hollow or hatched, never 0 -------- */
+  --unk-fill: var(--card);          /* hollow dot fill = the surface it sits on */
+  --unk-stroke-w: 2px;              /* hollow dot ring width */
+  --hatch-pitch: 4px;               /* hatch for areas >= 14px: ring segments, bars */
+  --hatch-tint: .22;                /* opacity of the scope colour behind the hatch lines */
+
+  /* ---- timeline chrome ---------------------------------------------------- */
+  --quiet-band: rgba(241,239,232,.07);   /* the 14-night band: ink at 7%, not a hue */
+  --today-line: #f1efe8;                 /* 1.5px, ink */
+  --mark-ring:  var(--card);             /* 2px surface ring on every dot; replaces glow */
+
+  /* ---- focus ---------------------------------------------------------------- */
+  --focus: #8fd3e6;
+}
+
+/* ---------------------------------------------------------------------------
+   LIGHT theme: warm paper by day. Same roles, re-selected values.
+   -------------------------------------------------------------------------- */
+@media (prefers-color-scheme: light){
+  :root:not([data-theme="dark"]){
+    color-scheme: light;
+    --page:#f3f0e8; --card:#fffdf9; --card2:#f7f4ec; --line:#e1dbce; --grid:#ebe6da;
+    --wash:rgba(26,25,38,.05); --wash2:rgba(26,25,38,.09); --track:#e6e1d6; --shadow:0 1px 2px rgba(26,25,38,.05);
+    --ink:#1a1926; --ink2:#4e4c60; --muted:#6b6a7e; --faint:#a09ead;
+    --st-live-ink:#086b80; --st-live-tint:#dcf2f6; --st-live-line:#9ed3df;
+    --st-work-bg:#0f7f95; --st-work-ink:#fffdf9;
+    --st-action-bg:#1a1926; --st-action-ink:#fffdf9;
+    --st-quiet-ink:#6b6a7e; --st-quiet-line:#c9c4b8;
+    --attn-wash:#fbf1dc; --attn-line:#ecd9b0; --attn-ink:#1a1926; --attn-glyph:#7a4a12;
+    --quiet-band:rgba(26,25,38,.06); --today-line:#1a1926;
+    --focus:#0f7f95;
+  }
+}
+:root[data-theme="light"]{
+  color-scheme: light;
+  --page:#f3f0e8; --card:#fffdf9; --card2:#f7f4ec; --line:#e1dbce; --grid:#ebe6da;
+  --wash:rgba(26,25,38,.05); --wash2:rgba(26,25,38,.09); --track:#e6e1d6; --shadow:0 1px 2px rgba(26,25,38,.05);
+  --ink:#1a1926; --ink2:#4e4c60; --muted:#6b6a7e; --faint:#a09ead;
+  --st-live-ink:#086b80; --st-live-tint:#dcf2f6; --st-live-line:#9ed3df;
+  --st-work-bg:#0f7f95; --st-work-ink:#fffdf9;
+  --st-action-bg:#1a1926; --st-action-ink:#fffdf9;
+  --st-quiet-ink:#6b6a7e; --st-quiet-line:#c9c4b8;
+  --attn-wash:#fbf1dc; --attn-line:#ecd9b0; --attn-ink:#1a1926; --attn-glyph:#7a4a12;
+  --quiet-band:rgba(26,25,38,.06); --today-line:#1a1926;
+  --focus:#0f7f95;
+}
+
+/* ---------------------------------------------------------------------------
+   SCOPE colour: from D.scopes[].colour, set per element as --sc. Never a token
+   here, never a second shade. Derived uses, all from the one value:
+   -------------------------------------------------------------------------- */
+.sc-dot   { background:var(--sc); box-shadow:0 0 0 2px var(--mark-ring); }  /* surface ring, no glow */
+.sc-stripe{ border-left:4px solid var(--sc); }                                 /* card / row identity */
+.sc-fill  { background:var(--sc); }                                            /* bars, ring segments */
+.sc-lane  { background:color-mix(in srgb, var(--sc) 7%, transparent); }        /* timeline lane wash */
+.sc-hollow{ background:var(--unk-fill); box-shadow:inset 0 0 0 var(--unk-stroke-w) var(--sc); } /* unknown, small */
+.sc-hatch { background:
+  repeating-linear-gradient(45deg, var(--sc) 0 1.5px, transparent 1.5px var(--hatch-pitch)),
+  color-mix(in srgb, var(--sc) 22%, transparent); }                           /* unknown, large */
+/* Rule: a scope colour is never shown without the scope's name within the same row or card,
+   because the contract's own six fail the colour-blind check (Starfront purple vs 107PHQ blue
+   ΔE 1.7 under deuteranopia). The legend strip is where the pairing is learnt. */
+
+/* ---------------------------------------------------------------------------
+   STATUS pills — glyph + word, always. Colour is tone of voice, not the signal.
+   -------------------------------------------------------------------------- */
+.st{display:inline-flex;align-items:center;gap:6px;border-radius:999px;padding:2px 9px 2px 6px;
+    font-size:12px;font-weight:650;line-height:1.3;white-space:nowrap;border:1px solid transparent}
+.st svg{width:14px;height:14px;flex:none}
+.st-live  {background:var(--st-live-tint); color:var(--st-live-ink); border-color:var(--st-live-line)}
+.st-work  {background:var(--st-work-bg);   color:var(--st-work-ink)}
+.st-action{background:var(--st-action-bg); color:var(--st-action-ink)}
+.st-done  {background:transparent; color:var(--st-quiet-ink); border-color:var(--st-quiet-line)}
+.st-sample{background:transparent; color:var(--st-quiet-ink); border-color:var(--st-quiet-line); border-style:dashed}
+
+/* ---------------------------------------------------------------------------
+   ATTENTION rows and inline notes
+   -------------------------------------------------------------------------- */
+.attn{background:var(--attn-wash); border:1px solid var(--attn-line); color:var(--attn-ink); border-radius:10px}
+.attn .glyph{color:var(--attn-glyph)}
+.attn .act{border:1.5px solid var(--attn-ink); color:var(--attn-ink); border-radius:999px; font-weight:650}
+.note-warn{color:var(--ink)}           /* an inline "no flats linked" line: ink + ⚠, not amber */
+.note-ok  {color:var(--muted)}         /* "fine, nothing to do": muted + ✓, not green */
+
+/* ---------------------------------------------------------------------------
+   What is deliberately NOT here
+   - no glow (box-shadow 0 0 Npx currentColor, drop-shadow, feGaussianBlur halos, text-shadow)
+   - no gradient text
+   - no yellow tab underline, no amber warning text, no green "ok" text
+   - no second palette for status; no per-status hue beyond teal
+   -------------------------------------------------------------------------- */

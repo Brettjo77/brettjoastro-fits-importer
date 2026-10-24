@@ -20,7 +20,7 @@ Smart telescopes fill up fast, and hand-copying folders leaves you guessing. Mos
 
 **For both cameras**
 
-- Notices a camera the moment it's plugged in (macOS: a LaunchAgent watching `/Volumes`; Windows: a small watcher started at logon that recognises a camera drive by what's on it), scans read-only, notifies you, and opens the control panel at `http://127.0.0.1:8765`
+- Notices a camera the moment it's plugged in (macOS: a LaunchAgent watching `/Volumes`; Windows: a small watcher started at logon that recognises a camera drive by what's on it), scans read-only, notifies you, and opens the control panel at `http://127.0.0.1:8765`. The panel is always running (1.7.4): the watcher starts it at login and brings it back if it stops, so the Observatory is there camera or not
 - Verified copies: stream-hash from camera → write to `.partial` → fsync → re-read from disk → re-hash → rename. Interrupted copies leave a `.partial`, never a fake backup
 - One JSON ledger for every frame ever imported (SHA-256, exposure, night, scope, day number, device) — entries are never deleted, so history survives archiving
 - Day-folder numbering per target with night-continuation handling, shared display-name tables (catalogue → common names) plus your own custom names
@@ -57,7 +57,9 @@ Smart telescopes fill up fast, and hand-copying folders leaves you guessing. Mos
 - Full MyWorks semantics: `_sub` light frames into Day folders (one Day per observing night), one `Stacked_N` kept per stacking *session* — a later, higher stack of the same exposure and filter continues an earlier one; a filter change or a restarted stack is its own keeper — never pruned, `_mosaic_pt` panels into `panels/`, `(mosaic)` display suffixes
 - Simultaneous **Milky Way captures auto-pair** to the DSO session shot at the same moment, renamed and filed under the DSO's display name
 - S50-family (S50 / S50 Pro) Lunar / Solar / Planetary / Scenery photo and video import
-- **Astro Desk, the Archive tab** (1.6.0): what is still to process on the archive (captured, stacked or in processing, from the Observatory's dataset), biggest first. Click a target for its nights, masters, processed files and finished pictures, with **Open folder**, **Open** (a master opens in PixInsight, a picture in its usual app), **Start Siril here** and **Copy path**. Read-only: it never writes to the archive, and it only opens folders and image files inside it. `/archive?target=…` opens it on one target (AstroLog links there)
+- **To process, from the facts** (1.7.0): `projects.json` says per object and scope what is still capturing, to process, in progress or done, worked out from the ledgers, the archive inventory and the finished pictures. The **To process** tab opens on it, with Open in Explorer / Open in Finder; the PC's complete list is published on the archive for the Mac
+- **The Observatory tab** (1.7.0): the Astro Archive Observatory page, drawn from the same pass as the To process list: what each scope captured last (click a scope for a timeline of its projects), what to process next, every target, a coverage matrix, the pipeline board, the nights heatmap, the sky map and footprints, the scopes and data health. `--observatory [FILE]` saves it as one standalone page
+- **Astro Desk, the folder list** (1.6.0): every folder on the archive under the To process list, with the live state where known (else the August 2026 scan's), biggest first. Click a target for its nights, masters, processed files and finished pictures, with **Open folder**, **Open** (a master opens in PixInsight, a picture in its usual app), **Start Siril here** and **Copy path**. Read-only: it never writes to the archive, and it only opens folders and image files inside it. `/archive?target=…` opens it on one target (AstroLog links there)
 - **Space on this Mac** (1.5.5): the dashboard shows what on this computer is safe to delete. That means frames whose archive copy the PC's sweep has re-hashed and matched, which are grouped by target folder with a coloured bar and a verdict: the whole folder, which Day folders, or keep. Anything not yet checked, not in the archive, edited, or not filed by the importer (your processing) is kept, and a folder holding any of it is never called safe. `--space` prints it as text. The importer never deletes from your Mac: you delete green folders yourself in Finder
 - SAFE-aware cleanup: after an import — or any time, from **clear…** on a row the panel shows as backed up — it offers to clear source folders **only** when every single file in them is ledger-verified *for that camera* and unchanged since import — *every* file (the one exception: a JPEG preview whose FIT twin is proven) — with No as the default. After your Yes it checks the camera and every file **again** and deletes only what passed; clearing flags only that camera's own ledger entries. Each Seestar's ledger rows are its own, so two units shooting the same target in the same second never share one
 
@@ -149,27 +151,39 @@ overwrites an existing config.
 Nothing here is installed or run until you configure it (`ASTRO_ARCHIVE_URL`
 in `config.json`); the step-by-step is in [PC-SYNC.md](PC-SYNC.md).
 
-In the author's setup the Mac takes frames off the cameras and holds the ledger,
-and the archive of record lives on a Windows PC (`E:\Astro Image Data`), shared
-over SMB and mounted on the Mac at `/Volumes/AstroImageData`. Three things keep
-the two in step, none of which you run by hand:
+In the author's setup both computers take frames off the cameras, each with
+its own ledger, and the archive of record lives on the Windows PC
+(`E:\Astro Image Data`), shared over SMB and mounted on the Mac at
+`/Volumes/AstroImageData`; the PC files into it from its own C: drive. Each
+computer leaves its record on the archive and reads the other's, so a frame
+one computer already imported is not offered again on the other (1.7.1).
+Three things keep the two in step, none of which you run by hand:
 
-1. **After every import** the engine ships what just arrived to the archive if
-   the share is mounted (`--no-ship` to skip). `--ship` on its own does the same
-   for anything waiting; `--ship --dry-run` shows the plan.
+1. **After every import** the engine ships what just arrived to the archive
+   (`--no-ship` to skip): a Terminal import connects the share first, a panel
+   import (1.7.0) ships when the share is already connected. `--ship` on its
+   own does the same for anything waiting; `--ship --dry-run` shows the plan.
 2. **Twice a day** (09:00 and 21:00) the `com.brettjohnson.astro-ship` LaunchAgent
    runs `--ship`. With `ASTRO_ARCHIVE_URL` set in `config.json` the engine asks
    Finder to mount the share on demand, using the password saved in the keychain,
    so no permanent connection is needed.
-3. **On the PC**, `pc\sweep.ps1` (a scheduled task from `pc\install_sweep.ps1`)
-   re-hashes every shipped file in a fresh process and writes
-   `_verify\verified.jsonl`. The Mac reads it on the next ship and stamps
-   `archiveVerifiedAt`. Only that stamp means a frame is safe in two places.
+3. **On the PC** (1.7.0), the same engine's sweep (`--sweep`, a scheduled task
+   the Windows installer sets up) re-reads every shipped file from the PC's own
+   disk, bypassing Windows' cache, and writes `_verify\pc\verified.jsonl`. The
+   Mac reads it on the next ship and stamps `archiveVerifiedAt`. Only that
+   stamp means a frame is safe in two places.
+
+From 1.7.0 the ship never deletes, renames or writes over anything on the
+archive, so the share's user can be denied Delete there (PC-SYNC.md, Part C):
+each frame is created under its final name only if that name is free, and is
+"shipped" only after its read-back. A copy cut off half-way is set aside by
+the PC into `_Quarantine\ship-incomplete` and sent again.
 
 The archive's naming and Day numbering always win: existing targets are
 reused, a night that already has a Day folder is merged into it, a new night
 takes the next number. Nothing is ever deleted or overwritten on either side;
-a differing file on the archive is reported and left alone. Set
+a differing file on the archive is reported and left alone (the PC's sweep
+moving an unfinished copy aside is the one move a tool makes there). Set
 `ASTRO_ARCHIVE_MOUNT` in `config.json` if the share mounts somewhere else.
 
 ## Safety model
@@ -196,8 +210,16 @@ The panel covers day-to-day use; everything is also scriptable:
 | `--verify [--deep]` | Re-check imported files on disk (size, or full re-hash with `--deep`) |
 | `--pick` | Native picker dialog for choosing targets (Terminal fallback flow) |
 | `--dashboard` | Regenerate and open the HTML status dashboard |
-| `--ship [--dry-run]` | File verified frames into the PC archive over the mounted share; quiet when it is not mounted |
+| `--ship [--dry-run]` | File verified frames (calibration frames too, from 1.7.0) into the PC archive over the mounted share; when it can't be reached it says why |
+| `--request sweep\|inventory` | Mac: ask the archive PC for a sweep or an inventory (1.7.0) |
+| `--check-share-rights` | Mac: try what this computer may and may not do on the share, in the PC's test folder `_rights-check` (1.7.0) |
+| `--sweep [--move-old-partials]` | Archive PC: check every shipped frame from its own disk; set aside copies a ship never finished (1.7.0) |
+| `--inventory [--root DIR]` / `--hash [--root DIR] [--max-minutes N] [--rolling]` | List, or hash, every file under a folder: the archive on the PC (into `_verify\pc`), or your own frame folders (into the state folder) (1.7.0) |
+| `--pc-tick` / `--pc-nightly` | Archive PC's scheduled work: the heartbeat and the Mac's requests every 5 minutes; sweep, inventory and hash at logon and 03:30 (1.7.0) |
 | `--space` | Read-only: what on this computer is safe to delete (archive copy re-checked by the PC), what is waiting, and what to keep, with the paths of safe folders |
+| `--observatory [FILE] [--with-ledger FILE] [--dry-run]` | Writes the Observatory as one standalone page (default `observatory.html` in the state folder) and nothing else; never under the archive or over another file. The panel's Observatory tab reads `observatory.json`, which `--projects` writes (1.7.0) |
+| `--projects [--with-ledger FILE] [--dry-run]` | Changes nothing in your frames or the archive; writes two files in the state folder from one pass, `projects.json` (per project and scope: still capturing, to process, in progress, done) and `observatory.json` (the Observatory tab's data) (1.7.0) |
+| `--targets-draft` | Writes `targets-draft.json` in the state folder: this ledger's target names against `contract/targets.json`, with the unknown ones listed to add (1.7.0) |
 | `--tidy-stacks [--dry-run]` | List archived Seestar stacks that a later stack of the same session continues, and offer removal (typed DELETE) |
 | `--refresh-metadata` | Back-fill ledger metadata after parser improvements (safe, repeatable) |
 | `--set-filter "<target>" "<filter>"` | Record the true filter for a target's ASIAir frames (`--night` to limit; `none` clears) |
@@ -211,11 +233,11 @@ The panel covers day-to-day use; everything is also scriptable:
 
 ## Testing
 
-538 end-to-end checks run the real engine and the real panel against simulated cameras (hand-built minimal FITS files, every device layout, crash/rename/mosaic/Milky-Way/cleanup/consent/interruption/multi-Seestar scenarios — including that the destination preview must equal the folders the import then actually creates, that a folder holding any unproven file is never offered as SAFE, and that the panel refuses foreign-origin requests):
+825 end-to-end checks run the real engine and the real panel against simulated cameras (hand-built minimal FITS files, every device layout, crash/rename/mosaic/Milky-Way/cleanup/consent/interruption/multi-Seestar scenarios — including that the destination preview must equal the folders the import then actually creates, that a folder holding any unproven file is never offered as SAFE, and that the panel refuses foreign-origin requests):
 
 ```bash
-python3 test_v2.py     # 401 engine checks (chain W1 simulates the Windows drive layer)
-python3 test_app.py    # 137 panel checks (boots the real HTTP server)
+python3 test_v2.py     # 556 engine checks (chain W1 simulates the Windows drive layer)
+python3 test_app.py    # 160 panel checks (boots the real HTTP server)
 # on Windows:  py -3 -X utf8 selftest.py   then the two suites above with  py -3 -X utf8
 ```
 
@@ -233,12 +255,14 @@ CLAUDE.md                            working rules for Claude Code, which builds
 Install … .command                   double-click installer (the no-terminal route)
 astro-import.py                      the engine (all cameras, ledger, report, dashboard)
 astro-app.py                         the control panel (localhost:8765)
+contract/                            targets.json and scopes.json: the one list of object and scope names (1.7.0)
+astro-observatory.html               the Observatory tab's page, filled from observatory.json (1.7.0)
 astro-watch.sh                       drive watcher (one for both cameras)
 BrettjoAstro FITS Importer.app/      app wrapper — the panel's grantable macOS identity
 Restart FITS Importer.command        Desktop one-click restart (Terminal context)
 com.brettjohnson.astro-import.plist  LaunchAgent template ($HOME substituted on install)
 com.brettjohnson.astro-ship.plist    optional twice-daily ship agent (only with an archive configured)
-pc/                                  the PC side of PC-SYNC.md (PowerShell sweep)
+pc/                                  set-archive-rights.ps1 for the archive PC (the sweep itself is Python since 1.7.0)
 Install on Windows.cmd               Windows: double-click to install or update
 install-windows.ps1                  Windows installer (no admin rights needed)
 astro-watch.py                       Windows camera watcher (started at logon)

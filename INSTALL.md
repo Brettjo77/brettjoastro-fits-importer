@@ -24,9 +24,10 @@ and `astropy`.
    release zip) and double-click it in Downloads to unpack it.
 5. In Terminal, paste (use the folder name you actually got):
 
-       cd ~/Downloads/importer-1.5.4 && bash install-scripts.sh
+       cd ~/Downloads/importer-1.7.2 && bash install-scripts.sh
 
-   It copies the engine, panel and camera watcher into `~/bin`, installs the
+   It copies the engine, panel, camera watcher, the Observatory page and the
+   `contract` folder into `~/bin`, installs the
    app wrapper and a **Restart FITS Importer** button on your Desktop, and
    loads the watcher that notices when a camera is plugged in. Your ledger and
    any `config.json` are never touched.
@@ -53,10 +54,15 @@ this tool.
 1. Quit the panel if it is running (or just carry on — the installer stops it).
 2. Download and unpack the new zip in Downloads, then in Terminal:
 
-       cd ~/Downloads/importer-1.5.4 && bash install-scripts.sh
+       cd ~/Downloads/importer-1.7.2 && bash install-scripts.sh
 
 3. Start the panel again: double-click **Restart FITS Importer** on your
    Desktop, or plug a camera in.
+4. From 1.7.0 the installer also updates `~/bin/contract/targets.json` and
+   `scopes.json` in place while they are the ones we shipped. A copy you
+   have edited is kept, and the newer one lands beside it as `targets.json.new`
+   for you to merge. The new **Observatory** tab needs one ship after the
+   update (it reads the record the ship leaves on the archive).
 
 Nothing in your ledger, config, or backed-up frames changes during an update.
 
@@ -72,34 +78,64 @@ To check an install any time: `/usr/local/bin/python3 ~/bin/selftest.py` (every 
 
 ## Windows 11
 
-No administrator rights are needed.
+No administrator rights are needed, and the installer must **not** be run from
+an Administrator window ("Run as administrator"): tasks made that way can't be
+replaced later from a normal window. From 1.7.0 the installer refuses an
+Administrator window and prints what to do.
 
 1. **Python.** If you don't already have Python 3 from
    [python.org](https://www.python.org/downloads/windows/), install it. On
    the first screen, tick **Add python.exe to PATH**.
 2. **Unzip.** Download the importer zip, right-click it → **Extract All…**.
+   Windows makes a folder with the zip's name and puts the importer's own
+   folder inside it, so you may need to open two folders to reach
+   `Install on Windows.cmd`. Either is fine.
 3. **Install.** Open the extracted folder and double-click
    **Install on Windows.cmd**.
    - If Windows says "Windows protected your PC", click **More info** →
      **Run anyway**. The scripts aren't code-signed.
-   - The installer adds `astropy` if it's missing.
-   - It copies the importer to `%LOCALAPPDATA%\BrettjoAstro\bin`.
+   - The installer adds `astropy` if it's missing. If you have just
+     installed a newer Python, run it again, or add astropy yourself in
+     Terminal (PowerShell):
+
+         py -3 -m pip install --user astropy
+   - It copies the importer to `%LOCALAPPDATA%\BrettjoAstro\bin`, with the
+     Observatory page and the `contract` folder.
    - It starts the camera watcher now and at every logon.
    - It puts **Restart FITS Importer** on your Desktop.
    - When `E:\Astro Image Data` exists, it schedules the ship to it at 09:30
      and 21:30, half an hour after the Mac's.
-   - When the PC already runs the archive sweep, it points the sweep at the
-     new version, which reads the Mac's and the PC's ship logs.
+   - With that archive, it also sets up the PC's own jobs (1.7.0), in Python,
+     as you: **Astro archive sweep** at logon and 03:30 (checks every shipped
+     frame, lists the archive, hashes new files) and **Astro sync requests**
+     every 5 minutes (answers what the Mac asks for). An older sweep task
+     under that name is replaced. One set up from an Administrator window
+     can't be: the installer then prints the three `Unregister-ScheduledTask`
+     lines to run once as administrator (see PC-SYNC.md), after which you
+     close that window and run the installer again from a normal one.
+   - The contract files (`contract\targets.json`, `scopes.json`) are updated
+     in place when yours are the ones we shipped. A file you have edited is
+     kept, and the newer shipped copy lands beside it as `targets.json.new`
+     for you to merge.
 4. **Plug in the Seestar or ASIAir.** A notification appears and the panel
    opens (`http://127.0.0.1:8765`). Tick what you want and press **Import**.
+   The panel is always running from 1.7.4, so that address works any time,
+   camera or not: the Observatory lives there.
    The first import starts this PC's own ledger.
+   - Frames the Mac already imported and verified show as "backed up by the
+     Mac", unticked (1.7.1): the PC reads the Mac's record on the archive.
    - Frames go to your C: workbench, `%USERPROFILE%\Documents\Astro\…`.
-   - Verified frames are then filed into `E:\Astro Image Data`, the same as
-     the Mac's ship does.
+   - Verified frames are then filed into `E:\Astro Image Data` at once, the
+     same as the Mac's ship does, and the panel says so.
+   - If the self-test's "drives checked" line lists a data drive (say D:),
+     add `"ASTRO_DRIVE_EXCLUDE": "D:"` to `%LOCALAPPDATA%\Astro Import\config.json`.
 5. **Check the install** any time. Open **Terminal** (right-click Start →
-   Terminal; it opens PowerShell) and run:
+   Terminal; it opens PowerShell) and paste this line as it is:
 
        py -3 -X utf8 "$env:LOCALAPPDATA\BrettjoAstro\bin\selftest.py"
+
+   Lines in these docs that start with `/usr/local/bin/python3` are the Mac's;
+   PowerShell doesn't know them. The PC's lines start with `py -3`.
 
    (In the old Command Prompt, write `%LOCALAPPDATA%` instead of
    `$env:LOCALAPPDATA`.)

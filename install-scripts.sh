@@ -122,6 +122,30 @@ install_file "$SCRIPT_DIR/astro-import.py"  "$BIN_DIR/astro-import.py"  true
 install_file "$SCRIPT_DIR/astro-app.py"     "$BIN_DIR/astro-app.py"     true
 install_file "$SCRIPT_DIR/astro-watch.sh"   "$BIN_DIR/astro-watch.sh"   true
 install_file "$SCRIPT_DIR/selftest.py"      "$BIN_DIR/selftest.py"      true
+install_file "$SCRIPT_DIR/astro-observatory.html" "$BIN_DIR/astro-observatory.html" false
+# The contract (1.7): canonical targets and scopes, read by --projects. Brett may
+# edit the installed copy, so an edited file is never replaced: the newer shipped
+# copy lands beside it as <name>.new for him to merge. An installed copy that is
+# still one we shipped (its hash is in contract/shipped.sha256) has no edits to
+# lose, so it is simply updated.
+mkdir -p "$BIN_DIR/contract"
+# >>> contract update (test_v2 runs this block on its own)
+for f in targets.json scopes.json; do
+    src="$SCRIPT_DIR/contract/$f"; dst="$BIN_DIR/contract/$f"
+    if [ ! -f "$src" ]; then warn "Source not found: contract/$f — skipping"; continue; fi
+    if [ ! -f "$dst" ]; then install_file "$src" "$dst" false; continue; fi
+    if cmp -s "$src" "$dst"; then continue; fi
+    have=$(shasum -a 256 "$dst" | cut -c1-64)
+    if [ -f "$SCRIPT_DIR/contract/shipped.sha256" ] && grep -qi "^$have" "$SCRIPT_DIR/contract/shipped.sha256"; then
+        cp "$src" "$dst"; rm -f "$dst.new"
+        success "contract/$f updated (your copy was an unedited shipped one)"
+    else
+        cp "$src" "$dst.new"
+        warn "contract/$f has your edits, so it is kept; the newer shipped copy is beside it as $f.new"
+    fi
+done
+# <<< contract update
+[ -f "$SCRIPT_DIR/contract/shipped.sha256" ] && cp "$SCRIPT_DIR/contract/shipped.sha256" "$BIN_DIR/contract/" || true
 # Compatibility copy: `asiair-import.py` IS the unified engine now.
 if [ -f "$BIN_DIR/astro-import.py" ]; then
     cp "$BIN_DIR/astro-import.py" "$BIN_DIR/asiair-import.py"
@@ -181,6 +205,9 @@ fi
 if [ -z "$APP_OWNS" ] && [ -f "$SCRIPT_DIR/Restart FITS Importer.command" ]; then
     cp "$SCRIPT_DIR/Restart FITS Importer.command" "$HOME/Desktop/"
     chmod +x "$HOME/Desktop/Restart FITS Importer.command"
+    # a .command unzipped from a download carries the quarantine flag, and
+    # Gatekeeper then refuses the double-click (1.7.0)
+    xattr -d com.apple.quarantine "$HOME/Desktop/Restart FITS Importer.command" 2>/dev/null || true
     success "Installed Restart FITS Importer.command → Desktop"
 fi
 echo ""
@@ -188,7 +215,7 @@ echo ""
 # Stop any running panel so the next launch picks up the new build: only the
 # web version's own (~/bin), never the app's (1.5.3)
 if [ -z "$APP_OWNS" ] && pkill -f "[Pp]ython[^ ]* .*$HOME/bin/(asiair|astro)-app\.py" 2>/dev/null; then
-    success "Stopped the running panel (the watcher restarts it on next plug-in)"
+    success "Stopped the running panel (the watcher starts the new one in a moment)"
 fi
 
 info "Retiring old LaunchAgents (replaced by com.brettjohnson.astro-import)..."
@@ -228,11 +255,13 @@ ship_plist="$LAUNCH_AGENTS_DIR/com.brettjohnson.astro-ship.plist"
 # The ship agent is only for people who keep an archive on another computer
 # (see PC-SYNC.md). Installed when an archive URL is configured, or when it
 # was already installed (an upgrade) — never by default (1.4.3, review S2).
-ARCHIVE_CONFIGURED=$(/usr/bin/python3 - <<'PY' 2>/dev/null
+# The same Python the owner check used (python.org's when it's there), and never
+# a reason for `set -e` to stop the installer (1.7.0)
+ARCHIVE_CONFIGURED=$("$PYCHECK" - <<'PY' 2>/dev/null || true
 import json, os
 p = os.path.expanduser("~/Library/Application Support/Astro Import/config.json")
 try:
-    print("yes" if (json.load(open(p)) or {}).get("ASTRO_ARCHIVE_URL") else "")
+    print("yes" if (json.load(open(p, encoding="utf-8-sig")) or {}).get("ASTRO_ARCHIVE_URL") else "")
 except Exception:
     print("")
 PY
@@ -241,7 +270,11 @@ if [ -f "$ship_plist" ]; then
     launchctl unload "$ship_plist" 2>/dev/null || true
     ARCHIVE_CONFIGURED=yes
 fi
-if [ -z "$ARCHIVE_CONFIGURED" ]; then
+if [ -n "$APP_OWNS" ]; then
+    # the app runs the ship itself while it is in charge (1.5.3): the web
+    # version's agent stays unloaded, like its watcher and panel
+    info "The FITs Importer App is in charge — its own ship runs; the web ship agent stays off."
+elif [ -z "$ARCHIVE_CONFIGURED" ]; then
     info "No PC archive configured — skipping the ship agent (optional; see PC-SYNC.md)."
 elif [ -f "$SCRIPT_DIR/com.brettjohnson.astro-ship.plist" ]; then
     info "Installing the twice-daily ship agent (files verified frames to the PC archive)..."
@@ -285,8 +318,9 @@ success "All done! BrettjoAstro FITS Importer installed."
 echo ""
 if [ -z "$APP_OWNS" ]; then
     log "First run:"
-    log "  1. Plug in a camera (ASIAir and/or Seestar) — the panel opens by itself"
-    log "     (or open http://127.0.0.1:8765). Scanning only reads the camera."
+    log "  1. Plug in a camera (ASIAir and/or Seestar) — the panel opens by itself."
+    log "     It is always running: http://127.0.0.1:8765 any time, camera or not."
+    log "     Scanning only reads the camera."
     log "  2. Tick what you want and press Import. The first import starts the"
     log "     ledger and backs everything up, verified byte for byte."
     log "  Already have copies of everything on this Mac? Instead of step 2, run"

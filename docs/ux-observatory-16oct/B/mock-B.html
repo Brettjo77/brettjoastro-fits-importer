@@ -1,0 +1,688 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Observatory: the season</title>
+<style>
+:root{
+  --bg:#0b1020; --bg2:#121a30; --card:#141c31; --card2:#1a2440; --line:#2a3553; --wash:#1b2544;
+  --ink:#eef2fb; --ink2:#b9c3dc; --muted:#8692b3; --today:#fff3c4;
+  --quiet:rgba(120,110,255,.13);
+  --st-cap:#36d6ea; --st-ready:#ff7aa8; --st-prog:#ffa63d; --st-done:#8be36a;
+  --sans:system-ui,-apple-system,"Segoe UI",Roboto,Helvetica,Arial,sans-serif;
+  --mono:ui-monospace,SFMono-Regular,Menlo,Consolas,monospace;
+}
+*{box-sizing:border-box}
+html,body{margin:0;background:var(--bg);color:var(--ink);font:15px/1.45 var(--sans)}
+body{padding:0 0 48px;
+  background:
+    radial-gradient(1.5px 1.5px at 12% 8%, rgba(255,255,255,.55) 50%, transparent 51%),
+    radial-gradient(1px 1px at 33% 4%, rgba(255,255,255,.5) 50%, transparent 51%),
+    radial-gradient(1.5px 1.5px at 58% 11%, rgba(255,255,255,.45) 50%, transparent 51%),
+    radial-gradient(1px 1px at 74% 3%, rgba(255,255,255,.6) 50%, transparent 51%),
+    radial-gradient(1px 1px at 88% 9%, rgba(255,255,255,.4) 50%, transparent 51%),
+    radial-gradient(2px 2px at 44% 14%, rgba(255,255,255,.35) 50%, transparent 51%),
+    radial-gradient(1px 1px at 20% 15%, rgba(255,255,255,.4) 50%, transparent 51%),
+    radial-gradient(1px 1px at 95% 16%, rgba(255,255,255,.45) 50%, transparent 51%),
+    linear-gradient(180deg,#1a1440 0,#141b3a 220px,#0b1020 560px);
+  background-repeat:no-repeat;background-size:100% 600px,100% 600px,100% 600px,100% 600px,100% 600px,100% 600px,100% 600px,100% 600px,100% 600px}
+.pad{padding:0 16px}
+.wrap{max-width:1220px;margin:0 auto}
+a{color:inherit}
+h1{font-size:28px;margin:0;letter-spacing:-.01em}
+h2{font-size:18px;margin:0 0 2px;font-weight:650}
+.sub{color:var(--ink2);font-size:13px}
+.muted{color:var(--muted)}
+.mono{font-family:var(--mono);font-size:12px}
+header{padding:20px 0 8px}
+.topline{display:flex;flex-wrap:wrap;gap:8px 20px;align-items:flex-start;justify-content:space-between}
+.eyebrow{font-family:var(--mono);font-size:11px;letter-spacing:.08em;text-transform:uppercase;color:var(--muted)}
+.fresh{font-size:12.5px;color:var(--ink2);text-align:right;line-height:1.5}
+.fresh b{color:var(--ink)}
+.fresh .cam{display:inline-block;margin-top:3px;border:1px solid var(--line);border-radius:999px;padding:2px 10px;font-size:12px;color:var(--muted)}
+nav.tabs{display:flex;gap:2px;flex-wrap:wrap;margin-top:14px;border-bottom:1px solid var(--line)}
+nav.tabs a{text-decoration:none;padding:8px 12px;color:var(--ink2);border-bottom:2px solid transparent;font-size:14px}
+nav.tabs a[aria-current]{color:var(--ink);border-bottom-color:#8f7cff}
+nav.tabs .n{font-family:var(--mono);font-size:11px;background:var(--wash);border-radius:10px;padding:1px 6px;margin-left:4px;color:var(--ink2)}
+/* hero: last night */
+.hero{display:grid;grid-template-columns:1.4fr 1fr;gap:16px;margin-top:16px}
+.lastnight{background:linear-gradient(135deg,#1d1a52 0,#152046 60%,#141c31 100%);border:1px solid #3a3f7a;border-radius:14px;padding:18px 20px;position:relative;overflow:hidden}
+.lastnight .k{font-family:var(--mono);font-size:11px;letter-spacing:.1em;text-transform:uppercase;color:#b4a9ff}
+.lastnight .big{font-size:26px;font-weight:700;letter-spacing:-.01em;line-height:1.2;margin:6px 0 8px}
+.lastnight .big .on{font-weight:500;color:var(--ink2)}
+.lastnight .list{display:flex;flex-wrap:wrap;gap:6px 10px}
+.lastnight .s{display:inline-flex;align-items:center;gap:7px;background:rgba(255,255,255,.07);border-radius:999px;padding:5px 12px 5px 8px;font-size:13.5px}
+.lastnight .s b{font-weight:600}
+.lastnight .s .h{color:var(--ink2)}
+.totals{background:var(--card);border:1px solid var(--line);border-radius:14px;padding:16px 18px;display:grid;grid-template-columns:1fr 1fr;gap:10px 14px;align-content:start}
+.totals .fig{display:flex;flex-direction:column}
+.totals .v{font-size:24px;font-weight:700;letter-spacing:-.01em;line-height:1.1}
+.totals .fig.hero .v{font-size:36px;background:linear-gradient(90deg,#ffd166,#ff7aa8 60%,#b28cff);-webkit-background-clip:text;background-clip:text;color:transparent}
+.totals .l{font-size:12px;color:var(--ink2);margin-top:2px}
+.totals .check{grid-column:1/-1;font-size:13px;color:var(--ink2);text-decoration:none;border-top:1px solid var(--line);padding-top:10px}
+.totals .check b{color:var(--st-prog)}
+.card{background:var(--card);border:1px solid var(--line);border-radius:14px;padding:16px 18px;margin-top:16px}
+.cardhead{display:flex;flex-wrap:wrap;gap:8px 16px;align-items:flex-start;justify-content:space-between;margin-bottom:10px}
+.seg{display:inline-flex;gap:2px;background:var(--wash);border-radius:8px;padding:2px;flex-wrap:wrap}
+.seg button{background:transparent;border:0;color:var(--ink2);font:13px var(--sans);padding:5px 10px;border-radius:6px;cursor:pointer;white-space:nowrap}
+.seg button[aria-pressed="true"]{background:#8f7cff;color:#0b1020;font-weight:600}
+.scroller{overflow-x:auto;overflow-y:hidden;-webkit-overflow-scrolling:touch;scrollbar-width:thin;flex:1 1 auto;min-width:0}
+.tl{display:flex;align-items:flex-start}
+.tl-labels{flex:none;width:166px}
+.tl-row{display:flex;flex-direction:column;justify-content:center;padding-left:10px;border-radius:8px 0 0 8px;position:relative}
+.tl-row .nm{font-weight:650;font-size:13.5px;display:flex;align-items:center;line-height:1.2}
+.tl-row .sb{font-size:11.5px;color:var(--ink2);line-height:1.2;margin-top:2px}
+svg text{font-family:var(--sans)}
+svg .axis{font-family:var(--mono);font-size:11px;fill:var(--muted)}
+svg .lab{font-size:13.5px;fill:var(--ink);font-weight:650}
+svg .lab2{font-size:11.5px;fill:var(--ink2)}
+svg .grid{stroke:var(--line);stroke-width:1}
+.mark{cursor:pointer}
+.mark:hover,.mark:focus{filter:brightness(1.3);outline:none}
+.dot{display:inline-block;width:10px;height:10px;border-radius:50%;vertical-align:-1px;margin-right:5px;flex:none;box-shadow:0 0 6px currentColor}
+.chip{display:inline-flex;align-items:center;gap:5px;font-size:12.5px;color:var(--ink2);white-space:nowrap}
+.chip b{color:var(--ink);font-weight:600}
+.legend{display:flex;flex-wrap:wrap;gap:6px 18px;margin-top:10px;font-size:12.5px;color:var(--ink2)}
+.hatchkey{display:inline-block;width:14px;height:10px;vertical-align:-1px;margin-right:5px;border-radius:2px;background:repeating-linear-gradient(135deg,var(--ink2) 0 2px,transparent 2px 5px)}
+/* status pills */
+.pill{display:inline-flex;align-items:center;gap:6px;font-size:12px;font-weight:600;border-radius:999px;padding:3px 10px 3px 8px;white-space:nowrap;color:var(--c);background:color-mix(in srgb,var(--c) 16%,transparent);border:1px solid color-mix(in srgb,var(--c) 45%,transparent)}
+.pill svg{width:12px;height:12px;flex:none}
+.pill .when{color:var(--ink2);font-weight:500}
+/* scope rows */
+.scoperows{display:grid;grid-template-columns:170px 1fr 150px auto;gap:0 14px;align-items:center}
+.scoperows>div{padding:8px 0;border-top:1px solid var(--line);min-width:0}
+.scoperows .h{border-top:0;padding-bottom:2px;font-size:11px;letter-spacing:.06em;text-transform:uppercase;color:var(--muted);font-family:var(--mono)}
+.scoperows .name{font-weight:650;display:flex;align-items:center;font-size:15px}
+.scoperows .latest{font-size:13.5px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
+.scoperows .latest .sub{display:block;white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
+.scoperows .tot{font-size:13px;color:var(--ink2);white-space:nowrap}
+.scoperows .tot b{color:var(--ink);font-size:15px}
+/* project cards */
+.grid{display:grid;grid-template-columns:repeat(3,1fr);gap:12px}
+.pc{background:var(--card2);border:1px solid var(--line);border-top:3px solid var(--c);border-radius:12px;padding:12px 14px;display:flex;flex-direction:column;gap:8px;min-width:0}
+.pc .t{font-weight:650;font-size:15.5px;line-height:1.25}
+.pc .t2{display:flex;justify-content:space-between;gap:8px;align-items:center;flex-wrap:wrap}
+.pc .t2 small{font-family:var(--mono);font-size:11px;color:var(--muted);font-weight:400}
+.hbar{display:flex;gap:2px;height:14px;border-radius:4px;overflow:hidden;background:var(--wash)}
+.hbar>span{display:block;height:100%;position:relative;min-width:3px}
+.hbar>span.unk{background:repeating-linear-gradient(135deg,var(--c) 0 2px,transparent 2px 5px)}
+.hbar>span i{position:absolute;left:6px;top:-1px;font:600 11px/14px var(--sans);font-style:normal;color:#10151c;white-space:nowrap}
+.chips{display:flex;flex-wrap:wrap;gap:4px 12px}
+.pc .meta{display:flex;justify-content:space-between;gap:8px;font-size:12.5px;color:var(--ink2);flex-wrap:wrap}
+.pc .meta b{color:var(--ink)}
+/* quiet list */
+.qrows{display:grid;grid-template-columns:minmax(200px,1.2fr) 160px minmax(200px,1fr) minmax(150px,1fr);gap:0 14px;align-items:center}
+.qrows>div{padding:9px 0;border-top:1px solid var(--line);min-width:0;font-size:13.5px}
+.qrows .h{border-top:0;padding-bottom:2px;font-size:11px;letter-spacing:.06em;text-transform:uppercase;color:var(--muted);font-family:var(--mono)}
+.qrows .nm{font-weight:650}
+.qrows .nm .chip{display:flex;margin-top:2px;font-weight:400}
+.qrows .num{color:var(--ink2);white-space:nowrap}
+.qrows .num b{color:var(--ink);font-size:15px}
+.qrows .flags{font-size:12.5px;color:var(--ink2)}
+.qrows .flags b{color:var(--st-prog)}
+.track{position:relative;height:28px}
+.track .axis{position:absolute;left:0;right:0;top:14px;height:1px;background:var(--line)}
+.track .today{position:absolute;right:0;top:8px;width:2px;height:13px;background:var(--today);border-radius:1px}
+.track .trail{position:absolute;top:11px;height:7px;border-radius:4px}
+.track .last{position:absolute;top:9px;width:11px;height:11px;border-radius:50%;margin-left:-5px;box-shadow:0 0 0 2px var(--card),0 0 10px var(--c)}
+.track .ql{position:absolute;left:0;top:-6px;font-size:11px;color:var(--ink2);white-space:nowrap}
+.samples{margin-top:10px;padding:10px 12px;border-radius:10px;background:var(--wash);font-size:13px;color:var(--ink2)}
+.samples b{color:var(--ink)}
+.warn{display:flex;gap:10px;align-items:flex-start;background:color-mix(in srgb,var(--st-prog) 12%,transparent);border:1px solid color-mix(in srgb,var(--st-prog) 45%,transparent);border-radius:10px;padding:10px 12px;font-size:13.5px;margin-top:10px}
+.warn b{display:block;color:var(--st-prog)}
+.more{display:inline-block;margin-top:10px;font-size:13px;color:var(--ink2);text-decoration:none;border:1px solid var(--line);border-radius:999px;padding:4px 12px}
+/* drill-down */
+.dd .head{display:flex;flex-wrap:wrap;gap:6px 24px;align-items:baseline}
+.dd .head h3{margin:0;font-size:26px;letter-spacing:-.01em}
+.dd .facts{display:flex;flex-wrap:wrap;gap:4px 22px;margin:6px 0 10px;font-size:13.5px;color:var(--ink2)}
+.dd .facts b{color:var(--ink);font-size:15px}
+.srows{display:grid;grid-template-columns:140px 200px 1fr 1.2fr;gap:0 14px;align-items:start}
+.srows .st .sub{margin-top:4px}
+.srows>div{padding:10px 0;border-top:1px solid var(--line);min-width:0;font-size:13.5px}
+.srows .h{border-top:0;padding-bottom:2px;font-size:11px;letter-spacing:.06em;text-transform:uppercase;color:var(--muted);font-family:var(--mono)}
+.srows .ev{color:var(--ink2);font-size:13px}
+.srows .act{font-weight:650}
+.srows .cal{margin-top:4px;font-size:12.5px;color:var(--ink2)}
+.sketchnote{font-family:var(--mono);font-size:11px;letter-spacing:.08em;text-transform:uppercase;color:#b4a9ff;margin-bottom:8px}
+#tip{position:fixed;z-index:9;pointer-events:none;background:#070b18;border:1px solid var(--line);border-radius:8px;padding:8px 10px;font-size:12.5px;color:var(--ink);box-shadow:0 6px 20px rgba(0,0,0,.6);display:none;max-width:280px}
+#tip .tt{font-weight:650;margin-bottom:3px}
+#tip .r{display:flex;gap:8px;justify-content:space-between;color:var(--ink2)}
+#tip .r b{color:var(--ink);font-weight:600}
+footer{margin-top:22px;font-family:var(--mono);font-size:11.5px;color:var(--muted);line-height:1.6}
+@media (max-width:760px){
+  h1{font-size:23px}
+  .fresh{text-align:left}
+  .hero{grid-template-columns:1fr;gap:12px}
+  .lastnight .big{font-size:21px}
+  .lastnight .s{width:100%;flex-wrap:wrap}
+  .totals .v{font-size:20px}.totals .fig.hero .v{font-size:30px}
+  .card{padding:14px 14px;border-radius:12px}
+  .grid{grid-template-columns:minmax(0,1fr)}
+  .chip{white-space:normal}
+  .dd .facts{gap:4px 14px}
+  .scoperows{grid-template-columns:150px minmax(0,1fr)}
+  .scoperows .h{display:none}
+  .scoperows .name{grid-column:1/-1;border-top:1px solid var(--line);padding-bottom:0}
+  .scoperows .latest{grid-column:1/-1;border-top:0;padding-top:2px;white-space:normal}
+  .scoperows .latest .sub{white-space:normal}
+  .scoperows .spark{border-top:0;padding-top:0}
+  .scoperows .tot{border-top:0;padding-top:0;white-space:normal}
+  .tl-labels{width:112px}
+  .tl-row{padding-left:6px}
+  .tl-row .nm{font-size:12.5px}
+  .tl-row .sb{font-size:10.5px}
+  .qrows{grid-template-columns:minmax(0,1fr) minmax(0,1fr)}
+  .qrows .num{white-space:normal}
+  .qrows .nm .chip{white-space:normal}
+  .pill{white-space:normal}
+  .qrows .h{display:none}
+  .qrows .nm{grid-column:1/-1;padding-bottom:2px}
+  .qrows .num{border-top:0;padding-top:0}
+  .qrows .trk{grid-column:1/-1;border-top:0;padding-top:8px}
+  .qrows .flags{grid-column:1/-1;border-top:0;padding-top:0}
+  .srows{grid-template-columns:minmax(0,1fr) minmax(0,1fr)}
+  .srows .h{display:none}
+  .srows .sc{grid-column:1/-1;padding-bottom:0}
+  .srows .st{border-top:0;padding-top:4px}
+  .srows .nums{border-top:0;padding-top:4px}
+  .srows .evc{grid-column:1/-1;border-top:0;padding-top:0}
+  .dd .head h3{font-size:21px}
+}
+</style>
+</head>
+<body>
+<div id="tip" role="tooltip"></div>
+<div class="pad"><div class="wrap">
+<header>
+  <div class="topline">
+    <div>
+      <div class="eyebrow" id="eyebrow"></div>
+      <h1>Astro Archive Observatory</h1>
+    </div>
+    <div class="fresh" id="fresh"></div>
+  </div>
+  <nav class="tabs" aria-label="Views">
+    <a href="#" aria-current="page">Overview</a>
+    <a href="#">Projects</a>
+    <a href="#">Timeline</a>
+    <a href="#">Sky</a>
+    <a href="#">Data health <span class="n" id="healthN"></span></a>
+  </nav>
+  <div class="hero">
+    <div class="lastnight" id="lastnight"></div>
+    <div class="totals" id="totals"></div>
+  </div>
+</header>
+
+<section class="card" id="strip">
+  <div class="cardhead">
+    <div><h2>The story of the season</h2><div class="sub">One lane per scope, a dot per night it was out. Bigger dot, more hours. Today is at the right; hover or tap a dot for the objects.</div></div>
+    <div class="seg" id="range" role="group" aria-label="How far back"></div>
+  </div>
+  <div id="stripwrap"></div>
+  <div class="legend" id="striplegend"></div>
+</section>
+
+<section class="card">
+  <div class="cardhead">
+    <div><h2>Where each scope is</h2><div class="sub">Its latest object, and how its hours have grown since its first night. Scopes are always in this order: most hours first.</div></div>
+  </div>
+  <div class="scoperows" id="scoperows"></div>
+</section>
+
+<section class="card">
+  <div class="cardhead">
+    <div><h2 id="growH">Growing now</h2><div class="sub" id="growS"></div></div>
+  </div>
+  <div class="grid" id="grow"></div>
+</section>
+
+<section class="card">
+  <div class="cardhead">
+    <div><h2 id="quietH">Gone quiet: ready to process</h2><div class="sub" id="quietS"></div></div>
+  </div>
+  <div class="qrows" id="quiet"></div>
+  <div class="samples" id="samples"></div>
+  <a class="more" href="#" id="quietMore"></a>
+</section>
+
+<section class="card">
+  <div class="cardhead">
+    <div><h2 id="progH">Half done: finish these</h2><div class="sub">A master of yours is saved, no final picture yet.</div></div>
+  </div>
+  <div class="qrows" id="prog"></div>
+  <div class="sub" id="doneLine" style="margin-top:10px"></div>
+</section>
+
+<section class="card dd" id="dd">
+  <div class="sketchnote">Sketch · what opens when you tap a project</div>
+  <div id="ddbody"></div>
+</section>
+
+<footer id="foot"></footer>
+</div></div>
+
+<script>
+"use strict";
+const D = __DATASET__;
+/* ---------- helpers ---------- */
+const MONTHS=["Jan","Feb","Mar","Apr","May","Jun","Jul","Aug","Sep","Oct","Nov","Dec"];
+const dayMs=864e5;
+const el=(t,c,txt)=>{const n=document.createElement(t); if(c) n.className=c; if(txt!=null) n.textContent=txt; return n;};
+const tx=s=>document.createTextNode(s);
+const svgEl=(t,a)=>{const n=document.createElementNS("http://www.w3.org/2000/svg",t); for(const k in a) n.setAttribute(k,a[k]); return n;};
+const fmtI=n=>Number(n).toLocaleString("en-GB");
+const fmtH=(h,d=1)=>Number(h).toFixed(d)+" h";
+const fmtDY=iso=>{const [y,m,d]=iso.split("-"); return (+d)+" "+MONTHS[+m-1]+" "+y;};
+const fmtDM=iso=>{const [y,m,d]=iso.split("-"); return (+d)+" "+MONTHS[+m-1];};
+const idx=(iso,start)=>Math.round((Date.parse(iso+"T12:00:00Z")-Date.parse(start+"T12:00:00Z"))/dayMs);
+const addN=(iso,n)=>new Date(Date.parse(iso+"T12:00:00Z")+n*dayMs).toISOString().slice(0,10);
+const plural=(n,w)=>n+" "+w+(n===1?"":"s");
+const ASOF=D.asOfNight, QUIET=D.quietPeriodDays||14, SAMPLE_H=1.0;
+const agoN=iso=>idx(ASOF,iso);
+const ago=iso=>{const n=agoN(iso); return n===0?"last night":n===1?"the night before":n+" nights ago";};
+/* ONE scope order, used everywhere: most hours first */
+const SC=[...D.scopes].sort((a,b)=>b.hours-a.hours);
+const byCam=new Map(SC.map(s=>[s.camera,s]));
+const rank=cam=>SC.indexOf(byCam.get(cam));
+const short=cam=>cam.replace(/^(Seestar|Askar)\s+/,"");
+const SESS=[...D.sessions].sort((a,b)=>a.night.localeCompare(b.night)||rank(a.camera)-rank(b.camera));
+const byName=new Map(D.targets.map(t=>[t.name,t]));
+const STATUS={capturing:{label:"Still capturing",g:"full",c:"var(--st-cap)"},ready_to_process:{label:"Ready to process",g:"ring",c:"var(--st-ready)"},in_progress:{label:"In progress",g:"half",c:"var(--st-prog)"},done:{label:"Done",g:"tick",c:"var(--st-done)"},sample:{label:"Sample",g:"dots",c:"var(--muted)"}};
+function glyph(g){
+  const s=svgEl("svg",{viewBox:"0 0 12 12","aria-hidden":"true"}); const c="currentColor";
+  if(g==="full") s.append(svgEl("circle",{cx:6,cy:6,r:5,fill:c}));
+  if(g==="ring") s.append(svgEl("circle",{cx:6,cy:6,r:4.25,fill:"none",stroke:c,"stroke-width":1.6}));
+  if(g==="half"){ s.append(svgEl("circle",{cx:6,cy:6,r:4.25,fill:"none",stroke:c,"stroke-width":1.6})); s.append(svgEl("path",{d:"M6 1.75 A4.25 4.25 0 0 1 6 10.25 Z",fill:c})); }
+  if(g==="tick"){ s.append(svgEl("circle",{cx:6,cy:6,r:4.25,fill:"none",stroke:c,"stroke-width":1.6})); s.append(svgEl("path",{d:"M3.6 6.2 L5.3 7.9 L8.5 4.4",fill:"none",stroke:c,"stroke-width":1.6,"stroke-linecap":"round","stroke-linejoin":"round"})); }
+  if(g==="dots"){ for(const x of [2.5,6,9.5]) s.append(svgEl("circle",{cx:x,cy:6,r:1.4,fill:c})); }
+  return s;
+}
+function pill(status, extra){
+  const st=STATUS[status]||{label:status,g:"ring",c:"var(--muted)"};
+  const p=el("span","pill"); p.style.setProperty("--c",st.c); p.append(glyph(st.g)); p.append(tx(st.label));
+  if(extra){ p.append(el("span","when","· "+extra)); }
+  return p;
+}
+function dot(scope){ const d=el("span","dot"); d.style.background=scope.colour; d.style.color=scope.colour; return d; }
+function chip(scope, text){ const c=el("span","chip"); c.append(dot(scope)); c.append(el("b",null,short(scope.camera))); if(text) c.append(tx(" "+text)); return c; }
+const typeLine=t=>{ const bits=[t.type,t.constellation].filter(Boolean); if(!bits.length) bits.push("type not recorded"); if(t.mosaic) bits.push("mosaic"); return bits.join(" · "); };
+/* tooltip */
+const tip=document.getElementById("tip");
+function showTip(e,rows){
+  tip.replaceChildren(); tip.append(el("div","tt",rows.shift()));
+  for(const [k,v,col] of rows){ const r=el("div","r"); const kk=el("span",null,k); if(col){ const d=el("span","dot"); d.style.background=col; d.style.color=col; kk.prepend(d);} r.append(kk, el("b",null,v)); tip.append(r); }
+  tip.style.display="block"; moveTip(e);
+}
+function moveTip(e){ const x=e.clientX+14, y=e.clientY+14; const r=tip.getBoundingClientRect(); tip.style.left=Math.min(x,innerWidth-r.width-8)+"px"; tip.style.top=Math.min(y,innerHeight-r.height-8)+"px"; }
+function hideTip(){ tip.style.display="none"; }
+function hoverable(node, rowsFn){
+  node.addEventListener("pointerenter",e=>showTip(e,rowsFn()));
+  node.addEventListener("pointermove",moveTip);
+  node.addEventListener("pointerleave",hideTip);
+  node.addEventListener("focus",()=>{ const r=node.getBoundingClientRect(); showTip({clientX:r.left+r.width/2,clientY:r.bottom},rowsFn()); });
+  node.addEventListener("blur",hideTip);
+}
+function defsFor(svg, scopes, uid){
+  const defs=svgEl("defs",{});
+  for(const s of scopes){
+    const p=svgEl("pattern",{id:uid+"-h-"+s.id,width:5,height:5,patternUnits:"userSpaceOnUse",patternTransform:"rotate(45)"});
+    p.append(svgEl("rect",{x:0,y:0,width:2.2,height:5,fill:s.colour})); defs.append(p);
+  }
+  const f=svgEl("filter",{id:uid+"-glow",x:"-60%",y:"-60%",width:"220%",height:"220%"});
+  f.append(svgEl("feGaussianBlur",{stdDeviation:"2.2",result:"b"}));
+  const m=svgEl("feMerge",{}); m.append(svgEl("feMergeNode",{in:"b"})); m.append(svgEl("feMergeNode",{in:"SourceGraphic"})); f.append(m); defs.append(f);
+  svg.append(defs);
+}
+/* a session dot: solid for known hours, hatched for unknown; a soft glow and a surface ring */
+function sessionDot(svg, uid, sc, cx, cy, r, unknown, label, rowsFn, quiet){
+  if(!quiet){ const halo=svgEl("circle",{cx,cy,r:r+3,fill:sc.colour,opacity:unknown?0:.28,filter:"url(#"+uid+"-glow)","pointer-events":"none"}); svg.append(halo); }
+  const c=svgEl("circle",{cx,cy,r,class:"mark",tabindex:"0",role:"img","aria-label":label,fill:unknown?"url(#"+uid+"-h-"+sc.id+")":sc.colour,stroke:unknown?sc.colour:"var(--card)","stroke-width":unknown?1.2:1.5});
+  hoverable(c,rowsFn); svg.append(c);
+  if(r<6){ const hit=svgEl("circle",{cx,cy,r:9,fill:"transparent",class:"mark"}); hoverable(hit,rowsFn); svg.append(hit); }
+  return c;
+}
+const sessRows=(s,extra)=>{ const sc=byCam.get(s.camera); return [s.target+" · "+fmtDY(s.night),[short(s.camera), s.hours>0?fmtH(s.hours,2):"integration unknown", sc&&sc.colour],["frames",fmtI(s.frames)],...(extra||[])]; };
+
+/* ---------- header: freshness + last night + totals ---------- */
+document.getElementById("eyebrow").textContent=D.machine||"";
+const warnN=(D.health||[]).filter(h=>h.severity==="warn").length;
+document.getElementById("healthN").textContent=warnN;
+{
+  const f=document.getElementById("fresh");
+  const l1=el("div"); l1.append(tx("Worked out ")); l1.append(el("b",null,D.generatedAt)); l1.append(tx(" · as of last night, "+fmtDY(ASOF))); f.append(l1);
+  const snap=(D.sourceNote.match(/the Mac's record \(its ledger snapshot of ([^)]+)\)/)||[])[1];
+  f.append(el("div",null,"from this PC's ledger"+(snap?" and the Mac's record of "+snap:"")+" · "+fmtI(D.snapshotRows)+" rows read"));
+  /* a slot the engine fills: files still on the cameras, not yet imported. The sample dataset does not carry it. */
+  const cam=el("span","cam"); const pend=D.pendingOnCamera;
+  cam.textContent=pend?fmtI(pend.files)+" files on the camera not yet imported ("+plural(pend.targets,"target")+")"+(pend.failedEject?" · one eject failed":""):"on the cameras: not checked in this record";
+  f.append(cam);
+}
+{
+  const ln=document.getElementById("lastnight");
+  const lastNight=SESS[SESS.length-1].night, last=SESS.filter(s=>s.night===lastNight);
+  ln.append(el("div","k",(agoN(lastNight)===0?"Last night":"Latest night · "+ago(lastNight))+" · "+fmtDY(lastNight)));
+  const big=el("div","big");
+  const names=[...new Set(last.map(s=>s.target))];
+  big.append(tx(names.slice(0,2).join(" and ")+(names.length>2?" and "+(names.length-2)+" more":"")));
+  const h=last.reduce((a,b)=>a+b.hours,0), unk=last.some(s=>!(s.hours>0));
+  big.append(el("span","on"," · "+(h>0?fmtH(h,1):"hours unknown")+(unk&&h>0?"+":"")+" on "+plural(new Set(last.map(s=>s.camera)).size,"scope")));
+  ln.append(big);
+  const list=el("div","list");
+  for(const s of last){ const sc=byCam.get(s.camera); const x=el("span","s"); x.append(dot(sc)); x.append(el("b",null,s.target)); x.append(el("span","h",short(s.camera)+" · "+(s.hours>0?fmtH(s.hours,2):"integration unknown")+" · "+fmtI(s.frames)+" frames")); list.append(x); }
+  ln.append(list);
+}
+{
+  const tt=document.getElementById("totals");
+  const figs=[[fmtH(D.totals.hours),"hours of integration, all time",true],[fmtI(D.totals.lights),"light frames"],[D.totals.targets+" targets","on "+plural(D.scopes.length,"scope")],[D.totals.nights+" nights","out since "+fmtDY(SESS[0].night)]];
+  for(const [v,l,hero] of figs){ const f=el("div","fig"+(hero?" hero":"")); f.append(el("span","v",String(v)), el("span","l",l)); tt.append(f); }
+  /* every excluded row, named: the warnings' counts plus the duplicate copies */
+  const num=re=>{ for(const h of D.health){ const m=(h.detail||"").match(re); if(m) return +m[1].replace(/,/g,""); } return 0; };
+  const unknown=num(/their ([\d,]+) frames/), noScope=num(/([\d,]+) rows carry no scope/), dup=num(/([\d,]+) rows are second copies/);
+  const a=el("a","check"); a.href="#"; a.append(el("b",null,plural(warnN,"thing")+" to check")); a.append(tx(" · "+fmtI(unknown+noScope+dup)+" rows not counted: "+fmtI(unknown)+" with names the contract doesn't know, "+noScope+" with no scope, "+fmtI(dup)+" duplicate copies (right to leave out) · Data health ›")); tt.append(a);
+}
+
+/* ---------- 1. the season strip ---------- */
+const stripwrap=document.getElementById("stripwrap");
+const seasonStart=(()=>{ const y=+ASOF.slice(0,4), m=+ASOF.slice(5,7); return (m>=9?y:y-1)+"-09-01"; })();
+const spanAll=idx(ASOF,SESS[0].night)+1;
+const RANGES=[["30","30 nights",30],["season","this season · from "+fmtDM(seasonStart),idx(ASOF,seasonStart)+1],["90","90 nights",90],["year","a year",365],["all","everything · "+spanAll+" nights",spanAll]].sort((a,b)=>a[2]-b[2]);
+let range=innerWidth<760?"30":"90";
+const rbox=document.getElementById("range");
+for(const [id,label] of RANGES){ const b=el("button",null,label); b.setAttribute("aria-pressed",id===range?"true":"false"); b.addEventListener("click",()=>{ range=id; for(const x of rbox.children) x.setAttribute("aria-pressed",x===b?"true":"false"); drawStrip(); }); rbox.append(b); }
+function drawStrip(){
+  stripwrap.replaceChildren();
+  const N=RANGES.find(r=>r[0]===range)[2];
+  const start=addN(ASOF,-(N-1));
+  const inR=SESS.filter(s=>s.night>=start);
+  /* past 120 nights the dots would bunch, so each dot is a week on that scope */
+  const bucket=N>120?7:1, nb=Math.ceil(N/bucket);
+  const cellW=bucket===1?(N<=30?24:10.5):Math.max(9,Math.min(16,860/nb));
+  const x0=8, x1=x0+nb*cellW, W=x1+16, laneH=44, top=30, H=top+SC.length*laneH+26;
+  const svg=svgEl("svg",{viewBox:"0 0 "+W+" "+H,width:W,height:H,role:"img","aria-label":"Nights on each scope, last "+N+" nights"});
+  svg.style.display="block";
+  defsFor(svg,SC,"st");
+  const labels=el("div","tl-labels"); labels.style.paddingTop=top+"px";
+  const X=i=>x0+(i/bucket)*cellW+cellW/2;
+  /* tinted quiet band */
+  const qx=X(N-Math.min(QUIET,N))-cellW/2;
+  svg.append(svgEl("rect",{x:qx,y:top-4,width:x1-qx,height:SC.length*laneH+6,fill:"var(--quiet)",rx:5}));
+  const qt=svgEl("text",{x:x1,y:H-6,"text-anchor":"end",class:"axis"}); qt.textContent="‹ quiet period · last "+QUIET+" nights · today "+fmtDM(ASOF); svg.append(qt);
+  /* month ticks */
+  let lastM="";
+  for(let i=0;i<N;i++){
+    const iso=addN(start,i), ym=iso.slice(0,7);
+    if(ym===lastM) continue; lastM=ym;
+    const x=X(i)-cellW/2;
+    if(i>0) svg.append(svgEl("line",{x1:x,x2:x,y1:top-4,y2:H-22,class:"grid"}));
+    const mo=+iso.slice(5,7);
+    const show=N<=120 ? !(i===0&&+iso.slice(8)>22) : (i===0||mo===1||(N<=400?mo%2===1:mo%3===1));
+    if(show && x<x1-72){ const t=svgEl("text",{x:x+(i===0?0:4),y:top-10,class:"axis"}); t.textContent=MONTHS[mo-1]+((mo===1||i===0)?" "+iso.slice(0,4):""); svg.append(t); }
+  }
+  /* today */
+  svg.append(svgEl("line",{x1:x1,x2:x1,y1:top-4,y2:H-22,stroke:"var(--today)","stroke-width":1.5}));
+  const tt=svgEl("text",{x:x1,y:top-10,"text-anchor":"end",class:"axis"}); tt.textContent="today"; svg.append(tt);
+  const st=svgEl("text",{x:x0,y:H-6,class:"axis"}); st.textContent=fmtDM(start)+" ›"; svg.append(st);
+  /* per scope per cell */
+  const per=new Map(); let maxH=0.5;
+  for(const s of inR){ const cell=Math.floor(idx(s.night,start)/bucket); const k=s.camera+"|"+cell; const a=per.get(k)||{hours:0,frames:0,ss:[],cell}; a.hours+=s.hours; a.frames+=s.frames; a.ss.push(s); per.set(k,a); maxH=Math.max(maxH,a.hours); }
+  const rMax=Math.min(laneH/2-3, cellW*0.95), rMin=3;
+  SC.forEach((sc,li)=>{
+    const y=top+li*laneH, mid=y+laneH/2;
+    /* lane tinted in the scope's own colour */
+    svg.append(svgEl("rect",{x:0,y:y+1,width:W,height:laneH-2,fill:sc.colour,opacity:.075}));
+    svg.append(svgEl("line",{x1:x0,x2:x1,y1:mid,y2:mid,stroke:sc.colour,opacity:.25}));
+    const mine=inR.filter(s=>s.camera===sc.camera);
+    const nights=new Set(mine.map(s=>s.night)).size, hrs=mine.reduce((a,b)=>a+b.hours,0), unk=mine.some(s=>!(s.hours>0));
+    const row=el("div","tl-row"); row.style.height=laneH+"px"; row.style.marginTop=(li?0:0)+"px"; row.style.background="color-mix(in srgb,"+sc.colour+" 8%,transparent)";
+    const nm=el("div","nm"); nm.append(dot(sc)); nm.append(tx(short(sc.camera))); row.append(nm);
+    row.append(el("div","sb",nights?((hrs>0?fmtH(hrs):"hours unknown")+(unk&&hrs>0?"+":"")+" · "+plural(nights,"night")):"not out"));
+    labels.append(row);
+    for(const a of per.values()){
+      if(a.ss[0].camera!==sc.camera) continue;
+      const unknown=!(a.hours>0);
+      const r=unknown?rMin+1.5:rMin+(rMax-rMin)*Math.sqrt(a.hours/maxH);
+      const night=a.ss[0].night, when=bucket===1?fmtDY(night):"week of "+fmtDM(addN(start,a.cell*bucket));
+      const label=when+" · "+short(sc.camera)+" · "+(unknown?"integration unknown":fmtH(a.hours,2))+" · "+[...new Set(a.ss.map(s=>s.target))].join(", ");
+      sessionDot(svg,"st",sc,X(a.cell*bucket),mid,r,unknown,label,()=>[when+" · "+short(sc.camera)+(bucket>1?" · "+plural(new Set(a.ss.map(s=>s.night)).size,"night"):""), ...a.ss.map(s=>[s.target+(bucket>1?" · "+fmtDM(s.night):""), s.hours>0?fmtH(s.hours,2)+" · "+fmtI(s.frames)+" fr":"unknown · "+fmtI(s.frames)+" fr", sc.colour])]);
+    }
+  });
+  const tl=el("div","tl"); tl.append(labels); const scr=el("div","scroller"); scr.append(svg); tl.append(scr); stripwrap.append(tl);
+  scr.scrollLeft=scr.scrollWidth;  // latest nights first
+  const lg=document.getElementById("striplegend"); lg.replaceChildren();
+  const nights=new Set(inR.map(s=>s.night)).size, hrs=inR.reduce((a,b)=>a+b.hours,0);
+  lg.append(el("span",null,"In these "+N+" nights: "+plural(nights,"night")+" out · "+fmtH(hrs)+" of integration · "+plural(inR.length,"session")+" (one object, one scope, one night)"+(bucket>1?" · at this range each dot is a week":"")));
+  const k=el("span"); k.append(el("i","hatchkey")); k.append(tx("hatched dot: frames saved but exposure unrecorded, so hours unknown (never shown as 0)")); lg.append(k);
+  lg.append(el("span",null,"tinted band = the quiet period; a project last touched before it is ready to process"));
+}
+drawStrip();
+
+/* ---------- 2. where each scope is ---------- */
+{
+  const g=document.getElementById("scoperows");
+  for(const t of ["scope","latest object","hours, growing","all time"]) g.append(el("div","h",t));
+  for(const sc of SC){
+    const mine=SESS.filter(s=>s.camera===sc.camera);
+    const last=mine[mine.length-1];
+    const name=el("div","name"); name.append(dot(sc)); name.append(tx(short(sc.camera))); g.append(name);
+    const lt=el("div","latest");
+    if(last){ lt.append(el("b",null,last.target)); lt.append(el("span","sub",fmtDY(last.night)+" · "+ago(last.night)+" · "+(last.hours>0?fmtH(last.hours,2):"integration unknown")+" · "+fmtI(last.frames)+" frames")); }
+    else lt.append(el("span","sub","no sessions"));
+    g.append(lt);
+    const sp=el("div","spark");
+    const w=150,h=32, n0=sc.first, span=Math.max(1,idx(ASOF,n0));
+    let cum=0; const pts=[[0,0]];
+    for(const s of mine){ cum+=s.hours; pts.push([idx(s.night,n0)/span*w, cum]); }
+    pts.push([w,cum]);
+    const svg=svgEl("svg",{viewBox:"0 0 "+w+" "+h,width:w,height:h,role:"img","aria-label":short(sc.camera)+": "+fmtH(sc.hours)+" built up since "+fmtDY(sc.first)});
+    const Y=v=>h-4-(sc.hours>0?v/sc.hours*(h-10):0);
+    const d=pts.map((p,i)=>(i?"L":"M")+p[0].toFixed(1)+" "+Y(p[1]).toFixed(1)).join(" ");
+    svg.append(svgEl("path",{d:d+" L"+w+" "+(h-4)+" L0 "+(h-4)+" Z",fill:sc.colour,opacity:.16}));
+    svg.append(svgEl("path",{d,fill:"none",stroke:sc.colour,"stroke-width":2,"stroke-linejoin":"round"}));
+    svg.append(svgEl("circle",{cx:w-2,cy:Y(cum),r:3.5,fill:sc.colour,stroke:"var(--card)","stroke-width":2}));
+    sp.append(svg); g.append(sp);
+    const tot=el("div","tot"); tot.append(el("b",null,fmtH(sc.hours))); tot.append(tx(" · "+fmtI(sc.frames)+" frames · "+plural(sc.nights,"night")+" · since "+fmtDY(sc.first))); g.append(tot);
+  }
+}
+
+/* ---------- 3. growing now ---------- */
+function hoursBar(t){
+  const wrap=el("div");
+  const bar=el("div","hbar"); bar.setAttribute("role","img");
+  const parts=t.programmes.map(p=>({p,sc:byCam.get(p.camera)})).filter(x=>x.sc).sort((a,b)=>SC.indexOf(a.sc)-SC.indexOf(b.sc));
+  const total=parts.reduce((a,b)=>a+b.p.hours,0);
+  bar.setAttribute("aria-label","hours by scope: "+parts.map(x=>short(x.sc.camera)+" "+(x.p.hours>0?fmtH(x.p.hours):"unknown")).join(", "));
+  for(const x of parts){
+    const s=el("span"); s.style.setProperty("--c",x.sc.colour);
+    if(x.p.hours>0){ s.style.background=x.sc.colour; s.style.flex=x.p.hours+" 1 0"; if(parts.length>1&&x.p.hours/total>0.3) s.append(el("i",null,short(x.sc.camera)+" "+fmtH(x.p.hours))); }
+    else { s.className="unk"; s.style.flex="1 1 0"; s.style.maxWidth="30%"; }
+    bar.append(s);
+  }
+  wrap.append(bar);
+  const ch=el("div","chips"); ch.style.marginTop="5px";   /* every scope labelled, however thin its segment */
+  for(const x of parts) ch.append(chip(x.sc, x.p.hours>0?fmtH(x.p.hours):"hours unknown · "+fmtI(x.p.lights)+" fr"));
+  wrap.append(ch);
+  return wrap;
+}
+function miniTimeline(t, uid, w=320){
+  const ss=SESS.filter(s=>s.target===t.name);
+  const n0=ss[0].night, span=Math.max(14,idx(ASOF,n0)), h=36, mid=14;
+  const svg=svgEl("svg",{viewBox:"0 0 "+w+" "+h,width:"100%",role:"img","aria-label":t.name+": "+plural(ss.length,"session")+" from "+fmtDY(n0)+" to "+fmtDY(t.lastNight)});
+  svg.style.display="block";
+  const scopes=[...new Set(ss.map(s=>byCam.get(s.camera)).filter(Boolean))];
+  defsFor(svg,scopes,uid);
+  const X=iso=>8+idx(iso,n0)/span*(w-16);
+  const qx=X(addN(ASOF,-(QUIET-1)));
+  svg.append(svgEl("rect",{x:qx-1,y:2,width:w-8-qx+1,height:24,fill:"var(--quiet)",rx:3}));
+  svg.append(svgEl("line",{x1:8,x2:w-8,y1:mid,y2:mid,class:"grid"}));
+  svg.append(svgEl("line",{x1:w-8,x2:w-8,y1:3,y2:25,stroke:"var(--today)","stroke-width":1.5}));
+  const maxh=Math.max(...ss.map(s=>s.hours),0.5);
+  for(const s of ss){
+    const sc=byCam.get(s.camera); if(!sc) continue;
+    const unknown=!(s.hours>0), r=unknown?4:2.5+4.5*Math.sqrt(s.hours/maxh);
+    sessionDot(svg,uid,sc,X(s.night),mid,r,unknown,fmtDY(s.night)+" · "+short(s.camera)+" · "+(unknown?"integration unknown":fmtH(s.hours,2)),()=>sessRows(s),true);
+  }
+  const a=svgEl("text",{x:8,y:h-2,class:"axis"}); a.textContent="first night "+fmtDM(n0)+(n0.slice(0,4)!==ASOF.slice(0,4)?" "+n0.slice(0,4):"")+" · "+plural(ss.length,"session"); svg.append(a);
+  const b=svgEl("text",{x:w-8,y:h-2,"text-anchor":"end",class:"axis"}); b.textContent="today"; svg.append(b);
+  return svg;
+}
+{
+  const cutoff=addN(ASOF,-(QUIET-1));
+  const recent=SESS.filter(s=>s.night>=cutoff);
+  const names=[...new Set(recent.map(s=>s.target))];
+  const rows=names.map(n=>{ const t=byName.get(n); const mine=recent.filter(s=>s.target===n); const last=mine[mine.length-1]; return {t,last,recentH:mine.reduce((a,b)=>a+b.hours,0)}; })
+    .filter(r=>r.t).sort((a,b)=>b.last.night.localeCompare(a.last.night)||b.recentH-a.recentH);
+  document.getElementById("growH").textContent="Growing now · "+plural(rows.length,"project");
+  document.getElementById("growS").textContent="Captured in the last "+QUIET+" nights, newest first. Each card: its whole life on one line, then its hours split by scope.";
+  const g=document.getElementById("grow"); let i=0;
+  for(const r of rows){
+    const t=r.t, sc=byCam.get(r.last.camera), prog=t.programmes.find(p=>p.camera===r.last.camera);
+    const c=el("article","pc"); c.style.setProperty("--c",sc.colour);
+    c.append(el("div","t",t.name));
+    const h=el("div","t2"); h.append(el("small",null,typeLine(t)));
+    h.append(pill(prog?prog.status:"capturing", prog&&prog.status==="capturing"&&prog.readyOn?"ready from "+fmtDM(prog.readyOn):null));
+    c.append(h);
+    const m=el("div","meta");
+    const l=el("span"); l.append(tx("last: ")); l.append(el("b",null,ago(r.last.night))); l.append(tx(" on ")); l.append(chip(sc)); m.append(l);
+    m.append(el("span",null,(r.last.hours>0?fmtH(r.last.hours,2):"integration unknown")+" that night"));
+    c.append(m);
+    c.append(miniTimeline(t,"g"+(i++)));
+    const tot=el("div","meta"); const b=el("span"); b.append(el("b",null,t.hours>0?fmtH(t.hours):"hours unknown")); b.append(tx(" total · "+plural(t.nights,"night")+" · "+fmtI(t.lights)+" lights")); tot.append(b);
+    tot.append(el("span",null,plural(t.cameras.length,"scope"))); c.append(tot);
+    c.append(hoursBar(t));
+    g.append(c);
+  }
+}
+
+/* ---------- 4. gone quiet ---------- */
+const flagsOf=p=>{
+  const f=el("div","flags"); const bits=[];
+  if(p.calibration&&p.calibration.applies&&p.calibration.missing.length) bits.push(el("span",null,"no "+p.calibration.missing.join(" or ")+" linked"));
+  if(/other Askar/.test(p.evidence||"")) bits.push(el("b",null,"⚠ master may belong to the other Askar"));
+  if(!(p.hours>0)&&p.lights>0) bits.push(el("span",null,"exposure not recorded: hours unknown"));
+  if(!bits.length) bits.push(el("span",null,"calibration "+(p.calibration&&p.calibration.applies?"linked":"not needed")));
+  bits.forEach((b,i)=>{ if(i) f.append(tx(" · ")); f.append(b); });
+  return f;
+};
+function quietRow(g,t,p,sc,mode){
+  const nm=el("div","nm"); nm.append(tx(t.name)); nm.append(chip(sc,"· "+plural(p.nights,"night"))); g.append(nm);
+  const num=el("div","num");
+  if(p.hours>0){ num.append(el("b",null,fmtH(p.hours))); num.append(tx(" · "+fmtI(p.lights)+" lights")); }
+  else { num.append(el("i","hatchkey")); num.append(el("b",null,"integration unknown")); num.append(tx(" · "+fmtI(p.lights)+" lights")); }
+  g.append(num);
+  const trk=el("div","trk");
+  const q=agoN(p.lastNight), SPAN=120, pos=Math.max(0,1-q/SPAN)*100;
+  const tr=el("div","track"); tr.style.setProperty("--c",sc.colour); tr.setAttribute("role","img"); tr.setAttribute("aria-label","quiet for "+plural(q,"night")+", since "+fmtDY(p.lastNight));
+  tr.append(el("div","axis")); tr.append(el("div","today"));
+  const trail=el("div","trail"); trail.style.left=pos+"%"; trail.style.right="0"; trail.style.background="linear-gradient(90deg,"+sc.colour+" 0%, transparent 100%)"; tr.append(trail);
+  const last=el("div","last"); last.style.left=pos+"%"; last.style.background=sc.colour; tr.append(last);
+  const ql=el("div","ql"); if(pos>45){ ql.style.left="auto"; ql.style.right="0"; } else ql.style.left=(pos+1.5)+"%"; ql.textContent=(mode==="prog"?"last frames ":"quiet ")+plural(q,"night")+" · since "+fmtDM(p.lastNight); tr.append(ql);
+  trk.append(tr); g.append(trk);
+  g.append(flagsOf(p));
+}
+{
+  const g=document.getElementById("quiet");
+  const all=[]; for(const t of D.targets) for(const p of t.programmes) if(p.status==="ready_to_process"&&byCam.get(p.camera)) all.push({t,p,sc:byCam.get(p.camera)});
+  /* samples: under the cutoff, with known hours. Unknown hours are never treated as small. */
+  const samples=all.filter(r=>r.p.hours>0&&r.p.hours<SAMPLE_H), rows=all.filter(r=>!samples.includes(r));
+  rows.sort((a,b)=>(b.p.hours-a.p.hours)||(b.p.lights-a.p.lights));
+  document.getElementById("quietH").textContent="Gone quiet: ready to process · "+rows.length;
+  document.getElementById("quietS").textContent="No new frames for "+QUIET+" nights and nothing started. Biggest first. The dot is the last night out; the trail fades toward today.";
+  for(const t of ["project","how much","quiet for · the last 120 nights","before you start"]) g.append(el("div","h",t));
+  const SHOW=10;
+  for(const r of rows.slice(0,SHOW)) quietRow(g,r.t,r.p,r.sc,"quiet");
+  const more=document.getElementById("quietMore"); more.textContent="+"+(rows.length-SHOW)+" more, smaller · all "+rows.length+" in Projects ›";
+  const sm=document.getElementById("samples"); sm.append(pill("sample")); sm.append(tx(" "));
+  sm.append(el("b",null,plural(samples.length,"test snap")+" under "+fmtH(SAMPLE_H,0)+" kept out of the queue: "));
+  sm.append(tx(samples.sort((a,b)=>b.p.hours-a.p.hours).map(r=>r.t.name.replace(/\s*\(.*\)/,"")+" "+fmtH(r.p.hours)+" on the "+short(r.sc.camera)).join(", ")+". The cutoff is a setting; mark one as a real project and it comes back."));
+}
+{
+  const g=document.getElementById("prog");
+  const rows=[]; for(const t of D.targets) for(const p of t.programmes) if(p.status==="in_progress"&&byCam.get(p.camera)) rows.push({t,p,sc:byCam.get(p.camera)});
+  rows.sort((a,b)=>b.p.hours-a.p.hours);
+  document.getElementById("progH").textContent="Half done: finish these · "+rows.length;
+  for(const t of ["project","how much","last frames · the last 120 nights","what is saved"]) g.append(el("div","h",t));
+  for(const r of rows){
+    quietRow(g,r.t,r.p,r.sc,"prog");
+    const f=g.lastChild; f.replaceChildren(); f.append(el("span",null,(r.p.evidence||"").split(";")[0])); if(/other Askar/.test(r.p.evidence||"")){ f.append(tx(" · ")); f.append(el("b",null,"⚠ may belong to the other Askar")); }
+  }
+  const done=[]; for(const t of D.targets) for(const p of t.programmes) if(p.status==="done") done.push(t.name);
+  const dl=document.getElementById("doneLine"); dl.append(pill("done")); dl.append(tx(" "+plural(done.length,"finished picture")+" · "+[...new Set(done)].slice(0,4).map(n=>n.replace(/\s*\(.*\)/,"")).join(", ")+" and more · see Projects"));
+}
+
+/* ---------- 5. drill-down sketch: Andromeda ---------- */
+{
+  const t=D.targets.find(x=>/Andromeda/.test(x.name))||D.targets[0];
+  const body=document.getElementById("ddbody");
+  const head=el("div","head"); head.append(el("h3",null,t.name));
+  head.append(el("span","sub",t.codes.join(" · ")+" · "+typeLine(t)));
+  body.append(head);
+  const counts={}; for(const p of t.programmes) counts[p.status]=(counts[p.status]||0)+1;
+  const facts=el("div","facts");
+  for(const [v,l] of [[t.hours>0?fmtH(t.hours):"hours unknown","of integration"],[plural(t.nights,"night"),"out"],[fmtI(t.lights),"light frames"],["first "+fmtDY(t.firstNight),"latest "+fmtDY(t.lastNight)+" ("+ago(t.lastNight)+")"]]){
+    const f=el("span"); f.append(el("b",null,v)); f.append(tx(" "+l)); facts.append(f);
+  }
+  body.append(facts);
+  const stl=el("div","chips"); stl.append(el("span","sub",plural(t.cameras.length,"scope")+", honestly:")); for(const [k,n] of Object.entries(counts).sort((a,b)=>b[1]-a[1])) stl.append(pill(k,n+(n===1?" scope":" scopes"))); body.append(stl);
+  const w=el("div","warn"); w.append(el("span",null,"⚠")); const wt=el("div"); wt.append(el("b",null,"Check before processing the Askar data")); wt.append(tx("The master in the shared Askar folder may belong to the other Askar. It is why the FRA400 counts as in progress and the 107PHQ does not. Say which scope it came from and the statuses settle.")); w.append(wt); body.append(w);
+  /* the project's own timeline: a lane per scope, same dots as the season strip */
+  const ss=SESS.filter(s=>s.target===t.name);
+  const lanes=t.programmes.map(p=>byCam.get(p.camera)).filter(Boolean).sort((a,b)=>SC.indexOf(a)-SC.indexOf(b));
+  const n0=t.firstNight, span=Math.max(30,idx(ASOF,n0)+1), LW=innerWidth<760?112:166, x0=18;
+  const W=Math.max(640, Math.min(1180,document.getElementById("dd").clientWidth-36)-LW), x1=W-16, laneH=42, top=28, H=top+lanes.length*laneH+24;
+  const svg=svgEl("svg",{viewBox:"0 0 "+W+" "+H,width:W,height:H,role:"img","aria-label":t.name+": sessions by scope since "+fmtDY(n0)});
+  svg.style.display="block";
+  defsFor(svg,lanes,"dd");
+  const labels=el("div","tl-labels"); labels.style.paddingTop=top+"px";
+  const X=iso=>x0+idx(iso,n0)/span*(x1-x0);
+  const qx=X(addN(ASOF,-(QUIET-1)));
+  svg.append(svgEl("rect",{x:qx,y:top-4,width:x1-qx,height:lanes.length*laneH+6,fill:"var(--quiet)",rx:5}));
+  let lastM="";
+  for(let i=0;i<span;i++){ const iso=addN(n0,i), ym=iso.slice(0,7); if(ym===lastM) continue; lastM=ym; if(+iso.slice(8)>20&&i===0) continue; const x=X(iso); if(i>0) svg.append(svgEl("line",{x1:x,x2:x,y1:top-4,y2:H-20,class:"grid"})); if(i===0||+iso.slice(5,7)%2===1){ const t2=svgEl("text",{x:x+3,y:top-10,class:"axis"}); t2.textContent=MONTHS[+iso.slice(5,7)-1]+((iso.slice(5,7)==="01"||i===0)?" "+iso.slice(0,4):""); svg.append(t2);} }
+  svg.append(svgEl("line",{x1:x1,x2:x1,y1:top-4,y2:H-20,stroke:"var(--today)","stroke-width":1.5}));
+  const tt=svgEl("text",{x:x1,y:H-5,"text-anchor":"end",class:"axis"}); tt.textContent="today"; svg.append(tt);
+  const maxh=Math.max(...ss.map(s=>s.hours),0.5);
+  lanes.forEach((sc,li)=>{
+    const y=top+li*laneH, mid=y+laneH/2, p=t.programmes.find(q=>q.camera===sc.camera);
+    svg.append(svgEl("rect",{x:0,y:y+1,width:W,height:laneH-2,fill:sc.colour,opacity:.075}));
+    const row=el("div","tl-row"); row.style.height=laneH+"px"; row.style.background="color-mix(in srgb,"+sc.colour+" 8%,transparent)";
+    const nm=el("div","nm"); nm.append(dot(sc)); nm.append(tx(short(sc.camera))); row.append(nm);
+    row.append(el("div","sb",(p.hours>0?fmtH(p.hours):"hours unknown")+" · "+plural(p.nights,"night"))); labels.append(row);
+    svg.append(svgEl("line",{x1:x0,x2:x1,y1:mid,y2:mid,stroke:sc.colour,opacity:.25}));
+    const mine=ss.filter(s=>s.camera===sc.camera);
+    if(mine.length>1) svg.append(svgEl("line",{x1:X(mine[0].night),x2:X(mine[mine.length-1].night),y1:mid,y2:mid,stroke:sc.colour,"stroke-width":3,opacity:.5,"stroke-linecap":"round"}));
+    for(const s of mine){
+      const unknown=!(s.hours>0), r=unknown?6:3.5+10*Math.sqrt(s.hours/maxh);
+      sessionDot(svg,"dd",sc,X(s.night),mid,r,unknown,fmtDY(s.night)+" · "+short(sc.camera)+" · "+(unknown?"integration unknown":fmtH(s.hours,2)),()=>sessRows(s,[["filter",Object.keys(s.filters||{}).filter(k=>k!=="unrecorded").join(", ")||"unrecorded"]]));
+    }
+  });
+  const tl=el("div","tl"); tl.style.marginTop="12px"; tl.append(labels); const scr=el("div","scroller"); scr.append(svg); tl.append(scr); body.append(tl); scr.scrollLeft=scr.scrollWidth;
+  const lg=el("div","legend"); lg.append(el("span",null,"a dot per session, bigger is more hours · the line is the span of that scope's work on it · tinted band = quiet period")); body.append(lg);
+  const hb=el("div"); hb.style.marginTop="12px"; hb.append(el("div","sub","Hours by scope")); const bar=hoursBar(t); bar.style.marginTop="4px"; hb.append(bar); body.append(hb);
+  const g=el("div","srows"); g.style.marginTop="14px";
+  for(const x of ["scope","status","how much · when","what the importer found"]) g.append(el("div","h",x));
+  const order=[...t.programmes].sort((a,b)=>rank(a.camera)-rank(b.camera));
+  for(const p of order){
+    const sc=byCam.get(p.camera); if(!sc) continue;
+    const s=el("div","sc"); s.append(chip(sc)); g.append(s);
+    const st=el("div","st"); st.append(pill(p.status));
+    if(p.status==="capturing") st.append(el("div","sub",(p.readyOn?"ready to process from "+fmtDM(p.readyOn)+" · ":"")+(p.keptOpen?"kept open by you":"frames arrived inside the quiet period")));
+    if(p.status==="ready_to_process") st.append(el("div","sub","quiet for "+plural(agoN(p.lastNight),"night")+" · since "+fmtDM(p.lastNight)));
+    if(p.status==="in_progress") st.append(el("div","sub","a master is saved"));
+    if(p.status==="done") st.append(el("div","sub","a finished picture names it"));
+    g.append(st);
+    const n=el("div","nums"); n.append(el("b",null,p.hours>0?fmtH(p.hours):"integration unknown")); n.append(tx(" · "+plural(p.nights,"night")+" · "+fmtI(p.lights)+" lights"));
+    n.append(el("div","sub",fmtDY(p.firstNight)+" → "+fmtDY(p.lastNight)+" · "+Object.keys(p.filters).join(", ")+" · "+Object.keys(p.exposures).map(e=>e+"s").join(", ")));
+    g.append(n);
+    const e=el("div","evc"); e.append(el("div","act",p.action)); e.append(el("div","ev",p.evidence));
+    const cal=el("div","cal"); cal.textContent=p.calibration.applies?(p.calibration.missing.length?"Calibration: missing "+p.calibration.missing.join(" and "):"Calibration: darks and flats linked"):"Calibration: not needed on this scope"; e.append(cal);
+    g.append(e);
+  }
+  body.append(g);
+}
+
+document.getElementById("foot").textContent=D.sourceNote;
+</script>
+</body>
+</html>

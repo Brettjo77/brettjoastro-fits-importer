@@ -33,10 +33,33 @@ RESULTS = {"PASS": 0, "WARN": 0, "FAIL": 0, "SKIP": 0}
 # astro-watch.py on Windows (PARITY.md). test_v2 checks these lists against
 # install-scripts.sh and install-windows.ps1, so the two can't drift again.
 INSTALLED = {
-    "mac": ("astro-import.py", "astro-app.py", "astro-watch.sh", "selftest.py"),
-    "windows": ("astro-import.py", "astro-app.py", "astro-watch.py", "selftest.py"),
+    "mac": ("astro-import.py", "astro-app.py", "astro-watch.sh", "selftest.py",
+            "astro-observatory.html", "contract/targets.json", "contract/scopes.json"),
+    "windows": ("astro-import.py", "astro-app.py", "astro-watch.py", "selftest.py",
+                "astro-observatory.html", "contract/targets.json", "contract/scopes.json"),
 }
 
+
+def desktop_dir(test_mode=False, shell=None):
+    """Where the Restart button lives. On Windows the installer asks the shell
+    ([Environment]::GetFolderPath('Desktop')), and with OneDrive that is
+    OneDrive\\Desktop, not Users\\<name>\\Desktop: ask the same way (1.7.0). In
+    test mode the plain folder under the test's home, so nothing outside the
+    root is ever looked at."""
+    if os.name == "nt" and not test_mode:
+        try:
+            if shell is None:
+                import ctypes
+                buf = ctypes.create_unicode_buffer(1024)
+                # CSIDL_DESKTOPDIRECTORY, the user's own, as the shell resolves it
+                if ctypes.windll.shell32.SHGetFolderPathW(None, 0x10, None, 0, buf) == 0:
+                    shell = lambda: buf.value
+            got = shell() if shell else ""
+            if got:
+                return got
+        except Exception:
+            pass
+    return os.path.join(os.path.expanduser("~"), "Desktop")
 
 def line(kind, name, detail=""):
     RESULTS[kind] += 1
@@ -168,9 +191,9 @@ def main():
             check(f"{label} is writable", False, f"{parent}: {e}")
     print(f"  ----  frames go under {os.path.dirname(eng.SEESTAR_DEST_S50PRO)}")
     if os.path.isdir(eng.ARCHIVE_MOUNT):
-        check(f"archive reachable ({eng.ARCHIVE_MOUNT})", eng.archive_reachable(eng.ARCHIVE_MOUNT),
-              "needs one of S30P, S30, S50, S50P, 'ZWO Askar Scopes' and a writable _verify")
-        print(f"  ----  this machine's ship log: {os.path.join(eng.ARCHIVE_MOUNT, '_verify', eng.SHIP_LOG_NAME)}")
+        ok, why = eng.archive_check(eng.ARCHIVE_MOUNT)
+        check(f"archive reachable ({eng.ARCHIVE_MOUNT})", ok, why)
+        print(f"  ----  this machine's ship log: {eng.ship_log_path(eng.ARCHIVE_MOUNT)}")
     else:
         line("SKIP", "archive", f"{eng.ARCHIVE_MOUNT} not present (shipping is optional)")
 
@@ -185,7 +208,7 @@ def main():
                   "it offers to take over again", warn_only=True)
         else:
             check("camera watcher starts at logon", os.path.isfile(startup), startup)
-        desk = os.path.join(os.path.expanduser("~"), "Desktop", "Restart FITS Importer.cmd")
+        desk = os.path.join(desktop_dir(bool(eng.TEST_ROOT)), "Restart FITS Importer.cmd")
         if owner == "app":                     # the installer leaves it out then (U1)
             line("SKIP", "Restart FITS Importer on the Desktop", f"not needed: {app_note}")
         else:
@@ -268,7 +291,8 @@ def main():
         check("panel is the same version as the engine", ping.get("version") == eng.VERSION,
               f"panel {ping.get('version')} vs engine {eng.VERSION} — restart the panel")
     except Exception:
-        line("SKIP", "panel", "not running right now (plug in a camera, or use Restart)")
+        line("SKIP", "panel", "not running right now (the watcher starts it within a minute; "
+             "or use Restart FITS Importer on the Desktop)")
     return summary()
 
 

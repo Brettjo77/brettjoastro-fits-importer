@@ -12,12 +12,15 @@
          is needed. Quiet no-op when the PC is off or nothing is waiting. If
          the Mac was asleep at the time, launchd runs it on wake.
          Log: ~/Library/Logs/astro-ship.log (1.4.2 — /tmp is wiped on reboot,
-         which lost the evidence after the September power cut). -->
+         which lost the evidence after the September power cut).
+         1.7.0: runs under caffeinate -i, so the Mac does not fall asleep in
+         the middle of a long ship; plain `bash -c`, since a login shell is
+         slow and nothing here needs the profile. -->
     <key>ProgramArguments</key>
     <array>
         <string>/bin/bash</string>
-        <string>-lc</string>
-        <string>P=/usr/local/bin/python3; [ -x "$P" ] || P=/usr/bin/python3; "$P" "$HOME/bin/astro-import.py" --ship</string>
+        <string>-c</string>
+        <string>P=/usr/local/bin/python3; [ -x "$P" ] || P=/usr/bin/python3; exec /usr/bin/caffeinate -i "$P" "$HOME/bin/astro-import.py" --ship</string>
     </array>
 
     <key>StartCalendarInterval</key>

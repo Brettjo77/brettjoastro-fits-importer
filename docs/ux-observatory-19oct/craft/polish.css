@@ -1,0 +1,87 @@
+/* craft: polish overrides for the Observatory (CSS only, appended after the page's own style) */
+
+/* ---- tokens: light (a touch more paper, whiter cards, firmer hairlines, darker secondary ink) ---- */
+:root[data-theme="light"], :root:not([data-theme="dark"]){
+  --page:#eeeae0; --card:#fffefb; --card2:#f6f3eb; --line:#d9d3c5; --grid:#e8e3d7;
+  --ink:#15141f; --ink2:#403e52; --muted:#625f74; --faint:#a39fae;
+  --track:#e2ddd1; --quiet-band:rgba(26,25,38,.045);
+  --shadow:0 1px 2px rgba(26,25,38,.06);
+  --st-quiet-ink:#625f74; --st-quiet-line:#c4bfb2;
+}
+/* ---- tokens: dark (cards one step lighter than the page, hairlines visible, tracks off the card) ---- */
+:root[data-theme="dark"]{
+  --page:#0d1120; --card:#181d36; --card2:#1f2544; --line:#303860; --grid:#262d4c;
+  --ink:#f3f1ea; --ink2:#c6cadc; --muted:#9aa0bd; --faint:#5f6584;
+  --track:#2c3456; --quiet-band:rgba(241,239,232,.055);
+  --shadow:0 1px 2px rgba(0,0,0,.4);
+}
+
+/* ---- section header: one short fact under the title, 20px to the content ---- */
+.cardhead{margin-bottom:20px;align-items:flex-end}
+.cardhead .sub{max-width:72ch}
+/* (mockup only: the shorter copy, set here because the text lives in JS) */
+.card:has(> .lately) > .cardhead .sub, .card:has(> .pgrid) > .cardhead .sub{font-size:0;line-height:0}
+.card:has(> .lately) > .cardhead .sub::before, .card:has(> .pgrid) > .cardhead .sub::before{display:block;width:max-content;max-width:72ch;white-space:normal;font-size:var(--fs-md);line-height:var(--lh-body);color:var(--muted)}
+.card:has(> .lately) > .cardhead .sub::before{content:"a dot per night out · bigger is more hours · shaded: the last 14 nights"}
+.card:has(> .pgrid) > .cardhead .sub::before{content:"20 projects with frames in the last 60 nights, newest first · open a card for one lane per scope"}
+
+/* ---- What each scope captured ---- */
+.lately{grid-template-columns:184px minmax(0,1fr) 320px;column-gap:20px}
+.lately .nm,.lately .rt{border-bottom:0}                 /* the lane's own hairline is the only rule */
+.lately .nm button{font-size:var(--fs-base);gap:9px}
+.lately .nm button .arrow{opacity:.7}
+.lately .rt{font-size:var(--fs-md);color:var(--ink2);line-height:1.35}
+.lately .rt b{font-weight:var(--fw-semi)}
+.lately .rt div > b:first-child{font-size:15px;color:var(--ink)}   /* the hours lead */
+.lately .rt .q{color:var(--muted)}
+.lately .axis{margin-top:6px;color:var(--muted)}
+svg g.bg{display:none}                                   /* the 180 "no frames" dust dots go */
+svg .gridline{stroke:var(--grid);stroke-width:1}
+svg .band{fill:var(--quiet-band)}
+svg g.dot circle.c{stroke-width:2}                       /* a 2px surface ring on every mark */
+svg g.dot.unk circle.c{stroke-width:2.5}
+/* mockup only: the size scale the spec asks for (r 4..9 at 30 nights) approximated from the drawn radii */
+svg g.dot circle.c[r^="1"]{transform:scale(.78)}
+svg g.dot circle.c[r^="9"]{transform:scale(.9)}
+svg g.dot circle.c[r^="3"]{transform:scale(1.3)}
+svg g.dot circle.c[r^="4."]{transform:scale(1.1)}
+svg .cnt{font:700 10px var(--sans)}
+svg g.dot:has(circle[fill="#eda100"]) .cnt, svg g.dot:has(circle[fill="#4cbf8a"]) .cnt{fill:#15141f}   /* ink on the light hues */
+svg .axis{fill:var(--muted)}
+.keyline{margin-top:16px !important;font-size:var(--fs-sm);color:var(--muted);gap:8px 20px}
+.keyline span:nth-child(3), .keyline span:nth-child(4){display:none}   /* the band is explained in the sub-line; the dust dots are gone */
+.keys{display:none}
+.card:focus-within .keys{display:flex}                   /* keyboard hints only once the keyboard is in the strip */
+
+/* ---- Projects that moved lately: the section is a region, the cards are the cards ---- */
+.card:has(> .pgrid){background:none;border:0;box-shadow:none;padding:0}
+.card:has(> .pgrid) > .cardhead{margin-bottom:16px}
+.pgrid{gap:20px;align-items:stretch}
+.proj{background:var(--card);border:1px solid var(--line);border-radius:12px;box-shadow:var(--shadow);display:flex;flex-direction:column}
+.proj:hover{border-color:var(--faint);box-shadow:0 6px 18px rgba(26,25,38,.10)}
+:root[data-theme="dark"] .proj:hover{box-shadow:0 6px 18px rgba(0,0,0,.45)}
+.proj .head{padding:16px 16px 6px;grid-template-columns:56px minmax(0,1fr) 22px;gap:14px}
+.proj .t{letter-spacing:-.01em}
+.proj .ty{margin-top:2px}
+.proj .hl{margin-top:6px;color:var(--muted);font-size:var(--fs-sm)}
+.proj .hl b{font-size:15px;font-weight:var(--fw-semi);color:var(--ink)}
+/* one row per scope: the scope's dot and NAME, then its next step; nothing is a filled pill */
+.proj .mix{display:flex;flex-direction:column;gap:0;margin-top:10px}
+.proj .mix .st{width:100%;height:26px;padding:0;background:none;border:0;border-top:1px solid var(--grid);border-radius:0;font-size:var(--fs-sm);font-weight:var(--fw-semi);gap:5px;color:var(--ink2)}
+.proj .mix .st:first-child{border-top:0}
+.proj .mix .st svg{width:13px;height:13px}
+.proj .mix .st .dot{width:auto;height:auto;background:none;box-shadow:none;border-radius:0;display:inline-flex;align-items:center;gap:7px;color:var(--ink);margin-right:auto;font-weight:var(--fw-semi)}
+.proj .mix .st .dot::before{content:"";width:9px;height:9px;border-radius:50%;background:var(--sc);box-shadow:0 0 0 2px var(--card);flex:none}
+.proj .mix .st .dot::after{content:attr(title)}
+.proj .mix .st-action{color:var(--ink);font-weight:var(--fw-bold)}
+.proj .mix .st-live{color:var(--st-live-ink)}
+.proj .mix .st-work{color:var(--st-work-bg)}
+:root[data-theme="dark"] .proj .mix .st-work{color:#5cc9de}
+.proj .mix .st-done,.proj .mix .st-sample{color:var(--muted)}
+.proj .mini{padding:8px 16px 14px;margin-top:auto}
+.proj .flag{padding:0 16px 12px;color:var(--ink2)}
+.ringwrap circle{stroke-width:7}
+.ringwrap circle.segm{transition:none}   /* mockup only: no draw-in while shooting */
+.proj .mini svg .band{fill:var(--quiet-band)}
+.ringwrap svg > circle:first-child{stroke:var(--track)}
+.btn.more{margin-top:20px}

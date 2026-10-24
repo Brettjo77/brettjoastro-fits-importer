@@ -1,0 +1,120 @@
+{
+ "schema": "scopes/1",
+ "note": "One entry per scope and site. 'archive_root' is its folder on the archive drive. 'match' says how a frame in the ledger is recognised as this scope: by camera name, and for the two Askars (one camera, one archive folder) by the scope name the import worked out from the focal length. Colours follow the Observatory palette; null means Brett hasn't picked one yet. 'aliases' are other spellings a filename or folder may use for the scope ('30P', 'S30Pro'). match.camera must equal the ledger's camera name exactly. A scope's id, name and aliases are also how a filename names it, so no two scopes may share one. Leave 'unit' in place on the two site entries: it is what keeps them switched off.",
+ "default_site": "Shinfield",
+ "scopes": [
+  {
+   "id": "S30P",
+   "name": "Seestar S30 Pro",
+   "archive_root": "S30P",
+   "site": "Shinfield",
+   "colour": "yellow",
+   "match": {
+    "camera": "ZWO Seestar S30 Pro"
+   },
+   "aliases": [
+    "30P",
+    "S30Pro",
+    "S30-Pro",
+    "Seestar30Pro"
+   ]
+  },
+  {
+   "id": "S30",
+   "name": "Seestar S30",
+   "archive_root": "S30",
+   "site": "Shinfield",
+   "colour": "blue",
+   "match": {
+    "camera": "ZWO Seestar S30"
+   },
+   "aliases": [
+    "Seestar30"
+   ]
+  },
+  {
+   "id": "S50",
+   "name": "Seestar S50",
+   "archive_root": "S50",
+   "site": "Shinfield",
+   "colour": "black",
+   "match": {
+    "camera": "ZWO Seestar S50"
+   },
+   "aliases": [
+    "Seestar50"
+   ]
+  },
+  {
+   "id": "S50P",
+   "name": "Seestar S50 Pro",
+   "archive_root": "S50P",
+   "site": "Shinfield",
+   "colour": null,
+   "match": {
+    "camera": "ZWO Seestar S50 Pro"
+   },
+   "aliases": [
+    "50P",
+    "S50Pro",
+    "S50-Pro",
+    "Seestar50Pro"
+   ]
+  },
+  {
+   "id": "FRA400",
+   "name": "Askar FRA400",
+   "archive_root": "ZWO Askar Scopes",
+   "site": "Shinfield",
+   "colour": "red",
+   "match": {
+    "camera": "ZWO ASI585MC Air",
+    "scope": "Askar FRA400"
+   },
+   "aliases": [
+    "FRA 400",
+    "Askar400"
+   ]
+  },
+  {
+   "id": "107PHQ",
+   "name": "Askar 107PHQ",
+   "archive_root": "ZWO Askar Scopes",
+   "site": "Shinfield",
+   "colour": "green",
+   "match": {
+    "camera": "ZWO ASI585MC Air",
+    "scope": "Askar 107PHQ"
+   },
+   "aliases": [
+    "107 PHQ",
+    "Askar107"
+   ]
+  },
+  {
+   "id": "S50P-STARFRONT",
+   "name": "Seestar S50 Pro (Starfront, Texas)",
+   "archive_root": "S50P",
+   "site": "Starfront",
+   "colour": null,
+   "match": {
+    "camera": "ZWO Seestar S50 Pro",
+    "unit": null
+   },
+   "note": "Switched off until the importer records the unit a frame came from."
+  },
+  {
+   "id": "S30P-TENERIFE",
+   "name": "Seestar S30 Pro (Tenerife, rented)",
+   "archive_root": "S30P",
+   "site": "Tenerife",
+   "colour": null,
+   "match": {
+    "camera": "ZWO Seestar S30 Pro",
+    "unit": null
+   },
+   "note": "Switched off until the importer records the unit a frame came from."
+  }
+ ],
+ "about_sites": "The Starfront S50 Pro and the rented Tenerife S30 Pro can't yet be told apart from the home Seestars of the same model: the importer doesn't record which unit a frame came from. Until it does, their frames count under the Shinfield entry, and the two entries above stay switched off ('unit': null). Leave them as they are."
+}

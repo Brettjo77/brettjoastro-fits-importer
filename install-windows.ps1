@@ -5,7 +5,7 @@
 #
 #   powershell -ExecutionPolicy Bypass -File .\install-windows.ps1
 #
-# No administrator rights needed. It:
+# No administrator rights needed (and it refuses an Administrator window). It:
 #   1. finds Python 3 (python.org) and installs astropy for it if missing
 #   2. copies the engine, panel and watcher to %LOCALAPPDATA%\BrettjoAstro\bin
 #   3. writes a starter config.json (only if you have none) — the archive
@@ -13,12 +13,14 @@
 #   4. starts the camera watcher now and at every logon (Startup folder)
 #   5. puts "Restart FITS Importer" on your Desktop
 #   6. schedules the twice-daily ship (09:30, 21:30) when an archive is set
-#   7. points the archive sweep task at the new sweep.ps1, if you have one
+#   7. on the archive PC (1.7.0): the archive's _verify\pc, _verify\mac and
+#      _verify\lock folders, the sweep at logon and 03:30, and every five
+#      minutes the answer to what the Mac asks for - all in Python, as you
 # Your ledger, config and backed-up frames are never touched.
 # While the FITs Importer App is in charge here (1.5.3), only the files are
 # updated: no watcher, Restart button or panel start (4, 5 and the start).
 
-param([switch]$NoStart)
+param([switch]$NoStart, [switch]$AllowElevated)
 # 'Continue', not 'Stop': in Windows PowerShell 5.1 a native program writing
 # to stderr (pip, a Python traceback) would otherwise abort the installer.
 # Cmdlets that must succeed say -ErrorAction Stop themselves.
@@ -37,6 +39,23 @@ function Utf8NoBom($path, $text) {
 Write-Host ""
 Write-Host "BrettjoAstro FITS Importer - Windows installer" -ForegroundColor White
 Write-Host ""
+
+# Never from an Administrator window (1.7.0). A scheduled task registered as
+# administrator can't be replaced later from a normal window, and files made
+# that way end up owned by the wrong account. -AllowElevated is for the one
+# case where that's wanted knowingly.
+$winId = [Security.Principal.WindowsIdentity]::GetCurrent()
+$me = $winId.Name            # DOMAIN\user, as the task scheduler wants it
+$isAdmin = (New-Object Security.Principal.WindowsPrincipal $winId).IsInRole([Security.Principal.WindowsBuiltInRole]::Administrator)
+if ($isAdmin -and -not $AllowElevated) {
+    Warn "This window is running as Administrator. The importer is installed for your own account,"
+    Warn "so please close this window and run 'Install on Windows.cmd' from a normal (non-admin) one."
+    Warn "If an earlier install was done as administrator, first remove its tasks from THIS window:"
+    foreach ($tn in @('BrettjoAstro FITS Importer ship', 'Astro archive sweep', 'Astro sync requests')) {
+        Warn "  Unregister-ScheduledTask -TaskName '$tn' -Confirm:`$false"
+    }
+    exit 1
+}
 
 # ── 1. Python ────────────────────────────────────────────────────────────────
 Info "Looking for Python 3..."
@@ -73,12 +92,40 @@ $bin = Join-Path $env:LOCALAPPDATA 'BrettjoAstro\bin'
 New-Item -ItemType Directory -Force -Path $bin -ErrorAction Stop | Out-Null
 New-Item -ItemType Directory -Force -Path (Join-Path $bin 'pc') -ErrorAction Stop | Out-Null
 
-foreach ($f in @('astro-import.py', 'astro-app.py', 'astro-watch.py', 'selftest.py')) {
+foreach ($f in @('astro-import.py', 'astro-app.py', 'astro-watch.py', 'selftest.py', 'astro-observatory.html')) {
     $src = Join-Path $here $f
     if (-not (Test-Path -LiteralPath $src)) { Warn "Missing from the package: $f"; exit 1 }
     Copy-Item -LiteralPath $src -Destination $bin -Force -ErrorAction Stop
 }
-foreach ($f in @('sweep.ps1', 'install_sweep.ps1')) {
+# The contract (1.7): canonical targets and scopes, read by --projects. Brett may
+# edit the installed copy, so an edited file is never replaced: the newer shipped
+# copy lands beside it as <name>.new for him to merge. An installed copy that is
+# still one we shipped (its hash is in contract\shipped.sha256) has no edits to
+# lose, so it is simply updated.
+New-Item -ItemType Directory -Force -Path (Join-Path $bin 'contract') -ErrorAction Stop | Out-Null
+$shippedList = Join-Path $here 'contract\shipped.sha256'
+$shipped = @()
+if (Test-Path -LiteralPath $shippedList) {
+    $shipped = @(Get-Content -LiteralPath $shippedList | ForEach-Object { ($_ -split '\s+')[0].ToLower() } | Where-Object { $_ -match '^[0-9a-f]{64}$' })
+}
+foreach ($f in @('targets.json', 'scopes.json')) {
+    $src = Join-Path $here "contract\$f"
+    $dst = Join-Path $bin "contract\$f"
+    if (-not (Test-Path -LiteralPath $src)) { Warn "Missing from the package: contract\$f"; continue }
+    if (-not (Test-Path -LiteralPath $dst)) { Copy-Item -LiteralPath $src -Destination $dst -Force; continue }
+    $have = (Get-FileHash -LiteralPath $dst -Algorithm SHA256).Hash.ToLower()
+    if ($have -eq (Get-FileHash -LiteralPath $src -Algorithm SHA256).Hash.ToLower()) { continue }
+    if ($shipped -contains $have) {
+        Copy-Item -LiteralPath $src -Destination $dst -Force
+        if (Test-Path -LiteralPath "$dst.new") { Remove-Item -LiteralPath "$dst.new" -Force -ErrorAction SilentlyContinue }
+        Ok "contract\$f updated (your copy was an unedited shipped one)"
+    } else {
+        Copy-Item -LiteralPath $src -Destination "$dst.new" -Force
+        Warn "contract\$f has your edits, so it is kept; the newer shipped copy is beside it as $f.new"
+    }
+}
+Copy-Item -LiteralPath $shippedList -Destination (Join-Path $bin 'contract') -Force -ErrorAction SilentlyContinue
+foreach ($f in @('set-archive-rights.ps1')) {
     $src = Join-Path $here "pc\$f"
     if (Test-Path -LiteralPath $src) { Copy-Item -LiteralPath $src -Destination (Join-Path $bin 'pc') -Force }
 }
@@ -176,53 +223,72 @@ if (-not $appOwns) {
 }
 
 # ── 6. Twice-daily ship (only with an archive) ───────────────────────────────
+# All three scheduled tasks go through one helper (1.7.0): the same account,
+# the same limited run level, and the same advice when a task made from an
+# administrator window stands in the way.
+$pri = New-ScheduledTaskPrincipal -UserId $me -LogonType Interactive -RunLevel Limited
+function Register-AstroTask($name, $arg, $triggers, $settings, $okText, $failText) {
+    try {
+        $act = New-ScheduledTaskAction -Execute $pyw -Argument "-X utf8 `"$bin\astro-import.py`" $arg" -WorkingDirectory $bin
+        Register-ScheduledTask -TaskName $name -Action $act -Trigger $triggers -Settings $settings -Principal $pri -Force -ErrorAction Stop | Out-Null
+        Ok $okText
+        return $true
+    } catch {
+        Warn "Could not set up the '$name' task ($($_.Exception.Message)). $failText"
+        Warn "If it was set up from an administrator window before, open PowerShell as administrator, run:"
+        Warn "  Unregister-ScheduledTask -TaskName '$name' -Confirm:`$false"
+        Warn "then close that window and run this installer again from a normal one."
+        return $false
+    }
+}
 $shipTask = 'BrettjoAstro FITS Importer ship'
 if ($archiveSet) {
-    try {
-        $act = New-ScheduledTaskAction -Execute $pyw -Argument "-X utf8 `"$bin\astro-import.py`" --ship" -WorkingDirectory $bin
-        # half an hour after the Mac's 09:00 / 21:00: the two never race
-        # (the archive's ship lock would stop that anyway)
-        $t1 = New-ScheduledTaskTrigger -Daily -At 09:30
-        $t2 = New-ScheduledTaskTrigger -Daily -At 21:30
-        $set = New-ScheduledTaskSettingsSet -StartWhenAvailable -ExecutionTimeLimit (New-TimeSpan -Hours 6) -MultipleInstances IgnoreNew
-        $pri = New-ScheduledTaskPrincipal -UserId "$env:USERDOMAIN\$env:USERNAME" -LogonType Interactive -RunLevel Limited
-        Register-ScheduledTask -TaskName $shipTask -Action $act -Trigger @($t1, $t2) -Settings $set -Principal $pri -Force -ErrorAction Stop | Out-Null
-        Ok "Ship scheduled at 09:30 and 21:30 (files verified frames into $archive)"
-    } catch {
-        Warn "Could not schedule the ship ($($_.Exception.Message)). Imports still ship straight after each import."
-    }
+    # half an hour after the Mac's 09:00 / 21:00: the two never race
+    # (the archive's ship lock would stop that anyway)
+    $t1 = New-ScheduledTaskTrigger -Daily -At 09:30
+    $t2 = New-ScheduledTaskTrigger -Daily -At 21:30
+    $set = New-ScheduledTaskSettingsSet -StartWhenAvailable -ExecutionTimeLimit (New-TimeSpan -Hours 6) -MultipleInstances IgnoreNew
+    Register-AstroTask $shipTask '--ship' @($t1, $t2) $set "Ship scheduled at 09:30 and 21:30 (files verified frames into $archive)" "Imports still ship straight after each import." | Out-Null
 } else {
     Info "No archive folder configured - skipping the ship schedule (optional; see PC-SYNC.md)."
 }
 
-# ── 7. Archive sweep: the new sweep reads EVERY machine's ship log ───────────
-# An older sweep.ps1 at the place PC-SYNC.md suggested is replaced in place
-# (kept as .bak), so whichever task runs it — even one registered elevated,
-# which this non-admin installer can't see — picks up the new version.
-$legacySweep = Join-Path $archive 'Claude outputs\pc\sweep.ps1'
-if ($archiveSet -and (Test-Path -LiteralPath $legacySweep)) {
-    try {
-        Copy-Item -LiteralPath $legacySweep -Destination ($legacySweep + '.bak') -Force -ErrorAction Stop
-        Copy-Item -LiteralPath (Join-Path $bin 'pc\sweep.ps1') -Destination $legacySweep -Force -ErrorAction Stop
-        Ok "Updated the archive sweep at $legacySweep (old copy kept as .bak)"
-    } catch {
-        Warn "Could not update $legacySweep ($($_.Exception.Message)) - copy $bin\pc\sweep.ps1 over it by hand."
+# ── 7. The archive PC's own jobs (1.7.0): Python, as you ────────────────────
+# "Astro archive sweep" (logon and 03:30) checks every shipped frame from this
+# disk, sets aside copies a ship never finished, lists the archive and hashes
+# new files. "Astro sync requests" (every 5 minutes) answers what the Mac asks
+# for and keeps the heartbeat that tells it this PC is awake. Registering the
+# sweep under its old name replaces the old sweep.ps1 task; the old script
+# files are left where they are (they are yours to delete).
+if ($archiveSet) {
+    $made = $true
+    foreach ($d in @('_verify\pc', '_verify\mac\requests', '_verify\lock', '_Quarantine\ship-incomplete')) {
+        try { New-Item -ItemType Directory -Force -Path (Join-Path $archive $d) -ErrorAction Stop | Out-Null }
+        catch { $made = $false; Warn "Could not create $archive\$d ($($_.Exception.Message))" }
     }
-}
-$sweepTask = Get-ScheduledTask -TaskName 'Astro archive sweep' -ErrorAction SilentlyContinue
-if ($sweepTask) {
-    try {
-        $sweep = Join-Path $bin 'pc\sweep.ps1'
-        $act = New-ScheduledTaskAction -Execute 'powershell.exe' -Argument "-NoProfile -ExecutionPolicy Bypass -WindowStyle Hidden -File `"$sweep`" -Root `"$archive`""
-        Set-ScheduledTask -TaskName 'Astro archive sweep' -Action $act -ErrorAction Stop | Out-Null
-        Ok "Archive sweep now uses $sweep (it reads every machine's ship log)"
-    } catch {
-        Warn "Could not update the 'Astro archive sweep' task. As administrator, run: $bin\pc\install_sweep.ps1"
+    if ($made) { Ok "The archive's _verify\pc, _verify\mac and _verify\lock folders are in place" }
+    $t1 = New-ScheduledTaskTrigger -AtLogOn -User $me
+    $t2 = New-ScheduledTaskTrigger -Daily -At 03:30
+    $set = New-ScheduledTaskSettingsSet -StartWhenAvailable -ExecutionTimeLimit (New-TimeSpan -Hours 8) -MultipleInstances IgnoreNew
+    $sweepOk = Register-AstroTask 'Astro archive sweep' '--pc-nightly' @($t1, $t2) $set "Archive sweep at logon and 03:30 (Python: sweep, list the archive, hash new files, rebuild projects.json)" "Until it is, nothing sweeps or lists the archive."
+    if ($sweepOk) {
+        # sweep.ps1 retired in 1.7.0: the sweep is Python now (--sweep). Set the old
+        # scripts aside only once the Python task is really in place, so a failed
+        # registration never leaves the PC with no sweep at all.
+        foreach ($f in @('sweep.ps1', 'install_sweep.ps1')) {
+            $old = Join-Path $bin "pc\$f"
+            if (Test-Path -LiteralPath $old) { Rename-Item -LiteralPath $old -NewName "$f.retired-$(Get-Date -Format 'yyyyMMdd_HHmmss')" -ErrorAction SilentlyContinue }
+        }
     }
-} elseif ($archiveSet -and -not (Test-Path -LiteralPath $legacySweep)) {
-    Info "No archive sweep task found for you. If one was registered from an administrator"
-    Info "prompt it may just be invisible here. Otherwise, to verify shipped frames, run:"
-    Info "  powershell -ExecutionPolicy Bypass -File `"$bin\pc\install_sweep.ps1`""
+    # every 5 minutes, all day, every day: a daily trigger that repeats
+    $t = New-ScheduledTaskTrigger -Daily -At 00:00
+    $t.Repetition = (New-ScheduledTaskTrigger -Once -At 00:00 -RepetitionInterval (New-TimeSpan -Minutes 5) -RepetitionDuration (New-TimeSpan -Days 1)).Repetition
+    $t1 = New-ScheduledTaskTrigger -AtLogOn -User $me
+    # light work, so it runs on a UPS's battery too: the Mac keeps seeing the
+    # heartbeat. A tick is seconds of work; one stuck on a dead share is cut
+    # after 15 minutes so the next can run (IgnoreNew would otherwise wait).
+    $set = New-ScheduledTaskSettingsSet -StartWhenAvailable -ExecutionTimeLimit (New-TimeSpan -Minutes 15) -MultipleInstances IgnoreNew -AllowStartIfOnBatteries -DontStopIfGoingOnBatteries
+    Register-AstroTask 'Astro sync requests' '--pc-tick' @($t, $t1) $set "Sync requests answered every 5 minutes (the Mac sees this PC is awake)" "The Mac will not see this PC's heartbeat until it is." | Out-Null
 }
 
 # ── 8. Start ─────────────────────────────────────────────────────────────────
@@ -240,8 +306,10 @@ Write-Host "All done: $ver" -ForegroundColor Green
 Write-Host ""
 if (-not $appOwns) {
     Write-Host "Next:" -ForegroundColor White
-    Write-Host "  1. Plug in your Seestar or ASIAir - the panel opens by itself (http://127.0.0.1:8765)."
-    Write-Host "  2. Tick what you want and press Import. The first import starts this PC's ledger."
+    Write-Host "  1. Plug in your Seestar or ASIAir - the panel opens by itself. It is always running:"
+    Write-Host "     http://127.0.0.1:8765 any time, camera or not (the Observatory lives there)."
+    Write-Host "  2. Tick what you want and press Import. The first import starts this PC's ledger;"
+    Write-Host "     frames the Mac already imported show as backed up by the Mac and are not copied again."
     Write-Host "  3. Check the install any time (in Terminal):  & `"$py`" -X utf8 `"$bin\selftest.py`""
 } else {
     Write-Host "Open the FITs Importer App to import: it handles the cameras on this PC." -ForegroundColor White

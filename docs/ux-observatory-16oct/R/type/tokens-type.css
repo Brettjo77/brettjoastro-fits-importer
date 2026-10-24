@@ -1,0 +1,83 @@
+/* Observatory: type, spacing and container tokens (R/type, 17 Oct 2026)
+   One sans, one mono (machine strings only), eight sizes, three weights,
+   a 4 px spacing scale, two control heights, one accent-bar width.
+   Everything on the page should resolve to one of these; nothing is set in px inline. */
+
+:root{
+  /* faces */
+  --sans: system-ui, -apple-system, "Segoe UI", Roboto, "Helvetica Neue", Arial, sans-serif;
+  --mono: ui-monospace, Menlo, Consolas, monospace;   /* paths, timestamps, ledger ids only */
+
+  /* type scale: 8 steps, whole pixels, no .5s */
+  --fs-xs:   11px;   /* eyebrows, column heads, axis ticks, chip text floor */
+  --fs-sm:   12px;   /* meta lines, notes, legend text */
+  --fs-md:   13px;   /* table body, secondary body, buttons */
+  --fs-base: 14px;   /* body, item titles (queue row, target row) */
+  --fs-lg:   16px;   /* project-card name, h3 */
+  --fs-xl:   20px;   /* h2 section heading, stat-tile value */
+  --fs-2xl:  28px;   /* last-night date, page h1 */
+  --fs-hero: 48px;   /* the one hero figure per view */
+
+  /* line heights: tight for display, open for small */
+  --lh-display: 1.1;  /* ≥ 28px */
+  --lh-heading: 1.25; /* 16–20px */
+  --lh-body:    1.4;  /* 13–14px */
+  --lh-small:   1.45; /* ≤ 12px */
+
+  /* weights: three, never 550/650/750/780 (system-ui snaps them unevenly on Windows) */
+  --fw-regular: 400;
+  --fw-semi:    600;
+  --fw-bold:    700;
+
+  /* eyebrow / column-head style, used everywhere a small caps label appears */
+  --eyebrow-size: var(--fs-xs);
+  --eyebrow-weight: var(--fw-semi);
+  --eyebrow-tracking: .06em;
+
+  /* numbers */
+  --nums-col: tabular-nums;     /* columns, axis ticks, legend values */
+  --nums-hero: proportional-nums; /* hero figure and stat-tile values */
+
+  /* spacing: 4 px base */
+  --s1: 4px;  --s2: 8px;  --s3: 12px;  --s4: 16px;  --s5: 24px;  --s6: 32px;  --s7: 48px;
+  --card-pad: var(--s4);          /* 16, becomes 20 at ≥ 1200 */
+  --item-pad: var(--s3);          /* a row or job card inside a section */
+  --section-gap: var(--s5);       /* between cards down the page */
+  --item-gap: var(--s2);          /* between rows / job cards in a list */
+  --inline-gap: var(--s2);        /* between chips, dots and words on one line */
+  --heading-gap: var(--s1);       /* h2 → sub */
+  --block-gap: var(--s4);         /* h2+sub → content */
+
+  /* containers */
+  --container: 1280px;            /* default content width; header inner wrap shares it */
+  --container-wide: 1440px;       /* data-dense lists (Targets, Process queue list view) */
+  --gutter: 24px;                 /* page side padding; 16px under 700px */
+  --measure: 72ch;                /* max line length for explanatory prose */
+
+  /* shape */
+  --r-sm: 6px;    /* buttons, tiles, notes */
+  --r-md: 10px;   /* cards, rows */
+  --r-pill: 999px;
+  --accent-bar: 4px;              /* the one left-edge scope bar width; inset, full height */
+  --ctl-sm: 24px;                 /* chips, badges, pills */
+  --ctl-md: 32px;                 /* buttons */
+  --dot: 10px;                    /* scope identity dot */
+  --ring-min: 56px;               /* smallest ring that still shows a share; below this use a dot */
+}
+@media (min-width:1200px){ :root{ --card-pad: 20px; } }
+@media (max-width:700px){ :root{ --gutter: 16px; --fs-hero: 40px; --fs-2xl: 24px; --fs-xl: 18px; } }
+
+/* How the tokens are applied (reference) */
+.eyebrow, .colhead { font: var(--eyebrow-weight) var(--eyebrow-size)/1.2 var(--sans); letter-spacing: var(--eyebrow-tracking); text-transform: uppercase; }
+h1 { font: var(--fw-bold) var(--fs-2xl)/var(--lh-display) var(--sans); letter-spacing: -.01em; }
+h2 { font: var(--fw-bold) var(--fs-xl)/var(--lh-heading) var(--sans); letter-spacing: -.01em; }
+h3 { font: var(--fw-semi) var(--fs-lg)/var(--lh-heading) var(--sans); }
+.hero-n { font: var(--fw-bold) var(--fs-hero)/1 var(--sans); letter-spacing: -.02em; font-variant-numeric: var(--nums-hero); }
+.num { font-variant-numeric: var(--nums-col); text-align: right; white-space: nowrap; }
+.unit { font-weight: var(--fw-regular); }           /* the "h" after "30.0": lighter, same size, same baseline */
+.nowrap { white-space: nowrap; }                     /* number + unit, date, "N nights" never split */
+.clamp2 { display: -webkit-box; -webkit-line-clamp: 2; -webkit-box-orient: vertical; overflow: hidden; }
+.prose { max-width: var(--measure); }
+.chip { height: var(--ctl-sm); padding: 0 10px; font: var(--fw-semi) var(--fs-sm)/1 var(--sans); border-radius: var(--r-pill); display: inline-flex; align-items: center; gap: 6px; }
+.btn  { height: var(--ctl-md); padding: 0 12px; font: var(--fw-semi) var(--fs-md)/1 var(--sans); border-radius: var(--r-sm); display: inline-flex; align-items: center; gap: 6px; }
+.accent { box-shadow: inset var(--accent-bar) 0 0 0 var(--sc); }   /* follows the card radius; no separate column */
