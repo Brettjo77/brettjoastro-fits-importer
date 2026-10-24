@@ -8,3 +8,4 @@
 615fcee459636c6b046e2d0d79c3aaaf6d06cb0f6f1d96f25a0d093f65bef4fb  targets.json   (1.7.0, 12 Oct 2026)
 8ddb4cacf45c1c96816279f8cf673b5ed367ad8867acec518246b422053f40d6  scopes.json    (1.7.0, 12 Oct 2026)
 61af490cad678d384f01204d3cb06761811e62928798dfda7477706e9db5d82b  targets.json   (1.7.0, 13 Oct 2026: type, constellation, ra, dec for the Observatory; 30 more positions after review)
+0bc6f8ea381bfb6a73a2ec82643a4071e53cbbee72e2554d88a6638518704edf  targets.json   (1.7.3, 18 Oct 2026: five merges on Brett's word: NGC 1893 into IC 410, NGC 6910 into IC 1318, NGC 7822 / Ced 214 into Sh2-171, LDN 386 into M 16, the Squid into Sh2-129)

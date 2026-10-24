@@ -21,3 +21,6 @@ Each folder has `review.md` (the critique and proposal), `mock-X.html` (the sour
 
 then open `/tmp/mock-B.html`. The earlier panel-and-page colour mockups of the same day are
 parked in `../ux-mockups-16oct/`.
+
+`built/` holds screenshots of the page as built for 1.7.2 from `SPEC.md` (light and dark, the
+project and night panels, the phone, the stress dataset of 87 targets).

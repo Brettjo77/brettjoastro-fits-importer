@@ -291,7 +291,8 @@ def main():
         check("panel is the same version as the engine", ping.get("version") == eng.VERSION,
               f"panel {ping.get('version')} vs engine {eng.VERSION} — restart the panel")
     except Exception:
-        line("SKIP", "panel", "not running right now (plug in a camera, or use Restart)")
+        line("SKIP", "panel", "not running right now (the watcher starts it within a minute; "
+             "or use Restart FITS Importer on the Desktop)")
     return summary()
 
 

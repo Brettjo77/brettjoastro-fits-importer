@@ -61,6 +61,7 @@ way. Every release updates it.
 | Report, dashboard, mirror | ✓ | ✓ | engine |
 | Camera detection | `/Volumes/…` | drive letters, by what's on them (`Autorun\` / `MyWorks\`) | platform layer |
 | Auto-open panel when a camera is plugged in | launchd + `astro-watch.sh` | Startup-folder `astro-watch.py` | platform |
+| The panel is always on (1.7.4): started at login, camera or not, and brought back if it stops; a silent start never notifies or opens a tab; nothing while the app is in charge | `astro-watch.sh` at load, on `/Volumes` changes and every 5 min (`StartInterval`), `ensure_panel_silently` | `astro-watch.py` at logon, `keep_panel_up()` every 30 s, a failed start retried after 10 min | platform |
 | Notifications | Notification Centre | Windows toast | platform layer |
 | Eject from the panel / CLI | `diskutil` | Shell "Eject" | platform layer |
 | Twice-daily ship | LaunchAgent, 09:00 / 21:00 | Scheduled Task, 09:30 / 21:30 | installers |
@@ -80,6 +81,12 @@ way. Every release updates it.
 | Receipts published to the archive (1.7.1): each ship copies this computer's AstroLog receipts into `_verify\<side>\receipts\<scope>\`, exclusive create | ✓ | ✓ | engine |
 | A fixed drive kept out of the camera search: `ASTRO_DRIVE_EXCLUDE` (1.7.1) | — (the Mac uses /Volumes) | ✓ `"D:"` | engine |
 | An import folder under a cloud sync is warned about before copying: iCloud Desktop & Documents on the Mac, OneDrive on Windows (1.7.1) | ✓ | ✓ | engine |
+| The Observatory's facts (1.7.2): `observatory.json` carries each dataset's capture state and its source, the sample flag and the exposure note from `capture-state.json`, one row per night (morning, exposures, filters, gains, which computer imported it, what the archive verified, the Day folders here and on the archive, autostacks and working files from the inventory, the calibration linked that night in detail), the unknown names, every count of what was not counted, notices with a kind and a count, the scopes in the contract's order, and the local time | ✓ | ✓ (the archive's Day folder sizes come from the PC's inventory, so on the Mac they appear through the PC's published copy) | engine |
+| What the last scan left on a camera (1.7.2): `last-scan.json` in the state folder, written by the panel after each scan and by `--scan-only`, read into the Observatory's freshness line (`pendingImport`) | ✓ | ✓ | engine + panel |
+| `--adopt-archive` (1.7.3): frames this computer imported that reached the archive without a ship are matched to the PC's inventory by hash and recorded as adopted (ledger marks, a "shipped" row in this computer's own log); `--hash-here` reads back un-hashed copies; dry run by default | ✓ over the share | ✓ local E: | engine |
+| The phone copy of the Observatory record (1.7.6): `publish_phone` writes `observatory.json` into the AstroLog iOS app's iCloud folder after each `--projects` and on the panel's stamp check | ✓ `~/Library/Mobile Documents/iCloud~Brettjo~Astrolog/Documents` (`ASTRO_PHONE_DIR`) | ✗ no iCloud Drive on the PC; the Mac's panel carries the PC's record to the phone | engine |
+| The Observatory, history first (1.7.5): the Recent nights ledger, the scope chart with the moon row and the selected-night panel, What each scope shot, the card rows and lanes per scope, the compact header; `pendingImport.targetNames` and `elsewhereMachine` from the scan summary; the page's Refresh and Open the Panel reach the panel as `observatory-refresh` / `open-panel`; the panel hides its own row and footer while the page shows | ✓ | ✓ | engine + panel + page |
+| The Observatory's live refresh (1.7.2): `GET /api/observatory/status` answers `{generatedAtIso, rebuilding}`; `GET /observatory?json=1` returns the dataset alone; the page polls and redraws in place. The archive is looked at for the stamp every ten minutes and for the Dashboard's snapshot once a minute, never on every poll | ✓ (the share: a stale mount must not stall the panel) | ✓ local E: | panel + page |
 | Long paths (1.7.1): a copy or ship destination over 240 characters gets the `\\?\` prefix; a typed target name is capped at 80 characters | — (no limit) | ✓ `_win_long` | engine |
 | The creation date of a copied frame (1.7.1): `os.stat` birth time; `SetFile` only when installed, looked up once | ✓ | — (NTFS keeps it through `preserve_creation_time`'s Windows path) | engine |
 | A camera unplugged mid-import or mid-scan stops the run with one plain sentence; nothing that failed is marked imported (1.7.1) | ✓ `/Volumes` gone | ✓ drive letter gone | engine |
@@ -114,6 +121,7 @@ The same keys on both, in `config.json` next to the ledger:
 | `ASIAIR_EQUIPMENT` | scope table | `~/Documents/Astro/equipment.json` | same |
 | `ASTRO_ARCHIVE_MOUNT` | the archive | `/Volumes/AstroImageData` | `E:\Astro Image Data` |
 | `ASTRO_ARCHIVE_URL` | share to mount on demand | empty (set for SMB) | not used (the archive is local) |
+| `ASTRO_PHONE_DIR` | the AstroLog iOS app's iCloud folder, where the phone's copy of the Observatory record goes (1.7.6) | `~/Library/Mobile Documents/iCloud~Brettjo~Astrolog/Documents` | empty (no copy) |
 | `ASTRO_ARCHIVE_LABEL` | how the archive is named in messages | `E:\Astro Image Data` | same |
 | `ASTRO_SHIP_LOG` | this machine's ship log, in its folder under `_verify` | `shipped.jsonl` | `shipped-pc.jsonl` |
 | `ASTRO_SHIP_FOLDER` | that folder (1.7.0) | `mac` | `pc` |

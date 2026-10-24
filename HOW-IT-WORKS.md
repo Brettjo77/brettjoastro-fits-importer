@@ -20,7 +20,10 @@ ever delete from the ASIAir — is that promise applied consistently.
 ## What happens when you plug a camera in
 
 A small watcher notices the drive mount, sends a notification, and opens the
-control panel in your browser. The panel scans the camera — reading only —
+control panel in your browser. (The panel itself is always running, from
+1.7.4: the watcher starts it when you log in and brings it back if it stops,
+so `http://127.0.0.1:8765` and the Observatory are there camera or not.)
+The panel scans the camera — reading only —
 and shows you three things: which targets have new frames (newest night at
 the top), which calibration frames would pair with them, and a preview of
 exactly which folders the import would create. Nothing has been copied yet;
@@ -277,13 +280,15 @@ Nights are noon to noon, like the Day folders, and the quiet period is counted i
 
 **Where the data is** says "on this Mac" (or "on this PC") only when the frame is still in the importer's folder on this computer right now — you clear your own disks by hand, and the importer checks the disk, not its memory. "On the archive" means the ship has filed it. "On the PC (per its ledger)" means the other computer's ledger says so and this one can't look.
 
-The one fact you can set by hand is per dataset: **open** ("I'm keeping this going all season — leave it as capturing") or **complete** ("that's enough light — count it as ready now"). AstroLog will set it later; until then, make a file called `capture-state.json` in the same folder as `projects.json`, for example:
+The one fact you can set by hand is per dataset: **open** ("I'm keeping this going all season — leave it as capturing"), **complete** ("that's enough light — count it as ready now") or, from 1.7.2, **sample** ("a quick look or a test, not a project — keep it out of the queue"). AstroLog will set it later; until then, make a file called `capture-state.json` in the same folder as `projects.json`, for example:
 
 ```
-{"datasets": {"NGC7023|FRA400|Shinfield": "open", "M42|S30P|Shinfield": "complete"}}
+{"datasets": {"NGC7023|FRA400|Shinfield": "open", "M42|S30P|Shinfield": "complete",
+              "NGC6229|S30P|Shinfield": "sample",
+              "MW|S30P|Shinfield": {"state": "auto", "exposure": 10}}}
 ```
 
-The key is target id, scope id and site, exactly as `projects.json` writes them. A finished picture or a saved master still wins: an object with a final reads done whatever the file says.
+The key is target id, scope id and site, exactly as `projects.json` writes them. A finished picture or a saved master still wins: an object with a final reads done whatever the file says, and a sample with a master of yours stays a project (the list says so). The object form with `"exposure"` is for frames whose headers carry no exposure (the Seestar's Milky Way frames, say): give the sub length in seconds once, and their hours are added up and marked as "from your note" instead of showing as nothing. The Observatory shows which of these facts you set and which the 14-night rule worked out.
 
 The facts come from this computer's ledger, the PC's inventory of the archive, and the `Final Astro Images` folder.
 
@@ -305,15 +310,29 @@ On the To process tab, **To process** and **In progress** sit at the top, newest
 
 ## The Observatory: the whole archive at a glance
 
-The panel's **Observatory** tab is the Astro Archive Observatory, the page built in August 2026 from a one-off scan of the drive, now fed by the importer. It opens on an overview, the job first: what each scope captured last (its last three sessions; click a scope's name and the card becomes a calendar timeline of that scope's projects, one row per object with a dot per session, the quiet period shaded, over the last 90 nights, a year or all time), then what to process next on the PC, and under those the headline figure, the two figures that matter (to process, in progress), hours by scope and where the hours went. Then the tabs: Targets, Coverage (every target against every scope), Pipeline, Nights (a heatmap), Sky, Footprints, Equipment (the scopes) and Data health. Click a target anywhere for its story: sessions night by night, and each dataset (one object on one scope) with why it has the state it has, what to do next, and two buttons: **Open in Explorer** (**Open in Finder** on the Mac), straight to its folder on the archive, and **Show in To process**.
+The panel's **Observatory** tab is the Astro Archive Observatory, rebuilt in 1.7.2 around the way the archive is laid out: the whole archive, one project, one night.
+
+**The whole archive** is the Overview, and from 1.7.5 it opens on the history. First **Recent nights**: one row per night, newest first, one column per scope in the importer's fixed order, and in each cell what that scope captured that night: the objects, frames, hours, exposure and filter, and for the ZWO scopes the darks and flats filed with it. Nights with no frames collapse into one thin row; a scope that was not out in the range shrinks to a narrow column saying when it was last out. If a camera still holds frames that were not imported, a line above the rows says so, names the targets, and opens the Panel. Then **What each scope captured**: a column per night whose height is the hours (hatched when the hours are unknown), one stacked column for all scopes and one row per scope, the moon drawn over each night (a glow for how lit it was) at the 30-night range, four tiles (nights out, hours captured, nights with the moon under half lit, the biggest night), and a panel beside the chart for the night you select, with its hours per scope and the objects named; at 90 nights a column is a week, at a year a month. Under it **What each scope shot**: one bar per scope split by object, the objects named beneath. Then **Projects that moved lately**: each card with its ring of hours by scope, one row per scope naming it with its hours and next step, and one lane per scope of its nights. Then **Needs your attention**: the things only you can decide, each with a count and a button (names the importer doesn't know, frames with no exposure in their headers, a master in the shared Askar folder that could belong to either Askar, waiting projects with no darks or flats filed). Then **What to do next** in three columns: ready to process (biggest first), finish it (a master saved, no final yet), still capturing (soonest ready first); quick looks you flagged sit under the columns, never in them. Then where the hours went. The header is one short band: when the record was built and on which computer, how old it is, the hours of integration, and one key line of the scopes' shares, so the lists never look more settled than they are.
+
+**One project** opens from any card: one lane per scope with the same dots and band, and beside each lane three marks: capture (active, kept open by you, closed by you, quiet), processing (not started, master saved, final found) and calibration (complete, missing flats, missing darks and flats; "calibrates in the camera" for a Seestar). Under it, one row per night.
+
+**One night** opens from any dot, night row or heatmap cell: the frames, hours, exposure, filter and gain; for the ZWO scopes the darks, flats and bias filed with that night, with their exposures, gains and filters and how many the archive has verified; what sits in that Day folder on the archive (autostacks, working files); which computer imported it; and **Open folder**, straight to the night's folder on the archive.
+
+Colour always means the scope (the contract's colours, in the key at the top). A status is a glyph and a word: Still capturing, Ready to process, Finish it, Done, Quick look. The page is dark by default (night, by the scope) and light when your computer is set to light, or by the sun/moon button in the bar. On a phone the View menu replaces the tabs. The other views stay: Targets, Coverage, Pipeline (a list on narrow screens), Nights, Sky, Footprints, Equipment and Data checks, which shows the subtraction from every row in the record to the frames counted on the page.
 
 Its facts are the To process list's. `--projects` writes two files side by side from one pass, `projects.json` and `observatory.json`, so the two views never disagree; the tab reads the second. They are rebuilt after each import and each ship on the Mac, each night on the PC, and whenever you press **Refresh now** on either tab. The states are the four you know: still capturing, to process, in progress, done. Names, codes and sky positions come from `contract/targets.json`; a target name the contract doesn't know isn't on the page at all (Data health says how many, `--targets-draft` lists them). Nothing is typed in apart from `capture-state.json`, and nothing on the archive is touched.
 
 **Which computer's list you see.** The PC's is the complete one: it sees the masters on the archive and the finished pictures. Each night, after its sweep, the PC publishes its `projects.json` and `observatory.json` into its own folder on the archive (`_verify\pc`). The Mac's panel shows that published list while it is under 48 hours old, and says so at the top; otherwise it shows the Mac's own, with the Mac's limits: "in progress" needs the share mounted and "done" needs `ASTRO_FINALS_DIR`. The PC's list is complete up to the Mac's last ship (that is when the Mac's sessions reach the archive).
 
+**On the phone.** From 1.7.6 the Mac keeps a copy of the record in the AstroLog iPhone app's iCloud folder (iCloud Drive → AstroLog → `observatory.json`), refreshed after every rebuild and whenever the PC's nightly copy is newer. The app's Observatory screen reads it; iCloud carries it across within a minute or two. The importer writes that one file and nothing else there, and never touches a credential.
+
 **A copy as one file**, to open on another computer or to send: on the Mac, in Terminal, `/usr/local/bin/python3 ~/bin/astro-import.py --observatory`; on the PC, in Terminal (PowerShell), `py -3 -X utf8 "$env:LOCALAPPDATA\BrettjoAstro\bin\astro-import.py" --observatory`. It writes `observatory.html` beside `projects.json` (add a file name after `--observatory` to put it elsewhere; it will never write under the archive, over one of the importer's own files, or over a file that isn't an Observatory page).
 
 **Sky positions.** A target with no position in `contract/targets.json` is listed but sits off the sky map and the footprints. To place it, add `"ra"` (hours, as a decimal) and `"dec"` (degrees, as a decimal) to its entry, as on Andromeda: `"ra": 0.712, "dec": 41.27`. Your copy then counts as edited, so the next update leaves `targets.json.new` beside it to merge.
+
+## Frames that reached the archive without a ship
+
+Before the ship existed, frames were moved from the Mac onto the archive by hand, and the ledger was never told. It still says they were imported and verified here, and nothing else; the Space view, the status line and the Observatory count them as not on the archive, and the ship's dry run lists them as "missing on this computer". From 1.7.3, `--adopt-archive` catches the ledger up: it looks each such frame up in the PC's inventory of the archive, and a copy with the same bytes (the hash the PC computed) is proof. The ledger is then marked exactly as a ship marks a copy it found already there, and the PC's sweep keeps checking it. A copy the PC hasn't hashed yet can be read back over the share with `--hash-here` (slow), or left for the PC's nightly hashing to reach. A copy whose bytes differ is named and never adopted. The command writes nothing on the archive and, without `--apply`, nothing at all.
 
 ## When things go wrong
 

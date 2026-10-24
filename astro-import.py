@@ -55,7 +55,7 @@ from collections import defaultdict
 from datetime import date, datetime, timedelta, timezone
 
 # One version for every platform (1.5.0: the Windows 11 edition joins the Mac).
-VERSION = "1.7.1"
+VERSION = "1.7.6"
 IS_WINDOWS = os.name == "nt"
 IS_MAC = sys.platform == "darwin"
 PLATFORM = "windows" if IS_WINDOWS else ("mac" if IS_MAC else "linux")
@@ -226,7 +226,7 @@ def _test_root_guard():
              ("ASIAIR_LEGACY_NAMES", LEGACY_CUSTOM_NAMES),
              ("ASTRO_SIRIL_EXE", SIRIL_EXE), ("ASTRO_OBSERVATORY_DATASET", OBSERVATORY_DATASET),
              ("ASTRO_CONTRACT_DIR", CONTRACT_DIR), ("ASTRO_FINALS_DIR", FINALS_DIR),
-             ("ASTRO_OBSERVATORY_TEMPLATE", OBSERVATORY_TEMPLATE)]
+             ("ASTRO_OBSERVATORY_TEMPLATE", OBSERVATORY_TEMPLATE), ("ASTRO_PHONE_DIR", PHONE_DIR)]
     paths += [("SEESTAR_VOLUME", v) for v in SEESTAR_VOLUMES]
     paths += [("ASTRO_DRIVE_ROOTS", r)
               for r in (os.environ.get("ASTRO_DRIVE_ROOTS") or "").split(os.pathsep)]
@@ -274,6 +274,13 @@ DEST_DIR      = _env_path("ASIAIR_DEST", "~/Documents/Astro/ZWO ASI AIR")
 LIBRARY_DIR   = _env_path("ASIAIR_CAL_LIBRARY", "~/Documents/Astro/ASIAir Calibration Library")
 STATE_DIR     = _env_path("ASIAIR_STATE", _DEF_STATE)
 MIRROR_DIR    = _env_path("ASIAIR_MIRROR", "~/Documents/Astro/Import Status")
+# 1.7.6: the phone's copy of the Observatory record. On the Mac the AstroLog
+# iOS app's iCloud container shows up under Mobile Documents; the importer
+# writes observatory.json there and iCloud carries it to the phone. Nothing
+# else is ever written there. The PC has no iCloud Drive: empty, no copy.
+_DEF_PHONE = "~/Library/Mobile Documents/iCloud~Brettjo~Astrolog/Documents"
+PHONE_DIR = (_env_path("ASTRO_PHONE_DIR", _DEF_PHONE)
+             if (IS_MAC or os.environ.get("ASTRO_PHONE_DIR") or _CONFIG.get("ASTRO_PHONE_DIR")) else "")
 # The archive on the PC, as mounted on this Mac (SMB share). --ship files
 # verified frames there; the PC's sweep verifies them independently.
 # On Windows the archive is a local folder (the PC IS the archive machine:
@@ -3744,7 +3751,7 @@ def ship_sides():
 # What the other computer's --projects needs of a ledger row, nothing more:
 # the snapshot is a few MB for thousands of frames, not a copy of the ledger.
 _SNAPSHOT_FIELDS = ("filename", "target", "displayName", "scope", "camera", "device",
-                    "sourceType", "night", "exposureSeconds", "filter", "size", "sha256", "origin",
+                    "sourceType", "night", "exposureSeconds", "filter", "gain", "size", "sha256", "origin",
                     "archiveLocation", "archivePath", "archiveShippedAt", "archiveVerifiedAt",
                     "identityGuessed",
                     # 1.7.1: what the other computer's SCAN needs to judge a camera
@@ -3874,7 +3881,10 @@ def _calibration_links(ledger):
             continue
         copies = c.get("archive") if isinstance(c.get("archive"), dict) else {}
         out[key] = {"frameType": c["frameType"], "filename": c.get("filename"), "linkedInto": links,
-                    "shipped": [l for l in links if isinstance(copies.get(l), dict) and copies[l].get("verifiedAt")]}
+                    "shipped": [l for l in links if isinstance(copies.get(l), dict) and copies[l].get("verifiedAt")],
+                    # 1.7.2: what the night panel says about each frame
+                    "exposureSeconds": c.get("exposureSeconds"), "gain": c.get("gain"),
+                    "filter": c.get("filter") or ""}
     return out
 
 def _calibration_index(cal_maps):
@@ -3891,10 +3901,12 @@ def _calibration_index(cal_maps):
             ident = str(key).split(CAMERA_KEY_SEP, 1)[0]
             for link in c.get("linkedInto") or []:
                 if isinstance(link, str):
-                    n = idx.setdefault(link, {"biases": set(), "darks": set(), "flats": set(), "shipped": set()})
+                    n = idx.setdefault(link, {"biases": set(), "darks": set(), "flats": set(), "shipped": set(),
+                                              "_facts": {}})
                     n[kind].add(ident)
                     if link in (c.get("shipped") or []):
                         n["shipped"].add(ident)
+                    n["_facts"][ident] = (kind, c.get("exposureSeconds"), c.get("gain"), c.get("filter") or "")
     return idx
 
 def _calibration_for(idx, day_keys):
@@ -3913,6 +3925,34 @@ def _calibration_for(idx, day_keys):
                 for k in acc:
                     acc[k] |= idx[link][k]
     return {k: len(v) for k, v in acc.items()}
+
+def _calibration_detail_for(idx, day_keys):
+    """1.7.2, the night panel: beside the counts, what the linked frames are:
+    the darks' exposures and gains, the flats' filters, the biases' gains."""
+    out = {"darkExposures": set(), "darkGains": set(), "flatFilters": set(), "biasGains": set()}
+    seen = set()
+    for dk in day_keys:
+        if not isinstance(dk, str):
+            continue
+        parts = dk.split("/")
+        for i in range(1, len(parts) + 1):
+            link = "/".join(parts[:i])
+            if link in idx and link not in seen:
+                seen.add(link)
+                for kind, exp, gain, flt in (idx[link].get("_facts") or {}).values():
+                    try:
+                        if kind == "darks":
+                            if exp is not None:
+                                out["darkExposures"].add(float(exp))
+                            if gain is not None:
+                                out["darkGains"].add(int(gain))
+                        elif kind == "flats":
+                            out["flatFilters"].add(str(flt) if flt else "unrecorded")
+                        elif kind == "biases" and gain is not None:
+                            out["biasGains"].add(int(gain))
+                    except (TypeError, ValueError):
+                        continue
+    return {k: sorted(v) for k, v in out.items()}
 
 def load_ledger_snapshot(path, warnings):
     """The other computer's snapshot: (rows, meta). Rows are {} when the file
@@ -5369,6 +5409,167 @@ def slug_problem():
         return ""
     return (f"this computer's short name {ident['slug']!r} breaks the rule (a to z, 0 to 9 "
             f"and -, at most 32): change ASTRO_MACHINE_ID in config.json")
+
+def _adopt_candidates(state):
+    """Ledger frames the archive has not confirmed: verified at import (so
+    their bytes are known), not yet located or verified on the archive, not
+    tidied, not riders. Each with where its copy on this computer should be."""
+    out = []
+    for key, e in (state.ledger.get("files") or {}).items():
+        if not isinstance(e, dict) or not e.get("verifiedAtImport") or not e.get("sha256"):
+            continue
+        if e.get("archiveVerifiedAt") or e.get("archiveLocation") or e.get("tidiedAt"):
+            continue
+        if e.get("origin") in ("baseline", "backfill") or _is_unshipped_rider(e):
+            continue
+        if not e.get("filename") or not isinstance(e.get("size"), int):
+            continue
+        dest = e.get("dest")
+        here = bool(dest and os.path.isfile(os.path.join(dest, e["filename"])))
+        out.append((key, e, here))
+    return out
+
+def run_adopt_archive(state, apply=False, hash_here=False, mount=None, limit=None):
+    """--adopt-archive (1.7.3): frames this computer imported and verified
+    whose copy reached the archive without a ship (moved there by hand before
+    the ship existed), so the ledger never recorded them arriving. For each
+    such frame the PC's inventory is searched: a row with the same bytes
+    (the sha256 the PC's --hash computed) is proof, and the ledger is marked
+    as a ship marks an adopted copy (archiveLocation, archiveShippedAt, and
+    archiveVerifiedAt from the PC's hash) with a "shipped" row (adopted) in
+    this computer's own ship log, so the PC's sweep keeps checking it. A row
+    with the same name and size but no PC hash yet is read back over the
+    share only with hash_here (slow; the ship's own standard). Nothing on the
+    archive is created, renamed or removed; without apply nothing is written
+    anywhere. Returns a summary dict."""
+    mount = mount or ARCHIVE_MOUNT
+    res = {"ok": True, "candidates": 0, "adopted": 0, "readback": 0, "unproven": 0,
+           "mismatch": 0, "absent": 0, "written": False}
+    if not state.has_ledger():
+        info("Nothing has been imported on this computer, so there is nothing to adopt.")
+        return res
+    ok, why = _ship_mount(mount)
+    if not ok:
+        warn(f"Archive not reachable at {mount} ({ARCHIVE_LABEL}): {why}. Nothing adopted.")
+        res["ok"] = False
+        return res
+    inv = _latest_inventory_path()
+    if not inv:
+        warn("No archive inventory was found (the PC's --inventory writes it); nothing can be "
+             "proven, so nothing is adopted.")
+        res["ok"] = False
+        return res
+    cands = _adopt_candidates(state)
+    res["candidates"] = len(cands)
+    if not cands:
+        info("Every frame this computer imported is already located on the archive. Nothing to adopt.")
+        return res
+    wanted_sha = {e["sha256"] for _k, e, _h in cands}
+    wanted_name = {e["filename"].lower() for _k, e, _h in cands}
+    by_sha, by_name = {}, {}
+    for r in _iter_jsonl_rows(inv):
+        rel = r.get("relpath")
+        if r.get("retired") or not isinstance(rel, str) or "/" not in rel:
+            continue
+        sha = r.get("sha256") if isinstance(r.get("sha256"), str) else None
+        name = rel.rsplit("/", 1)[1].lower()
+        if sha and sha in wanted_sha:
+            by_sha.setdefault(sha, []).append(r)
+        if name in wanted_name:
+            by_name.setdefault(name, []).append(r)
+    info(f"{len(cands):,} frame(s) in this computer's ledger are not yet located on the archive; "
+         f"the inventory {os.path.basename(inv)} was read.")
+    stamp = now_stamp()
+    ship_id = uuid.uuid4().hex[:12]
+    slog = ship_log_path(mount)
+    adopted, lines = [], []
+    n_done = 0
+    for key, e, here in cands:
+        if limit and n_done >= limit:
+            break
+        name, size, sha = e["filename"], e["size"], e["sha256"]
+        hit, how = None, None
+        for r in by_sha.get(sha, []):
+            try:
+                if int(r.get("size") or -1) == size:
+                    hit, how = r, "pc-inventory-hash"
+                    break
+            except (TypeError, ValueError):
+                continue
+        if hit is None:
+            same = [r for r in by_name.get(name.lower(), [])
+                    if str(r.get("size")) == str(size)]
+            if not same:
+                res["absent"] += 1
+                continue
+            if any(isinstance(r.get("sha256"), str) and r["sha256"] != sha for r in same) \
+                    and not any(r.get("sha256") is None for r in same):
+                res["mismatch"] += 1
+                lines.append(f"{name}: a file of that name and size is on the archive but its bytes differ")
+                continue
+            if not hash_here:
+                res["unproven"] += 1
+                continue
+            for r in same:
+                if r.get("sha256"):
+                    continue
+                path = os.path.join(mount, r["relpath"].replace("/", os.sep))
+                try:
+                    if os.path.getsize(path) == size and _hash_dest_uncached(path) == sha:
+                        hit, how = r, "mac-readback" if SHIP_FOLDER != "pc" else "readback"
+                        res["readback"] += 1
+                        break
+                except OSError as ex:
+                    lines.append(f"{name}: could not read the archive copy ({ex})")
+            if hit is None:
+                res["mismatch"] += 1
+                lines.append(f"{name}: a file of that name and size is on the archive but its bytes differ")
+                continue
+        loc = hit["relpath"].replace("/", "\\")
+        adopted.append((key, e, loc, how, hit))
+        n_done += 1
+    res["adopted"] = len(adopted)
+    for ln in lines[:20]:
+        warn("  " + ln)
+    if len(lines) > 20:
+        warn(f"  ... and {len(lines) - 20} more")
+    by_target = {}
+    for _k, e, loc, how, _r in adopted:
+        t = loc.split("\\")[1] if "\\" in loc else "?"
+        by_target[t] = by_target.get(t, 0) + 1
+    for t, n in sorted(by_target.items(), key=lambda x: -x[1])[:25]:
+        log(f"  {t}: {n} frame(s)")
+    info(f"Proven on the archive: {len(adopted):,} (by the PC's hash: "
+         f"{len(adopted) - res['readback']:,}; read back here: {res['readback']:,}). "
+         f"Same name and size, not yet hashed by the PC: {res['unproven']:,}"
+         + (" (run again with --hash-here to read them back over the share)" if res["unproven"] and not hash_here else "")
+         + f". Bytes differ: {res['mismatch']:,}. Not on the archive at all: {res['absent']:,}.")
+    if not apply:
+        info("Dry run: nothing written. Add --apply to record the proven ones in the ledger.")
+        return res
+    if not adopted:
+        return res
+    _confine(slog, "the ship log")
+    os.makedirs(os.path.dirname(slog), exist_ok=True)
+    for key, e, loc, how, r in adopted:
+        _ship_row(slog, "shipped", loc, e["size"], e["sha256"], ship_id, shippedAt=stamp,
+                  adopted=True, adoptedBy=how)
+        e["archiveLocation"] = loc
+        e["archiveShippedAt"] = stamp
+        e["adoptedFromArchive"] = {"at": stamp, "by": how}
+        if how == "pc-inventory-hash":
+            e["archiveVerifiedAt"] = str(r.get("hashedAt") or stamp)
+            e["archiveVerifiedBy"] = "pc-inventory"
+        state._dirty = True
+    state.history_event("adopt-archive", adopted=len(adopted), readback=res["readback"])
+    state.save_ledger()
+    res["written"] = True
+    success(f"Recorded {len(adopted):,} frame(s) as on the archive. The PC's next sweep checks "
+            f"the adopted copies again by hash, as it does after a ship.")
+    write_ledger_snapshot(state, mount)
+    state.publish_mirror()
+    rebuild_projects_quietly(state)
+    return res
 
 def run_ship(state, dry_run=False, mount=None, checksum=True):
     mount = mount or ARCHIVE_MOUNT
@@ -9839,6 +10040,51 @@ def _say_elsewhere(scan):
              + (f"{int(age // 24)} day(s) old" if isinstance(age, (int, float)) else "undated")
              + ": frames it imported since may look new here.")
 
+SCAN_SUMMARY_FILE = "last-scan.json"
+
+def save_scan_summary(files, targets, camera=None, failed_eject=False, elsewhere=0,
+                      target_names=None, elsewhere_machine=None):
+    """1.7.2: what the last scan found still on a camera, for the Observatory's
+    freshness line. Written by the panel after each scan and by --scan-only;
+    one small file in the state folder, never anywhere else. 1.7.5: the
+    targets' display names (at most 12) and which other computer already holds
+    the 'elsewhere' frames, so the page can say what to do."""
+    path = os.path.join(STATE_DIR, SCAN_SUMMARY_FILE)
+    names = [str(n) for n in (target_names or []) if isinstance(n, str) and n.strip()][:12]
+    try:
+        _confine(path, "scan summary")
+        _atomic_write_json(path, {"schema": "scan-summary/1", "files": int(files), "targets": int(targets),
+                                  "elsewhere": int(elsewhere), "camera": camera,
+                                  "failedEject": bool(failed_eject), "seenAt": _utc_iso(),
+                                  "machine": MACHINE_LABEL, "targetNames": names,
+                                  "elsewhereMachine": elsewhere_machine if isinstance(elsewhere_machine, str) else None})
+    except Exception as e:
+        debug(f"scan summary not written: {e}")
+
+def read_scan_summary():
+    """The last scan's summary, or None when there has never been one here."""
+    d = _read_json_file(os.path.join(STATE_DIR, SCAN_SUMMARY_FILE))
+    if not isinstance(d, dict) or d.get("schema") != "scan-summary/1":
+        return None
+    try:
+        age = _hours_since(d.get("seenAt"))
+    except Exception:
+        age = None
+    def _n(v):
+        try:
+            return int(v or 0)
+        except (TypeError, ValueError):
+            return 0
+    return {"files": _n(d.get("files")), "targets": _n(d.get("targets")),
+            "elsewhere": _n(d.get("elsewhere")),
+            "camera": d.get("camera") if isinstance(d.get("camera"), str) else None,
+            "failedEject": bool(d.get("failedEject")),
+            "seenAt": d.get("seenAt") if isinstance(d.get("seenAt"), str) else None,
+            "ageHours": age, "machine": d.get("machine") if isinstance(d.get("machine"), str) else None,
+            "targetNames": [str(n) for n in (d.get("targetNames") or []) if isinstance(n, str)][:12]
+            if isinstance(d.get("targetNames"), list) else [],
+            "elsewhereMachine": d.get("elsewhereMachine") if isinstance(d.get("elsewhereMachine"), str) else None}
+
 def run_scan_only(state):
     """Tagged lines for the watcher: count / summary / storage — both devices."""
     rows, storages = [], []
@@ -9915,6 +10161,18 @@ def run_scan_only(state):
 
     n_else_all = sum(_elsewhere_count(x)[0] for x in (locals().get("scan"), locals().get("s")) if x)
     who_else = next((_elsewhere_count(x)[2] for x in (locals().get("scan"), locals().get("s")) if x and _elsewhere_count(x)[0]), None)
+    if scan or (svol and s):
+        new_names = []
+        if scan:
+            new_names += [display_name_for(state, t["name"]) for t in scan["targets"] if t["new"] and not t["skipped"]]
+        if svol and s:
+            new_names += [seestar_display(state, t["project_name"])
+                          for t in sorted(s_new, key=lambda t: -len(t["new"]))]
+            new_names += [seestar_display(state, p["mosaic_name"], ask=False) + " (panels)" for p in s_panels]
+            new_names += [str(nd.get("dest_name") or "") for nd in s_nd]
+        save_scan_summary(n_files, total_new, elsewhere=n_else_all,
+                          camera=" + ".join(x for x, ok in (("ASIAir", bool(scan)), ("Seestar", bool(svol and s))) if ok),
+                          target_names=new_names, elsewhere_machine=who_else)
     if asiair_here and not scan and not total_new:
         # the ASIAir could not be read at all: said first, even before a
         # first import (never "the first import backs everything up")
@@ -10463,8 +10721,8 @@ def load_capture_state(verbose=False):
     """The one human-set fact (spec §4): per dataset, auto / open / complete,
     keyed 'TARGET|SCOPE|SITE' as projects.json shows it. Written by AstroLog
     (step 3) or by hand; read here. Missing file means all auto. Values are
-    read whatever their case; with verbose=True returns (state, notes) and
-    the notes say what in the file was not understood."""
+    read whatever their case; with verbose=True returns (state, notes,
+    exposures) and the notes say what in the file was not understood."""
     path = os.path.join(STATE_DIR, "capture-state.json")
     d = _read_json_file(path)
     notes = []
@@ -10472,16 +10730,37 @@ def load_capture_state(verbose=False):
         notes.append("capture-state.json is there but could not be read (not valid JSON?): "
                      "every dataset counts as auto")
     ds = d.get("datasets") if isinstance(d.get("datasets"), dict) else d
-    out = {}
+    out, exposures = {}, {}
     for k, v in (ds or {}).items():
         if k == "datasets":
             continue
-        vv = v.strip().lower() if isinstance(v, str) else None
-        if isinstance(k, str) and vv in ("auto", "open", "complete"):
+        # 1.7.2: a value may be an object: {"state": "open", "exposure": 10}
+        # ('exposure' is the sub length, in seconds, for frames whose headers
+        # carry none, so their hours can be added up); and 'sample' is a
+        # fourth state: a quick look, kept out of the queue
+        state_v, exp_v = v, None
+        if isinstance(v, dict):
+            state_v, exp_v = v.get("state", "auto"), v.get("exposure")
+        vv = state_v.strip().lower() if isinstance(state_v, str) else None
+        if isinstance(k, str) and vv in ("auto", "open", "complete", "sample"):
             out[k] = vv
         else:
-            notes.append(f"capture-state.json: {k!r} = {v!r} was not understood (auto, open or complete)")
-    return (out, notes) if verbose else out
+            notes.append(f"capture-state.json: {k!r} = {v!r} was not understood (auto, open, complete or sample)")
+            continue
+        if exp_v is not None:
+            try:
+                if isinstance(exp_v, bool):
+                    raise ValueError
+                ev = float(exp_v)
+                if math.isfinite(ev) and 0 < ev <= 86400:
+                    exposures[k] = ev
+                else:
+                    raise ValueError
+            except (TypeError, ValueError):
+                notes.append(f"capture-state.json: {k!r} has an exposure that isn't a number of seconds: {exp_v!r}")
+    if verbose:
+        return out, notes, exposures
+    return out
 
 def _latest_inventory_path():
     """The archive inventory the sweep/nightly last finished: the generation
@@ -10615,6 +10894,8 @@ def _project_rows(state, extra_ledgers, warnings, metas=None, stats=None):
         ledgers.append((meta.get("machine") or os.path.basename(p), there, False, lf))
     for label, loc, own, files in ledgers:
         for key, row in files.items():
+            if stats is not None:
+                stats["rowsAll"] = stats.get("rowsAll", 0) + 1
             try:
                 if not isinstance(row, dict) or not _project_light(row):
                     continue
@@ -10716,6 +10997,12 @@ def build_projects(state, extra_ledgers=(), today=None, custom_names=None, colle
     status derived from the facts — never typed in. Pure read."""
     contract = load_contract()
     warnings = list(contract["warnings"])
+    notices = [{"kind": "contract", "count": None, "frames": None, "text": w} for w in warnings]
+
+    def _warn(kind, text, count=None, frames=None):
+        # 1.7.2: every warning is also a notice the page can count, never regex
+        warnings.append(text)
+        notices.append({"kind": kind, "count": count, "frames": frames, "text": text})
     names = custom_names if isinstance(custom_names, dict) else (state.custom_names or {})
     if today is None:
         today = date.fromisoformat(observing_night(datetime.now()))   # nights, not dates
@@ -10774,8 +11061,23 @@ def build_projects(state, extra_ledgers=(), today=None, custom_names=None, colle
                 d = datasets.setdefault(first, {"target": t, "scope": s, "nights": {},
                                                 "locations": set()})
                 n = d["nights"].setdefault(night, {"frames": 0, "integration": 0.0,
-                                                   "bytes": 0, "exps": {}, "filters": {}, "days": set()})
+                                                   "bytes": 0, "exps": {}, "filters": {}, "days": set(),
+                                                   "gains": set(), "sources": set(), "archived": 0,
+                                                   "archiveDays": set(), "noExposure": 0})
                 n["frames"] += 1
+                n["sources"].add(loc)                       # 1.7.2: which computer imported it
+                if row.get("archiveVerifiedAt"):
+                    n["archived"] += 1
+                try:
+                    if row.get("gain") is not None:
+                        n["gains"].add(int(row.get("gain")))
+                except (TypeError, ValueError):
+                    pass
+                _al = row.get("archiveLocation") or row.get("archivePath")
+                if isinstance(_al, str):
+                    _ap = [p for p in _al.replace("\\", "/").split("/") if p]
+                    if len(_ap) >= 3 and _DAY_RE.search(_ap[-2]):
+                        n["archiveDays"].add("/".join(_ap[:-1]))
                 dk = row.get("dayKey") if isinstance(row.get("dayKey"), str) else \
                     (_day_key(row["dest"]) if own and isinstance(row.get("dest"), str) else None)
                 if dk:
@@ -10789,8 +11091,12 @@ def build_projects(state, extra_ledgers=(), today=None, custom_names=None, colle
                         if secs > 0:                      # for the Observatory's drawer
                             ek = f"{secs:g}"
                             n["exps"][ek] = n["exps"].get(ek, 0) + 1
+                        else:
+                            n["noExposure"] += 1
+                    else:
+                        n["noExposure"] += 1
                 except (TypeError, ValueError, OverflowError):
-                    pass
+                    n["noExposure"] += 1
                 try:
                     sz = int(row.get("size") or 0)
                     if 0 < sz < 10 ** 12:
@@ -10825,7 +11131,7 @@ def build_projects(state, extra_ledgers=(), today=None, custom_names=None, colle
             bad_rows += 1                           # a row that is not a ledger row
     bad_rows += stats.get("bad", 0)
     if bad_rows:
-        warnings.append(f"{bad_rows} ledger row(s) could not be read and were not counted")
+        _warn("unreadable", f"{bad_rows} ledger row(s) could not be read and were not counted", count=bad_rows)
     # the calibration frames linked into each session's Day folder: this computer's
     # ledger and the other's snapshot together (a Seestar needs none of ours)
     cal_idx = _calibration_index([_calibration_links(state.ledger)]
@@ -10833,21 +11139,24 @@ def build_projects(state, extra_ledgers=(), today=None, custom_names=None, colle
     for d in datasets.values():
         for n in d["nights"].values():
             n["cal"] = _calibration_for(cal_idx, n["days"])
+            n["calDetail"] = _calibration_detail_for(cal_idx, n["days"]) if not d.get("seestar") else None
             n["days"] = sorted(n["days"])
     if unresolved:
-        warnings.append(f"{len(unresolved)} target name(s) the contract doesn't know "
-                        f"(run --targets-draft to list them); their frames are not counted")
+        _warn("unknown_names", f"{len(unresolved)} target name(s) the contract doesn't know "
+              f"(run --targets-draft to list them); their {n_unresolved:,} frames are not counted",
+              count=len(unresolved), frames=n_unresolved)
     if no_scope:
-        warnings.append(f"{no_scope} frame(s) have no scope recorded (older ASIAir rows) "
-                        f"and were not counted")
+        _warn("no_scope", f"{no_scope} frame(s) have no scope recorded (older ASIAir rows) "
+              f"and were not counted", count=no_scope, frames=no_scope)
     if no_night:
-        warnings.append(f"{no_night} frame(s) carry no night and were not counted")
+        _warn("no_night", f"{no_night} frame(s) carry no night and were not counted", count=no_night, frames=no_night)
 
     # What the archive itself shows: masters per target and root, from the
     # PC's newest inventory. Every folder that resolves to the target counts
     # (a renamed folder is still that target's), and the folder the
     # inventory saw wins for archive_rel: it is the one that exists.
     masters = {}             # (tid, root) -> [names]
+    day_sizes = {}           # 1.7.2: archive Day folder rel -> what sits in it (the night panel)
     inv_path = _latest_inventory_path()
     folder_cache = {}
     if inv_path:
@@ -10856,6 +11165,19 @@ def build_projects(state, extra_ledgers=(), today=None, custom_names=None, colle
             if r.get("retired") or not isinstance(root, str) or not isinstance(folder, str) \
                     or not isinstance(rel, str) or "/" not in rel:
                 continue
+            _rp = rel.split("/")
+            if len(_rp) >= 4 and _DAY_RE.search(_rp[2]):
+                _ds = day_sizes.setdefault("/".join(_rp[:3]), {"files": 0, "bytes": 0, "autostacks": 0,
+                                                                "autostackBytes": 0, "workingBytes": 0})
+                try:
+                    _sz = int(r.get("size") or 0)
+                except (TypeError, ValueError):
+                    _sz = 0
+                _ds["files"] += 1; _ds["bytes"] += _sz
+                if SHIP_WORKING in _rp[3:-1]:
+                    _ds["workingBytes"] += _sz
+                elif _rp[-1].startswith("Stacked_") or r.get("kind") == "stack":
+                    _ds["autostacks"] += 1; _ds["autostackBytes"] += _sz
             if (root, folder) not in folder_cache:
                 t, _how = resolve_target(contract, folder, names)
                 folder_cache[(root, folder)] = t["id"] if t else None
@@ -10868,20 +11190,21 @@ def build_projects(state, extra_ledgers=(), today=None, custom_names=None, colle
             if _desk_kind(name, rel.rsplit("/", 1)[0]) == "master" and not _PL_CAL_RE.search(rel):
                 masters.setdefault((tid, root), []).append(name)
     elif not os.path.isdir(ARCHIVE_MOUNT):
-        warnings.append("the archive isn't mounted, so its inventory (masters, In progress) "
-                        "wasn't checked")
+        _warn("inventory_missing", "the archive isn't mounted, so its inventory (masters, In progress) "
+              "wasn't checked")
     else:
-        warnings.append("no archive inventory was found; masters (In progress) "
-                        "were not checked — run --inventory on the PC first")
+        _warn("inventory_missing", "no archive inventory was found; masters (In progress) "
+              "were not checked — run --inventory on the PC first")
 
     finals, finals_note = _scan_finals(contract)
     if finals is None:
-        warnings.append(f"finished pictures were not checked: {finals_note}")
+        _warn("finals_unchecked", f"finished pictures were not checked: {finals_note}")
     elif finals_note:
-        warnings.append(finals_note)
+        _warn("finals_note", finals_note)
 
-    capture_state, cs_notes = load_capture_state(verbose=True)
-    warnings.extend(cs_notes)
+    capture_state, cs_notes, cs_exposures = load_capture_state(verbose=True)
+    for w in cs_notes:
+        _warn("capture_state_bad", w)
     per_target = {}
     for (tid, sid), d in datasets.items():
         per_target.setdefault(tid, []).append((sid, d))
@@ -10896,6 +11219,15 @@ def build_projects(state, extra_ledgers=(), today=None, custom_names=None, colle
             days_since = (today - date.fromisoformat(last)).days
             key = f"{tid}|{sid}|{site}"
             cstate = capture_state.pop(key, "auto")
+            sample = cstate == "sample"               # 1.7.2: a quick look, Brett's flag
+            if sample:
+                cstate = "auto"                       # its status is still worked out
+            exp_note = cs_exposures.get(key)
+            if exp_note:
+                for n in d["nights"].values():        # frames with no exposure recorded: Brett's note
+                    if n["noExposure"] and n["integration"] == 0:
+                        n["integration"] = n["frames"] * exp_note
+                        n["integrationFromNote"] = True
             folder = folder_names.get((tid, root))
             n_in_root = sum(1 for _sid2, d2 in group
                             if (d2["scope"].get("archive_root") or "") == root)
@@ -10930,20 +11262,29 @@ def build_projects(state, extra_ledgers=(), today=None, custom_names=None, colle
             else:
                 status = "capturing" if days_since <= QUIET_PERIOD_DAYS else "ready_to_process"
 
+            if sample and (own_masters or done_files):
+                _warn("capture_state_bad", f"capture-state.json marks {key} as a sample, but a master or a "
+                      f"finished picture names it, so it stays a project")
+                sample = False
             entry = {
                 "key": key, "scope": sid, "scope_name": s.get("name"), "site": site,
                 "status": status, "capture_state": cstate,
+                "capture_state_source": "capture-state.json" if (cstate != "auto" or sample) else "rule",
+                "sample": sample,
                 "nights": len(nights), "frames": sum(n["frames"] for n in d["nights"].values()),
                 "integration_seconds": round(sum(n["integration"] for n in d["nights"].values())),
+                "frames_without_exposure": sum(n["noExposure"] for n in d["nights"].values()),
                 "first_session": nights[0], "last_session": last,
                 "locations": sorted(d["locations"]),
                 "archive_rel": f"{root}/{folder}" if folder else None,
             }
+            if exp_note:
+                entry["exposure_override"] = exp_note
             if status == "capturing" and cstate != "open":
                 entry["ready_on"] = (date.fromisoformat(last)
                                      + timedelta(days=QUIET_PERIOD_DAYS + 1)).isoformat()
             if d.get("seestar"):
-                entry["calibration"] = {"applies": False}    # the Seestar calibrates itself
+                entry["calibration"] = {"applies": False, "mode": "inCamera"}   # the Seestar calibrates itself
             else:
                 cal = {"biases": 0, "darks": 0, "flats": 0, "shipped": 0}
                 with_cal = 0
@@ -10953,11 +11294,39 @@ def build_projects(state, extra_ledgers=(), today=None, custom_names=None, colle
                         cal[k] += c.get(k, 0)
                     if c.get("darks") or c.get("flats"):
                         with_cal += 1
-                entry["calibration"] = {"applies": True, **cal, "nights_with": with_cal,
-                                        "nights": len(nights),
+                entry["calibration"] = {"applies": True, "mode": "tracked", **cal, "nights_with": with_cal,
+                                        "nights": len(nights), "nights_without": len(nights) - with_cal,
                                         "missing": [k for k in ("darks", "flats") if not cal[k]]}
+            # 1.7.2: the night panel's rows, one per night, oldest first
+            entry["sessions"] = []
+            for nt in nights:
+                n = d["nights"][nt]
+                try:
+                    morning = (date.fromisoformat(nt) + timedelta(days=1)).isoformat()
+                except ValueError:
+                    morning = None
+                sess = {"night": nt, "morning": morning, "frames": n["frames"],
+                        "seconds": round(n["integration"]),
+                        "integrationFromNote": bool(n.get("integrationFromNote")),
+                        "framesWithoutExposure": n["noExposure"],
+                        "exposures": dict(n.get("exps", {})), "filters": dict(n.get("filters", {})),
+                        "gains": sorted(n["gains"]), "importedOn": sorted(n["sources"]),
+                        "archived": n["archived"], "dayKeys": list(n["days"]),
+                        "archiveDays": sorted(n["archiveDays"]),
+                        "calibration": (None if d.get("seestar") else
+                                        {**{k: (n.get("cal") or {}).get(k, 0) for k in ("darks", "flats", "biases", "shipped")},
+                                         **(n.get("calDetail") or {})})}
+                on_disk = [day_sizes[a] for a in sess["archiveDays"] if a in day_sizes]
+                if on_disk:
+                    sess["archive"] = {k: sum(x[k] for x in on_disk)
+                                       for k in ("files", "bytes", "autostacks", "autostackBytes", "workingBytes")}
+                entry["sessions"].append(sess)
             if own_masters:
                 entry["masters"] = sorted(own_masters)[:20]
+                if "shared-folder" in notes:
+                    entry["master_owner_uncertain"] = {
+                        "candidates": [x["id"] for x in scopes_for_root(contract, root)],
+                        "masters": sorted(m for m in own_masters if not _rigs_in(m, contract))[:20]}
             if done_files:
                 entry["finals"] = sorted(set(done_files))[:20]
             if notes:
@@ -10967,17 +11336,30 @@ def build_projects(state, extra_ledgers=(), today=None, custom_names=None, colle
             p["datasets"].append(entry)
 
     for key in sorted(capture_state):
-        warnings.append(f"capture-state.json names a dataset that doesn't exist: {key}")
+        _warn("capture_state_bad", f"capture-state.json names a dataset that doesn't exist: {key}")
     projects = []
     for tid, p in out_projects.items():
         ds = p["datasets"]
-        rank = min(PROJECT_STATUS_ORDER.index(e["status"]) for e in ds)
+        real = [e for e in ds if not e.get("sample")] or ds     # a quick look never drives the project
+        rank = min(PROJECT_STATUS_ORDER.index(e["status"]) for e in real)
         p["status"] = PROJECT_STATUS_ORDER[rank]
-        p["to_process"] = any(e["status"] == "ready_to_process" for e in ds)
+        p["to_process"] = any(e["status"] == "ready_to_process" and not e.get("sample") for e in ds)
         p["last_captured"] = max(e["last_session"] for e in ds)
         p["integration_seconds"] = sum(e["integration_seconds"] for e in ds)
         projects.append(p)
     projects.sort(key=lambda p: p["last_captured"], reverse=True)
+    # a warning added by a helper (the snapshot loader) is a notice too
+    _pool, _ordered = list(notices), []
+    for w in warnings:                            # one notice per warning, in the warnings' order
+        hit = next((n for n in _pool if n["text"] == w), None)
+        if hit is not None:
+            _pool.remove(hit)
+        else:
+            kind = ("snapshot_age" if ("record on the archive is" in w or "newer importer" in w or "snapshot" in w)
+                    else "other")
+            hit = {"kind": kind, "count": None, "frames": None, "text": w}
+        _ordered.append(hit)
+    notices[:] = _ordered
     if isinstance(collect, dict):               # build_observatory reads the working dicts
         collect["datasets"] = datasets
         collect["contract"] = contract
@@ -10986,14 +11368,17 @@ def build_projects(state, extra_ledgers=(), today=None, custom_names=None, colle
             "as_of_night": today.isoformat(),
             "quiet_period_days": QUIET_PERIOD_DAYS,
             "sources": {"ledgers": ledger_names, "rows": rows_read,
+                        "rows_all": stats.get("rowsAll", 0),
                         "dropped": {"unknown_names": n_unresolved, "no_scope": no_scope,
                                     "no_night": no_night, "unreadable": bad_rows,
                                     "duplicates": n_dupes},
+                        "unknown_names": sorted(unresolved)[:60],
+                        "unknown_name_count": len(unresolved),
                         "snapshots": metas,
                         "inventory": os.path.basename(inv_path) if inv_path else None,
                         "finals_dir": FINALS_DIR or None,
                         "capture_state": bool(capture_state)},
-            "warnings": warnings, "projects": projects}
+            "warnings": warnings, "notices": notices, "projects": projects}
 
 # ── The Observatory (1.7.0): the Astro Archive Observatory's page, fed live ──
 # The dataset shape is the artifact's (29 Aug 2026 build_dataset.py), so its
@@ -11045,10 +11430,18 @@ def _obs_inventory_at(name):
     m = re.search(r"(\d{4})(\d{2})(\d{2})T(\d{2})(\d{2})(\d{2})Z", str(name or ""))
     return f"{m.group(1)}-{m.group(2)}-{m.group(3)}T{m.group(4)}:{m.group(5)}:{m.group(6)}+00:00" if m else None
 
-def observatory_from(doc, collect, state=None, now=None):
+def observatory_from(doc, collect, state=None, now=None, pending=None):
     """The Observatory's dataset from one build_projects() result and the
-    working dicts it collected. No I/O."""
+    working dicts it collected. No I/O. `pending` is the last scan's summary
+    (read_scan_summary), so the page can say what is still on a camera."""
     datasets = (collect or {}).get("datasets") or {}
+    contract = (collect or {}).get("contract") or {}
+    scope_order = {x.get("id"): i + 1 for i, x in enumerate(contract.get("scopes") or []) if isinstance(x, dict)}
+    scope_kind = {}
+    for x in contract.get("scopes") or []:
+        if isinstance(x, dict):
+            camn = str(((x.get("match") or {}).get("camera")) or x.get("name") or "")
+            scope_kind[x.get("id")] = "seestar" if "seestar" in camn.lower() else "askar"
     here_side, there_side = ship_sides()
     here_label = "PC" if here_side == "pc" else "Mac"
     there_label = "PC" if there_side == "pc" else "Mac"
@@ -11075,7 +11468,9 @@ def observatory_from(doc, collect, state=None, now=None):
         hours = round(secs / 3600, 2)
         sc = scopes.setdefault(cam, {"camera": cam, "id": sid, "frames": 0, "hours": 0.0,
                                      "nights": set(), "bytes": 0, "first": None, "last": None,
-                                     "colour": OBS_COLOURS.get(str(s.get("colour") or "").lower())})
+                                     "colour": OBS_COLOURS.get(str(s.get("colour") or "").lower()),
+                                     "order": scope_order.get(sid, 99),
+                                     "kind": scope_kind.get(sid) or ("seestar" if d.get("seestar") else "askar")})
         sc["frames"] += frames; sc["hours"] += secs / 3600; sc["bytes"] += nbytes
         sc["nights"].update(nights)
         nights_all.update(nights)
@@ -11092,12 +11487,20 @@ def observatory_from(doc, collect, state=None, now=None):
                 filters[k] = filters.get(k, 0) + v
             for k, v in n.get("exps", {}).items():
                 exps[k] = exps.get(k, 0) + v
+            _sess = next((x for x in (e.get("sessions") or []) if x.get("night") == nt), {})
             sessions.append({"target": name, "camera": cam, "night": nt, "frames": n["frames"],
                              "hours": round(n["integration"] / 3600, 3),
                              "filters": nf, "exps": dict(n.get("exps", {})),
                              "askar": {}, "stackOnly": False,
                              "cal": None if d.get("seestar") else
-                             {k: (n.get("cal") or {}).get(k, 0) for k in ("darks", "flats", "biases")}})
+                             {k: (n.get("cal") or {}).get(k, 0) for k in ("darks", "flats", "biases")},
+                             # 1.7.2: the night panel
+                             "morning": _sess.get("morning"), "gains": _sess.get("gains") or [],
+                             "importedOn": _sess.get("importedOn") or [], "archived": _sess.get("archived", 0),
+                             "framesWithoutExposure": _sess.get("framesWithoutExposure", 0),
+                             "integrationFromNote": bool(_sess.get("integrationFromNote")),
+                             "dayKeys": _sess.get("dayKeys") or [], "archiveDays": _sess.get("archiveDays") or [],
+                             "calDetail": _sess.get("calibration"), "archive": _sess.get("archive")})
         state_id = OBS_STATE.get(e["status"], "captured")
         where = _obs_where(e.get("locations"), here_label, there_label)
         masters, finals = e.get("masters") or [], e.get("finals") or []
@@ -11143,12 +11546,22 @@ def observatory_from(doc, collect, state=None, now=None):
                 "firstNight": e["first_session"], "lastNight": e["last_session"],
                 "filters": filters, "exposures": exps, "panels": [], "gains": {}, "askar": {},
                 "where": where, "status": e["status"], "readyOn": e.get("ready_on"),
-                "evidence": evidence, "action": action, "calibration": e.get("calibration")}
+                "evidence": evidence, "action": action, "calibration": e.get("calibration"),
+                # 1.7.2: facts the page used to regex out of the evidence
+                "captureState": e.get("capture_state", "auto"),
+                "captureStateSource": e.get("capture_state_source", "rule"),
+                "sample": bool(e.get("sample")),
+                "framesWithoutExposure": e.get("frames_without_exposure", 0),
+                "exposureOverride": e.get("exposure_override"),
+                "mastersNamed": list(masters), "finalsNamed": list(finals),
+                "masterOwnerUncertain": e.get("master_owner_uncertain"),
+                "sessions": e.get("sessions") or []}
         card = {"target": name, "label": name + (" (mosaic)" if d.get("mosaic") else ""),
                 "camera": cam, "state": state_id, "hours": hours, "nights": len(nights),
                 "lights": frames, "lastNight": e["last_session"], "readyOn": e.get("ready_on"),
                 "evidence": evidence, "action": action, "source": "worked out by the importer",
-                "badges": where, "rel": arel}
+                "badges": where, "rel": arel,
+                "captureState": e.get("capture_state", "auto"), "sample": bool(e.get("sample"))}
         ra, dec = _obs_number(t.get("ra")), _obs_number(t.get("dec"))
         if ra is None or dec is None:
             ra = dec = None
@@ -11168,9 +11581,12 @@ def observatory_from(doc, collect, state=None, now=None):
         tg["sessions"] += len(nights)
         tg["firstNight"] = min(x for x in (tg["firstNight"], e["first_session"]) if x)
         tg["lastNight"] = max(x for x in (tg["lastNight"], e["last_session"]) if x)
-        if e["status"] != "done":
+        if e["status"] != "done" and not e.get("sample"):
             tg["pendingProgrammes"] += 1
         rank = PROJECT_STATUS_ORDER.index(e["status"])
+        if e.get("sample"):
+            rank += 10                              # a quick look never drives the project's state
+            tg.setdefault("_sampleState", state_id)
         if rank < tg["_rank"]:                      # the project's state: its least advanced dataset
             tg["_rank"], tg["state"] = rank, state_id
     out_targets = []
@@ -11178,7 +11594,7 @@ def observatory_from(doc, collect, state=None, now=None):
         tg["nights"] = len(tg["nights"]); tg["hours"] = round(tg["hours"], 2); tg.pop("_rank")
         out_targets.append(tg)
     out_scopes = []
-    for sc in sorted(scopes.values(), key=lambda x: x["camera"]):
+    for sc in sorted(scopes.values(), key=lambda x: (x["order"], x["camera"])):
         sc["nights"] = len(sc["nights"]); sc["hours"] = round(sc["hours"], 1)
         out_scopes.append(sc)
     src = doc.get("sources") or {}
@@ -11211,7 +11627,8 @@ def observatory_from(doc, collect, state=None, now=None):
     health.append({"severity": "info", "title": "Built from the importer's own record, nothing typed in",
                    "detail": f"Worked out on this {here_label} from " + ", ".join(read_from)
                              + f": {src.get('rows', 0):,} ledger rows read. The one human-set fact is "
-                               f"capture-state.json (open / complete)."})
+                               f"capture-state.json (open / complete / sample, and a sub length for frames "
+                               f"with no exposure recorded)."})
     for w in doc.get("warnings") or []:
         health.append({"severity": "warn", "title": "Warning from the project layer", "detail": w})
     dropped = src.get("dropped") or {}
@@ -11236,8 +11653,26 @@ def observatory_from(doc, collect, state=None, now=None):
               "note": "rounded per scope", "ok": abs(sum(x["hours"] for x in out_scopes) - tot_secs / 3600) < 0.1 * max(1, len(out_scopes))}]
     now = now or datetime.now()
     when_txt = _obs_date(now.date().isoformat()) + now.strftime(", %H:%M")
+    try:
+        local = now.astimezone() if now.tzinfo is None else now
+        local_iso, tzname = local.isoformat(timespec="seconds"), (local.tzname() or "")
+    except (ValueError, OverflowError, OSError):
+        local_iso, tzname = None, ""
+    rows_all = int(src.get("rows_all") or 0)
+    not_counted = {"unknownNames": {"names": int(src.get("unknown_name_count") or 0),
+                                    "frames": int(dropped.get("unknown_names") or 0)},
+                   "noScope": int(dropped.get("no_scope") or 0), "noNight": int(dropped.get("no_night") or 0),
+                   "unreadable": int(dropped.get("unreadable") or 0),
+                   "duplicates": int(dropped.get("duplicates") or 0),
+                   "notLightFrames": max(0, rows_all - int(src.get("rows") or 0)
+                                         - int(dropped.get("unreadable") or 0))}
     return {
         "schema": "observatory/1", "generatedAt": when_txt, "generatedAtIso": _utc_iso(),
+        "generatedAtLocal": local_iso, "timezone": tzname,
+        "notCounted": not_counted, "unknownNames": list(src.get("unknown_names") or []),
+        "notices": list(doc.get("notices") or []),
+        "pendingImport": pending if isinstance(pending, dict) else None,
+        "scopeOrder": [x["id"] for x in out_scopes],
         "machine": f"{MACHINE_LABEL} · {ARCHIVE_LABEL} · live from the importer",
         "sourceNote": f"Worked out on this {here_label} on {when_txt} from " + ", ".join(read_from)
                       + f" ({src.get('rows', 0):,} ledger rows). The statuses are the project layer's, the "
@@ -11263,7 +11698,7 @@ def build_observatory(state, extra_ledgers=(), today=None, custom_names=None):
     """The Observatory's dataset, from the same facts as projects.json (one pass)."""
     collect = {}
     doc = build_projects(state, extra_ledgers, today, custom_names, collect=collect)
-    return observatory_from(doc, collect, state)
+    return observatory_from(doc, collect, state, pending=read_scan_summary())
 
 def observatory_html(dataset, template=None):
     """The Observatory page with the dataset in place of __DATASET__. Raises
@@ -11419,6 +11854,70 @@ def load_observatory(prefer_published=False):
                              "ageHours": (doc.get("sources") or {}).get("published_age_hours")}
     return doc if doc and doc.get("schema") == "observatory/1" and isinstance(doc.get("targets"), list) else own
 
+def publish_phone(doc=None):
+    """1.7.6: write the Observatory record the phone reads into the AstroLog
+    app's iCloud folder (PHONE_DIR): the record this computer would serve (the
+    PC's complete copy while it is fresh, else its own). Only when the record
+    changed since the last copy; atomic; never anything else in that folder.
+    Returns True when a new copy was written. Quiet about every failure: the
+    phone copy is a convenience, never a reason to stop a job."""
+    if not PHONE_DIR:
+        return False
+    try:
+        if doc is None:
+            doc = load_observatory(prefer_published=True)
+        if not isinstance(doc, dict) or doc.get("schema") != "observatory/1" \
+                or not isinstance(doc.get("targets"), list):
+            return False
+        dst = os.path.join(PHONE_DIR, "observatory.json")
+        _confine(dst, "the phone copy")
+        # iCloud Drive off (no Mobile Documents at all): nowhere to write
+        if not os.path.isdir(os.path.dirname(os.path.dirname(PHONE_DIR))):
+            return False
+        old = _read_json_file(dst) if os.path.isfile(dst) else {}
+        if isinstance(old, dict) and old.get("generatedAtIso") == doc.get("generatedAtIso") \
+                and (old.get("servedFrom") or {}).get("machine") == (doc.get("servedFrom") or {}).get("machine"):
+            return False
+        os.makedirs(PHONE_DIR, exist_ok=True)
+        _atomic_write_json(dst, doc)
+        debug(f"phone copy written → {dst}")
+        return True
+    except Exception as e:
+        debug(f"phone copy not written: {e}")
+        return False
+
+_OBS_STAMP_CACHE = {"key": None, "value": None}
+
+def observatory_stamp():
+    """1.7.2: generatedAtIso of the Observatory dataset this computer would
+    serve (its own, or the PC's recent published copy), re-read only when one
+    of the two files changes. The page polls the panel for it."""
+    def _st(p):
+        try:
+            st = os.stat(p)
+            return (p, st.st_mtime_ns, st.st_size)
+        except OSError:
+            return (p, None, None)
+    own = _st(os.path.join(STATE_DIR, "observatory.json"))
+    bucket = int(time.time() // 600)                  # the archive (an SMB share on the Mac) is looked
+    prev = _OBS_STAMP_CACHE["key"] or ()              # at every ten minutes, never on every poll
+    if len(prev) == 3 and prev[0] == own and prev[2] == bucket:
+        return _OBS_STAMP_CACHE["value"]
+    try:
+        other = _st(_verify_path(ARCHIVE_MOUNT, ship_sides()[1], "observatory.json"))
+    except Exception:
+        other = None
+    key = (own, other, bucket)
+    if _OBS_STAMP_CACHE["key"] != key:
+        try:
+            d = load_observatory(prefer_published=True) or {}
+            _OBS_STAMP_CACHE["value"] = d.get("generatedAtIso")
+            publish_phone(d)                          # 1.7.6: a newer record reaches the phone
+        except Exception:
+            _OBS_STAMP_CACHE["value"] = None
+        _OBS_STAMP_CACHE["key"] = key
+    return _OBS_STAMP_CACHE["value"]
+
 def publish_projects(mount=None):
     """The archive PC's nightly job: put this computer's projects.json and
     observatory.json in ITS OWN _verify folder on the archive, so the Mac's
@@ -11496,7 +11995,7 @@ def run_projects(state, extra_ledgers=(), dry_run=False):
     # the Observatory's dataset, from the same pass: the two views never disagree
     obs_out = os.path.join(STATE_DIR, "observatory.json")
     _confine(obs_out, "--projects")
-    _atomic_write_json(obs_out, observatory_from(doc, collect, state))
+    _atomic_write_json(obs_out, observatory_from(doc, collect, state, pending=read_scan_summary()))
     success(f"Wrote {out} and observatory.json")
     # The mirror copy, only into a mirror this computer has already claimed
     # (publish_mirror claims; this never does — one writer per folder)
@@ -11508,6 +12007,8 @@ def run_projects(state, extra_ledgers=(), dry_run=False):
             _atomic_write_json(mpath, doc)
         except OSError:
             pass
+    if publish_phone():                                   # 1.7.6
+        info("Phone copy refreshed (the AstroLog app's iCloud folder).")
     return doc
 
 def main():
@@ -11550,6 +12051,14 @@ def main():
     p.add_argument("--ship", action="store_true",
                    help="file verified frames into the archive on the PC over the mounted share "
                         "(no camera needed; safe to repeat; --dry-run lists only)")
+    p.add_argument("--adopt-archive", action="store_true",
+                   help="frames this computer imported that reached the archive without a ship "
+                        "(moved there by hand): record them in the ledger with proof from the PC's "
+                        "inventory hashes; a dry run unless --apply (1.7.3)")
+    p.add_argument("--apply", action="store_true", help="with --adopt-archive: write the ledger")
+    p.add_argument("--hash-here", action="store_true",
+                   help="with --adopt-archive: read back over the share the copies the PC has not "
+                        "hashed yet (slow)")
     p.add_argument("--no-ship", action="store_true",
                    help="do not file frames to the archive after this import")
     p.add_argument("--space", action="store_true",
@@ -11741,6 +12250,15 @@ def main():
         else:
             locked(lambda: run_tidy_stacks(state))
         return
+    if args.adopt_archive:
+        if not acquire_lock("adopt"):
+            sys.exit(1)
+        try:
+            reload()
+            got = run_adopt_archive(state, apply=args.apply, hash_here=args.hash_here)
+        finally:
+            release_lock()
+        sys.exit(0 if got.get("ok") else 1)
     if args.ship:
         if not acquire_lock("ship"):
             sys.exit(1)

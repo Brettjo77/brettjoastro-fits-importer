@@ -341,6 +341,17 @@ try:
     check("T2 scan lists the Seestar project with device tag",
           names.get("M 42", {}).get("device") == "seestar" and names["M 42"]["new"] == 2,
           json.dumps(names.get("M 42", {})))
+    try:
+        with open(os.path.join(env.state, "last-scan.json"), encoding="utf-8") as f:
+            _ls = json.load(f)
+    except (OSError, ValueError) as e:
+        _ls = {"error": str(e)}
+    check("OB5 (1.7.5) the scan summary the panel writes names every target with new frames by its display name, "
+          "biggest first, and says no other computer holds any (none has a record here)",
+          _ls.get("targetNames") == [t["display"] for t in sorted((t for t in s["scan"]["targets"] if t["new"] and not t["skipped"]),
+                                                                  key=lambda t: -t["new"])]
+          and len(_ls.get("targetNames") or []) >= 3 and _ls.get("elsewhereMachine") is None,
+          json.dumps(_ls)[:300])
     check("T2 storage covers both volumes",
           len(s["scan"]["disks"]) == 2 and s["scan"]["disk"] is not None,
           json.dumps(s["scan"].get("disks", [])))
@@ -1714,6 +1725,15 @@ try:
           and "e.source!==fr.contentWindow" in _pagen and 'd.kind==="archive-open"' in _pagen
           and 'd.kind==="archive-show"' in _pagen and 'd.kind==="observatory-ready"' in _pagen,
           _pagen[:200])
+    check("OB5 (1.7.5) the panel's own 'Worked out … Refresh now' row goes once the page says it is ready (the "
+          "page carries the freshness line and Refresh), comes back while the frame loads or is a note; the page's "
+          "Refresh and 'Open the Panel' arrive as observatory-refresh and open-panel and nothing else is accepted; "
+          "the footer line is off the Observatory tab; 'see Data checks', never 'Data health'",
+          lambda: 'd.kind==="observatory-refresh"' in _pagen and '$("#obsRefresh").click()' in _pagen
+          and 'd.kind==="open-panel"' in _pagen and "data-tab=\"panel\"]'); if(b) b.click();" in _pagen
+          and '$("#obsHead").style.display="none"' in _pagen and '$("#obsHead").style.display=""' in _pagen
+          and 'b.dataset.tab==="observatory"?"none":""' in _pagen and "(see Data health)" not in _pagen,
+          _pagen[:200])
     os.makedirs(os.path.join(envn.archive, "_verify", "mac"))
     with open(os.path.join(envn.archive, "_verify", "mac", "ledger-snapshot.json"), "w") as f:
         json.dump({"schema": "ledger-snapshot/1", "machine": "Mac", "machineId": "mac", "machineUid": "m",
@@ -1743,22 +1763,76 @@ try:
           and _dsn.get("schema") == "observatory/1" and [x["name"] for x in _dsn.get("targets", [])] == ["Andromeda Galaxy (M 31)"]
           and len(_dsn.get("sessions", [])) == 1 and _dsn["inputs"]["snapshot"]["machine"] == "Mac"
           and _dsn["targets"][0]["statusCards"][0]["state"] == "stacked" and "<" not in _m.group(1)
-          and "What each scope captured last" in body,
+          and "What each scope captured" in body and "Needs your attention" in body,
           f"{code} {xfo} rb={json.dumps(_rb)[:200]} " + (json.dumps(_dsn)[:400] if _dsn else body[:300]))
-    check("OB the first card has two faces: each scope's name is a button to its timeline of projects "
-          "(paintScopeCard, 90 nights / a year / all time, the quiet-period band), the hero rows and the "
-          "Equipment cards open it too (openScope), and 'all scopes' comes back",
-          lambda: "function paintScopeCard(cam)" in body and "function openScope(cam)" in body
-          and body.count("openScope(c") >= 2 and 'el("button","scopebtn")' in body
-          and "all scopes" in body and '["90","90 nights",90],["365","a year",365],["all","all time",' in body
-          and "quiet period: the last " in body and "has been doing" in body,
+    check("OB (1.7.2) every scope row opens the scope: a scope's name in the six-scope strip, its share-bar "
+          "slice and its Equipment card open the scope panel (openScope -> scopePanelFor: one row per object, "
+          "90 nights / a year / everything, the quiet band), and every dot opens the night panel (openNight)",
+          lambda: "function openScope(cam)" in body and "function scopePanelFor(cam" in body
+          and body.count("openScope(") >= 4 and "function openNight(cam,night,target,host" in body
+          and "function nightPanelFor(cam,night,target)" in body
+          and '["90","90 nights",90],["365","a year",365],["all","everything",' in body
+          and "what it has been doing" in body and "Timeline of its projects" in body,
           body[:200])
-    check("OB (16 Oct) the page normalises a thin dataset (missing keys filled once, an unknown state falls back, "
-          "the drawer is a dialog, the tooltip is hidden from readers)",
-          lambda: "if(D[k]==null) D[k]=v;" in body and "reconciliation:[],warnings:[]" in body
-          and "stageOf(" in body and "function showDrawer(" in body
-          and '<div class="tt" id="tt" aria-hidden="true">' in body,
+    check("OB5 (1.7.5) the page opens on the history: the Recent nights ledger (a week / 14 / 30 nights, blank "
+          "nights collapsed, the pending-import line naming the targets with 'Open the Panel to import'), the scope "
+          "chart rebuilt (tiles, the moon from the date, all-scopes columns, one row per scope, a selected night with "
+          "Previous / Next, resting scopes folded), What each scope shot, cards with one row per scope and one lane "
+          "per scope, one freshness line, Refresh and Key in the bar; no 'Data health', no stamp in the bar",
+          lambda: "function renderRecent(card,changed)" in body and 'id="pendLine"' in body
+          and "Open the Panel to import" in body and "no frames on any scope" in body
+          and "nights after it are not in this list" in body and "function chartData(N)" in body
+          and "function moonAt(night)" in body and "29.530588853" in body
+          and "Nights with the moon under half lit" in body and "Biggest night" in body
+          and "Resting this period" in body and "length is hours imaged" in body
+          and "function renderShotBars(box,d)" in body and "What each scope shot" in body
+          and "function latestTxt(t)" in body and "mosaic on the " in body and '"srow"' in body
+          and "Built on the " in body and 'id="refreshBtn"' in body and 'id="keyBtn"' in body
+          and 'kind:"observatory-refresh"' in body and 'kind:"open-panel"' in body
+          and "ready to process from " in body and "Data health" not in body and 'id="asof"' not in body
+          and "a grey dot is a night on more than one" not in body and "http://" not in body.replace("http://www.w3.org/2000/svg", ""),
           body[:200])
+    check("OB (16 Oct, 1.7.2) the page normalises a thin dataset (missing keys filled once, a null pendingImport "
+          "stays null so the page never claims a camera is empty, an unknown state falls back), the drawer is a "
+          "dialog, the tooltip is hidden from readers, and scope colour comes only from the dataset (no palette)",
+          lambda: "function normalise(d)" in body and "reconciliation:[],warnings:[]" in body
+          and "v===null?null:" in body and "stageOf(" in body and "function showDrawer(" in body
+          and '<div class="tt" id="tt" aria-hidden="true" role="tooltip">' in body
+          and "const CAMORDER" not in body and "--cam-s30p" not in body
+          and 'const col=cam=>(BY[cam]&&BY[cam].colour)||"var(--muted)"' in body,
+          body[:200])
+    # 1.7.2: the page's live refresh: the status carries the Observatory's stamp, and the dataset
+    # alone is one GET away (same token and origin rules as the page)
+    _stq = {"observatory": api("/api/observatory/status", url=URLN)}
+    with urllib.request.urlopen(URLN + "/observatory?json=1&t=2", timeout=30) as resp:
+        _dsj = json.loads(resp.read().decode())
+    check("OB (1.7.2) /api/observatory/status carries the Observatory's stamp (the dataset's generatedAtIso) and "
+          "whether a rebuild is running, and /observatory?json=1 returns the dataset itself with the new facts",
+          lambda: isinstance(_stq.get("observatory"), dict) and _stq["observatory"]["generatedAtIso"] == _dsn.get("generatedAtIso")
+          and _stq["observatory"]["rebuilding"] is False
+          and _dsj.get("schema") == "observatory/1" and _dsj.get("generatedAtIso") == _dsn.get("generatedAtIso")
+          and isinstance(_dsj.get("notCounted"), dict) and isinstance(_dsj.get("notices"), list)
+          and "scopeOrder" in _dsj and "pendingImport" in _dsj
+          and _dsj["targets"][0]["programmes"][0].get("captureState") == "auto"
+          and isinstance(_dsj["targets"][0]["programmes"][0].get("sessions"), list),
+          json.dumps([_stq.get("observatory"), {k: _dsj.get(k) for k in ("schema", "notCounted", "scopeOrder", "pendingImport")}])[:600])
+    # the review round of 17 Oct: a scan with no camera leaves no scan summary; what is still on a
+    # camera is THIS computer's last scan, merged at serve time even into a published record
+    api("/api/scan", {}, url=URLN)
+    _t0 = time.time()
+    while time.time() - _t0 < 60 and api("/api/state", url=URLN).get("status") != "idle":
+        time.sleep(0.3)
+    _no_sum = not os.path.isfile(os.path.join(envn.state, "last-scan.json"))
+    with open(os.path.join(envn.state, "last-scan.json"), "w") as f:
+        json.dump({"schema": "scan-summary/1", "files": 3559, "targets": 29, "camera": "Seestar",
+                   "failedEject": True, "seenAt": "2026-10-16T08:50:00+00:00", "machine": "PC"}, f)
+    with urllib.request.urlopen(URLN + "/observatory?json=1&t=3", timeout=30) as resp:
+        _dsp = json.loads(resp.read().decode())
+    check("OB (review, 1.7.2) a scan with no camera writes no scan summary (so the page says 'not checked', never "
+          "'nothing left'); this computer's last scan is merged into the served record at serve time",
+          lambda: _no_sum and (_dsp.get("pendingImport") or {}).get("files") == 3559
+          and _dsp["pendingImport"]["failedEject"] is True and isinstance(_dsp["pendingImport"].get("ageHours"), (int, float)),
+          json.dumps([_no_sum, _dsp.get("pendingImport")])[:400])
     # every script block of the page parses (node), so a slip in the template can't blank the tab
     import shutil as _sh2
     _node = _sh2.which("node") or next((p for p in ("/opt/node22/bin/node", "/usr/local/bin/node")

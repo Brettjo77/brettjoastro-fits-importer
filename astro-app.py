@@ -164,6 +164,12 @@ class App:
             return True
         return all(os.path.basename(str(u)) in els for u in names)
 
+    def _pending_names(self):
+        """1.7.5: the targets with new frames on the camera, display names,
+        biggest first, for the Observatory's 'still on the camera' line."""
+        ts = [t for t in (self.scan or {}).get("targets") or [] if t.get("new") and not t.get("skipped")]
+        return [str(t.get("display") or t.get("name") or "") for t in sorted(ts, key=lambda t: -int(t.get("new") or 0))]
+
     @staticmethod
     def _sides():
         """This computer's name and the other's, as the engine labels them."""
@@ -517,6 +523,16 @@ class App:
                     if t.get(k):
                         self.labels[t[k]] = t["display"]
             self.scanned_at = time.strftime("%H:%M:%S")
+            try:                                     # 1.7.2: the Observatory's "still on a camera" line
+                if scan_a is not None or s:
+                        eng.save_scan_summary(self.scan["newFiles"], self.scan["newTargets"],
+                                          camera=" + ".join(x for x, ok in (("ASIAir", scan_a is not None), ("Seestar", bool(s))) if ok) or None,
+                                          failed_eject=bool(getattr(self, "eject_failed", False)),
+                                          elsewhere=self.scan["elsewhereFiles"],
+                                          target_names=self._pending_names(),
+                                          elsewhere_machine=(self.scan.get("other") or {}).get("machine"))
+            except Exception as e:
+                self.logline(f"⚠ scan summary not saved: {e}")
             o = self.scan["other"]
             who = self._other_name((o or {}).get("machine"))
             self.logline(f"▸ Scan: {self.scan['newTargets']} target(s) with new frames, "
@@ -755,6 +771,16 @@ class App:
                     self.logline(f"⚠ Could not eject {label} — is an import still running?")
                     bad += 1
             self.last_result = "Ejected." if not bad else "Eject failed."
+            self.eject_failed = bool(bad)        # 1.7.2: the Observatory's freshness line says so
+            if bad and self.scan:
+                try:
+                    eng.save_scan_summary(self.scan["newFiles"], self.scan["newTargets"],
+                                          camera=" + ".join(l for l, _v in vols) or None,
+                                          failed_eject=True, elsewhere=self.scan.get("elsewhereFiles", 0),
+                                          target_names=self._pending_names(),
+                                          elsewhere_machine=(self.scan.get("other") or {}).get("machine"))
+                except Exception as e:
+                    self.logline(f"⚠ scan summary not saved: {e}")
             if ok and not bad:
                 self.scan = None
         return self._run("ejecting", fn)
@@ -882,6 +908,13 @@ class SafeStatus:
 
 STATUS = SafeStatus()
 
+def _observatory_stamp():
+    """The engine's stamp of the Observatory dataset this panel would serve."""
+    try:
+        return eng.observatory_stamp()
+    except Exception:
+        return None
+
 
 class DashboardCache:
     """The Dashboard tab's page (1.7.1 review): built by one thread, never on
@@ -908,14 +941,17 @@ class DashboardCache:
             threading.Thread(target=self._loop, daemon=True).start()
 
     def refresh(self):
+        DashboardCache._snap_at = 0.0         # look at the archive again on the next signature
         self._kick.set()
 
     def wait_fresh(self, timeout):
         """Before serving: when the inputs changed since the last build (a
         click right after an import), ask the worker for one and wait for it
         a little, so the tab shows the new state; still nothing is built on
-        the request thread, and during an operation the last build is served."""
+        the request thread, and during an operation the last build is served.
+        A request looks at the archive once (the poll looks once a minute)."""
         self.ready.wait(timeout)
+        DashboardCache._snap_at = 0.0
         if self.signature() == self._seen:
             return
         gen = self._n
@@ -924,13 +960,22 @@ class DashboardCache:
         while time.time() < end and self._n == gen:
             time.sleep(0.05)
 
+    _snap_at, _snap_path = 0.0, None
+
     @staticmethod
     def signature():
-        """(ledger mtime, size, snapshot mtime, size): the two inputs."""
-        try:
-            snap = eng.other_ledger_snapshot()
-        except Exception:
-            snap = None
+        """(ledger mtime, size, snapshot mtime, size): the two inputs. The
+        snapshot sits on the archive (an SMB share on the Mac), so it is looked
+        for at most once a minute: a stale mount must never stall the poll."""
+        now = time.time()
+        if now - DashboardCache._snap_at < 60:
+            snap = DashboardCache._snap_path
+        else:
+            try:
+                snap = eng.other_ledger_snapshot()
+            except Exception:
+                snap = None
+            DashboardCache._snap_at, DashboardCache._snap_path = now, snap
         sig = []
         for p in (os.path.join(eng.STATE_DIR, "ledger.json"), snap):
             try:
@@ -1185,6 +1230,11 @@ class Handler(BaseHTTPRequestHandler):
             STATUS.ready.wait(5)               # just after start: the first computation
             self._json(STATUS.value if STATUS.value is not None
                        else eng.status_unknown("still working it out"))
+        elif self.path == "/api/observatory/status":
+            # 1.7.2: the Observatory page polls this (cheap, cached by the files'
+            # mtimes) to know when its record changed or a rebuild is running
+            self._json({"generatedAtIso": _observatory_stamp(),
+                        "rebuilding": APP.status == "rebuilding", "busy": APP.status})
         elif self.path == "/api/report-text":
             self._json({"text": APP.report_text or ""})
         elif self.path == "/archive" or self.path.startswith("/archive?"):
@@ -1228,6 +1278,17 @@ class Handler(BaseHTTPRequestHandler):
             # a problem is a readable note, never a refused frame.
             try:
                 dataset = eng.load_observatory(prefer_published=True)
+                if isinstance(dataset, dict):
+                    # 1.7.2: what is still on a camera is THIS computer's last scan, even
+                    # when the record served is the PC's published copy
+                    pend = eng.read_scan_summary()
+                    if pend is not None:
+                        dataset["pendingImport"] = pend
+                if "json=1" in urllib.parse.urlsplit(self.path).query.split("&"):
+                    # 1.7.2: the dataset alone, for the page's in-place refresh
+                    self._json(dataset if dataset is not None else {"error": "not built yet"},
+                               200 if dataset is not None else 404)
+                    return
                 if dataset is None:
                     corrupt = False
                     try:
@@ -1879,6 +1940,8 @@ document.querySelectorAll(".tabs button").forEach(b=>b.addEventListener("click",
   document.querySelectorAll(".tabs button").forEach(x=>x.classList.remove("on"));
   b.classList.add("on");
   ["panel","report","dash","observatory","archive"].forEach(t=>$("#tab-"+t).style.display = b.dataset.tab===t?"":"none");
+  // 1.7.5: the Observatory fills the window; the panel's footer line stays off it
+  document.querySelectorAll(".foot").forEach(f=>f.style.display = b.dataset.tab==="observatory"?"none":"");
   if(b.dataset.tab==="dash" && !dashShown) showDash();
   if(b.dataset.tab==="observatory") loadObservatory();
   if(b.dataset.tab==="report") loadReport();
@@ -2326,7 +2389,7 @@ function projectsHtml(pj, opts){
     if(d.status==="capturing") return `last night ${last}${d.capture_state==="open"?" · kept open by you":rf?" · ready from "+fmtNight(rf):""}`;
     return `nothing new since ${last}${d.capture_state==="complete"?" · marked complete by you":""}`; };
   const sect=(status,open)=>{
-    const list=vis.filter(r=>r.d.status===status)
+    const list=vis.filter(r=>r.d.status===status&&!r.d.sample)
       .sort((a,b)=>String(b.d.last_session||"").localeCompare(String(a.d.last_session||"")));
     if(!list.length) return "";
     return `<details class="ad-sec"${open?" open":""}><summary class="eyebrow">${PROJ_STATUS[status]} · ${list.length}</summary>`+
@@ -2394,6 +2457,7 @@ function renderProjects(){
 }
 function loadObservatory(){
   $("#obsNote").textContent="Working it out…";
+  $("#obsHead").style.display="";          // shown while the frame loads or is a note (1.7.5)
   $("#obsFrame").src="/observatory?t="+Date.now();
 }
 // The frame loaded but said nothing (a note page, not the Observatory): the
@@ -2417,7 +2481,13 @@ window.addEventListener("message",async e=>{
   const d=e.data;
   if(d.kind==="observatory-ready"){
     const from=d.servedFrom&&d.servedFrom.machine?` · the ${esc(d.servedFrom.machine)}'s complete list`:"";
-    $("#obsNote").textContent=`Worked out ${d.generatedAt||"?"}${from}${d.warnings?` · ${d.warnings} warning${d.warnings===1?"":"s"} (see Data health)`:""}`;
+    $("#obsNote").textContent=`Worked out ${d.generatedAt||"?"}${from}${d.warnings?` · ${d.warnings} warning${d.warnings===1?"":"s"} (see Data checks)`:""}`;
+    // 1.7.5: the page carries its own freshness line and Refresh, so this row goes
+    $("#obsHead").style.display="none";
+  } else if(d.kind==="observatory-refresh"){
+    $("#obsRefresh").click();              // the page's Refresh now: the same rebuild (1.7.5)
+  } else if(d.kind==="open-panel"){
+    const b=document.querySelector('.tabs button[data-tab="panel"]'); if(b) b.click();
   } else if(d.kind==="archive-open" && typeof d.rel==="string"){
     let res; try{ res=await api("/api/archive/open",{rel:d.rel}); }catch(err){ res={ok:false,error:"The FITS Importer isn't answering."}; }
     try{ fr.contentWindow.postMessage({kind:"archive-opened",rel:d.rel,ok:!!(res&&res.ok),error:res&&res.error||""},location.origin); }catch(err){}

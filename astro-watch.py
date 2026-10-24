@@ -41,6 +41,12 @@ ENGINE_PATH = os.path.join(HERE, "astro-import.py")
 APP_PATH = os.path.join(HERE, "astro-app.py")
 POLL_S = float(os.environ.get("ASTRO_WATCH_POLL_S", "3"))
 FLAP_GUARD_S = int(os.environ.get("ASTRO_FLAP_GUARD_S", "600"))
+# The panel is always on (1.7.4): the watcher starts it when it starts, camera
+# or not, and looks every KEEP_PANEL_S whether it is still answering. When a
+# start fails it says so once and tries again after PANEL_RETRY_S, never in a
+# tight loop. The Observatory is then there whenever Brett opens it.
+KEEP_PANEL_S = float(os.environ.get("ASTRO_KEEP_PANEL_S", "30"))
+PANEL_RETRY_S = float(os.environ.get("ASTRO_PANEL_RETRY_S", "600"))
 
 _spec = importlib.util.spec_from_file_location("astro_engine_w", ENGINE_PATH)
 eng = importlib.util.module_from_spec(_spec)
@@ -113,6 +119,31 @@ def start_panel():
         if panel_up():
             return True
         time.sleep(0.5)
+    return False
+
+
+_panel_retry_at = 0.0
+
+
+def keep_panel_up():
+    """The panel is always on: start it if it is not answering. True when it
+    is up (already, or now). Nothing is notified and no browser is opened:
+    existing tabs reconnect by themselves. While the app owns the machine the
+    watcher never starts the web panel. A start that fails is logged once,
+    with the Restart button named, and not tried again for PANEL_RETRY_S."""
+    global _panel_retry_at
+    if eng.app_owner():
+        return False
+    if panel_up():
+        return True
+    if time.time() < _panel_retry_at:
+        return False
+    wlog("panel not running — starting it silently")
+    if start_panel():
+        return True
+    _panel_retry_at = time.time() + PANEL_RETRY_S
+    wlog(f"panel did not come up — trying again in {int(PANEL_RETRY_S // 60)} min; "
+         "'Restart FITS Importer' on the Desktop starts it now and shows why")
     return False
 
 
@@ -250,8 +281,11 @@ def main(argv=None):
         return 0
     if not single_instance():
         return 0
-    wlog(f"watcher {eng.VERSION} started (poll {POLL_S}s)")
+    wlog(f"watcher {eng.VERSION} started (poll {POLL_S}s; the panel is kept up, "
+         f"checked every {KEEP_PANEL_S:g}s)")
     st = load_state()
+    keep_panel_up()                            # camera or not: the Observatory is there
+    last_keep = time.time()
     while True:
         try:
             poll_once(st,
@@ -259,6 +293,9 @@ def main(argv=None):
                                                           open_browser=not args.no_browser),
                       on_removed=lambda previous: wlog("cameras removed"),
                       on_rearrived=lambda found: on_arrival(found, st, repeat=True))
+            if time.time() - last_keep >= KEEP_PANEL_S:
+                last_keep = time.time()
+                keep_panel_up()
         except Exception as e:                           # never die on a hiccup
             wlog(f"watcher error: {e}")
         time.sleep(POLL_S)
