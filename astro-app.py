@@ -2355,7 +2355,8 @@ function projWhere(k){
   W[self+"-unchecked"]="on this "+SIDES.here+" (per its ledger)"; W[oth+"-unchecked"]="on the "+SIDES.there+" (per its ledger)";
   return W[k]||k;
 }
-const fmtHours=s=>!s?"":s<360?Math.round(s/60)+" min":(s/3600).toFixed(1)+" h";
+// one format for durations (Observatory_UX_Plan §9.1, 25 Oct): minutes under an hour, one decimal from an hour
+const fmtHours=s=>!s?"":s<3600?Math.max(1,Math.round(s/60))+" min":(s/3600).toFixed(1)+" h";
 const fmtWhen=iso=>{ const t=new Date(String(iso||"")); if(isNaN(t)) return ""; const d=t.getDate(), m=MONTHS[t.getMonth()], y=t.getFullYear(); return `${d} ${m} ${y} at ${String(t.getHours()).padStart(2,"0")}:${String(t.getMinutes()).padStart(2,"0")}`; };
 const PROJ_STATUS={ready_to_process:"To process",in_progress:"In progress",capturing:"Still capturing",done:"Done"};
 function projectsHtml(pj, opts){
@@ -2383,17 +2384,24 @@ function projectsHtml(pj, opts){
     const bits=[c.darks?`${c.darks} dark${c.darks===1?"":"s"}`:"", c.flats?`${c.flats} flat${c.flats===1?"":"s"}`:"", c.biases?`${c.biases} bias`:""].filter(Boolean);
     const miss=(c.missing||[]).length?` · no ${c.missing.join(" or ")}`:"";
     return `calibration: ${bits.join(" · ")}${miss}`; };
+  // phase 1 (25 Oct, honest numbers): the engine's own fields when the list carries them (an older list has none)
+  const isSample=d=>!!d.sample||d.status==="sample";                      // the rule's sample (status "sample") or Brett's flag
+  const readySince=d=>String(d.readySince||d.ready_since||"").slice(0,10);
+  const newFrames=d=>+(d.newFramesSinceFinal!=null?d.newFramesSinceFinal:d.new_frames_since_final)||0;
+  const finalDate=d=>String(d.finalDate||d.final_date||"").slice(0,10);
+  const rules=(doc.rules&&typeof doc.rules==="object")?doc.rules:{};
+  const sampleMin=Number.isFinite(+rules.sampleMinutes)&&+rules.sampleMinutes>0?+rules.sampleMinutes:(Number.isFinite(+rules.sample_minutes)&&+rules.sample_minutes>0?+rules.sample_minutes:30);
+  // ONE order (§6.3), the engine's dataset_sort_key and the Observatory's orderDatasets mirrored exactly: the most
+  // recent capture first; captured the same night, the newest ready_since first; then the most hours; then the name
+  const orderRows=list=>list.slice().sort((a,b)=>String(b.d.last_session||"").localeCompare(String(a.d.last_session||""))||readySince(b.d).localeCompare(readySince(a.d))
+    ||((+b.d.integration_seconds||0)-(+a.d.integration_seconds||0))||String(a.name).toLowerCase().localeCompare(String(b.name).toLowerCase()));
   const reason=d=>{ const last=fmtNight(d.last_session), rf=readyFrom(d);
-    if(d.status==="done") return `finished picture${d.finals&&d.finals[0]?": "+d.finals[0]:""}`;
+    if(typeof d.reason==="string"&&d.reason.trim()) return d.reason.trim()+(d.status==="done"&&newFrames(d)>0?` · new frames since ${finalDate(d)?fmtNight(finalDate(d)):"the finished picture"}`:"");
+    if(d.status==="done") return `finished picture${d.finals&&d.finals[0]?": "+d.finals[0]:""}${newFrames(d)>0?` · new frames since ${finalDate(d)?fmtNight(finalDate(d)):"the finished picture"}`:""}`;
     if(d.status==="in_progress") return `master saved on the archive${d.masters&&d.masters[0]?": "+d.masters[0]:""}${(d.attribution||[]).includes("shared-folder")?" (shared Askar folder: may be the other Askar's)":""}`;
     if(d.status==="capturing") return `last night ${last}${d.capture_state==="open"?" · kept open by you":rf?" · ready from "+fmtNight(rf):""}`;
-    return `nothing new since ${last}${d.capture_state==="complete"?" · marked complete by you":""}`; };
-  const sect=(status,open)=>{
-    const list=vis.filter(r=>r.d.status===status&&!r.d.sample)
-      .sort((a,b)=>String(b.d.last_session||"").localeCompare(String(a.d.last_session||"")));
-    if(!list.length) return "";
-    return `<details class="ad-sec"${open?" open":""}><summary class="eyebrow">${PROJ_STATUS[status]} · ${list.length}</summary>`+
-      list.map(r=>{
+    return `nothing new since ${last}${d.capture_state==="complete"?" · marked complete by you":(readySince(d)?" · ready since "+fmtNight(readySince(d)):"")}`; };
+  const rowHtml=r=>{
         const d=r.d, locs=Array.isArray(d.locations)?d.locations:[];
         const where=locs.map(l=>PROJ_WHERE[l]||l).join(" and ");
         const facts=[scopeOf(d), where].filter(Boolean).join(" · ");
@@ -2405,19 +2413,27 @@ function projectsHtml(pj, opts){
         return `<div class="ad-row${deskSel&&deskSel===d.archive_rel?" on":""}"${sel}>
           <div class="tmain"><div class="tname">${esc(r.name)}</div><div class="tmeta">${esc(facts)}</div><div class="tnote">${esc(reason(d))}${calText(d)?` · <span class="${(d.calibration.missing||[]).length||(!d.calibration.darks&&!d.calibration.flats)?"ad-calmiss":""}">${esc(calText(d))}</span>`:""}</div></div>
           <div class="tstats"><div class="big">${esc(fmtHours(d.integration_seconds))}</div><div class="small">${esc(nights+frames)}</div></div>${btn}</div>`;
-      }).join("")+"</details>";
+      };
+  const sect=(status,open)=>{
+    const list=orderRows(vis.filter(r=>r.d.status===status&&!isSample(r.d)));   // samples leave every section and count (§6.2)
+    if(!list.length) return "";
+    return `<details class="ad-sec"${open?" open":""}><summary class="eyebrow">${PROJ_STATUS[status]} · ${list.length}</summary>`+list.map(rowHtml).join("")+"</details>";
   };
+  // the samples: one closed group at the bottom, never in a count
+  const sampSect=()=>{ const list=orderRows(vis.filter(r=>isSample(r.d))); if(!list.length) return "";
+    return `<details class="ad-sec ad-samples"><summary class="eyebrow">Samples · ${list.length}</summary><p class="ad-note">Under ${sampleMin} minutes of integration, or flagged by you as a quick look: set aside from every count and queue.</p>`+list.map(rowHtml).join("")+"</details>"; };
   const when=(doc.generated_at||"").slice(0,10), whenFull=fmtWhen(doc.generated_at);
   const snaps=(doc.sources&&Array.isArray(doc.sources.snapshots))?doc.sources.snapshots.filter(m=>m&&m.rows):[];
   const snapNote=snaps.map(m=>`${esc(m.machine||"the other computer")}'s record as of ${esc(fmtNight(String(m.at||"").slice(0,10))||"an unknown time")}${typeof m.age_hours==="number"&&m.age_hours>=36?` (${Math.floor(m.age_hours/24)} day${Math.floor(m.age_hours/24)===1?"":"s"} old)`:""}`).join("; ");
   const warns=(doc.warnings||[]).map(w=>/doesn't know|could not be read|day\(s\) old|newer importer/.test(w)?`<p class="ad-warn">⚠ ${esc(w)}</p>`:`<p class="ad-note">⚠ ${esc(w)}</p>`).join("");
   const scopeSel=`<select id="deskScope" aria-label="Scope"><option value="">All scopes (${rows.length})</option>${Object.keys(scopes).sort().map(k=>`<option value="${esc(k)}"${k===pick?" selected":""}>${esc(k)} (${scopes[k]})</option>`).join("")}</select>`;
   const head=`<div class="ad-head">${scopeSel}<button type="button" id="deskRefresh">Refresh now</button></div>`;
-  const legend=`<p class="ad-legend">Each ASIAir row also says what calibration (darks, flats, bias) is linked to its lights; the Seestar calibrates itself. <strong>To process</strong>: no new frames for ${quiet} nights and no master saved. <strong>In progress</strong>: a master of yours is in the object's folder on the archive. <strong>Still capturing</strong>: frames within the last ${quiet} nights, or kept open by you. <strong>Done</strong>: a finished picture in Final Astro Images names the object and the scope.</p>`;
-  const body=sect("ready_to_process",true)+sect("in_progress",false)+sect("capturing",false)+sect("done",false);
-  const cap=rows.filter(r=>r.d.status==="capturing"), done=rows.filter(r=>r.d.status==="done").length;
+  const legend=`<p class="ad-legend">Each ASIAir row also says what calibration (darks, flats, bias) is linked to its lights; the Seestar calibrates itself. <strong>To process</strong>: no new frames for ${quiet} nights and no master saved, newest ready first. <strong>In progress</strong>: a master of yours is in the object's folder on the archive. <strong>Still capturing</strong>: frames within the last ${quiet} nights, or kept open by you. <strong>Done</strong>: a finished picture in Final Astro Images names the object and the scope. <strong>Samples</strong>: under ${sampleMin} minutes of integration, or your quick-look flag; set aside from every count and queue. Each section is most recent capture first, the same order as the Observatory.</p>`;
+  const body=sect("ready_to_process",true)+sect("in_progress",false)+sect("capturing",false)+sect("done",false)+sampSect();
+  const real=rows.filter(r=>!isSample(r.d)), nSamp=rows.length-real.length;
+  const cap=real.filter(r=>r.d.status==="capturing"), done=real.filter(r=>r.d.status==="done").length;
   const soonest=cap.map(r=>readyFrom(r.d)).filter(Boolean).sort()[0];
-  const tail=rows.length?`<p class="ad-note">${cap.length} still capturing${soonest?` (the first is ready from ${esc(fmtNight(soonest))})`:""}, ${done} done.</p>`
+  const tail=rows.length?`<p class="ad-note">${cap.length} still capturing${soonest?` (the first is ready from ${esc(fmtNight(soonest))})`:""}, ${done} done${nSamp?`, ${nSamp} sample${nSamp===1?"":"s"} set aside`:""}.</p>`
     :`<p class="ad-note">No captures were counted on this computer yet.</p>`;
   const pub=doc.sources&&doc.sources.published_by?` This is the ${esc(String(doc.sources.published_by).toUpperCase()==="PC"?"PC":"Mac")}'s list (it sees the masters and the finished pictures), published on the archive; complete up to the other computer's last ship.`:"";
   return `<div class="ad-note" id="deskProjMsg" aria-live="polite">Worked out ${when?esc(fmtNight(when)):"at an unknown time"}${whenFull?` (${esc(whenFull)})`:""}${snapNote?` from ${snapNote}`:""}.${pub}</div>`

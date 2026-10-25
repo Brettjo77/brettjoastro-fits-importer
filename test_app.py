@@ -1617,7 +1617,7 @@ try:
     statuses = set(re.findall(r'sect\("[^"]+","([a-z_]+)"\)', page)) | \
         set(re.findall(r'status==="([a-z_]+)"', page))
     check("PL every status string the page uses is one the engine writes",
-          statuses and statuses <= {"capturing", "ready_to_process", "in_progress", "done"},
+          statuses and statuses <= {"capturing", "ready_to_process", "in_progress", "done", "sample"},   # "sample" since phase 1 (25 Oct)
           str(statuses))
     pj0 = api("/api/projects", url=URLD)
     check("PL /api/projects before --projects has run: ok false, so the tab says to run it "
@@ -1692,7 +1692,10 @@ envn = teh.Env("NL", asiair=False, seestar=False)
 shutil.copytree(os.path.join(BUILD, "contract"), os.path.join(envn.root, "contract"))
 shutil.copy(os.path.join(BUILD, "astro-observatory.html"), os.path.join(envn.root, "astro-observatory.html"))
 envn.env.update({"ASTRO_CONTRACT_DIR": os.path.join(envn.root, "contract"), "ASTRO_SHIP_FOLDER": "pc",
-                 "ASTRO_OBSERVATORY_TEMPLATE": os.path.join(envn.root, "astro-observatory.html")})
+                 "ASTRO_OBSERVATORY_TEMPLATE": os.path.join(envn.root, "astro-observatory.html"),
+                 # the fixture's one 10 s frame must still read as a real dataset, not a
+                 # sample (the 1.8.0 rule); the HN checks cover samples with their own fixture
+                 "ASTRO_SAMPLE_MINUTES": "0"})
 os.makedirs(os.path.join(envn.archive, "S30P"), exist_ok=True)
 PORTN = int(envn.env["ASTRO_PANEL_PORT"])
 URLN = f"http://127.0.0.1:{PORTN}"
@@ -1851,6 +1854,222 @@ try:
         check("OB the dataset block parses with a browser's JSON.parse (node)", rj.returncode == 0, rj.stderr[-200:])
     else:
         skip("OB the Observatory page's script blocks parse (needs node)")
+    # ── HN: phase 1, honest numbers (25 Oct 2026, Observatory_UX_Plan §6) ──────────────────────
+    # The page's pure layer (orderDatasets, pipelineGroups, stateTotals, ruleLine, finalsChecks,
+    # statesKeptText, newFramesNote, the §9.1 formats) is cut out of the SERVED page and run in node,
+    # and the panel's projectsHtml is rendered from the SAME datasets written the projects.json way,
+    # so one fixture proves the two lists agree. The expected order is worked out by hand from the
+    # rule (most recent capture first; a ready list newest readySince first; ties by hours), not by
+    # either implementation.
+    import datetime as _hn_dt
+    _hn_year = _hn_dt.date.today().year
+    _hn_date = lambda dow_d_mon, year: dow_d_mon + ("" if year == _hn_year else " %d" % year)   # "Fri 16 Oct", the year only when not this year
+    _HN = [   # one dataset per row: the target, its scope, the engine's facts and phase 1 fields; `old` is the row's 1.7.6 shape
+        dict(t="Wizard Nebula (NGC 7380)", tid="wiz", sc="FRA400", cam="Askar FRA400", status="ready_to_process",
+             h=12.5, f=900, n=5, last="2026-10-01", readySince="2026-10-16", reason="ready since Fri 16 Oct · 12.5 h on the FRA400"),
+        dict(t="Wizard Nebula (NGC 7380)", tid="wiz", sc="S30P", cam="Seestar S30 Pro", status="capturing",
+             h=0.75, f=600, n=2, last="2026-10-20", reason="still capturing · ready from Wed 4 Nov"),
+        dict(t="Black Eye Galaxy (M 64)", tid="m64", sc="S50", cam="Seestar S50", status="ready_to_process",         # the same night and ready day as the Wizard: more hours wins
+             h=29.4, f=3000, n=9, last="2026-10-01", readySince="2026-10-16", reason="ready since Fri 16 Oct · 29.4 h on the S50"),
+        dict(t="Great Globular (M 13)", tid="m13", sc="S30P", cam="Seestar S30 Pro", status="ready_to_process",       # closed by hand that night: an older readySince sorts after
+             h=4.0, f=400, n=2, last="2026-10-01", readySince="2026-10-01", captureState="complete", reason="ready since Thu 1 Oct · 4.0 h on the S30 Pro"),
+        dict(t="Helix Nebula (NGC 7293)", tid="hel", sc="107PHQ", cam="Askar 107PHQ", status="in_progress",
+             h=6.0, f=500, n=3, last="2026-10-18", masters=["masterLight_FRA.xisf"], reason="master in the folder · 6.0 h on the 107PHQ"),
+        dict(t="Beehive Cluster (M 44)", tid="bee", sc="FRA400", cam="Askar FRA400", status="done",
+             h=3.2, f=200, n=2, last="2026-10-19", finals=["Beehive FRA400.jpg"], finalDate="2026-10-16", newFramesSinceFinal=True, reason="finished · final of Fri 16 Oct"),
+        dict(t="NGC 6229", tid="n6229", sc="S30P", cam="Seestar S30 Pro", status="sample", sample=True,                 # the rule's sample (3 min): status "sample" since phase 1
+             h=0.05, f=30, n=1, last="2026-10-21", reason="sample · 3 min on the S30 Pro", old=dict(status="capturing", sample=False)),
+        dict(t="Betelgeuse", tid="betel", sc="S50", cam="Seestar S50", status="sample", sample=True, captureState="sample",   # Brett's quick-look flag
+             h=0.1, f=36, n=1, last="2026-09-01", reason="sample · 6 min on the S50", old=dict(status="ready_to_process")),
+        dict(t="Tadpoles Nebula (IC 410)", tid="tad", sc="S30P", cam="Seestar S30 Pro", status="capturing",
+             h=1.5, f=540, n=1, last="2026-10-22", readyOn="2026-11-06"),
+    ]
+    _HN_EXPECT = [("ready_to_process", "Black Eye Galaxy (M 64)", "Seestar S50"), ("ready_to_process", "Wizard Nebula (NGC 7380)", "Askar FRA400"),
+                  ("ready_to_process", "Great Globular (M 13)", "Seestar S30 Pro"), ("in_progress", "Helix Nebula (NGC 7293)", "Askar 107PHQ"),
+                  ("capturing", "Tadpoles Nebula (IC 410)", "Seestar S30 Pro"), ("capturing", "Wizard Nebula (NGC 7380)", "Seestar S30 Pro"),
+                  ("done", "Beehive Cluster (M 44)", "Askar FRA400")]
+    _HN_RULES = {"quietDays": 10, "sampleMinutes": 20, "activeWindowNights": 30}      # not the defaults, so the line proves it reads them
+
+    def _hn_obs(rows, **top):
+        """the Observatory record (observatory/1) for the rows: programmes under their targets"""
+        tg = {}
+        for r in rows:
+            t = tg.setdefault(r["tid"], {"id": r["tid"], "name": r["t"], "programmes": [], "statusCards": [], "codes": [], "cameras": [],
+                                         "hours": 0, "lights": 0, "nights": 0, "lastNight": ""})
+            p = {"camera": r["cam"], "status": r["status"], "hours": r["h"], "lights": r["f"], "nights": r["n"], "lastNight": r["last"],
+                 "firstNight": r["last"], "captureState": r.get("captureState", "auto"), "captureStateSource": "rule", "sample": r.get("sample", False),
+                 "mastersNamed": r.get("masters", []), "finalsNamed": r.get("finals", [])}
+            for k in ("readySince", "reason", "finalDate", "newFramesSinceFinal", "readyOn"):
+                if k in r:
+                    p[k] = r[k]
+            t["programmes"].append(p); t["cameras"].append(r["cam"]); t["hours"] += r["h"]; t["lights"] += r["f"]; t["nights"] += r["n"]
+            t["lastNight"] = max(t["lastNight"], r["last"])
+        d = {"schema": "observatory/1", "asOfNight": "2026-10-23", "quietPeriodDays": 14, "targets": list(tg.values()), "sessions": [], "scopes": []}
+        d.update(top)
+        return d
+
+    def _hn_pj(rows, **top):
+        """the same datasets as projects.json (the panel's list)"""
+        pj = {}
+        for r in rows:
+            t = pj.setdefault(r["tid"], {"target_id": r["tid"], "name": r["t"], "datasets": []})
+            d = {"scope": r["sc"], "scope_name": r["cam"], "site": "Shinfield", "status": r["status"], "nights": r["n"], "frames": r["f"],
+                 "integration_seconds": int(round(r["h"] * 3600)), "last_session": r["last"], "locations": ["chillblast_archive"],
+                 "archive_rel": r["sc"] + "/" + r["tid"], "sample": r.get("sample", False)}
+            if r.get("captureState") == "complete":
+                d["capture_state"] = "complete"
+            for k in ("masters", "finals"):
+                if k in r:
+                    d[k] = r[k]
+            for k, pk in (("readySince", "ready_since"), ("reason", "reason"), ("finalDate", "final_date"), ("newFramesSinceFinal", "new_frames_since_final")):
+                if k in r:
+                    d[pk] = r[k]
+            t["datasets"].append(d)
+        doc = {"schema": "projects/1", "generated_at": "2026-10-23T08:00:00+00:00", "quiet_period_days": 14, "warnings": [], "projects": list(pj.values())}
+        doc.update(top)
+        return {"ok": True, "opener": "Finder", "projects": doc}
+
+    _HN_PAGE_PATS = (r"const DEFAULTS = \{.*?\nconst STATE_OF_STATUS=[^\n]*\n", r"const dayMs=864e5;\n.*?const nightIdx=[^\n]*\n",
+                     r"const ST=\{.*?\nconst stKey=[^\n]*\n",
+                     r"/\* ---------- formatting: ONE rounding function.*?/\* ==== end of the phase 1 pure layer ==== \*/")
+    _HN_HARNESS = r"""
+let D=JSON.parse(require('fs').readFileSync(0,'utf8')); D=normalise(D);
+let SESS=D.sessions, TG=D.targets, PROGS=[]; for(const t of TG) for(const p of t.programmes) PROGS.push({...p,target:t.name,tid:t.id,t});
+const out={}; const pg=pipelineGroups();
+out.order=pg.groups.flatMap(g=>g.list.map(p=>[g.k,p.target,p.camera])); out.samples=pg.samples.map(p=>p.target);
+out.queueReady=orderDatasets(PROGS.filter(p=>!isSample(p)&&stKey(p)==="ready_to_process")).map(p=>p.target);
+out.targetsDefault=orderDatasets(TG.filter(t=>!sampleOnly(t))).map(t=>t.name); out.sampleOnly=TG.filter(sampleOnly).map(t=>t.name);
+out.totals=stateTotals(); out.rule=ruleLine(); out.kept=statesKeptText(); out.fc=finalsChecks(); out.samplesLine=samplesLine(); out.quiet=RULES().quietDays;
+out.reasons=Object.fromEntries(PROGS.map(p=>[p.target+"|"+p.camera,reasonTxt(p)])); out.notes=Object.fromEntries(PROGS.filter(p=>newFramesNote(p)).map(p=>[p.target,newFramesNote(p)]));
+out.fmt=[fmtH(0.75),fmtH(0.05),fmtH(1),fmtH(3.24),fmtH(0),fmtDate("2026-10-16"),fmtDate("2025-12-03"),sumH([0.5,0.5,1.04]),fmtHp(0.5).u];
+process.stdout.write(JSON.stringify(out));
+"""
+    _hn_page_pieces = [re.search(p_, body, re.S) for p_ in _HN_PAGE_PATS]
+    _hn_panel_m = re.search(r"<script>(.*?)</script>", _pagen, re.S)
+    _hn_panel_pieces = [re.search(p_, _hn_panel_m.group(1) if _hn_panel_m else "", re.S) for p_ in
+                        (r"const MONTHS=[^\n]*", r"const esc=[^\n]*", r"const fmtNight=[^\n]*",
+                         r"const PROJ_WHERE=.*?\nfunction projectsHtml\(pj, opts\)\{.*?\n\}\n")]
+    if _node:
+        check("HN (phase 1) the served page carries the phase 1 pure layer (DEFAULTS and normalise, the night helpers, the ST "
+              "vocabulary with stKey, the formatting helpers through 'end of the phase 1 pure layer') and the panel its "
+              "projectsHtml, so the checks below can cut them out and run them in node",
+              all(_hn_page_pieces) and all(_hn_panel_pieces), str([bool(m_) for m_ in _hn_page_pieces + _hn_panel_pieces]))
+    if _node and all(_hn_page_pieces) and all(_hn_panel_pieces):
+        _hn_js = "\n".join(m_.group(0) for m_ in _hn_page_pieces) + _HN_HARNESS
+
+        def _hn_run(record):
+            r_ = subprocess.run([_node, "-e", _hn_js], input=json.dumps(record), capture_output=True, text=True, timeout=30)
+            if r_.returncode != 0:
+                return {"error": r_.stderr[-400:]}
+            try:
+                return json.loads(r_.stdout)
+            except ValueError as e_:
+                return {"error": str(e_) + r_.stdout[-200:]}
+
+        def _hn_panel(pj):
+            h_ = "let deskSel=null;\n" + "\n".join(m_.group(0) for m_ in _hn_panel_pieces) + f"\nprocess.stdout.write(projectsHtml({json.dumps(pj)}));\n"
+            r_ = subprocess.run([_node, "-e", h_], capture_output=True, text=True, timeout=30)
+            return r_.stdout if r_.returncode == 0 else "ERROR " + r_.stderr[-400:]
+
+        _hn_fc = {"finalsUnmatched": [{"file": "Soul Nebula HOO.jpg", "folder": "ZWO Askar Scopes", "why": "no target named Soul in the importer's list"}],
+                  "finalsAmbiguous": [{"file": "Elephant Trunk.tif", "target": "Elephant's Trunk (IC 1396)", "scopes": ["Askar FRA400", "Askar 107PHQ"]}],
+                  "statesKeptFrom": "2026-10-21T03:38:00+00:00", "rules": _HN_RULES,
+                  "notices": [{"kind": "finals_unmatched", "count": 1, "text": "1 finished picture(s) match no dataset"},       # the engine's spellings
+                              {"kind": "finals-ambiguous", "count": 1, "text": "1 finished picture(s) could be of either Askar"},
+                              {"kind": "states_kept", "count": 3, "text": "states kept from 2026-10-21T03:38:00+00:00: Final Astro Images could not be read, so 3 dataset(s) keep the done / in progress state they had"}]}
+        _o1 = _hn_run(_hn_obs(_HN, **_hn_fc))                                 # counts added up by the page (no stateCounts)
+        _o2 = _hn_run(_hn_obs(_HN, stateCounts={"capturing": 2, "ready_to_process": 3, "in_progress": 1, "done": 7, "sample": 2},
+                              stateHours={"capturing": 2.3, "ready_to_process": 45.9, "in_progress": 6.0, "done": 30.0, "sample": 0.15}, **_hn_fc))
+        _h1 = _hn_panel(_hn_pj(_HN, rules=_HN_RULES))
+        _h_names = re.findall(r'<div class="tname">(.*?)</div>', _h1)
+        _h_secs = re.findall(r'<summary class="eyebrow">(.*?)</summary>', _h1)
+        _h_notes = re.findall(r'<div class="tnote">(.*?)</div>', _h1)
+        _p_order = [tuple(x) for x in (_o1.get("order") or [])]
+        check("HN (phase 1) one order everywhere: the page's orderDatasets (What to do next, the Pipeline board, the Targets "
+              "default, the lanes) and the panel's To process tab put the same first five datasets in the same order, and it "
+              "is the engine's rule worked out by hand (most recent capture first; the same night, newest readySince first; "
+              "then hours; then name); the Ready column is the Pipeline's Ready group",
+              lambda: _p_order[:5] == _HN_EXPECT[:5] and _p_order == _HN_EXPECT
+              and _h_names[:5] == [x[1] for x in _HN_EXPECT[:5]] and _h_names[:7] == [x[1] for x in _HN_EXPECT]
+              and _o1["queueReady"] == [x[1] for x in _HN_EXPECT[:3]]
+              and _o1["targetsDefault"] == ["Tadpoles Nebula (IC 410)", "Wizard Nebula (NGC 7380)", "Beehive Cluster (M 44)", "Helix Nebula (NGC 7293)",
+                                            "Black Eye Galaxy (M 64)", "Great Globular (M 13)"],
+              json.dumps([_p_order, _h_names, _o1.get("error"), _h1[:300] if _h1.startswith("ERROR") else ""])[:900])
+        check("HN (phase 1) every queue row carries the engine's reason when the record has one, else the page's own words "
+              "('ready since', 'ready to process from', 'nothing new for'); the panel row shows the same reason",
+              lambda: _o1["reasons"]["Black Eye Galaxy (M 64)|Seestar S50"] == "ready since Fri 16 Oct · 29.4 h on the S50"
+              and _o1["reasons"]["Great Globular (M 13)|Seestar S30 Pro"] == "ready since Thu 1 Oct · 4.0 h on the S30 Pro"
+              and _o1["reasons"]["Tadpoles Nebula (IC 410)|Seestar S30 Pro"] == "ready to process from " + _hn_date("Fri 6 Nov", 2026) + " unless you add frames"
+              and _o1["reasons"]["Betelgeuse|Seestar S50"] == "sample · 6 min on the S50"
+              and _h_notes[0] == "ready since Fri 16 Oct · 29.4 h on the S50" and "ready since Fri 16 Oct · 12.5 h on the FRA400" in _h_notes
+              and "last night 22 Oct 2026 · ready from 6 Nov 2026" in _h_notes,
+              json.dumps([_o1.get("reasons"), _h_notes])[:900])
+        check("HN (phase 1, §6.2) samples leave every count, total and queue: the rule's sample (status 'sample', 3 min) and Brett's "
+              "quick look are in no Pipeline group and in no Ready/Finish/Capturing list, only in the Samples group (newest first); "
+              "the counts the page adds up exclude them (2 · 3 · 1 · 1, samples 2) and the engine's stateCounts win when the record "
+              "carries them; the Targets default leaves a sample-only target out; the panel shows 'Samples · 2' as the last, closed "
+              "section, 'To process · 3', and the tail says '2 samples set aside'",
+              lambda: _o1["samples"] == ["NGC 6229", "Betelgeuse"] and not any(x[1] in ("NGC 6229", "Betelgeuse") for x in _p_order)
+              and _o1["totals"]["counts"] == {"capturing": 2, "ready_to_process": 3, "in_progress": 1, "done": 1, "sample": 2}
+              and _o1["totals"]["fromEngine"] is False and _o1["totals"]["samples"]["n"] == 2 and _o1["samplesLine"] == "2 samples set aside"
+              and _o2["totals"]["counts"]["done"] == 7 and _o2["totals"]["hours"]["done"] == 30.0 and _o2["totals"]["fromEngine"] is True
+              and _o1["sampleOnly"] == ["NGC 6229", "Betelgeuse"] and "NGC 6229" not in _o1["targetsDefault"]
+              and _h_secs == ["To process · 3", "In progress · 1", "Still capturing · 2", "Done · 1", "Samples · 2"]
+              and '<details class="ad-sec ad-samples"><summary class="eyebrow">Samples · 2' in _h1
+              and _h_names[7:] == ["NGC 6229", "Betelgeuse"] and "2 still capturing" in _h1 and "1 done, 2 samples set aside." in _h1
+              and "Under 20 minutes of integration" in _h1
+              and '"Samples ("' in body and "details.samples-grp" in body and "function samplesGroup(" in body
+              and "Quick looks, kept out of the queue" not in body,
+              json.dumps([_o1.get("samples"), _o1.get("totals"), _o2.get("totals"), _h_secs, _h_names])[:900])
+        check("HN (phase 1) Data checks: the rule line comes from the record's rules ('Ready: nothing new for 10 days, or closed by "
+              "you. Samples under 20 minutes are set aside.'), QUIET follows it, the unmatched finals (file, folder, why) and the "
+              "either-Askar finals (file, target, scopes) come through, the kept-states notice names the date, and the page carries "
+              "the headings and the 'no action yet' note",
+              lambda: _o1["rule"] == "Ready: nothing new for 10 days, or closed by you. Samples under 20 minutes are set aside."
+              and _o1["quiet"] == 10
+              and _o1["fc"]["unmatched"] == [{"file": "Soul Nebula HOO.jpg", "folder": "ZWO Askar Scopes", "why": "no target named Soul in the importer's list"}]
+              and _o1["fc"]["ambiguous"] == [{"file": "Elephant Trunk.tif", "target": "Elephant's Trunk (IC 1396)", "scopes": ["Askar FRA400", "Askar 107PHQ"]}]
+              and _o1["kept"].startswith("states kept from 2026-10-21T03:38:00+00:00: Final Astro Images could not be read")
+              and _o1["kept"].endswith("Nothing slipped back; the next rebuild that can read them moves on.")
+              and ("kept the state they had on " + _hn_date("Wed 21 Oct", 2026)) in _hn_run(_hn_obs(_HN, statesKeptFrom="2026-10-21T03:38:00+00:00"))["kept"]
+              and "Finished pictures that match nothing" in body and "Pictures that could be either Askar" in body
+              and "No action yet: the scope can be set later" in body and "States kept from the last build" in body
+              and "/^finals[-_](unmatched|ambiguous)$/" in body and 'finals_unmatched:"Finished pictures that match nothing"' in body and "function finalsChecks()" in body and "function ruleLine" in body.replace("const ruleLine=", "function ruleLine"),
+              json.dumps([_o1.get("rule"), _o1.get("quiet"), _o1.get("fc"), _o1.get("kept")])[:900])
+        check("HN (phase 1, §6.1) Done with nights newer than the final stays Done with 'new frames since {finalDate}' in the §9.1 "
+              "date format, on the page and on the panel row; nothing else gets the note",
+              lambda: _o1["notes"] == {"Beehive Cluster (M 44)": "new frames since " + _hn_date("Fri 16 Oct", 2026)}
+              and _o1["reasons"]["Beehive Cluster (M 44)|Askar FRA400"] == "finished · final of Fri 16 Oct"
+              and _p_order[-1][0] == "done"
+              and any(n_.startswith("finished · final of Fri 16 Oct") and n_.endswith("· new frames since 16 Oct 2026") for n_ in _h_notes)
+              and "function newFramesNote" in body.replace("const newFramesNote=", "function newFramesNote"),
+              json.dumps([_o1.get("notes"), _h_notes])[:600])
+        check("HN (phase 1, §9.1) one format for durations and dates: minutes under an hour ('45 min', '3 min'), one decimal from an "
+              "hour ('1.0 h', '3.2 h'), a total keeps its minute parts, 'Fri 16 Oct' with the year only when it isn't this year; the "
+              "panel's fmtHours agrees ('45 min' for 2700 s, '29.4 h')",
+              lambda: _o1["fmt"] == ["45 min", "3 min", "1.0 h", "3.2 h", "0.0 h", _hn_date("Fri 16 Oct", 2026), "Wed 3 Dec 2025", 2, "min"]
+              and re.findall(r'class="big">(.*?)<', _h1)[:3] == ["29.4 h", "12.5 h", "4.0 h"] and '<div class="big">45 min</div>' in _h1
+              and '<div class="big">3 min</div>' in _h1 and "fmtDate(" in body and "const MIN_H=1;" in body,
+              json.dumps([_o1.get("fmt"), re.findall(r'class="big">(.*?)<', _h1)])[:600])
+        # an OLD record (1.7.6, none of the phase 1 fields) still renders: no script error, the defaults, nothing set aside
+        _old_rows = [dict([(k, v) for k, v in r.items() if k not in ("readySince", "reason", "finalDate", "newFramesSinceFinal", "old")] + list(r.get("old", {}).items())) for r in _HN]
+        _o3 = _hn_run(_hn_obs(_old_rows))
+        _h3 = _hn_panel(_hn_pj(_old_rows))
+        check("HN (phase 1) an OLD record (1.7.6 shape, none of the new fields) still renders with no script error: the lists keep "
+              "the one order from lastNight and hours alone, the rule line falls back to 14 days / 30 minutes, the quick look is the only sample, no "
+              "finals checks, no kept-states notice, no 'undefined'; the panel renders it too",
+              lambda: "error" not in _o3 and _o3["order"][0] == ["ready_to_process", "Black Eye Galaxy (M 64)", "Seestar S50"]
+              and [x[1] for x in _o3["order"]] == ["Black Eye Galaxy (M 64)", "Wizard Nebula (NGC 7380)", "Great Globular (M 13)", "Helix Nebula (NGC 7293)",
+                                                   "Tadpoles Nebula (IC 410)", "NGC 6229", "Wizard Nebula (NGC 7380)", "Beehive Cluster (M 44)"]
+              and _o3["reasons"]["Betelgeuse|Seestar S50"] == "nothing new for 52 nights" and _o3["reasons"]["Wizard Nebula (NGC 7380)|Askar FRA400"] == "nothing new for 22 nights"
+              and _o3["samples"] == ["Betelgeuse"] and _o3["rule"] == "Ready: nothing new for 14 days, or closed by you. Samples under 30 minutes are set aside."
+              and _o3["kept"] == "" and _o3["fc"] == {"unmatched": [], "ambiguous": [], "keptFrom": None} and _o3["notes"] == {}
+              and _o3["totals"]["fromEngine"] is False and _o3["totals"]["counts"]["sample"] == 1
+              and "undefined" not in json.dumps(_o3) and not _h3.startswith("ERROR") and "undefined" not in _h3
+              and "Samples · 1" in _h3 and "To process · 3" in _h3 and "1 sample set aside." in _h3,
+              json.dumps(_o3)[:700] + _h3[:200])
+    else:
+        skip("HN (phase 1) the page's pure layer and the panel's projectsHtml in node (needs node and the marked regions)")
 finally:
     procn.terminate()
     procn.wait(timeout=30)

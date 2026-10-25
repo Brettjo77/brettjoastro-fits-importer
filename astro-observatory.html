@@ -562,6 +562,15 @@ svg .stage circle.ring{fill:var(--card2);stroke:var(--ink);stroke-width:1.3}
 .samples{margin-top:var(--section-gap);padding-top:var(--s4);border-top:1px solid var(--grid)}
 .samples .r{display:flex;gap:var(--s2);align-items:center;flex-wrap:wrap;min-height:32px;font-size:var(--fs-md);color:var(--ink2)}
 .samples .r b{color:var(--ink)}
+/* phase 1: samples sit in one closed group at the bottom of the Pipeline and the Targets list */
+details.samples-grp{margin-top:var(--section-gap);padding-top:var(--s3);border-top:1px solid var(--grid)}
+details.samples-grp>summary{display:flex;align-items:center;gap:var(--s2);flex-wrap:wrap;cursor:pointer;list-style:none;font:var(--fw-semi) var(--fs-md)/var(--lh-body) var(--sans);color:var(--ink);padding:var(--s1) 0}
+details.samples-grp>summary::-webkit-details-marker{display:none}
+details.samples-grp>summary .sub{flex-basis:100%;margin-top:0}
+details.samples-grp>summary .showall{margin-left:auto;font-size:var(--fs-sm);color:var(--ink2);text-decoration:underline dotted}
+details.samples-grp[open]>summary .showall{display:none}
+details.samples-grp .grpbody{margin-top:var(--s2)}
+.proj .srow .note{font-weight:var(--fw-regular);color:var(--muted);white-space:nowrap;overflow:hidden;text-overflow:ellipsis;min-width:0}
 @media (max-width:1100px) and (min-width:700px){ .qcols{grid-template-columns:repeat(2,minmax(0,1fr))} }
 @media (max-width:699px){ .qcols{grid-template-columns:minmax(0,1fr)} .qcol .colsub{min-height:0} .job{padding:var(--s4);padding-left:calc(var(--s4) + var(--accent-bar))} }
 
@@ -847,7 +856,9 @@ footer.foot .mono{display:block;margin-top:var(--s1)}
 const $ = id => document.getElementById(id);
 let D = JSON.parse(document.getElementById("dataset").textContent);
 const DEFAULTS = {targets:[],sessions:[],scopes:[],events:[],health:[],reconciliation:[],warnings:[],shelves:{},calibration:{},askarRigs:{},junk:{files:0,bytes:0},totals:{},inputs:{},
-  notices:[],unknownNames:[],scopeOrder:[],notCounted:{},pendingImport:null};
+  notices:[],unknownNames:[],scopeOrder:[],notCounted:{},pendingImport:null,
+  /* phase 1 (25 Oct, honest numbers): absent in an older record, so every reader degrades quietly */
+  stateCounts:null,stateHours:null,rules:{},finalsUnmatched:[],finalsAmbiguous:[],statesKeptFrom:null};
 function normalise(d){
   /* a dataset from another engine version may lack a key: fill the gaps once, so no tab goes blank */
   if(!d||typeof d!=="object") d={};
@@ -859,7 +870,12 @@ function normalise(d){
     if(!s.morning) s.morning=nightAdd(s.night,1); s.gains=Array.isArray(s.gains)?s.gains:[]; s.importedOn=Array.isArray(s.importedOn)?s.importedOn:[]; s.archived=(s.archived==null||isNaN(+s.archived))?null:+s.archived; s.framesWithoutExposure=+s.framesWithoutExposure||0; s.dayKeys=Array.isArray(s.dayKeys)?s.dayKeys:[]; s.archiveDays=Array.isArray(s.archiveDays)?s.archiveDays:[]; }
   d.sessions=d.sessions.filter(s=>s&&s.night);
   for(const t of d.targets){ t.programmes=t.programmes||[]; t.statusCards=t.statusCards||[]; t.codes=Array.isArray(t.codes)?t.codes:[]; t.cameras=t.cameras||[]; t.hours=+t.hours||0; t.lights=+t.lights||0; t.nights=+t.nights||0; t.name=String(t.name||"?"); t.id=String(t.id||t.name);
-    for(const p of t.programmes){ p.hours=+p.hours||0; p.lights=+p.lights||0; p.nights=+p.nights||0; p.sessions=Array.isArray(p.sessions)?p.sessions:[]; p.mastersNamed=Array.isArray(p.mastersNamed)?p.mastersNamed:[]; p.finalsNamed=Array.isArray(p.finalsNamed)?p.finalsNamed:[]; p.captureState=p.captureState||"auto"; p.captureStateSource=p.captureStateSource||"rule"; p.sample=!!p.sample; p.framesWithoutExposure=+p.framesWithoutExposure||0; p.filters=p.filters||{}; p.exposures=p.exposures||{}; if(!p.status) p.status=STATUS_OF_STATE[(t.statusCards.find(c=>c.camera===p.camera)||{}).state]||"capturing"; } }
+    for(const p of t.programmes){ p.hours=+p.hours||0; p.lights=+p.lights||0; p.nights=+p.nights||0; p.sessions=Array.isArray(p.sessions)?p.sessions:[]; p.mastersNamed=Array.isArray(p.mastersNamed)?p.mastersNamed:[]; p.finalsNamed=Array.isArray(p.finalsNamed)?p.finalsNamed:[]; p.captureState=p.captureState||"auto"; p.captureStateSource=p.captureStateSource||"rule"; p.sample=!!p.sample; p.framesWithoutExposure=+p.framesWithoutExposure||0; p.filters=p.filters||{}; p.exposures=p.exposures||{}; if(!p.status) p.status=STATUS_OF_STATE[(t.statusCards.find(c=>c.camera===p.camera)||{}).state]||"capturing";
+      /* phase 1: the engine's state word (may be "sample"), when it became ready, its reason in words, the final's date and the frames after it */
+      p.state=typeof p.state==="string"?p.state:""; p.readySince=(typeof p.readySince==="string"&&p.readySince)?p.readySince.slice(0,10):null; p.reason=typeof p.reason==="string"?p.reason.trim():"";
+      p.finalDate=(typeof p.finalDate==="string"&&p.finalDate)?p.finalDate.slice(0,10):null; p.newFramesSinceFinal=(p.newFramesSinceFinal===true)?1:(+p.newFramesSinceFinal||0); p.stateKeptFrom=(typeof p.stateKeptFrom==="string"&&p.stateKeptFrom)?p.stateKeptFrom.slice(0,10):null; } }
+  d.finalsUnmatched=d.finalsUnmatched.filter(x=>x&&typeof x==="object"); d.finalsAmbiguous=d.finalsAmbiguous.filter(x=>x&&typeof x==="object");
+  if(typeof d.rules!=="object"||d.rules===null) d.rules={}; if(typeof d.stateCounts!=="object") d.stateCounts=null; if(typeof d.stateHours!=="object") d.stateHours=null;
   return d;
 }
 const STATUS_OF_STATE={captured:"capturing",stacked:"ready_to_process",processing:"in_progress",complete:"done"};
@@ -875,14 +891,15 @@ const ST={
   ready_to_process: {word:"Ready to process", verb:"Process it",     icon:"play",   cls:"st-action", state:"stacked"},
   in_progress:      {word:"Finish it",        verb:"Finish it",      icon:"half",   cls:"st-work",   state:"processing"},
   done:             {word:"Done",             verb:"Done",           icon:"check",  cls:"st-done",   state:"complete"},
-  sample:           {word:"Quick look",       verb:"Decide",         icon:"sample", cls:"st-sample", state:"sample"},
+  sample:           {word:"Sample",           verb:"Set aside",      icon:"sample", cls:"st-sample", state:"sample"},
 };
 const PIPE_ORDER=["capturing","ready_to_process","in_progress","done","sample"];
 const stOf=k=>ST[k]||ST.capturing;
 /* the stored state word (statusCards.state) → the status key */
 const stageOf=state=>stOf(STATUS_OF_STATE[state]||state);
-/* a quick look is Brett's flag, never an hour rule; nothing with a master or a final can be one */
-const stKey=p=>(p.sample&&!(p.masters>0||p.processedFinals>0||p.mastersNamed.length||p.finalsNamed.length))?"sample":p.status;
+/* a sample is the engine's state (under the sample cut-off, phase 1) or Brett's quick-look flag; the flag never
+   overrides a master or a final. Any other engine state word the page knows wins over the older status */
+const stKey=p=>{ if(!p) return "capturing"; if(p.state==="sample") return "sample"; if(p.sample&&!(p.masters>0||p.processedFinals>0||(p.mastersNamed||[]).length||(p.finalsNamed||[]).length)) return "sample"; return (p.state&&ST[p.state])?p.state:p.status; };
 const cardKey=c=>(c.sample&&c.state!=="processing"&&c.state!=="complete")?"sample":(STATUS_OF_STATE[c.state]||"capturing");
 
 /* ---------- scopes: colour and order from the engine only ---------- */
@@ -911,7 +928,7 @@ function derive(){
   MAXSES=Math.max(1,...SESS.map(s=>s.hours||0));
   /* one rounding rule: a scope's hours are the sum of its sessions' displayed hours (when the record has
      sessions for it), and the hero is the sum of the six scope figures, so the strip, the key and the hero agree */
-  const rr=h=>Math.round((+h||0)*10)/10, ssum=list=>list.reduce((a,x)=>{ x=+x||0; return a+((x>0&&x<0.1)?x:rr(x)); },0);   /* = r1 / sumH, which are defined below */
+  const rr=h=>Math.round((+h||0)*10)/10, ssum=list=>list.reduce((a,x)=>{ x=+x||0; return a+((x>0&&x<1)?x:rr(x)); },0);   /* = r1 / sumH (MIN_H), which are defined below */
   for(const s of SC){ const ss=SESS.filter(z=>z.camera===s.camera); if(ss.length) s.hours=rr(ssum(ss.map(z=>z.hours))); }
   totalHours=SESS.length?rr(SC.reduce((a,s)=>a+s.hours,0)):(+D.totals.hours||0);
 }
@@ -926,12 +943,13 @@ const CAMSHORT=new Proxy({}, {get:(_,k)=>short(k)});
 /* ---------- formatting: ONE rounding function; unknown is never 0; totals are sums of displayed parts ---------- */
 const r1=h=>Math.round((+h||0)*10)/10;
 const fmtI=n=>(n==null||isNaN(+n))?"?":(+n).toLocaleString("en-GB");
-/* one rule for small values: under 0.1 h is minutes, never "0.0 h"; fmtHp gives the number and its unit apart */
-function fmtHp(h){ h=+h||0; if(h>0&&h<0.1) return {n:String(Math.max(1,Math.round(h*60))),u:"min"}; return {n:r1(h).toLocaleString("en-GB",{minimumFractionDigits:1,maximumFractionDigits:1}),u:"h"}; }
+/* one rule for durations (§9.1): under an hour is minutes ("45 min"), from an hour one decimal ("3.2 h"); fmtHp gives the number and its unit apart */
+const MIN_H=1;
+function fmtHp(h){ h=+h||0; if(h>0&&h<MIN_H) return {n:String(Math.max(1,Math.round(h*60))),u:"min"}; return {n:r1(h).toLocaleString("en-GB",{minimumFractionDigits:1,maximumFractionDigits:1}),u:"h"}; }
 function fmtH(h){ const p=fmtHp(h); return p.n+" "+p.u; }
 const fmtHn=h=>fmtHp(h).n;
-/* a total is the sum of its displayed parts: tenths, except a part under 0.1 h is shown in minutes, so it keeps its minutes */
-const sumH=list=>list.reduce((a,x)=>{ x=+x||0; return a+((x>0&&x<0.1)?x:r1(x)); },0);
+/* a total is the sum of its displayed parts: tenths, except a part under an hour is shown in minutes, so it keeps its minutes */
+const sumH=list=>list.reduce((a,x)=>{ x=+x||0; return a+((x>0&&x<MIN_H)?x:r1(x)); },0);
 const hoursUnknown=(hours,frames)=>!(hours>0)&&frames>0;
 const hoursTxt=(hours,frames)=>hoursUnknown(hours,frames)?"hours unknown":fmtH(hours);
 const fmtGB=b=>{ b=+b||0; const g=b/2**30; return g>=1024?(g/1024).toLocaleString("en-GB",{maximumFractionDigits:2})+" TB":g>=1?g.toLocaleString("en-GB",{maximumFractionDigits:g>=100?0:1})+" GB":(b/2**20).toLocaleString("en-GB",{maximumFractionDigits:0})+" MB"; };
@@ -941,6 +959,8 @@ function fmtDY(iso){ if(!iso) return "?"; const [y,m,d]=String(iso).split("-"); 
 const fmtD=fmtDY;
 function fmtDS(iso){ if(!iso) return "?"; const [y,m,d]=String(iso).split("-"); if(!m||!d) return String(iso); return (+d)+" "+(MONTHS[+m-1]||m); }
 const dowOf=iso=>{ const t=Date.parse(iso+"T12:00:00Z"); return isNaN(t)?"":DOW[new Date(t).getUTCDay()]; };
+/* one format for dates (§9.1): "Fri 16 Oct", with the year only when it isn't this year */
+function fmtDate(iso){ if(!iso) return "?"; const [y,m,d]=String(iso).slice(0,10).split("-"); if(!m||!d) return String(iso); const dw=dowOf(y+"-"+m+"-"+d); return (dw?dw+" ":"")+(+d)+" "+(MONTHS[+m-1]||m)+(+y!==new Date().getFullYear()?" "+y:""); }
 /* a night is noon to noon: the key is the evening, `morning` the day after */
 function fmtNight(night,morning,year){ morning=morning||nightAdd(night,1); const [y1,m1,d1]=night.split("-"),[y2,m2,d2]=morning.split("-");
   if(!m1||!m2) return fmtDY(night); const a=dowOf(night)+" "+(+d1), b=dowOf(morning)+" "+(+d2)+" "+(MONTHS[+m2-1]||m2)+(year?" "+y2:"");
@@ -951,6 +971,67 @@ const plural=(n,w,ws)=>fmtI(n)+" "+(n===1?w:(ws||w+"s"));
 const ASOF=()=>D.asOfNight||(SESS.map(s=>s.night).sort().pop())||new Date().toISOString().slice(0,10);
 const ago=iso=>nightIdx(ASOF(),iso);
 const agoTxt=iso=>{ const n=ago(iso); return n===0?"last night":n===1?"1 night ago":n+" nights ago"; };
+
+/* ============================================================================
+   Phase 1, honest numbers (25 Oct 2026, Observatory_UX_Plan §6): one order for every list, samples set
+   aside, the rules from the record, the finished-picture checks. PURE: no DOM, so test_app renders
+   these in node (chain NL, "HN" checks) beside the panel's projectsHtml. Keep this region self-contained:
+   it may use D, PROGS, TG, SESS, the ST vocabulary and the formatting helpers above, nothing else.
+   ========================================================================== */
+/* the rules live in config (§6.5): the record carries them; an older record falls back to the defaults */
+function RULES(){ const r=(D.rules&&typeof D.rules==="object")?D.rules:{}; const n=(v,dflt)=>(Number.isFinite(+v)&&+v>0)?+v:dflt;
+  return {quietDays:n(r.quietDays,n(D.quietPeriodDays,14)),sampleMinutes:n(r.sampleMinutes,30),activeWindowNights:n(r.activeWindowNights,30)}; }
+/* ONE order for every list of datasets (§6.3), the engine's `dataset_sort_key` mirrored exactly: the most recent
+   capture (lastNight) first; among items captured the same night the newest readySince first (the day the quiet
+   period ended, or the night Brett closed it; none sorts after); then the most hours; then the name, A to Z.
+   Works on programmes (target, lastNight, hours) and on targets (name, lastNight, hours) alike */
+function orderDatasets(list){
+  const s=x=>String(x||""); const nm=x=>s(x.target||x.name).toLowerCase();
+  return list.slice().sort((a,b)=>s(b.lastNight).localeCompare(s(a.lastNight))||s(b.readySince).localeCompare(s(a.readySince))||((+b.hours||0)-(+a.hours||0))||nm(a).localeCompare(nm(b)));
+}
+const ORDER_WORDS={ready_to_process:"most recent capture first, then newest ready",in_progress:"most recent capture first",capturing:"most recent capture first",done:"most recent capture first",sample:"most recent capture first"};
+/* the next step in words, from the facts; the engine's own reason (phase 1) wins when the record carries it */
+function nextWhen(p){
+  if(p.status==="capturing"){ if(p.captureState==="open") return "open until you close it"; if(p.readyOn) return "ready to process from "+fmtDate(p.readyOn)+" unless you add frames"; return ""; }
+  if(p.status==="ready_to_process") return p.captureState==="complete"?"closed by you · ready to process":(p.readySince?"ready since "+fmtDate(p.readySince):"nothing new for "+nts(ago(p.lastNight)));
+  if(p.status==="in_progress") return "a master is saved, no final yet";
+  if(p.status==="done") return newFramesNote(p);
+  return "";
+}
+const reasonTxt=p=>(p&&typeof p.reason==="string"&&p.reason.trim())?p.reason.trim():nextWhen(p);
+/* Done with nights newer than the final (§6.1): stays Done, with a note; the date in the §9.1 format */
+const newFramesNote=p=>(p&&p.newFramesSinceFinal>0)?"new frames since "+(p.finalDate?fmtDate(p.finalDate):"the finished picture"):"";
+/* samples (§6.2) leave every count, total and queue; the engine's stateCounts / stateHours win when present */
+const isSample=p=>stKey(p)==="sample";
+const sampleOnly=t=>!!(t&&t.programmes&&t.programmes.length&&t.programmes.every(isSample));
+function stateTotals(){
+  const keys=["capturing","ready_to_process","in_progress","done","sample"]; const counts={},hours={};
+  for(const k of keys){ const ps=PROGS.filter(p=>stKey(p)===k); counts[k]=ps.length; hours[k]=sumH(ps.map(p=>p.hours)); }
+  const sc=D.stateCounts,sh=D.stateHours;
+  if(sc&&typeof sc==="object") for(const k of keys) if(Number.isFinite(+sc[k])) counts[k]=+sc[k];
+  if(sh&&typeof sh==="object") for(const k of keys) if(Number.isFinite(+sh[k])) hours[k]=+sh[k];
+  const fromEngine=!!(sc&&typeof sc==="object");
+  return {counts,hours,samples:{n:counts.sample,hours:hours.sample},fromEngine};
+}
+const samplesLine=()=>{ const t=stateTotals(); return t.samples.n?plural(t.samples.n,"sample")+" set aside":""; };
+/* the Pipeline's groups, in the page's one order, the samples apart (a closed group at the bottom) */
+const PIPE_GROUPS=["ready_to_process","in_progress","capturing","done"];
+function pipelineGroups(keep){ keep=keep||(()=>true); const ps=PROGS.filter(keep);
+  return {groups:PIPE_GROUPS.map(k=>({k,list:orderDatasets(ps.filter(p=>stKey(p)===k))})).filter(g=>g.list.length),samples:orderDatasets(ps.filter(isSample))}; }
+/* the rule line (§8.5), from the record's rules */
+const ruleLine=()=>{ const r=RULES(); return "Ready: nothing new for "+r.quietDays+" days, or closed by you. Samples under "+r.sampleMinutes+" minutes are set aside."; };
+/* the finished-picture checks (§6.1): finals that match nothing, finals that could be either Askar, and a record that kept its states */
+function finalsChecks(){
+  const str=v=>v==null?"":String(v);
+  const unmatched=(D.finalsUnmatched||[]).map(x=>({file:str(x.file||x.name),folder:str(x.folder),why:str(x.why||x.reason)})).filter(x=>x.file||x.folder);
+  const ambiguous=(D.finalsAmbiguous||[]).map(x=>({file:str(x.file||x.name),target:str(x.target),scopes:Array.isArray(x.scopes)?x.scopes.map(str):(x.scopes?[str(x.scopes)]:[])})).filter(x=>x.file);
+  return {unmatched,ambiguous,keptFrom:D.statesKeptFrom?str(D.statesKeptFrom):null};
+}
+const keptNotice=()=>(D.notices||[]).find(n=>n&&n.text&&(n.kind==="states_kept"||n.kind==="states-kept"));
+function statesKeptText(){ const k=finalsChecks().keptFrom; const n=keptNotice(); if(!k&&!n) return "";
+  const when=k&&/^\d{4}-\d{2}-\d{2}/.test(k)?fmtDate(k.slice(0,10)):(k||"the last build");
+  return (n?n.text+". ":"Final Astro Images or the archive inventory couldn't be read when this record was built, so the datasets that were Done or Finish it kept the state they had on "+when+". ")+"Nothing slipped back; the next rebuild that can read them moves on."; }
+/* ==== end of the phase 1 pure layer ==== */
 /* percentages by largest remainder, so they add to 100 */
 function pctLR(vals){ const tot=vals.reduce((a,b)=>a+b,0); if(tot<=0) return vals.map(()=>0); const raw=vals.map(v=>v/tot*100), fl=raw.map(Math.floor); let rem=100-fl.reduce((a,b)=>a+b,0); const idx=raw.map((v,i)=>[v-fl[i],i]).sort((a,b)=>b[0]-a[0]); for(let k=0;k<rem;k++) fl[idx[k%idx.length][1]]++; return fl; }
 /* a name is a common name plus catalogue codes: "Open cluster in the Tadpoles (IC 410) (NGC 1893)" */
@@ -1008,16 +1089,18 @@ function stageMark(svg,kind,cx,cy,tipBuild){
 }
 function pill(key,opts){ opts=opts||{}; const s=stOf(key); const p=el("span","st "+s.cls+(opts.tap?" tapp":"")); if(opts.cam) p.append(camDot(opts.cam)); p.append(glyph(s.icon)); p.append(document.createTextNode(opts.text||(opts.verb?s.verb:s.word))); return p; }
 function stageChip(state,opts){ return pill(STATUS_OF_STATE[state]||state,opts); }
+/* phase 1 (§6.2): the closed "Samples (n)" group; "Show all" opens it */
+function samplesGroup(n,rows,sub){ const d=el("details","samples-grp"); const sm=el("summary"); sm.append(pill("sample"),el("span",null,"Samples ("+fmtI(n)+")"),el("span","showall","Show all")); if(sub) sm.append(el("span","sub",sub)); d.append(sm); const body=el("div","grpbody"); for(const r of rows) body.append(r); d.append(body); return d; }
 function markEl(m){ const s=el("span","mark "+(m.cls||"")); s.append(glyph(m.icon)); const w=el("span","mw"); w.append(el("span","w",m.word)); if(m.sub){ const sm=el("small",null,m.sub); sm.title=m.sub; w.append(sm); } s.append(w); if(m.tip) hoverable(s,box=>{ box.append(el("div","tt-t",m.word)); box.append(el("div",null,m.tip)); }); return s; }
 
 /* ---------- the three marks beside an Askar dataset lane (wording: R/truth/wording.md) ---------- */
 function captureMark(p){
   const a=p.lastNight?ago(p.lastNight):null; const by=p.captureStateSource==="capture-state.json";
   if(p.status==="capturing"&&p.captureState==="open") return {icon:"cap",cls:"",word:"Open, kept by you",sub:a==null?"":"last frames "+agoTxt(p.lastNight),tip:"You kept this one open in capture-state.json, so it stays Still capturing until you close it."};
-  if(p.status==="capturing") return {icon:"cap",cls:"",word:"Active",sub:a==null?"":"last frames "+agoTxt(p.lastNight),tip:"New frames within the last "+(D.quietPeriodDays||14)+" nights."};
+  if(p.status==="capturing") return {icon:"cap",cls:"",word:"Active",sub:a==null?"":"last frames "+agoTxt(p.lastNight),tip:"New frames within the last "+QUIET()+" nights."};
   if(p.captureState==="complete") return {icon:"check",cls:"ok",word:"Closed by you",sub:"",tip:"You marked this dataset complete"+(by?" in capture-state.json":"")+", so it is ready to process whatever the dates say."};
   if(p.status==="done") return {icon:"check",cls:"ok",word:"Quiet",sub:a==null?"":"nothing new for "+nts(a),tip:"No new frames; the finished picture closes it."};
-  return {icon:"none",cls:"none",word:"Quiet",sub:a==null?"":"nothing new for "+nts(a),tip:"No new frames for more than "+(D.quietPeriodDays||14)+" nights."};
+  return {icon:"none",cls:"none",word:"Quiet",sub:a==null?"":"nothing new for "+nts(a),tip:"No new frames for more than "+QUIET()+" nights."};
 }
 function processingMark(p){
   const u=!!p.masterOwnerUncertain;
@@ -1098,7 +1181,7 @@ function renderHeader(changed){
   const eb=$("mastEyebrow"); const path=String(D.machine||"").replace(/\s*·\s*live from the importer\s*$/i,"").replace(/\s*·\s*from the importer's record\s*$/i,""); eb.textContent=path; eb.title=path?path+" · every number on this page comes from the importer's record":"";
   const hero=$("hero"); const old=heroVal==null?totalHours:heroVal; heroVal=totalHours;
   if(!hero.children.length){ hero.append(el("span","n"), el("span","u","hours of integration")); hero.title="light-frame exposure, added up across every target and scope · the sum of the six scope figures below"; }
-  const n=hero.querySelector(".n"), u=hero.querySelector(".u"); const tiny=totalHours>0&&totalHours<0.1; u.textContent=tiny?"minutes of integration":"hours of integration";
+  const n=hero.querySelector(".n"), u=hero.querySelector(".u"); const tiny=totalHours>0&&totalHours<MIN_H; u.textContent=tiny?"minutes of integration":"hours of integration";
   if(tiny) n.textContent=fmtHn(totalHours); else if(changed){ tween(n,old,totalHours,v=>fmtHn(v)); wash(n); } else n.textContent=fmtHn(totalHours);
   const comps=$("comps"); const vals=[[fmtI(D.totals.lights),"frames",""],[fmtI(D.totals.targets),"targets",""],[fmtI(D.totals.nights),"nights","nights with at least one scope out (a night is noon to noon)"],[fmtI(SC.length),SC.length===1?"scope":"scopes",""]];
   if(!comps.children.length) vals.forEach((_,i)=>{ const s=el("span"); s.append(el("b"),document.createTextNode(" ")); comps.append(s); if(i<vals.length-1) comps.append(el("span","sepdot","·")); });
@@ -1132,7 +1215,7 @@ function legendInto(lg){
   const mk=(node,text)=>{ const m=el("span","m"); m.append(node,document.createTextNode(text)); lg.append(m); };
   const hd=el("span","dot hollow"); hd.style.setProperty("--sc","var(--sky-ink2)"); hd.style.setProperty("--card","var(--sky2)"); mk(hd,"hollow dot: frames, hours unknown");
   mk(el("i","hatch"),"hatched: frames with no exposure, hours unknown");
-  mk(el("i","band"),"shaded: the last "+(D.quietPeriodDays||14)+" nights (a dataset is usually still capturing while its last frames are in there)");
+  mk(el("i","band"),"shaded: the last "+QUIET()+" nights (a dataset is usually still capturing while its last frames are in there)");
   mk(el("i","speck"),"a speck: no frames that night");
   mk(el("i","glow"),"a column's glow: how lit the moon was");
   const n=el("b",null,"‹N"); n.style.color="var(--sky-ink)"; mk(n,"N earlier nights, before the range shown");
@@ -1251,7 +1334,7 @@ let rsT; addEventListener("resize",()=>{ clearTimeout(rsT); rsT=setTimeout(()=>{
    six-scope strip) · what to do next · projects that moved lately, with the
    project panel, the night panel and the scope panel (SPEC §1, §1b, §3).
    ========================================================================== */
-const QUIET=()=>D.quietPeriodDays||14;
+const QUIET=()=>RULES().quietDays;
 
 /* ---------- keyed strips: one SVG, one or many lanes, a dot per night (or per week past 120 nights),
    dots keyed so a range change MOVES them; drawn at the real pixel width ---------- */
@@ -1427,12 +1510,7 @@ function openNight(cam,night,target,host,returnTo){
 }
 
 /* ---------- the project panel (project level): one lane per scope, the quiet band, the three marks, the Day rows ---------- */
-function nextWhen(p){
-  if(p.status==="capturing"){ if(p.captureState==="open") return "open until you close it"; if(p.readyOn) return "ready to process from "+fmtDS(p.readyOn)+" unless you add frames"; return ""; }
-  if(p.status==="ready_to_process") return p.captureState==="complete"?"closed by you · ready to process":"nothing new for "+nts(ago(p.lastNight));
-  if(p.status==="in_progress") return "a master is saved, no final yet";
-  return "";
-}
+/* nextWhen(p) lives in the phase 1 pure layer (Core block) */
 function nightRowsFor(t,p){
   /* the engine's per-night rows (1.7.2) when present, else the sessions this page has */
   const ss=SESS.filter(z=>z.target===t.name&&z.camera===p.camera).sort((a,b)=>a.night<b.night?1:-1);
@@ -1503,7 +1581,9 @@ function scopePanelFor(cam,opts){
     const inRange=all.filter(z=>ago(z.night)<N);
     if(!inRange.length){ const p=el("p","sub","Nothing in the last "+N+" nights on this scope."+(all.length?" The latest night is "+fmtNight(all[all.length-1].night,all[all.length-1].morning)+" ("+commonName(all[all.length-1].target)+").":"")); plot.append(p); return; }
     const byT=new Map(); for(const z of inRange){ let a=byT.get(z.target); if(!a){ a=[]; byT.set(z.target,a); } a.push(z); }
-    const lanes=[...byT.entries()].map(([name,ss])=>({name,ss,last:ss[ss.length-1].night,hours:ss.reduce((a,b)=>a+b.hours,0)})).sort((a,b)=>b.last.localeCompare(a.last)||b.hours-a.hours);
+    /* one order everywhere (§6.3): each lane is a dataset on this scope, so orderDatasets decides (most recent capture first) */
+    const lanes=orderDatasets([...byT.entries()].map(([name,ss])=>{ const t=byName[name], p=t&&t.programmes.find(x=>x.camera===cam); const last=ss[ss.length-1].night;
+      return {...(p||{}),name,ss,target:name,last,lastNight:last,hours:ss.reduce((a,b)=>a+b.hours,0),lights:ss.reduce((a,b)=>a+b.frames,0)}; }));
     const MAXL=40, shown=lanes.slice(0,MAXL);
     const labW=mode()==="phone"?96:170;
     st=buildStrip({lanes:shown.map(ln=>({key:ln.name,cam,label:commonName(ln.name),sessions:ln.ss,target:ln.name})),laneH:mode()==="phone"?26:30,labelW:labW,
@@ -1656,6 +1736,8 @@ function attentionJobs(){
     else if(n.kind==="finals_note") jobs.push({id:"finn:"+n.text,n:"",u:"",w:"A note about the finished pictures",s:n.text,act:"Mark as checked"});
     else if(n.kind==="capture_state_bad") jobs.push({id:"csb:"+n.text,n:"",u:"",w:"capture-state.json names a dataset that doesn't exist",s:n.text,act:"Mark as checked"});
     else if(n.kind==="contract") jobs.push({id:"con:"+n.text,n:"",u:"",w:"A note about the importer's list of targets and scopes",s:n.text,act:"Mark as checked"});
+    else if(/^finals[-_](unmatched|ambiguous)$/.test(n.kind)){ const amb=/ambiguous$/.test(n.kind); const list=amb?finalsChecks().ambiguous:finalsChecks().unmatched;
+      jobs.push({id:n.kind+":"+n.text,n:n.count!=null?n.count:(list.length||""),u:(n.count!=null||list.length)?"pictures":"",w:amb?"Pictures that could be either Askar":"Finished pictures that match nothing",s:n.text+(amb?" · no action yet: the scope can be set later":""),act:"Show them",more:()=>{ const b=el("div","more"); const ul=el("ul"); for(const x of list.slice(0,12)){ const li=el("li"); const c=el("code"); c.textContent=x.file; li.append(c,document.createTextNode(amb?(" · "+(x.target||"?")+(x.scopes&&x.scopes.length?" · could be the "+x.scopes.join(" or the "):"")):((x.folder?" in "+x.folder:"")+(x.why?" · "+x.why:"")))); ul.append(li); } if(list.length>12) ul.append(el("li",null,"and "+(list.length-12)+" more in Data checks")); b.append(ul); const bt=el("button","disc"); bt.append(document.createTextNode("Open Data checks"),glyph("right")); bt.addEventListener("click",()=>go("health")); b.append(bt); return b; }}); }
     else jobs.push({id:"n:"+n.kind+":"+n.text,n:n.count!=null?n.count:"",u:n.frames!=null?"frames":"",w:n.text,s:"",act:"Mark as checked"}); }
   /* an older record (no notices) still carries its warnings: one job each, the text as the engine wrote it */
   if(!(D.notices||[]).length) for(const w of D.warnings||[]){ if(!w) continue; jobs.push({id:"w:"+String(w),n:"",u:"",w:"Something to know",s:String(w),act:"Mark as checked"}); }
@@ -1900,30 +1982,30 @@ function renderQueue(card){
   card.replaceChildren(); card.className="card reveal";
   const head=el("div","cardhead"); const hh=el("div"); hh.append(el("h2",null,"What to do next")); hh.append(el("div","sub","worked out from your records · one card is one target on one scope · click a card for the project")); head.append(hh);
   const pipe=el("button","btn","All of them in Pipeline"); pipe.addEventListener("click",()=>go("pipeline")); head.append(pipe); card.append(head);
-  const real=PROGS.filter(p=>stKey(p)!=="sample"), samples=PROGS.filter(p=>stKey(p)==="sample");
-  const ready=real.filter(p=>p.status==="ready_to_process").sort((a,b)=>b.hours-a.hours||b.lights-a.lights);
-  const finish=real.filter(p=>p.status==="in_progress").sort((a,b)=>b.hours-a.hours||b.lights-a.lights);
-  const cap=real.filter(p=>p.status==="capturing").sort((a,b)=>{ const ra=a.captureState==="open"?"9999":(a.readyOn||"9998"), rb=b.captureState==="open"?"9999":(b.readyOn||"9998"); return ra.localeCompare(rb)||b.hours-a.hours; });
+  const real=PROGS.filter(p=>!isSample(p)), samples=PROGS.filter(isSample);
+  /* one order everywhere (§6.3): orderDatasets, the rule the Pipeline and the panel's To process tab share */
+  const ready=orderDatasets(real.filter(p=>stKey(p)==="ready_to_process"));
+  const finish=orderDatasets(real.filter(p=>stKey(p)==="in_progress"));
+  const cap=orderDatasets(real.filter(p=>stKey(p)==="capturing"));
   const maxH=Math.max(0.1,...real.filter(p=>p.status!=="done").map(p=>p.hours));
   const cols=el("div","qcols"); const N=()=>mode()==="phone"?3:4;
   function job(p){ const b=el("button","job"); b.style.setProperty("--sc",col(p.camera)); b.append(nameEl(p.target,"t"));
     const m=el("div","m meta"); m.append(camDot(p.camera),el("span",null,short(p.camera)),document.createTextNode(" · ")); const unk=hoursUnknown(p.hours,p.lights); m.append(el("span","h",unk?"hours unknown":fmtH(p.hours)),document.createTextNode(" · "+nts(p.nights)+" · "+plural(p.lights,"frame"))); b.append(m);
     const bar=el("div","bar"); const f=el("i",unk?"sc-hatch":"sc-fill"); f.style.setProperty("--sc",col(p.camera)); f.style.width=(unk?100:Math.max(2,p.hours/maxH*100))+"%"; bar.append(f); b.append(bar);
     const foot=el("div","foot"); foot.append(markEl(calibrationMark(p))); foot.append(pill(stKey(p),{tap:true})); b.append(foot);
-    const w=nextWhen(p); if(w&&p.status!=="ready_to_process"||p.captureState==="complete") b.append(el("div","when",w));
+    const w=reasonTxt(p); if(w) b.append(el("div","when",w));
     b.addEventListener("click",()=>openProject(p.target)); return b; }
   function column(title,sub,list){ const c=el("div","qcol"); const h=el("h3"); h.append(document.createTextNode(title),el("span","count",String(list.length))); c.append(h); c.append(el("div","colsub",sub)); const box=el("div"); c.append(box); let open=false;
     const paint=()=>{ box.replaceChildren(); const shown=open?list:list.slice(0,N()); shown.forEach((p,i)=>{ const j=job(p); if(open&&i>=N()){ j.classList.add("reveal"); j.style.setProperty("--block-delay",Math.min(i-N(),8)*40+"ms"); } box.append(j); }); if(!list.length) box.append(el("p","sub","nothing here")); if(list.length>N()){ const mb=el("button","btn more",open?"show the top "+N():"+ "+(list.length-N())+" more · show all "+list.length); mb.addEventListener("click",()=>{ open=!open; paint(); }); box.append(mb); } };
     paint(); return c; }
-  cols.append(column("Ready to process","nothing new for "+QUIET()+" nights, or closed by you, and nothing started yet · biggest first",ready));
-  cols.append(column("Finish it","a master of yours is saved, no final picture yet",finish));
-  cols.append(column("Still capturing","new frames in the last "+QUIET()+" nights, or kept open by you · soonest ready first",cap));
+  cols.append(column("Ready to process","nothing new for "+QUIET()+" nights, or closed by you, and nothing started yet · "+ORDER_WORDS.ready_to_process,ready));
+  cols.append(column("Finish it","a master of yours is saved, no final picture yet · "+ORDER_WORDS.in_progress,finish));
+  cols.append(column("Still capturing","new frames in the last "+QUIET()+" nights, or kept open by you · "+ORDER_WORDS.capturing,cap));
   card.append(cols);
   const soon=cap.filter(p=>p.readyOn).map(p=>p.readyOn).sort()[0];
   if(!ready.length&&!finish.length) card.append(el("p","sub","Nothing is waiting for you"+(cap.length?": everything is still capturing"+(soon?" (the first is ready from "+fmtDY(soon)+")":""):"")+(real.some(p=>p.status==="done")?"; the rest is done.":".")));
-  if(samples.length){ const sm=el("div","samples"); const h=el("h3"); h.append(document.createTextNode("Quick looks, kept out of the queue"),el("span","count",String(samples.length))); sm.append(h); sm.append(el("div","sub","a test or a one-off snap you flagged as a quick look · say it is a real project to put it back in the queue"));
-    for(const p of samples){ const r=el("div","r"); r.append(pill("sample"),camDot(p.camera),el("b",null,commonName(p.target)),el("span",null,"on the "+short(p.camera)+" · "+plural(p.lights,"frame")+" · "+nts(p.nights)+" · "+agoTxt(p.lastNight))); const b=el("button","disc"); b.append(document.createTextNode("It's a real project"),glyph("right")); b.addEventListener("click",()=>toast("Remove its line from capture-state.json ("+p.tid+"|"+((BY[p.camera]||{}).id||p.camera)+") and press Refresh: it goes back in the queue.")); r.append(b); sm.append(r); }
-    card.append(sm); }
+  /* samples (§6.2) are listed only in the closed Samples group of the Pipeline and the Targets list: one line here */
+  if(samples.length){ const sm=el("div","samples"); const r=el("div","r"); r.append(pill("sample"),el("span",null,plural(samples.length,"sample")+" set aside · under "+RULES().sampleMinutes+" minutes of integration, or flagged by you as a quick look · listed under Samples in Pipeline")); const b=el("button","disc"); b.append(document.createTextNode("Show them"),glyph("right")); b.addEventListener("click",()=>go("pipeline")); r.append(b); sm.append(r); card.append(sm); }
 }
 
 /* ---------- projects that moved lately: cards with a ring, one pill per scope, a mini timeline; the header opens the panel ---------- */
@@ -1951,7 +2033,7 @@ function projCard(t){
   head.append(ring(progs,56)); const txt=el("div"); txt.append(nameEl(t.name,"t"),el("div","ty",describe(t)));
   const hl=el("div","hl"); const unkAll=progs.every(p=>hoursUnknown(p.hours,p.lights)); hl.append(el("b","nowrap",unkAll?"hours unknown":fmtH(sumH(progs.map(p=>p.hours)))),document.createTextNode(" · "+fmtI(t.lights)+" frames · "+nts(t.nights)+" · "),el("span","lt",latestTxt(t))); txt.append(hl);
   /* the ring's key: one row per scope, in the fixed order (the pills stay in the opened panel, where they have room) */
-  const rows=el("div","rows"); for(const p of progs){ const k=stKey(p), st2=stOf(k); const r=el("div","srow"); r.append(camDot(p.camera),el("span","nm",short(p.camera)),el("span","h",hoursUnknown(p.hours,p.lights)?"hours unknown":fmtH(p.hours)),el("span","lead")); const step=el("span","step p-"+st2.cls); step.append(glyph(st2.icon),document.createTextNode(st2.word)); r.append(step); r.title=p.camera+" · "+st2.word+(p.evidence?" · "+p.evidence:""); rows.append(r); } txt.append(rows);
+  const rows=el("div","rows"); for(const p of progs){ const k=stKey(p), st2=stOf(k); const r=el("div","srow"); r.append(camDot(p.camera),el("span","nm",short(p.camera)),el("span","h",hoursUnknown(p.hours,p.lights)?"hours unknown":fmtH(p.hours)),el("span","lead")); const step=el("span","step p-"+st2.cls); step.append(glyph(st2.icon),document.createTextNode(st2.word)); r.append(step); const nf=newFramesNote(p); if(nf) r.append(el("span","note","· "+nf)); r.title=p.camera+" · "+st2.word+(nf?" · "+nf:"")+(p.evidence?" · "+p.evidence:""); rows.append(r); } txt.append(rows);
   head.append(txt); head.append(glyph("chev")); head.lastChild.classList.add("chev"); card.append(head);
   /* one 18 px lane per scope, dots in the scope's own colour, the band and the last-night line across all lanes, 120 nights */
   const mini=el("div","mini"); const st=buildStrip({lanes:progs.map(p=>({key:p.camera,cam:p.camera,label:short(p.camera),sessions:SESS.filter(z=>z.target===t.name&&z.camera===p.camera),target:t.name})),laneH:18,labelW:52,lblCls:"mini",today:true,inset:16,onDot:(ln,a)=>openNight(ln.cam,a.night,t.name,card.closest(".card")||card,ln.g)});
@@ -1998,9 +2080,10 @@ RENDER.overview=function(root){
   OV.wh=el("div","card reveal"); root.append(OV.wh); renderWhereHours(OV.wh); blocks.push(OV.wh);
   blocks.forEach((b,i)=>b.style.setProperty("--block-delay",(150+i*ms("--stagger"))+"ms"));
 };
-/* newest first, then biggest (a tie-break the record's order can't decide) */
-const movedLately=()=>TG.filter(t=>t.lastNight&&ago(t.lastNight)<60).sort((a,b)=>String(b.lastNight).localeCompare(String(a.lastNight))||b.hours-a.hours||b.lights-a.lights);
-const movedSub=()=>plural(movedLately().length,"project")+" with frames in the last 60 nights, newest first, then biggest · open a card for one lane per scope";
+/* the one order (§6.3): most recent capture first, then biggest; a project that is only samples is set aside (§6.2) */
+const movedLately=()=>orderDatasets(TG.filter(t=>t.lastNight&&ago(t.lastNight)<60&&!sampleOnly(t)));
+const movedOut=()=>TG.filter(t=>t.lastNight&&ago(t.lastNight)<60&&sampleOnly(t)).length;
+const movedSub=()=>plural(movedLately().length,"project")+" with frames in the last 60 nights, most recent capture first, then biggest"+(movedOut()?" · "+plural(movedOut(),"sample")+" set aside":"")+" · open a card for one lane per scope";
 /* where the hours went: top targets by hours, split by scope; chart or table */
 function renderWhereHours(card){
   card.replaceChildren(); card.className="card reveal";
@@ -2068,23 +2151,28 @@ RENDER.targets=function(root){
   const search=el("input","ctl"); search.type="search"; search.placeholder="Search targets or codes"; search.setAttribute("aria-label","Search targets"); tb.append(search);
   const cams=chipFilter(SC.map(s=>({id:s.camera,cam:s.camera,label:s.short})),()=>paint()); tb.append(cams.box);
   const sts=chipFilter(PIPE_ORDER.map(k=>({id:k,st:k,label:stOf(k).word})),()=>paint()); tb.append(sts.box);
-  const sort=el("select","ctl"); sort.setAttribute("aria-label","Sort targets"); [["hours","Sort: hours"],["nights","Sort: nights"],["lights","Sort: frames"],["last","Sort: most recent"],["name","Sort: name"]].forEach(([v,l])=>{ const o=el("option",null,l); o.value=v; sort.append(o); }); tb.append(sort);
+  const sort=el("select","ctl"); sort.setAttribute("aria-label","Sort targets"); [["recent","Sort: most recent capture"],["hours","Sort: hours"],["nights","Sort: nights"],["lights","Sort: frames"],["name","Sort: name"]].forEach(([v,l])=>{ const o=el("option",null,l); o.value=v; sort.append(o); }); tb.append(sort);
   const count=el("span","tcount"); tb.append(count); root.append(tb);
   const head=el("div","thead"); ["Target","Type · constellation","Scopes","Next step, per scope","Hours","Nights","Frames","Latest"].forEach((h,i)=>head.append(el("span","colhead"+(i>=4?" num":""),h))); root.append(head);
   const list=el("div","trows"); root.append(list);
   function paint(){
     const qy=search.value.trim().toLowerCase();
-    let rows=TG.filter(t=>{ if(qy&&!(t.name.toLowerCase().includes(qy)||t.codes.join(" ").toLowerCase().includes(qy))) return false; if(cams.sel.size&&!t.cameras.some(c=>cams.sel.has(c))) return false; if(sts.sel.size&&!t.programmes.some(p=>sts.sel.has(stKey(p)))) return false; return true; });
-    const k=sort.value; rows.sort((a,b)=>k==="name"?a.name.localeCompare(b.name):k==="last"?String(b.lastNight).localeCompare(String(a.lastNight)):(b[k]||0)-(a[k]||0));
-    list.replaceChildren(); count.textContent=rows.length+" of "+TG.length+" targets";
-    for(const t of rows){ const r=el("button","trow"); const c1=el("div"); c1.append(nameEl(t.name,"tname")); if(t.mosaic) c1.append(el("div","meta muted","mosaic")); r.append(c1);
+    const all=TG.filter(t=>{ if(qy&&!(t.name.toLowerCase().includes(qy)||t.codes.join(" ").toLowerCase().includes(qy))) return false; if(cams.sel.size&&!t.cameras.some(c=>cams.sel.has(c))) return false; if(sts.sel.size&&!t.programmes.some(p=>sts.sel.has(stKey(p)))) return false; return true; });
+    /* samples (§6.2) leave the list and its count; they sit in the closed group under it. The default order is the page's one order (§6.3) */
+    const real=all.filter(t=>!sampleOnly(t)), samp=all.filter(sampleOnly);
+    const k=sort.value; const sortRows=rs=>k==="recent"?orderDatasets(rs):rs.slice().sort((a,b)=>k==="name"?a.name.localeCompare(b.name):(b[k]||0)-(a[k]||0));
+    const rows=sortRows(real), nReal=TG.filter(t=>!sampleOnly(t)).length;
+    list.replaceChildren(); count.textContent=rows.length+" of "+nReal+" targets"+(samp.length?" · "+plural(samp.length,"sample")+" set aside":"");
+    const rowEl=t=>{ const r=el("button","trow"); const c1=el("div"); c1.append(nameEl(t.name,"tname")); if(t.mosaic) c1.append(el("div","meta muted","mosaic")); r.append(c1);
       r.append(el("div","tmeta",[t.type,t.constellation].filter(Boolean).join(" · ")||"type not recorded"));
       const dots=el("div","dots"); for(const p of scopeOrder(t.programmes)) dots.append(camDot(p.camera)); r.append(dots);
-      const stc=el("div","sts"); for(const p of scopeOrder(t.programmes)) stc.append(pill(stKey(p),{cam:p.camera,text:stOf(stKey(p)).word})); r.append(stc);
+      const stc=el("div","sts"); for(const p of scopeOrder(t.programmes)){ const kk=stKey(p), nf=newFramesNote(p); stc.append(pill(kk,{cam:p.camera,text:stOf(kk).word+(nf?" · "+nf:"")})); } r.append(stc);
       const n1=el("div","num"); n1.dataset.l="hours"; const unkAll=t.programmes.every(p=>hoursUnknown(p.hours,p.lights)); const hp=fmtHp(sumH(t.programmes.map(p=>p.hours))); n1.append(el("b",null,unkAll?"unknown":hp.n),document.createTextNode(unkAll?"":" "+hp.u)); r.append(n1);
-      const n2=el("div","num",fmtI(t.nights)); n2.dataset.l="nights"; const n3=el("div","num",fmtI(t.lights)); n3.dataset.l="frames"; const n4=el("div","num",fmtDY(t.lastNight)); n4.dataset.l="latest"; r.append(n2,n3,n4);
-      r.addEventListener("click",()=>openTarget(t.name)); list.append(r); }
+      const n2=el("div","num",fmtI(t.nights)); n2.dataset.l="nights"; const n3=el("div","num",fmtI(t.lights)); n3.dataset.l="frames"; const n4=el("div","num",fmtDate(t.lastNight)); n4.dataset.l="latest"; r.append(n2,n3,n4);
+      r.addEventListener("click",()=>openTarget(t.name)); return r; };
+    for(const t of rows) list.append(rowEl(t));
     if(!rows.length) list.append(el("p","sub","No target matches."));
+    if(samp.length){ const g=samplesGroup(samp.length,sortRows(samp).map(rowEl),"under "+RULES().sampleMinutes+" minutes of integration, or flagged by you as a quick look · set aside from every count and queue"); if(sts.sel.size&&[...sts.sel].every(x=>x==="sample")) g.open=true; list.append(g); }
   }
   search.addEventListener("input",paint); sort.addEventListener("change",paint); paint();
 };
@@ -2146,7 +2234,7 @@ function openTarget(name){
   const pp=projectPanelFor(t,{slot:"drawerproj"}); pp.classList.add("auto","open"); pp.style.height="auto"; pp.querySelector(".ph .tools .btn:last-child").remove(); const stack=el("div","stack"); stack.append(pp); drawer.append(stack);
   /* the folders and files */
   const ph=el("h2",null,"By scope: the folder and what is in it"); ph.style.margin="24px 0 4px"; drawer.append(ph);
-  for(const p of progs){ const box=el("div","prog"); box.style.setProperty("--sc",col(p.camera)); const h=el("div","p-h"); h.append(camDot(p.camera),el("span",null,p.camera)); if(p.mosaic) h.append(el("span","chip","mosaic")); h.append(pill(stKey(p))); if(p.collected) h.append(el("span","chip","Collect Lights: collected")); box.append(h);
+  for(const p of progs){ const box=el("div","prog"); box.style.setProperty("--sc",col(p.camera)); const h=el("div","p-h"); h.append(camDot(p.camera),el("span",null,p.camera)); if(p.mosaic) h.append(el("span","chip","mosaic")); h.append(pill(stKey(p))); if(newFramesNote(p)) h.append(el("span","chip",newFramesNote(p))); if(p.stateKeptFrom) h.append(el("span","chip","state kept from "+fmtDate(p.stateKeptFrom))); if(p.collected) h.append(el("span","chip","Collect Lights: collected")); box.append(h);
     const st=el("div","p-stats"); const stat=(lbl,val)=>{ if(val==null||val==="") return; const s2=el("span"); s2.append(lbl+" "); s2.append(el("b",null,String(val))); st.append(s2); };
     stat("light frames",fmtI(p.lights)); stat("hours",hoursUnknown(p.hours,p.lights)?"unknown":fmtH(p.hours)); stat("nights",fmtI(p.nights)); if(p.firstNight) stat("span",fmtDY(p.firstNight)+" to "+fmtDY(p.lastNight)); if(p.autostacks) stat("auto-stacks",p.autostacks); if(p.panels&&p.panels.length) stat("mosaic panels",p.panels.length); box.append(st);
     if(p.mastersNamed.length||p.finalsNamed.length){ const f=el("div","p-stats"); if(p.mastersNamed.length){ const s=el("span"); s.append("masters "); s.append(el("b",null,p.mastersNamed.join(", "))); f.append(s); } if(p.finalsNamed.length){ const s=el("span"); s.append("finished pictures "); s.append(el("b",null,p.finalsNamed.join(", "))); f.append(s); } box.append(f); }
@@ -2168,16 +2256,17 @@ RENDER.pipeline=function(root){
   const wide=()=>matchMedia("(min-width:900px)").matches; let form=mem.pipeForm||"board";
   const seg=segRange([["list","List",0],["board","Board",1]],form,(n,id)=>{ form=id; mem.pipeForm=id; remember(); paint(); },"Form"); seg.style.marginLeft="auto"; tb.append(seg); root.append(tb);
   const holder=el("div"); root.append(holder);
-  const ORDER=["ready_to_process","in_progress","capturing","done","sample"];
-  const sub=k=>({ready_to_process:"nothing new for "+QUIET()+" nights, or closed by you, and nothing started",in_progress:"a master of yours is saved, no final yet",capturing:"new frames in the last "+QUIET()+" nights, or kept open by you",done:"a finished picture names the target and the scope",sample:"your flag: kept out of the queue"})[k];
-  function item(p,asRow){ const b=el("button",asRow?"prow":"pcard"); b.style.setProperty("--sc",col(p.camera)); const l=el("div"); l.append(nameEl(p.target,asRow?"t":"p-t")); const m=el("div","p-m"); m.append(camDot(p.camera),el("span",null,short(p.camera)),el("b",null,hoursTxt(p.hours,p.lights)),el("span",null,"· "+nts(p.nights)+" · last "+fmtDS(p.lastNight))); l.append(m); if(!asRow){ const ev=[nextWhen(p),(!isSeestar(p.camera)&&p.status!=="done"?calibrationMark(p).word:"")].filter(Boolean).join(" · "); if(ev) l.append(el("div","p-ev",ev)); } b.append(l); if(asRow) b.append(pill(stKey(p),{tap:true})); b.addEventListener("click",()=>openProject(p.target)); return b; }
+  /* the groups come from pipelineGroups (the pure layer): PIPE_GROUPS in the page's one order, the samples apart */
+  const sub=k=>({ready_to_process:"nothing new for "+QUIET()+" nights, or closed by you, and nothing started",in_progress:"a master of yours is saved, no final yet",capturing:"new frames in the last "+QUIET()+" nights, or kept open by you",done:"a finished picture names the target and the scope",sample:"under "+RULES().sampleMinutes+" minutes of integration, or your quick-look flag · set aside from every count and queue"})[k];
+  function item(p,asRow){ const b=el("button",asRow?"prow":"pcard"); b.style.setProperty("--sc",col(p.camera)); const l=el("div"); l.append(nameEl(p.target,asRow?"t":"p-t")); const m=el("div","p-m"); m.append(camDot(p.camera),el("span",null,short(p.camera)),el("b",null,hoursTxt(p.hours,p.lights)),el("span",null,"· "+nts(p.nights)+" · last "+fmtDate(p.lastNight))); l.append(m); const ev=[reasonTxt(p),(!asRow&&!isSeestar(p.camera)&&p.status!=="done"?calibrationMark(p).word:"")].filter(Boolean).join(" · "); if(ev) l.append(el("div","p-ev",ev)); b.append(l); if(asRow) b.append(pill(stKey(p),{tap:true})); b.addEventListener("click",()=>openProject(p.target)); return b; }
   function paint(){ holder.replaceChildren(); const useBoard=form==="board"&&wide(); seg.style.display=wide()?"":"none";
-    const groups=ORDER.map(k=>({k,list:PROGS.filter(p=>stKey(p)===k&&(!cams.sel.size||cams.sel.has(p.camera))).sort((a,b)=>b.hours-a.hours)})).filter(g=>g.list.length);
-    if(!groups.length){ holder.append(el("p","sub","No dataset matches.")); return; }
-    if(useBoard){ const board=el("div","board"); for(const g of groups){ const c=el("div","col"); const h=el("h3"); h.append(pill(g.k)); c.append(h); const hrs=sumH(g.list.map(p=>p.hours)); c.append(el("div","colsum",plural(g.list.length,"dataset")+" · "+fmtH(hrs)+" · "+sub(g.k))); for(const p of g.list) c.append(item(p,false)); board.append(c); } holder.append(board); }
-    else { const L=el("div","plist"); for(const g of groups){ const gr=el("div","grp"); const h=el("h3"); h.append(pill(g.k),el("span","count",String(g.list.length)),el("span","sub",sub(g.k))); gr.append(h); for(const p of g.list) gr.append(item(p,true)); L.append(gr); } holder.append(L); } }
+    const {groups,samples}=pipelineGroups(p=>!cams.sel.size||cams.sel.has(p.camera));
+    if(!groups.length&&!samples.length){ holder.append(el("p","sub","No dataset matches.")); return; }
+    if(useBoard){ const board=el("div","board"); for(const g of groups){ const c=el("div","col"); const h=el("h3"); h.append(pill(g.k)); c.append(h); const hrs=sumH(g.list.map(p=>p.hours)); c.append(el("div","colsum",plural(g.list.length,"dataset")+" · "+fmtH(hrs)+" · "+sub(g.k)+" · "+ORDER_WORDS[g.k])); for(const p of g.list) c.append(item(p,false)); board.append(c); } holder.append(board); }
+    else { const L=el("div","plist"); for(const g of groups){ const gr=el("div","grp"); const h=el("h3"); h.append(pill(g.k),el("span","count",String(g.list.length)),el("span","sub",sub(g.k)+" · "+ORDER_WORDS[g.k])); gr.append(h); for(const p of g.list) gr.append(item(p,true)); L.append(gr); } holder.append(L); }
+    if(samples.length) holder.append(samplesGroup(samples.length,samples.map(p=>item(p,true)),sub("sample"))); }
   paint(); const fitter=()=>{ if(!holder.isConnected){ FITTERS.delete(fitter); return; } if((form==="board"&&wide())!==!!holder.querySelector(".board")) paint(); }; FITTERS.add(fitter);
-  root.append(el("div","sub prose","Still capturing: a night within the quiet period ("+QUIET()+" observing nights) or kept open by you. Ready to process: the quiet period has passed and nothing is started. Finish it: a master of yours is saved in the target's folder on the archive. Done: a finished picture names the target and the scope. Quick look: your flag in capture-state.json."));
+  root.append(el("div","sub prose","Still capturing: a night within the quiet period ("+QUIET()+" observing nights) or kept open by you. Ready to process: the quiet period has passed and nothing is started. Finish it: a master of yours is saved in the target's folder on the archive. Done: a finished picture names the target and the scope (with nights newer than the picture it stays Done, with a 'new frames since' note). Sample: under "+RULES().sampleMinutes+" minutes of integration, or your flag in capture-state.json; set aside from every count and queue. "+ruleLine()));
 };
 
 /* ================= NIGHTS: a heatmap of calendar nights ================= */
@@ -2339,8 +2428,13 @@ RENDER.equipment=function(root){
 
 /* ================= DATA CHECKS: how the numbers add up ================= */
 RENDER.health=function(root){
+  /* phase 1: the rule in one line, the state counts with the samples set aside, from stateTotals (the engine's counts when the record carries them) */
+  const tot=stateTotals(); const rl=el("div","card"); const rlh=el("div","cardhead"); const rld=el("div"); rld.append(el("h2",null,"The states and the rules"),el("div","sub",ruleLine())); rlh.append(rld); rl.append(rlh);
+  const ssum=el("div","sum"); for(const k of PIPE_GROUPS) ssum.append(el("div","k",ST[k].word),el("div","v",fmtI(tot.counts[k])+(tot.hours[k]>0?" · "+fmtH(tot.hours[k]):"")));
+  ssum.append(el("div","k tot",samplesLine()||"no samples set aside"),el("div","v tot",fmtI(tot.samples.n)+(tot.samples.hours>0?" · "+fmtH(tot.samples.hours):""))); rl.append(ssum);
+  const rlp=el("p","sub prose"); rlp.style.marginTop="12px"; rlp.textContent="A sample is under "+RULES().sampleMinutes+" minutes of integration, or flagged by you as a quick look: its hours stay in the header's total on disk, but it leaves every count and queue · counts "+(tot.fromEngine?"from the importer's record":"added up by this page")+" · the Pipeline and the Targets list keep the samples in a closed group at the bottom."; rl.append(rlp); root.append(rl);
   const nc=D.notCounted; const rowsAll=(D.ledgerMeta&&D.ledgerMeta.rows)||0; const lights=D.totals.lights||0;
-  const rec=el("div","card"); const hh=el("div","cardhead"); const hd=el("div"); hd.append(el("h2",null,"How the numbers add up"),el("div","sub","what the importer read, what this page counts, and where the difference went · every line is a count from the record")); hh.append(hd); rec.append(hh);
+  const rec=el("div","card"); rec.style.marginTop="24px"; const hh=el("div","cardhead"); const hd=el("div"); hd.append(el("h2",null,"How the numbers add up"),el("div","sub","what the importer read, what this page counts, and where the difference went · every line is a count from the record")); hh.append(hd); rec.append(hh);
   const sum=el("div","sum"); const line=(k,v,cls)=>{ sum.append(el("div","k "+(cls||""),k),el("div","v "+(cls?cls.replace("sub-k","sub-v"):""),v)); };
   const nlf=nc.notLightFrames||0, un=(nc.unknownNames||{}).frames||0, drop=un+(nc.noScope||0)+(nc.noNight||0)+(nc.unreadable||0), dup=nc.duplicates||0;
   const total=rowsAll+nlf;
@@ -2353,12 +2447,21 @@ RENDER.health=function(root){
     t2.append(tb); w.append(t2); rc.append(w); root.append(rc); }
   const hl=el("div","hlist"); hl.style.marginTop="24px";
   const notices=(D.notices||[]).filter(n=>n&&n.text);
-  for(const n of notices){ const it=el("div","hitem warn"); it.append(glyph("warn")); const bx=el("div"); bx.append(el("h4",null,({unknown_names:"Names the importer doesn't recognise",no_scope:"Frames that name no scope",no_night:"Frames with no night",unreadable:"Lines that could not be read",inventory_missing:"The archive wasn't checked",finals_unchecked:"Finished pictures weren't checked",finals_note:"About the finished pictures",capture_state_bad:"capture-state.json names a dataset that doesn't exist",contract:"The importer's list of targets and scopes"})[n.kind]||"Something to know")); bx.append(el("p",null,n.text)); it.append(bx); hl.append(it); }
+  /* the record kept its states because the finished pictures couldn't be read (§6.1): said first, in the record's words */
+  const kept=statesKeptText(); if(kept){ const it=el("div","hitem warn"); it.append(glyph("warn")); const bx=el("div"); bx.append(el("h4",null,"States kept from the last build: an input couldn't be read"),el("p",null,kept)); it.append(bx); hl.append(it); }
+  for(const n of notices){ if(n===keptNotice()) continue; const it=el("div","hitem warn"); it.append(glyph("warn")); const bx=el("div"); bx.append(el("h4",null,({unknown_names:"Names the importer doesn't recognise",finals_unmatched:"Finished pictures that match nothing","finals-unmatched":"Finished pictures that match nothing",finals_ambiguous:"Pictures that could be either Askar","finals-ambiguous":"Pictures that could be either Askar",no_scope:"Frames that name no scope",no_night:"Frames with no night",unreadable:"Lines that could not be read",inventory_missing:"The archive wasn't checked",finals_unchecked:"Finished pictures weren't checked",finals_note:"About the finished pictures",capture_state_bad:"capture-state.json names a dataset that doesn't exist",contract:"The importer's list of targets and scopes"})[n.kind]||"Something to know")); bx.append(el("p",null,n.text)); it.append(bx); hl.append(it); }
   for(const h of D.health){ if(!h) continue; if(h.severity==="warn"&&notices.some(n=>n.text===h.detail)) continue; const it=el("div","hitem"+(h.severity==="warn"?" warn":"")); it.append(glyph(h.severity==="warn"?"warn":"info")); const bx=el("div"); bx.append(el("h4",null,h.severity==="warn"&&h.title==="Warning from the project layer"?"Something to know":h.title),el("p",null,h.detail)); it.append(bx); hl.append(it); }
   root.append(hl);
+  /* the finished-picture checks (§6.1): what matched nothing, and what could be either Askar */
+  const fc=finalsChecks();
+  if(fc.unmatched.length){ const c=el("div","card"); c.style.marginTop="24px"; const ch=el("div","cardhead"); const cd=el("div"); cd.append(el("h2",null,"Finished pictures that match nothing"),el("div","sub",plural(fc.unmatched.length,"picture")+" in Final Astro Images "+(fc.unmatched.length===1?"names":"name")+" no dataset the importer knows · the dataset each belongs to stays unfinished until the file name or its folder says which object and scope")); ch.append(cd); c.append(ch);
+    const w=el("div","tablewrap"); simpleTable(w,["File","Folder","Why"],fc.unmatched.map(x=>[x.file||"·",x.folder||"·",x.why||"·"]),[]); c.append(w); root.append(c); }
+  if(fc.ambiguous.length){ const c=el("div","card"); c.style.marginTop="24px"; const ch=el("div","cardhead"); const cd=el("div"); cd.append(el("h2",null,"Pictures that could be either Askar"),el("div","sub",plural(fc.ambiguous.length,"picture")+" in a folder, or with a name, that covers both Askars · counted for neither until the scope is set")); ch.append(cd); c.append(ch);
+    const w=el("div","tablewrap"); simpleTable(w,["File","Target","Could be"],fc.ambiguous.map(x=>[x.file||"·",x.target||"·",x.scopes.length?x.scopes.join(" or "):"either Askar"]),[]); c.append(w);
+    const note=el("p","sub prose"); note.style.marginTop="12px"; note.textContent="No action yet: the scope can be set later, through the panel's Say which Askar action, and the dataset moves to Done at the next rebuild."; c.append(note); root.append(c); }
   const inp=D.inputs||{}; const lg=el("div","card"); lg.style.marginTop="24px"; lg.append(el("h2",null,"Where this record came from")); const ul=el("div","sum"); ul.style.marginTop="12px";
   const li=(k,v)=>{ ul.append(el("div","k",k),el("div","v",v)); };
-  li("built",D.generatedAt||"?"); if(D.generatedAtLocal) li("local time",String(D.generatedAtLocal).replace("T"," ").slice(0,16)+(D.timezone?" "+D.timezone:"")); li("on",inp.machine||"?"); li("this computer's record",inp.ledger?(inp.ledgerCorrupt?"can't be read":"read"):"none here"); if(inp.snapshot) li("the "+(inp.snapshot.machine||"other computer")+"'s copy",fmtDY(String(inp.snapshot.at||"").slice(0,10))+(typeof inp.snapshot.ageHours==="number"?" · "+(Math.floor(inp.snapshot.ageHours/24)===0?"from today":plural(Math.floor(inp.snapshot.ageHours/24),"day")+" old"):"")+(inp.snapshot.rows?" · "+fmtI(inp.snapshot.rows)+" lines":"")); li("the archive's inventory",inp.inventoryAt?fmtDY(String(inp.inventoryAt).slice(0,10)):"not checked"); li("finished pictures",inp.finals?"checked":"not checked"); li("quiet period",(D.quietPeriodDays||14)+" observing nights"); li("as of night",fmtNight(ASOF()));
+  li("built",D.generatedAt||"?"); if(D.generatedAtLocal) li("local time",String(D.generatedAtLocal).replace("T"," ").slice(0,16)+(D.timezone?" "+D.timezone:"")); li("on",inp.machine||"?"); li("this computer's record",inp.ledger?(inp.ledgerCorrupt?"can't be read":"read"):"none here"); if(inp.snapshot) li("the "+(inp.snapshot.machine||"other computer")+"'s copy",fmtDY(String(inp.snapshot.at||"").slice(0,10))+(typeof inp.snapshot.ageHours==="number"?" · "+(Math.floor(inp.snapshot.ageHours/24)===0?"from today":plural(Math.floor(inp.snapshot.ageHours/24),"day")+" old"):"")+(inp.snapshot.rows?" · "+fmtI(inp.snapshot.rows)+" lines":"")); li("the archive's inventory",inp.inventoryAt?fmtDY(String(inp.inventoryAt).slice(0,10)):"not checked"); li("finished pictures",inp.finals?"checked":"not checked"); li("quiet period",QUIET()+" observing nights"); li("sample cut-off",RULES().sampleMinutes+" minutes"); li("active scope window",RULES().activeWindowNights+" nights"); if(samplesLine()) li("set aside",samplesLine()); li("as of night",fmtNight(ASOF()));
   lg.append(ul); const p=el("p","sub prose"); p.style.marginTop="12px"; p.textContent=(D.sourceNote||"")+" "+(D.provenance||""); lg.append(p); root.append(lg);
 };
 

@@ -55,7 +55,7 @@ from collections import defaultdict
 from datetime import date, datetime, timedelta, timezone
 
 # One version for every platform (1.5.0: the Windows 11 edition joins the Mac).
-VERSION = "1.7.6"
+VERSION = "1.8.0"
 IS_WINDOWS = os.name == "nt"
 IS_MAC = sys.platform == "darwin"
 PLATFORM = "windows" if IS_WINDOWS else ("mac" if IS_MAC else "linux")
@@ -870,17 +870,31 @@ FINALS_DIR = _env_path(
     "ASTRO_FINALS_DIR",
     os.path.join(os.path.splitdrive(ARCHIVE_MOUNT)[0] + "\\", "Final Astro Images")
     if IS_WINDOWS else "")
-def _env_int(var, default):
-    value = os.environ.get(var)
-    if value is None:
-        value = _CONFIG.get(var)          # 0 is a real setting, not "unset"
-    if value is None:
+# The project layer's three rules (Observatory UX plan §6.5). Each is read
+# from the environment or config.json like any other setting; a value that
+# isn't a whole number in its range falls back to the default, and
+# build_projects says so in a notice (CONFIG_WARNINGS) rather than guessing.
+CONFIG_WARNINGS = []
+def _env_rule(var, default, lo, hi):
+    raw = os.environ.get(var)
+    if raw is None:
+        raw = _CONFIG.get(var)            # 0 is a real setting, not "unset"
+    if raw is None:
         return default
     try:
-        return int(value)
+        if isinstance(raw, bool):
+            raise ValueError
+        v = int(str(raw).strip())
+        if not lo <= v <= hi:
+            raise ValueError
+        return v
     except (TypeError, ValueError):
+        CONFIG_WARNINGS.append(f"{var} is set to {raw!r}, which isn't a whole number from {lo} to {hi}; "
+                               f"using the default of {default}")
         return default
-QUIET_PERIOD_DAYS = _env_int("ASTRO_QUIET_PERIOD_DAYS", 14)
+QUIET_PERIOD_DAYS = _env_rule("ASTRO_QUIET_PERIOD_DAYS", 14, 0, 3650)      # calendar days with no new frames
+SAMPLE_MINUTES = _env_rule("ASTRO_SAMPLE_MINUTES", 30, 0, 100000)           # under this, a dataset is a sample
+ACTIVE_WINDOW_NIGHTS = _env_rule("ASTRO_ACTIVE_WINDOW_NIGHTS", 30, 1, 3650)  # a scope with frames this recently is active
 _test_root_guard()
 
 # One-time migration from the pre-unification state locations (spec §1).
@@ -10444,6 +10458,12 @@ def run_skiplist_dialog(state):
 # ═════════════════════════════════════════════════════════════════════════
 
 PROJECT_STATUS_ORDER = ["capturing", "ready_to_process", "in_progress", "done"]
+# "sample" (UX plan §6.2) is a fifth state: a quick look, kept out of every count and
+# queue. It comes last so the four indexes above never move.
+PROJECT_STATES = PROJECT_STATUS_ORDER + ["sample"]
+# the words a kind of object is called by, at the end of a name: "Black Eye Galaxy"
+# is also "Black Eye" (the short name matches only when it is nobody else's)
+_KIND_WORDS = {"galaxy", "nebula", "nebulae", "cluster"}
 # What Brett pastes to rebuild the list by hand (the panel shows it)
 PROJECTS_COMMAND_HINT = ('py -3 -X utf8 "$env:LOCALAPPDATA\\BrettjoAstro\\bin\\astro-import.py" --projects'
                          if IS_WINDOWS else "python3 ~/bin/astro-import.py --projects")
@@ -10508,7 +10528,7 @@ _GENERIC_NAME_KEYS = {"reflection nebula", "spiral galaxy", "open cluster", "ope
 def load_contract():
     """contract/targets.json and contract/scopes.json, indexed for lookups.
     A missing, unreadable or malformed file becomes a warning, never a crash."""
-    out = {"targets": [], "scopes": [], "by_code": {}, "by_namekey": {},
+    out = {"targets": [], "scopes": [], "by_code": {}, "by_namekey": {}, "by_shortkey": {},
            "ambiguous_names": set(), "default_site": "Shinfield", "warnings": [],
            "_tokens": None}
     for fname, key in (("targets.json", "targets"), ("scopes.json", "scopes")):
@@ -10541,6 +10561,17 @@ def load_contract():
                 out["ambiguous_names"].add(k)   # e.g. two 'Reflection Nebula's
             else:
                 out["by_namekey"][k] = t
+            # the name without its kind word ('Black Eye Galaxy' → 'black eye'), so a
+            # finished picture called Black_Eye_S50.jpg finds M 64. Two targets with the
+            # same short name ('Cat's Eye' galaxy and nebula) make it nobody's.
+            words = k.split()
+            if len(words) > 1 and words[-1] in _KIND_WORDS:
+                sk = " ".join(words[:-1])
+                if sk and sk not in _GENERIC_NAME_KEYS and sk not in _KIND_WORDS:
+                    if sk in out["by_shortkey"] and out["by_shortkey"][sk] is not t:
+                        out["by_shortkey"][sk] = None      # two objects: matches neither
+                    elif sk not in out["by_shortkey"]:
+                        out["by_shortkey"][sk] = t
     if dup_codes:
         out["warnings"].append(f"contract/targets.json lists a code on two targets (the first keeps it): "
                                f"{', '.join(sorted(set(dup_codes))[:6])}")
@@ -10553,7 +10584,10 @@ def _lookup_name(contract, text):
     k = _name_key(text)
     if not k or k in contract["ambiguous_names"]:
         return None
-    return contract["by_namekey"].get(k)
+    t = contract["by_namekey"].get(k)
+    if t is None and k not in _GENERIC_NAME_KEYS:
+        t = (contract.get("by_shortkey") or {}).get(k)   # 'Black Eye' for 'Black Eye Galaxy'
+    return t
 
 def target_display(t):
     """'Iris Nebula (NGC 7023)': the name with its first catalogue code."""
@@ -10803,10 +10837,36 @@ def _is_link(path):
     isj = getattr(os.path, "isjunction", None)
     return os.path.islink(path) or bool(isj and isj(path))
 
+def _final_target(contract, stem, subs):
+    """The contract target a finished picture is of: by any catalogue code or
+    known name in its file name, through the one resolver the ledger and
+    --targets-draft use (so 'M64', 'M 64', 'Black Eye' and 'Black Eye Galaxy'
+    all find M 64), then by the longest run of words in the name that is a
+    known name ('Black_Eye_Galaxy_S50_v2'), then by the nearest folder above
+    it that names one. Returns (target, how) or (None, why) with one of the
+    three reasons the Observatory lists."""
+    t, how = resolve_target(contract, stem)
+    if t is not None:
+        return t, how
+    words = _flat_words(stem)
+    for n in range(min(6, len(words)), 0, -1):          # longest run first
+        for i in range(len(words) - n + 1):
+            t = _lookup_name(contract, " ".join(words[i:i + n]))
+            if t is not None:
+                return t, "name in the file name"
+    for d in reversed(subs):                            # nearest folder first
+        t, _how = resolve_target(contract, d)
+        if t is not None:
+            return t, "folder name"
+    if _codes_in(stem) or any(_codes_in(d) for d in subs):
+        return None, "name not in the contract"
+    return None, "no catalogue code or known name in the file name"
+
 def _scan_finals(contract):
-    """Finished pictures in Final Astro Images, with the codes and the scopes
-    their filenames and subfolders carry. (None, why) when the folder can't
-    be looked at. Never follows a link out of the folder."""
+    """Finished pictures in Final Astro Images: which target each one is of
+    (_final_target), the scopes its filename and subfolders name, the archive
+    root a folder spells, and the day it was last saved. (None, why) when the
+    folder can't be looked at. Never follows a link out of the folder."""
     if not FINALS_DIR:
         return None, "no Final Astro Images folder is configured on this computer"
     if not os.path.isdir(FINALS_DIR):
@@ -10821,22 +10881,26 @@ def _scan_finals(contract):
                 return found, f"Final Astro Images is very large; stopped after {_PL_FINALS_CAP:,} files"
             if fn.startswith((".", "~$")) or not fn.lower().endswith(_PL_FINAL_EXTS):
                 continue                                  # ._ sidecars, Office locks
-            rel = _rel(os.path.join(dirpath, fn), FINALS_DIR).replace("\\", "/")
+            full = os.path.join(dirpath, fn)
+            rel = _rel(full, FINALS_DIR).replace("\\", "/")
             subs = rel.split("/")[:-1]                    # every folder on the way
             sub = subs[0] if subs else ""
             stem = os.path.splitext(fn)[0]
-            codes = _codes_in(stem)
-            codes = [c for c in codes                      # 'IC1318A' known: not also IC 1318
-                     if not any(k != c and k.startswith(c) and k[len(c):].isalpha()
-                                and k in contract["by_code"] for k in codes)]
+            t, why = _final_target(contract, stem, subs)
             folder_scopes = next((r for r in (_rigs_in(d, contract) for d in reversed(subs)) if r), [])
             roots = set()
             for d in subs:
                 roots |= _finals_sub_roots(contract, d)
-            found.append({"name": fn, "sub": sub, "codes": codes,
+            try:                                          # the day the picture was saved (local)
+                saved = date.fromtimestamp(os.path.getmtime(full)).isoformat()
+            except (OSError, ValueError, OverflowError):
+                saved = None
+            found.append({"name": fn, "sub": sub, "folder": "/".join(subs), "rel": rel,
+                          "codes": _codes_in(stem),
+                          "target": t["id"] if t else None, "why": None if t else why,
                           "rigs": _rigs_in(stem, contract),
                           "folder_scopes": folder_scopes,
-                          "folder_roots": roots})
+                          "folder_roots": roots, "saved": saved})
     return found, ""
 
 def _finals_sub_roots(contract, sub):
@@ -10850,21 +10914,34 @@ def _finals_sub_roots(contract, sub):
             roots.add(root)
     return roots
 
-def _final_marks(f, tcodes, sid, root, n_datasets):
-    """Does this finished picture mark dataset (sid, root) done? Returns
-    (yes, note). The scope comes from the filename first, else the subfolder;
-    a final that names no scope counts only when the target has one dataset
-    (spec §4: done is per target AND scope), and the dataset says so."""
-    if not tcodes & set(f["codes"]):
-        return False, None
+_FINAL_WHY_NO_DATASET = "no dataset for that object on that scope"
+
+def _final_candidates(f, group):
+    """Which of a target's datasets this finished picture marks done (UX plan
+    §6.1). `group` is [(scope id, working dict)] for the picture's target.
+    Returns (marks, note, why): `marks` the scope ids it marks; when it names
+    no scope and the target has more than one dataset (two Askars sharing
+    one folder, or two Seestars), it marks none and `note` says why
+    ('shared-final' in a scope-root folder, 'unscoped-final' elsewhere) with
+    the candidates, so the Observatory can list it as ambiguous rather than
+    quietly leaving a dataset unfinished; `why` is set when it fits no dataset."""
+    if not group:
+        return [], None, _FINAL_WHY_NO_DATASET
     rigs = f["rigs"] or f["folder_scopes"]
-    if rigs:
-        return sid in rigs, None
-    if f["folder_roots"]:
-        if root not in f["folder_roots"]:
-            return False, None
-        return (n_datasets == 1), ("shared-final" if n_datasets > 1 else None)
-    return (n_datasets == 1), ("unscoped-final" if n_datasets > 1 else None)
+    if rigs:                                     # a named scope: that dataset, or nothing
+        marks = [sid for sid, _d in group if sid in rigs]
+        return marks, None, (None if marks else _FINAL_WHY_NO_DATASET)
+    if f["folder_roots"]:                        # a scope-root folder: the datasets filed there
+        cands = [sid for sid, d in group if (d["scope"].get("archive_root") or "") in f["folder_roots"]]
+        if not cands:
+            return [], None, _FINAL_WHY_NO_DATASET
+        if len(cands) == 1:
+            return cands, None, None
+        return [], ("shared-final", cands), None
+    cands = [sid for sid, _d in group]            # names nothing: only a one-dataset target
+    if len(cands) == 1:
+        return cands, None, None
+    return [], ("unscoped-final", cands), None
 
 def _row_idents(key, row):
     """The two ways one frame can be recognised across two ledgers: its bytes
@@ -10991,13 +11068,100 @@ def _row_mosaic(row):
             return True
     return False
 
-def build_projects(state, extra_ledgers=(), today=None, custom_names=None, collect=None):
+def _iso_ord(iso):
+    """A night or date as a day number, 0 when it isn't one (so None sorts last)."""
+    try:
+        return date.fromisoformat(str(iso)[:10]).toordinal()
+    except (TypeError, ValueError):
+        return 0
+
+def _day_words(iso, this_year=None):
+    """'2026-10-16' as 'Fri 16 Oct' (UX plan §9.1), with the year when it isn't
+    this year ('Sat 20 Dec 2025'); anything else as it is."""
+    try:
+        d = date.fromisoformat(str(iso)[:10])
+    except (TypeError, ValueError):
+        return str(iso or "?")
+    year = this_year if this_year is not None else date.today().year
+    return f"{d.strftime('%a')} {d.day} {d.strftime('%b')}" + (f" {d.year}" if d.year != year else "")
+
+def _hours_words(seconds, frames=0):
+    """One format for durations (UX plan §9.1): minutes under an hour ('45 min'),
+    hours with one decimal from an hour up ('29.4 h'); frames with no exposure
+    recorded are 'hours unknown'."""
+    try:
+        secs = float(seconds or 0)
+    except (TypeError, ValueError):
+        secs = 0.0
+    if secs <= 0:
+        return "hours unknown" if frames else "0 min"
+    if secs < 3600:
+        return f"{max(1, round(secs / 60))} min"
+    return f"{secs / 3600:.1f} h"
+
+def _scope_short(name):
+    """'Seestar S30 Pro' → 'S30 Pro', 'Askar FRA400' → 'FRA400': how a reason names a scope."""
+    return re.sub(r"^(seestar|askar|zwo)\s+", "", str(name or ""), flags=re.I) or str(name or "?")
+
+def dataset_sort_key(d):
+    """The one order for every list of datasets, programmes or projects the
+    engine writes (UX plan §6.3; the page and the panel mirror it exactly):
+
+      1. the most recent capture first: the newest `lastNight` (projects.json
+         `last_session`, or a project's `last_captured`) comes first;
+      2. then, among items captured the same night, the newest `readySince`
+         first (`ready_since`): for Ready to process that is the day after the
+         quiet period ended, or the last night when Brett marked it complete;
+         items with none sort after;
+      3. then the most hours first (`hours`, or `integration_seconds` / 3600);
+      4. then the name, A to Z, so equal items keep one fixed order.
+
+    Sort ascending by this key (dates and hours are negated here). Samples
+    are not treated differently: callers keep them out of the queue."""
+    last = d.get("lastNight") or d.get("last_session") or d.get("last_captured") or ""
+    ready = d.get("readySince") or d.get("ready_since") or ""
+    hours = d.get("hours")
+    if hours is None:
+        hours = (d.get("integration_seconds") or 0) / 3600
+    try:
+        hours = float(hours)
+        if not math.isfinite(hours):
+            hours = 0.0
+    except (TypeError, ValueError):
+        hours = 0.0
+    name = str(d.get("name") or d.get("target") or d.get("folder") or d.get("key") or "").lower()
+    return (-_iso_ord(last), -_iso_ord(ready), -hours, name)
+
+def _dataset_reason(status, *, scope_name, seconds, frames, last, ready_since, ready_on, final_date, year):
+    """The dataset's state in plain words (UX plan §6.3), one line the page shows as it is."""
+    hours = _hours_words(seconds, frames)
+    scope = _scope_short(scope_name)
+    if status == "ready_to_process":
+        return f"ready since {_day_words(ready_since, year)} · {hours} on the {scope}"
+    if status == "capturing":
+        return f"still capturing · ready from {_day_words(ready_on, year)}" if ready_on \
+            else "still capturing · kept open by hand"
+    if status == "in_progress":
+        return f"master in the folder · {hours} on the {scope}"
+    if status == "done":
+        return f"finished · final of {_day_words(final_date, year)}" if final_date else "finished"
+    if status == "sample":
+        return f"sample · {hours} on the {scope}"
+    return status
+
+def build_projects(state, extra_ledgers=(), today=None, custom_names=None, collect=None, previous=None):
     """The whole project layer as one dict (spec §7): every dataset
     (target + scope + site) with its sessions, where its frames are, and a
-    status derived from the facts — never typed in. Pure read."""
+    status derived from the facts — never typed in. Pure read. `previous` is
+    the projects.json this build replaces: when Final Astro Images or the
+    archive inventory can't be read this time, the done / in-progress states
+    it knew are kept rather than slipping back (UX plan §6.1)."""
     contract = load_contract()
     warnings = list(contract["warnings"])
     notices = [{"kind": "contract", "count": None, "frames": None, "text": w} for w in warnings]
+    for w in CONFIG_WARNINGS:                     # a rule set to nonsense: the default, said once
+        warnings.append(w)
+        notices.append({"kind": "config", "count": None, "frames": None, "text": w})
 
     def _warn(kind, text, count=None, frames=None):
         # 1.7.2: every warning is also a notice the page can count, never regex
@@ -11208,6 +11372,63 @@ def build_projects(state, extra_ledgers=(), today=None, custom_names=None, colle
     per_target = {}
     for (tid, sid), d in datasets.items():
         per_target.setdefault(tid, []).append((sid, d))
+
+    # Which dataset each finished picture marks (UX plan §6.1). A picture that
+    # fits no dataset is listed with its reason; one that names no scope while
+    # the target has several datasets is listed as ambiguous and marks none.
+    _FINALS_LIST_CAP = 200
+    finals_by_target = {}        # tid -> [picture dicts with "marks"]
+    finals_unmatched, finals_ambiguous = [], []
+    n_unmatched = n_ambiguous = 0
+    for f in finals or []:
+        if f["target"] is None:
+            why = f["why"]
+        else:
+            group = per_target.get(f["target"]) or []
+            marks, note, why = _final_candidates(f, group)
+            if why is None:
+                f["marks"], f["note"] = marks, note
+                finals_by_target.setdefault(f["target"], []).append(f)
+                if note:
+                    n_ambiguous += 1
+                    if len(finals_ambiguous) < _FINALS_LIST_CAP:
+                        finals_ambiguous.append({"file": f["rel"], "target": f["target"],
+                                                 "scopes": list(note[1])})
+                continue
+        n_unmatched += 1
+        if len(finals_unmatched) < _FINALS_LIST_CAP:
+            finals_unmatched.append({"file": f["name"], "folder": f["folder"], "why": why})
+    if n_unmatched:
+        _warn("finals_unmatched", f"{n_unmatched} finished picture(s) match no dataset"
+              + (f" (the first {_FINALS_LIST_CAP} are listed)" if n_unmatched > _FINALS_LIST_CAP else "")
+              + ": a catalogue code or known name, and the scope, in the file name or its folder would place them",
+              count=n_unmatched)
+    if n_ambiguous:
+        _warn("finals-ambiguous", f"{n_ambiguous} finished picture(s) could be of either Askar (or of either "
+              "Seestar) and mark neither dataset done"
+              + (f" (the first {_FINALS_LIST_CAP} are listed)" if n_ambiguous > _FINALS_LIST_CAP else "")
+              + ": name the scope in the file name, or file it in the scope's folder", count=n_ambiguous)
+
+    # States kept from the previous build when an input can't be read (§6.1):
+    # a dataset that was done stays done while Final Astro Images is
+    # unreadable; one in progress stays so while the inventory is missing.
+    # Nothing is kept when there is no previous file (a fresh build).
+    kept_states, states_kept_from = {}, None
+    lost = ([] if finals is not None else ["Final Astro Images"]) + ([] if inv_path else ["the archive inventory"])
+    if lost and isinstance(previous, dict) and previous.get("schema") == "projects/1" \
+            and isinstance(previous.get("projects"), list):
+        for pp in previous["projects"]:
+            for pe in (pp.get("datasets") if isinstance(pp, dict) else None) or []:
+                if not isinstance(pe, dict) or not isinstance(pe.get("key"), str):
+                    continue
+                if (pe.get("status") == "done" and finals is None) \
+                        or (pe.get("status") == "in_progress" and not inv_path):
+                    kept_states[pe["key"]] = pe
+        if kept_states:
+            states_kept_from = previous.get("states_kept_from") or previous.get("generated_at")
+            _warn("states_kept", f"states kept from {states_kept_from}: {' and '.join(lost)} could not be read, "
+                  f"so {len(kept_states)} dataset(s) keep the done / in progress state they had",
+                  count=len(kept_states))
     out_projects = {}
     for tid, group in sorted(per_target.items()):
         for sid, d in sorted(group):
@@ -11229,8 +11450,6 @@ def build_projects(state, extra_ledgers=(), today=None, custom_names=None, colle
                         n["integration"] = n["frames"] * exp_note
                         n["integrationFromNote"] = True
             folder = folder_names.get((tid, root))
-            n_in_root = sum(1 for _sid2, d2 in group
-                            if (d2["scope"].get("archive_root") or "") == root)
             shared_root = len(scopes_for_root(contract, root)) > 1
             notes = []
 
@@ -11241,15 +11460,14 @@ def build_projects(state, extra_ledgers=(), today=None, custom_names=None, colle
                     own_masters.append(m)
                     if not rigs and shared_root:
                         notes.append("shared-folder")
-            tcodes = {_codekey(c) for c in t.get("codes") or [] if isinstance(c, str)} \
-                | {_codekey(tid)}
-            done_files = []
-            for f in finals or []:
-                yes, note = _final_marks(f, tcodes, sid, root, n_in_root)
-                if yes:
+            done_files, final_date = [], None
+            for f in finals_by_target.get(tid, []):
+                if sid in f.get("marks", ()):
                     done_files.append(f["name"])
-                if note:
-                    notes.append(note)
+                    if f.get("saved") and (final_date is None or f["saved"] > final_date):
+                        final_date = f["saved"]              # the newest finished picture
+                elif f.get("note") and sid in f["note"][1]:
+                    notes.append(f["note"][0])                # could be this dataset's, or the other's
 
             if done_files:
                 status = "done"
@@ -11262,27 +11480,66 @@ def build_projects(state, extra_ledgers=(), today=None, custom_names=None, colle
             else:
                 status = "capturing" if days_since <= QUIET_PERIOD_DAYS else "ready_to_process"
 
+            # §6.1: an input that couldn't be read never pulls a dataset back
+            kept = kept_states.get(key)
+            if kept is not None and status != "done":
+                if kept["status"] == "done":
+                    status, done_files = "done", [x for x in (kept.get("finals") or []) if isinstance(x, str)]
+                    final_date = kept.get("final_date") if isinstance(kept.get("final_date"), str) else None
+                elif kept["status"] == "in_progress" and status != "in_progress":
+                    status, own_masters = "in_progress", [x for x in (kept.get("masters") or []) if isinstance(x, str)]
+                else:
+                    kept = None
+            else:
+                kept = None
+
+            integration = round(sum(n["integration"] for n in d["nights"].values()))
+            frames = sum(n["frames"] for n in d["nights"].values())
+            no_exposure = sum(n["noExposure"] for n in d["nights"].values())
+            # §6.2: under SAMPLE_MINUTES of light with nothing made from it is a
+            # sample, not a project; a hand-set open / complete still wins, and
+            # frames with no exposure recorded can't be judged by their hours
+            sample_source = "capture-state.json" if sample else None
+            if not sample and status in ("capturing", "ready_to_process") and cstate == "auto" \
+                    and integration < SAMPLE_MINUTES * 60 and not (integration == 0 and no_exposure):
+                sample, sample_source = True, "sample-rule"
             if sample and (own_masters or done_files):
                 _warn("capture_state_bad", f"capture-state.json marks {key} as a sample, but a master or a "
                       f"finished picture names it, so it stays a project")
-                sample = False
+                sample, sample_source = False, None
+            if sample:
+                status = "sample"
+            ready_on = ready_since = None
+            if status == "capturing" and cstate != "open":
+                ready_on = (date.fromisoformat(last) + timedelta(days=QUIET_PERIOD_DAYS + 1)).isoformat()
+            elif status == "ready_to_process":                 # §6.3: the day it became ready
+                ready_since = last if cstate == "complete" else \
+                    (date.fromisoformat(last) + timedelta(days=QUIET_PERIOD_DAYS + 1)).isoformat()
             entry = {
                 "key": key, "scope": sid, "scope_name": s.get("name"), "site": site,
                 "status": status, "capture_state": cstate,
-                "capture_state_source": "capture-state.json" if (cstate != "auto" or sample) else "rule",
+                "capture_state_source": sample_source or ("capture-state.json" if cstate != "auto" else "rule"),
                 "sample": sample,
-                "nights": len(nights), "frames": sum(n["frames"] for n in d["nights"].values()),
-                "integration_seconds": round(sum(n["integration"] for n in d["nights"].values())),
-                "frames_without_exposure": sum(n["noExposure"] for n in d["nights"].values()),
+                "nights": len(nights), "frames": frames,
+                "integration_seconds": integration,
+                "frames_without_exposure": no_exposure,
                 "first_session": nights[0], "last_session": last,
                 "locations": sorted(d["locations"]),
                 "archive_rel": f"{root}/{folder}" if folder else None,
+                # UX plan §6.1 / §6.3: the state's date and its reason in words
+                "ready_since": ready_since,
+                "final_date": final_date,
+                "new_frames_since_final": bool(status == "done" and final_date and last > final_date),
+                "reason": _dataset_reason(status, scope_name=s.get("name"), seconds=integration, frames=frames,
+                                          last=last, ready_since=ready_since, ready_on=ready_on,
+                                          final_date=final_date, year=today.year),
             }
+            if kept is not None:
+                entry["state_kept_from"] = states_kept_from
             if exp_note:
                 entry["exposure_override"] = exp_note
-            if status == "capturing" and cstate != "open":
-                entry["ready_on"] = (date.fromisoformat(last)
-                                     + timedelta(days=QUIET_PERIOD_DAYS + 1)).isoformat()
+            if ready_on:
+                entry["ready_on"] = ready_on
             if d.get("seestar"):
                 entry["calibration"] = {"applies": False, "mode": "inCamera"}   # the Seestar calibrates itself
             else:
@@ -11338,16 +11595,24 @@ def build_projects(state, extra_ledgers=(), today=None, custom_names=None, colle
     for key in sorted(capture_state):
         _warn("capture_state_bad", f"capture-state.json names a dataset that doesn't exist: {key}")
     projects = []
+    state_counts = {k: 0 for k in PROJECT_STATES}
+    state_hours = {k: 0.0 for k in PROJECT_STATES}
     for tid, p in out_projects.items():
         ds = p["datasets"]
         real = [e for e in ds if not e.get("sample")] or ds     # a quick look never drives the project
-        rank = min(PROJECT_STATUS_ORDER.index(e["status"]) for e in real)
-        p["status"] = PROJECT_STATUS_ORDER[rank]
+        rank = min(PROJECT_STATES.index(e["status"]) for e in real)
+        p["status"] = PROJECT_STATES[rank]
         p["to_process"] = any(e["status"] == "ready_to_process" and not e.get("sample") for e in ds)
         p["last_captured"] = max(e["last_session"] for e in ds)
         p["integration_seconds"] = sum(e["integration_seconds"] for e in ds)
+        p["ready_since"] = max((e["ready_since"] for e in ds if e.get("ready_since")), default=None)
+        ds.sort(key=dataset_sort_key)                            # §6.3: one order everywhere
+        for e in ds:
+            state_counts[e["status"]] += 1
+            state_hours[e["status"]] += e["integration_seconds"] / 3600
         projects.append(p)
-    projects.sort(key=lambda p: p["last_captured"], reverse=True)
+    projects.sort(key=dataset_sort_key)
+    state_hours = {k: round(v, 1) for k, v in state_hours.items()}
     # a warning added by a helper (the snapshot loader) is a notice too
     _pool, _ordered = list(notices), []
     for w in warnings:                            # one notice per warning, in the warnings' order
@@ -11367,6 +11632,14 @@ def build_projects(state, extra_ledgers=(), today=None, custom_names=None, colle
     return {"schema": "projects/1", "generated_at": _utc_iso(),
             "as_of_night": today.isoformat(),
             "quiet_period_days": QUIET_PERIOD_DAYS,
+            # UX plan §6: the three rules, the per-state counts (samples outside the
+            # four), the pictures that fit no dataset, and what was kept from last time
+            "rules": {"quietDays": QUIET_PERIOD_DAYS, "sampleMinutes": SAMPLE_MINUTES,
+                      "activeWindowNights": ACTIVE_WINDOW_NIGHTS},
+            "state_counts": state_counts, "state_hours": state_hours,
+            "finals_unmatched": finals_unmatched, "finals_unmatched_count": n_unmatched,
+            "finals_ambiguous": finals_ambiguous, "finals_ambiguous_count": n_ambiguous,
+            "states_kept_from": states_kept_from,
             "sources": {"ledgers": ledger_names, "rows": rows_read,
                         "rows_all": stats.get("rowsAll", 0),
                         "dropped": {"unknown_names": n_unresolved, "no_scope": no_scope,
@@ -11387,7 +11660,7 @@ def build_projects(state, extra_ledgers=(), today=None, custom_names=None, colle
 # health[] and reconciliation[]. It is made in the SAME pass as projects.json
 # (run_projects writes both files), so the two views never disagree. Pure read.
 OBS_STATE = {"capturing": "captured", "ready_to_process": "stacked",
-             "in_progress": "processing", "done": "complete"}
+             "in_progress": "processing", "done": "complete", "sample": "sample"}
 OBS_COLOURS = {"yellow": "#eda100", "green": "#3cb554", "black": "#0a0a0a", "blue": "#3987e5",
                "red": "#e05a5a", "pink": "#d66bc9", "purple": "#8f80ea", "orange": "#ec835a",
                "grey": "#7a849b", "gray": "#7a849b", "white": "#edf1f8"}
@@ -11507,6 +11780,13 @@ def observatory_from(doc, collect, state=None, now=None, pending=None):
         last_txt = _obs_date(e["last_session"])
         if e["status"] == "done":
             evidence = ("finished picture " + os.path.basename(finals[0])) if finals else "a finished picture names it"
+            if e.get("new_frames_since_final"):
+                evidence += f"; new frames since (last session {last_txt})"
+            action = ""
+        elif e["status"] == "sample":
+            evidence = (f"a quick look: {_hours_words(e.get('integration_seconds'), e.get('frames'))} of light"
+                        + (" (your flag)" if e.get("capture_state_source") == "capture-state.json"
+                           else f" (under {SAMPLE_MINUTES} min)") + "; kept out of the queue")
             action = ""
         elif e["status"] == "in_progress":
             evidence = ("master saved: " + os.path.basename(masters[0])) if masters else "a master of yours is saved"
@@ -11536,7 +11816,8 @@ def observatory_from(doc, collect, state=None, now=None, pending=None):
         if notes:
             evidence += "; " + ", ".join(notes)
         arel = e.get("archive_rel")
-        prog = {"camera": cam, "folder": arel.split("/")[-1] if arel else name,
+        prog = {"camera": cam, "target": name, "tid": tid,     # the target by name and id (sort key, cards)
+                "folder": arel.split("/")[-1] if arel else name,
                 "path": _obs_path(arel) if arel else "", "rel": arel,
                 "lights": frames, "autostacks": 0, "autostackFrames": 0,
                 "processedFiles": len(masters) + len(finals), "processedFinals": len(finals),
@@ -11555,13 +11836,19 @@ def observatory_from(doc, collect, state=None, now=None, pending=None):
                 "exposureOverride": e.get("exposure_override"),
                 "mastersNamed": list(masters), "finalsNamed": list(finals),
                 "masterOwnerUncertain": e.get("master_owner_uncertain"),
-                "sessions": e.get("sessions") or []}
+                "sessions": e.get("sessions") or [],
+                # UX plan §6.1 / §6.3: the state's date, its reason in words, the final's day
+                "readySince": e.get("ready_since"), "reason": e.get("reason"),
+                "finalDate": e.get("final_date"),
+                "newFramesSinceFinal": bool(e.get("new_frames_since_final")),
+                "stateKeptFrom": e.get("state_kept_from")}
         card = {"target": name, "label": name + (" (mosaic)" if d.get("mosaic") else ""),
                 "camera": cam, "state": state_id, "hours": hours, "nights": len(nights),
                 "lights": frames, "lastNight": e["last_session"], "readyOn": e.get("ready_on"),
                 "evidence": evidence, "action": action, "source": "worked out by the importer",
                 "badges": where, "rel": arel,
-                "captureState": e.get("capture_state", "auto"), "sample": bool(e.get("sample"))}
+                "captureState": e.get("capture_state", "auto"), "sample": bool(e.get("sample")),
+                "readySince": e.get("ready_since"), "reason": e.get("reason")}
         ra, dec = _obs_number(t.get("ra")), _obs_number(t.get("dec"))
         if ra is None or dec is None:
             ra = dec = None
@@ -11571,7 +11858,7 @@ def observatory_from(doc, collect, state=None, now=None, pending=None):
             "constellation": str(t["constellation"]) if t.get("constellation") else None,
             "ra": ra, "dec": dec,
             "mosaic": False, "programmes": [], "cameras": [], "lights": 0, "hours": 0.0,
-            "nights": set(), "sessions": 0, "firstNight": None, "lastNight": None,
+            "nights": set(), "sessions": 0, "firstNight": None, "lastNight": None, "readySince": None,
             "state": None, "pendingProgrammes": 0, "statusCards": [], "_rank": 99})
         tg["programmes"].append(prog); tg["statusCards"].append(card)
         if cam not in tg["cameras"]:
@@ -11581,17 +11868,21 @@ def observatory_from(doc, collect, state=None, now=None, pending=None):
         tg["sessions"] += len(nights)
         tg["firstNight"] = min(x for x in (tg["firstNight"], e["first_session"]) if x)
         tg["lastNight"] = max(x for x in (tg["lastNight"], e["last_session"]) if x)
+        if e.get("ready_since"):
+            tg["readySince"] = max(x for x in (tg["readySince"], e["ready_since"]) if x)
         if e["status"] != "done" and not e.get("sample"):
             tg["pendingProgrammes"] += 1
-        rank = PROJECT_STATUS_ORDER.index(e["status"])
+        rank = PROJECT_STATES.index(e["status"])
         if e.get("sample"):
             rank += 10                              # a quick look never drives the project's state
             tg.setdefault("_sampleState", state_id)
         if rank < tg["_rank"]:                      # the project's state: its least advanced dataset
             tg["_rank"], tg["state"] = rank, state_id
     out_targets = []
-    for tg in sorted(targets.values(), key=lambda x: x["name"].lower()):
+    for tg in sorted(targets.values(), key=dataset_sort_key):   # §6.3: one order everywhere
         tg["nights"] = len(tg["nights"]); tg["hours"] = round(tg["hours"], 2); tg.pop("_rank")
+        tg["programmes"].sort(key=dataset_sort_key)
+        tg["statusCards"].sort(key=dataset_sort_key)
         out_targets.append(tg)
     out_scopes = []
     for sc in sorted(scopes.values(), key=lambda x: (x["order"], x["camera"])):
@@ -11680,8 +11971,21 @@ def observatory_from(doc, collect, state=None, now=None, pending=None):
         "provenance": f"Still capturing: a session within the quiet period of {quiet} observing nights, or "
                       "kept open by hand. Ready to process: the quiet period has passed and nothing is "
                       "started. In progress: one of your own masters sits in the object's folder on the "
-                      "archive. Done: a finished picture names the object and the scope.",
+                      "archive. Done: a finished picture names the object and the scope. Sample: under "
+                      f"{doc.get('rules', {}).get('sampleMinutes', SAMPLE_MINUTES)} minutes of light with "
+                      "nothing made from it, or your flag; kept out of every count.",
         "quietPeriodDays": quiet, "asOfNight": today, "inputs": inputs,
+        # UX plan §6: the rules, the per-state counts (samples outside the four), the
+        # finished pictures that fit no dataset, and what was kept from the last build
+        "rules": doc.get("rules") or {"quietDays": quiet, "sampleMinutes": SAMPLE_MINUTES,
+                                      "activeWindowNights": ACTIVE_WINDOW_NIGHTS},
+        "stateCounts": doc.get("state_counts") or {k: 0 for k in PROJECT_STATES},
+        "stateHours": doc.get("state_hours") or {k: 0.0 for k in PROJECT_STATES},
+        "finalsUnmatched": list(doc.get("finals_unmatched") or []),
+        "finalsUnmatchedCount": int(doc.get("finals_unmatched_count") or 0),
+        "finalsAmbiguous": list(doc.get("finals_ambiguous") or []),
+        "finalsAmbiguousCount": int(doc.get("finals_ambiguous_count") or 0),
+        "statesKeptFrom": doc.get("states_kept_from"),
         "snapshotRows": sum(int(m.get("rows") or 0) for m in snaps_used),
         "scopes": out_scopes, "askarSplit": {}, "targets": out_targets, "sessions": sessions,
         "events": [], "calibration": {}, "shelves": {}, "quarantine": {},
@@ -11964,8 +12268,9 @@ def run_projects(state, extra_ledgers=(), dry_run=False):
              "only the other computer's sessions can be listed.")
     extra, names = projects_inputs(state, extra_ledgers)
     collect = {}
-    doc = build_projects(state, extra_ledgers=extra, custom_names=names, collect=collect)
     previous = _read_json_file(out) if os.path.isfile(out) else {}
+    doc = build_projects(state, extra_ledgers=extra, custom_names=names, collect=collect,
+                         previous=previous or None)      # §6.1: states kept when an input is unreadable
     if not doc["sources"]["rows"] and previous.get("projects"):
         warn("No ledger rows could be read from this computer or from the other computer's "
              "snapshot on the archive; projects.json was left as it is.")
@@ -11985,6 +12290,11 @@ def run_projects(state, extra_ledgers=(), dry_run=False):
             ("ready_to_process", "in_progress", "capturing", "done") if counts.get(k)]
     info(f"{len(doc['projects'])} objects, {n_ds} datasets (an object on one scope): "
          + (", ".join(bits) or "nothing yet"))
+    sc = doc.get("state_counts") or {}
+    info("States: " + " · ".join([f"{sc.get('capturing', 0)} still capturing",
+                                  f"{sc.get('ready_to_process', 0)} ready to process",
+                                  f"{sc.get('in_progress', 0)} finish it", f"{sc.get('done', 0)} done",
+                                  f"{sc.get('sample', 0)} sample" + ("" if sc.get("sample", 0) == 1 else "s")]))
     for w in doc["warnings"]:
         warn(w)
     if dry_run:

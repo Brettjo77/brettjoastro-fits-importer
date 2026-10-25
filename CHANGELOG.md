@@ -1,5 +1,23 @@
 # Changelog
 
+## 1.8.0 (2026-10-25): honest numbers (Observatory UX plan, phase 1)
+
+Brett's Observatory UX plan v2 of 25 Oct (`docs/ux-observatory-25oct/`, with the iPhone brief and the step-1 report) rebuilds the Observatory around the telescope: scope first, then project, then detail. Phase 1 fixes the numbers first, because the counts drive the overwhelm: 89 "ready" datasets included finished pictures the page could not match and test snaps of a few minutes.
+
+- **Finished pictures matched properly.** A picture in `Final Astro Images` now matches its object by catalogue code OR any name the target table knows ("Black Eye", "M 64", "M64"), and its scope from a rig tag in the name, then the per-scope folder, then the root. A picture that could be either Askar marks neither and is listed in Data checks ("Pictures that could be either Askar"); every picture that matches nothing is listed with why ("Finished pictures that match nothing"). A done dataset with nights newer than its picture stays done and says "new frames since …".
+- **Nothing slips back.** When the finals folder or the archive's inventory can't be read during a rebuild, done and in-progress datasets keep the previous build's state, and Data checks says so.
+- **Samples set aside.** Under 30 minutes of integration with no master and no final is a sample: outside every count and queue, in a closed Samples group in the Pipeline and Targets views and the panel's To process tab. `ASTRO_SAMPLE_MINUTES` in config.json changes the cut-off (0 switches it off).
+- **One order for every list.** The Observatory's queue, its Pipeline, the Targets view, "Projects that moved lately" and the panel's To process tab all sort the same way: most recent capture first, ready items newest ready first, ties by hours. Each ready dataset carries the date it became ready and a reason in words ("ready since Fri 16 Oct · 29.4 h on the FRA400"). A test proves the engine, the page and the panel agree.
+- **Words and formats** (plan §9.1): minutes under an hour ("45 min"), one decimal from an hour ("3.2 h"), dates "Fri 16 Oct"; the rule line "Ready: nothing new for 14 days, or closed by you. Samples under 30 minutes are set aside." in Data checks.
+- **Config:** `ASTRO_SAMPLE_MINUTES` (30) and `ASTRO_ACTIVE_WINDOW_NIGHTS` (30, reported only until phase 2) beside `ASTRO_QUIET_PERIOD_DAYS` (14; it stays calendar days). `--projects` ends with a per-state count line.
+- **The target table:** Middle Heart (LDN 1373) and Fish on a Platter (Barnard 144) get their type and constellation; the fourteen bare "Nebula" types become one spelling per kind (`docs/ux-observatory-25oct/PHASE1-CONTRACT-CHANGES.md` lists every change and 19 suggested fills left for Brett).
+- Decided with Brett on 25 Oct: sites and time zones are deferred (no frame says which unit took it); states come from files, so there is no hand "processed" mark; the Dashboard tab becomes Ledger and the hand-set facts (park, goals, open/complete) get one panel endpoint in phase 2.
+- Chain HN in both suites (18 engine checks, 8 panel checks).
+
+Mac / Windows: the same on both; finals are still checked on the PC (and on the Mac only with `ASTRO_FINALS_DIR`). After updating: install as before on each computer, then Refresh now on the Observatory (or wait for the PC's 03:30 build) and compare the per-state counts with the 1.7.6 page.
+
+851 end-to-end checks (651 engine + 200 panel). On Linux here: engine 643 passed, 4 skipped, the four Mac/PC-only lines as before; panel 200 passed.
+
 ## 1.7.6 (2026-10-21): the Observatory on the phone
 
 Brett asked for the Observatory on his iPhone, done properly: a native read-only screen in the AstroLog iOS app, fed by the importer's own record, live, with the importer never handling a credential (rule 8).

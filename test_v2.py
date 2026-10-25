@@ -5002,7 +5002,9 @@ for _f in ("targets.json", "scopes.json"):
     shutil.copy(os.path.join(PL_SRC, "contract", _f), PL_CON)
 PL.env.update({"ASTRO_CONTRACT_DIR": PL_CON,
                "ASTRO_FINALS_DIR": os.path.join(PL.root, "finals"),
-               "ASTRO_SHIP_FOLDER": "mac"})   # runs as the Mac on every OS, like D7
+               "ASTRO_SHIP_FOLDER": "mac",    # runs as the Mac on every OS, like D7
+               "ASTRO_SAMPLE_MINUTES": "0"})  # these chains use 10-second frames: the sample
+NO_SAMPLE = {"ASTRO_SAMPLE_MINUTES": "0"}     # rule (chain HN) is off, so the four states show
 
 def pl_row(target, display, night, *, scope=None, device=None, st="sub", exp=10.0,
            here=False, arch=None, sha=None):
@@ -5284,7 +5286,7 @@ PLp = teh.Env("PLp", asiair=False, seestar=False)
 PLp_CON = os.path.join(PLp.root, "contract")
 shutil.copytree(PL_CON, PLp_CON)
 PLp.env.update({"ASTRO_CONTRACT_DIR": PLp_CON, "ASTRO_SHIP_FOLDER": "pc",
-                "ASTRO_FINALS_DIR": os.path.join(PLp.root, "finals")})
+                "ASTRO_FINALS_DIR": os.path.join(PLp.root, "finals"), **NO_SAMPLE})
 os.makedirs(os.path.join(PLp.archive, "_verify", "mac"))
 with open(os.path.join(PLp.archive, "_verify", "mac", "ledger-snapshot.json"), "w") as f:
     json.dump({"schema": "ledger-snapshot/1", "machineId": "mac",
@@ -5315,7 +5317,7 @@ check("PL ...and --targets-draft there reads the same snapshot: the Mac's names,
 # ...and with no snapshot either, a good projects.json is never replaced by an empty one
 PLq = teh.Env("PLq", asiair=False, seestar=False)
 shutil.copytree(PL_CON, os.path.join(PLq.root, "contract"))
-PLq.env.update({"ASTRO_CONTRACT_DIR": os.path.join(PLq.root, "contract"), "ASTRO_SHIP_FOLDER": "pc"})
+PLq.env.update({"ASTRO_CONTRACT_DIR": os.path.join(PLq.root, "contract"), "ASTRO_SHIP_FOLDER": "pc", **NO_SAMPLE})
 os.makedirs(PLq.state, exist_ok=True)
 with open(os.path.join(PLq.state, "projects.json"), "w") as f:
     f.write('{"schema": "projects/1", "projects": [{"keep": "me"}]}')
@@ -5333,7 +5335,7 @@ def pl_pc_env(name, snapshot_files, **snap_extra):
     shutil.copytree(PL_CON if os.path.isdir(PL_CON) else os.path.join(PL_SRC, "contract"),
                     os.path.join(e.root, "contract"))
     e.env.update({"ASTRO_CONTRACT_DIR": os.path.join(e.root, "contract"), "ASTRO_SHIP_FOLDER": "pc",
-                  "ASTRO_FINALS_DIR": os.path.join(e.root, "finals")})
+                  "ASTRO_FINALS_DIR": os.path.join(e.root, "finals"), **NO_SAMPLE})
     os.makedirs(os.path.join(e.archive, "_verify", "mac"), exist_ok=True)
     os.makedirs(e.state, exist_ok=True)
     snap = {"schema": "ledger-snapshot/1", "machine": "Mac", "machineId": "mac", "machineUid": "mac-1",
@@ -5459,7 +5461,7 @@ check("PL 'NGC 7023B' (unknown suffix) is NGC 7023, 'IC 1396A' is IC 1396, 'Mess
 # 6. the Mac with the share gone: a list that had the PC's half is left alone, not replaced by a Mac-only one
 PLu = teh.Env("PLu", asiair=False, seestar=False)
 shutil.copytree(PL_CON, os.path.join(PLu.root, "contract"))
-PLu.env.update({"ASTRO_CONTRACT_DIR": os.path.join(PLu.root, "contract"), "ASTRO_SHIP_FOLDER": "mac",
+PLu.env.update({"ASTRO_CONTRACT_DIR": os.path.join(PLu.root, "contract"), "ASTRO_SHIP_FOLDER": "mac", **NO_SAMPLE,
                 "ASTRO_ARCHIVE_MOUNT": os.path.join(PLu.root, "not-mounted")})
 os.makedirs(PLu.state, exist_ok=True)
 with open(os.path.join(PLu.state, "ledger.json"), "w") as f:
@@ -5555,7 +5557,7 @@ PL2 = teh.Env("PL2", asiair=False, seestar=False)
 os.makedirs(os.path.join(PL2.root, "contract"))
 for _f in ("targets.json", "scopes.json"):
     shutil.copy(os.path.join(PL_SRC, "contract", _f), os.path.join(PL2.root, "contract"))
-PL2.env.update({"ASTRO_CONTRACT_DIR": os.path.join(PL2.root, "contract")})
+PL2.env.update({"ASTRO_CONTRACT_DIR": os.path.join(PL2.root, "contract"), **NO_SAMPLE})
 os.makedirs(PL2.state, exist_ok=True)
 with open(os.path.join(PL2.state, "ledger.json"), "w") as f:
     json.dump({"version": 1, "calibration": {}, "files": {
@@ -5832,7 +5834,7 @@ shutil.rmtree(OB2.root, ignore_errors=True)
 # the PC publishes its list in its own _verify folder; the Mac's panel prefers it while it is fresh
 OB3 = teh.Env("OB3", asiair=False, seestar=False)      # a Mac (ASTRO_SHIP_FOLDER=mac) with its own small ledger
 shutil.copytree(PL_CON if os.path.isdir(PL_CON) else os.path.join(PL_SRC, "contract"), os.path.join(OB3.root, "contract"))
-OB3.env.update({"ASTRO_CONTRACT_DIR": os.path.join(OB3.root, "contract"), "ASTRO_SHIP_FOLDER": "mac"})
+OB3.env.update({"ASTRO_CONTRACT_DIR": os.path.join(OB3.root, "contract"), "ASTRO_SHIP_FOLDER": "mac", **NO_SAMPLE})
 os.makedirs(OB3.state, exist_ok=True)
 _ob3_day = os.path.join(OB3.env["ASIAIR_DEST"], "Wizard Nebula", "2026-09-01 Day 1")
 with open(os.path.join(OB3.state, "ledger.json"), "w") as f:
@@ -6130,7 +6132,7 @@ check("OB4 (1.7.2) every dataset carries its capture state and where it came fro
       "(marked as from the note), and the one rule for the quiet period still stands",
       lambda: _wiz.get("captureState") == "open" and _wiz.get("captureStateSource") == "capture-state.json"
       and _wiz.get("status") == "capturing" and _wiz.get("sample") is False
-      and _by4["M 13"]["programmes"][0]["sample"] is True and _by4["M 13"]["programmes"][0]["status"] == "ready_to_process"
+      and _by4["M 13"]["programmes"][0]["sample"] is True and _by4["M 13"]["programmes"][0]["status"] == "sample"
       and _by4["M 13"]["statusCards"][0]["sample"] is True
       and _by4["M 27"]["programmes"][0]["exposureOverride"] == 10 and _by4["M 27"]["programmes"][0]["hours"] == round(20 / 3600, 2)
       and _by4["M 27"]["programmes"][0]["sessions"][0]["integrationFromNote"] is True
@@ -6282,13 +6284,291 @@ check("OB4 (review) a quick look never drives its project's state or the target'
       "it In progress, the S30P sample stays out of the pending count and names capture-state.json as its "
       "source); gain travels in the snapshot; an unreadable row is counted once; a corrupt last-scan.json reads "
       "as zeros, never a crash; one notice per warning",
-      lambda: _o4c["p"] == [["NGC7380", "in_progress", False, [["FRA400", "in_progress", False, "rule"], ["S30P", "ready_to_process", True, "capture-state.json"]]]]
+      lambda: _o4c["p"] == [["NGC7380", "in_progress", False, [["S30P", "sample", True, "capture-state.json"], ["FRA400", "in_progress", False, "rule"]]]]
       and _o4c["t"] == [["NGC7380", "processing", 1]]
       and _o4c["nc"]["unreadable"] == 1 and _o4c["nc"]["notLightFrames"] == 0
       and _o4c["pend"]["files"] == 0 and _o4c["pend"]["camera"] is None and _o4c["pend"]["ageHours"] is None
       and _o4c["gain"] is True and _o4c["n"] is True,
       json.dumps(_o4c)[:900])
 shutil.rmtree(OB4c.root, ignore_errors=True)
+
+# ═══════════════ CHAIN HN: honest numbers (Observatory UX plan, phase 1) ═══════
+print("\n── Chain HN: honest numbers — finals matched by name and scope, kept states, samples, one order ──")
+# Each check guards one fix from the plan's §6. The sample rule is ON here
+# (the earlier chains switch it off with ASTRO_SAMPLE_MINUTES=0).
+HN_ASI = dict(device="asiair", camera="ZWO ASI585MC Air", sourceType="Plan")
+def hn_rows(target, display, scope, nights, n, exp, tag, **extra):
+    """n frames of exp seconds on each night, on one scope."""
+    out = {}
+    for i, nt in enumerate(nights):
+        for j in range(n):
+            out[f"{tag}{i}{j}"] = pl_snap_row(target, display, nt, hashlib.sha256(f"{tag}{i}{j}".encode()).hexdigest(),
+                                              scope=scope, exposureSeconds=exp, **extra)
+    return out
+HN_FILES = {}
+HN_FILES.update(hn_rows("M 64", "M 64 - Black Eye Galaxy", "Seestar S50", ["2026-08-01", "2026-08-02"], 2, 600.0, "be"))
+HN_FILES.update(hn_rows("M 64", "M 64 - Black Eye Galaxy", "Seestar S50", ["2026-09-20"], 1, 600.0, "bn"))   # after the final
+HN_FILES.update(hn_rows("M 44", "M 44 - Beehive Cluster", "Askar FRA400", ["2026-03-01"], 2, 600.0, "bh", **HN_ASI))
+HN_FILES.update(hn_rows("M 81", "M 81 - Bode's Galaxy", "Askar FRA400", ["2026-02-01"], 4, 600.0, "bf", **HN_ASI))
+HN_FILES.update(hn_rows("M 81", "M 81 - Bode's Galaxy", "Askar 107PHQ", ["2026-02-02"], 4, 600.0, "b7", **HN_ASI))
+HN_FILES.update(hn_rows("M 31", "M 31 - Andromeda", "Seestar S30 Pro", ["2026-09-01"], 29, 60.0, "an"))       # 29 min
+HN_FILES.update(hn_rows("M 42", "M 42 - Orion", "Seestar S30 Pro", ["2026-09-01"], 31, 60.0, "or"))           # 31 min
+HN_FILES.update(hn_rows("M 13", "M 13 - Hercules", "Seestar S30 Pro", ["2026-08-01"], 10, 600.0, "hc"))       # Brett's flag
+HN_FILES.update(hn_rows("M 27", "M 27 - Dumbbell", "Seestar S30 Pro", ["2026-08-01"], 1, 60.0, "du"))         # 1 min + a master
+HN_FILES.update(hn_rows("NGC 7380", "NGC 7380 - Wizard", "Seestar S50 Pro", ["2026-10-05"], 2, 600.0, "wz"))  # complete by hand
+HN_FILES.update(hn_rows("NGC 1499", "NGC 1499 - California", "Seestar S50", ["2026-10-08"], 4, 600.0, "ca"))  # capturing
+HN = pl_pc_env("HN", HN_FILES, at="2026-10-10T08:00:00Z")
+HN.env.pop("ASTRO_SAMPLE_MINUTES", None)                      # the rule is on: the default 30 min
+_hn_pc = os.path.join(HN.archive, "_verify", "pc"); os.makedirs(_hn_pc, exist_ok=True)
+with open(os.path.join(_hn_pc, "inventory-E-20261009T033000Z.jsonl"), "w") as f:
+    f.write(json.dumps(pl_inv_row("S30P/Dumbbell Nebula (M 27)/processed/master_M27.xisf", "S30P", "Dumbbell Nebula (M 27)")) + "\n")
+with open(os.path.join(_hn_pc, "inventory-E.status.json"), "w") as f:
+    json.dump({"schema": "inventory-status/1", "generation": "20261009T033000Z"}, f)
+with open(os.path.join(HN.state, "capture-state.json"), "w") as f:
+    json.dump({"M13|S30P|Shinfield": "sample", "NGC7380|S50P|Shinfield": "complete"}, f)
+# finished pictures: an alias with a rig tag (Black_Eye_S50, saved 20 Aug: older than the 20 Sep
+# night); a scope from the folder (Beehive under ZWO Askar Scopes/FRA400); Bode's in the shared Askar
+# root with datasets on both Askars; and three that fit no dataset, one for each reason
+_hn_fin = os.path.join(HN.root, "finals")
+os.makedirs(os.path.join(_hn_fin, "ZWO Askar Scopes", "FRA400"))
+for _p in (("Black_Eye_S50.jpg",), ("ZWO Askar Scopes", "FRA400", "M44_Beehive.jpg"),
+           ("ZWO Askar Scopes", "M81_Bodes_Galaxy.jpg"), ("NGC9999_x.jpg",), ("holiday_snap.png",),
+           ("M44_Beehive_S30Pro.jpg",)):
+    with open(os.path.join(_hn_fin, *_p), "w") as f:
+        f.write("x")
+_hn_t = _dt(2026, 8, 20, 12, 0).timestamp()
+os.utime(os.path.join(_hn_fin, "Black_Eye_S50.jpg"), (_hn_t, _hn_t))
+def hn_build(env=None, extra=""):
+    """projects.json and observatory/1 from one pass, the way run_projects makes them."""
+    return probe(env or HN.env, "st = m.State()\nextra, names = m.projects_inputs(st)\ncollect = {}\n"
+                 f"d = m.build_projects(st, extra, today='{PL_TODAY}', custom_names=names, collect=collect{extra})\n"
+                 "o = m.observatory_from(d, collect, st)\n"
+                 "print(json.dumps({'d': d, 'o': o, 'doc': m.dataset_sort_key.__doc__}))\n")
+_hn = hn_build()
+_hd, _ho = _hn.get("d") or {}, _hn.get("o") or {}
+def hn_ds(tid, sid):
+    return pl_ds(_hd, tid, sid)[1]
+_be, _bh = hn_ds("M64", "S50"), hn_ds("M44", "FRA400")
+_bf, _b7 = hn_ds("M81", "FRA400"), hn_ds("M81", "107PHQ")
+_hn_by = {x["id"]: x for x in _ho.get("targets", [])}
+_hn_prog = lambda tid, cam: next((p for p in _hn_by.get(tid, {}).get("programmes", []) if p["camera"] == cam), {})
+
+# §6.1 — before: finals matched by catalogue code only, so Black_Eye_S50.jpg marked nothing
+check("HN a final named by an alias ('Black_Eye', no code) with a rig tag marks the S50 Black Eye done; "
+      "the picture's day is kept, and new frames after it leave it Done with newFramesSinceFinal",
+      lambda: _be["status"] == "done" and _be["finals"] == ["Black_Eye_S50.jpg"]
+      and _be["final_date"] == "2026-08-20" and _be["new_frames_since_final"] is True
+      and _be["reason"] == "finished · final of Thu 20 Aug"
+      and _hn_prog("M64", "Seestar S50")["finalDate"] == "2026-08-20"
+      and _hn_prog("M64", "Seestar S50")["newFramesSinceFinal"] is True
+      and "new frames since" in _hn_prog("M64", "Seestar S50")["evidence"],
+      json.dumps([_be, _hn_prog("M64", "Seestar S50").get("evidence")])[:700])
+check("HN a final with no rig in its name takes its scope from the per-scope folder it sits in "
+      "(ZWO Askar Scopes/FRA400/M44_Beehive.jpg): the FRA400 Beehive is done",
+      lambda: _bh["status"] == "done" and _bh["finals"] == ["M44_Beehive.jpg"]
+      and _bh["new_frames_since_final"] is False,
+      json.dumps(_bh)[:400])
+# before: a loose picture in the shared root with two Askar datasets vanished silently
+check("HN a final in the shared Askar root for a target shot on BOTH Askars marks neither, is listed in "
+      "finalsAmbiguous with the file, the target and the two scopes, and raises a 'finals-ambiguous' notice",
+      lambda: _bf["status"] != "done" and _b7["status"] != "done"
+      and "shared-final" in _bf["attribution"] and "shared-final" in _b7["attribution"]
+      and _hd["finals_ambiguous"] == [{"file": "ZWO Askar Scopes/M81_Bodes_Galaxy.jpg", "target": "M81",
+                                      "scopes": ["FRA400", "107PHQ"]}]
+      and _ho["finalsAmbiguous"] == _hd["finals_ambiguous"] and _ho["finalsAmbiguousCount"] == 1
+      and any(n["kind"] == "finals-ambiguous" and n["count"] == 1 for n in _ho["notices"]),
+      json.dumps([_bf.get("status"), _b7.get("status"), _hd.get("finals_ambiguous"), [n["kind"] for n in _ho.get("notices", [])]]))
+# before: a picture that matched no dataset was invisible
+check("HN every final that fits no dataset is listed in finalsUnmatched with its reason: an unknown code, "
+      "no code or name at all, and a known object on a scope it was never shot with; one notice with the count",
+      lambda: sorted(_hd["finals_unmatched"], key=lambda x: x["file"]) == [
+          {"file": "M44_Beehive_S30Pro.jpg", "folder": "", "why": "no dataset for that object on that scope"},
+          {"file": "NGC9999_x.jpg", "folder": "", "why": "name not in the contract"},
+          {"file": "holiday_snap.png", "folder": "", "why": "no catalogue code or known name in the file name"}]
+      and _ho["finalsUnmatched"] == _hd["finals_unmatched"] and _ho["finalsUnmatchedCount"] == 3
+      and any(n["kind"] == "finals_unmatched" and n["count"] == 3 for n in _ho["notices"]),
+      json.dumps([_hd.get("finals_unmatched"), [n["kind"] for n in _ho.get("notices", [])]]))
+_hn_names = probe(HN.env, "c = m.load_contract()\n"
+                  "r = lambda x: (m.resolve_target(c, x)[0] or {}).get('id')\n"
+                  "print(json.dumps([r(x) for x in ['M64', 'M 64', 'Black Eye', 'Black Eye Galaxy', "
+                  "\"Cat's Eye\", 'Nebula', 'Galaxy']]))\n")
+check("HN the one resolver finds M 64 by 'M64', 'M 64', 'Black Eye' and 'Black Eye Galaxy'; a short name two "
+      "objects share (Cat's Eye: a galaxy and a nebula) and a bare kind word match nothing",
+      lambda: _hn_names == ["M64", "M64", "M64", "M64", None, None, None], json.dumps(_hn_names))
+
+# §6.2 — before: no cut-off existed; a 3-minute test sat in the queue as Ready to process
+_an, _or, _hc, _du, _wz, _ca = (hn_ds(t, s) for t, s in (("M31", "S30P"), ("M42", "S30P"), ("M13", "S30P"),
+                                                        ("M27", "S30P"), ("NGC7380", "S50P"), ("NGC1499", "S50")))
+check("HN 29 minutes of light with no master and no final is a sample (state 'sample', source 'sample-rule', "
+      "a reason in words); 31 minutes is not; the card and programme say sample too",
+      lambda: _an["status"] == "sample" and _an["sample"] is True and _an["capture_state_source"] == "sample-rule"
+      and _an["reason"] == "sample · 29 min on the S30 Pro" and _an["ready_since"] is None
+      and _or["status"] == "ready_to_process" and _or["sample"] is False and _or["capture_state_source"] == "rule"
+      and _hn_prog("M31", "Seestar S30 Pro")["status"] == "sample"
+      and _hn_by["M31"]["statusCards"][0]["state"] == "sample" and _hn_by["M31"]["state"] == "sample"
+      and _hn_by["M31"]["pendingProgrammes"] == 0,
+      json.dumps([_an, _or, _hn_by.get("M31", {}).get("statusCards")])[:800])
+check("HN Brett's hand mark in capture-state.json still makes a sample (100 minutes, source "
+      "'capture-state.json'); a 1-minute dataset with a master of his is In progress, never a sample",
+      lambda: _hc["status"] == "sample" and _hc["capture_state_source"] == "capture-state.json"
+      and _hc["reason"] == "sample · 1.7 h on the S30 Pro"
+      and _du["status"] == "in_progress" and _du["sample"] is False
+      and _du["reason"] == "master in the folder · 1 min on the S30 Pro",
+      json.dumps([_hc, _du])[:600])
+check("HN stateCounts and stateHours count datasets per state with samples outside the four, in "
+      "projects.json and observatory/1 alike; rules carries the three settings",
+      lambda: _hd["state_counts"] == {"capturing": 1, "ready_to_process": 4, "in_progress": 1, "done": 2, "sample": 2}
+      and _ho["stateCounts"] == _hd["state_counts"] and _ho["stateHours"] == _hd["state_hours"]
+      and _hd["state_hours"]["done"] == round((5 * 600 + 2 * 600) / 3600, 1) and _hd["state_hours"]["in_progress"] == 0.0
+      and abs(_hd["state_hours"]["sample"] - (29 * 60 + 10 * 600) / 3600) <= 0.05
+      and _hd["rules"] == {"quietDays": 14, "sampleMinutes": 30, "activeWindowNights": 30}
+      and _ho["rules"] == _hd["rules"] and "Sample:" in _ho["provenance"],
+      json.dumps([_hd.get("state_counts"), _hd.get("state_hours"), _hd.get("rules")]))
+
+# §6.3 — before: no 'ready since' date existed, and the reason was prose the page regexed
+check("HN readySince: the day after the quiet period ended for a rule-ready dataset, the last night for one "
+      "marked complete by hand (which also beats the sample rule), null while capturing; each with its reason",
+      lambda: _or["ready_since"] == "2026-09-16" and _or["reason"] == "ready since Wed 16 Sep · 31 min on the S30 Pro"
+      and _wz["status"] == "ready_to_process" and _wz["ready_since"] == "2026-10-05"
+      and _wz["reason"] == "ready since Mon 5 Oct · 20 min on the S50 Pro"
+      and _ca["status"] == "capturing" and _ca["ready_since"] is None and _ca["ready_on"] == "2026-10-23"
+      and _ca["reason"] == "still capturing · ready from Fri 23 Oct"
+      and _hn_prog("M42", "Seestar S30 Pro")["readySince"] == "2026-09-16"
+      and _hn_prog("M42", "Seestar S30 Pro")["reason"] == _or["reason"]
+      and _hn_by["M42"]["statusCards"][0]["readySince"] == "2026-09-16" and _hn_by["M42"]["readySince"] == "2026-09-16",
+      json.dumps([_or.get("ready_since"), _or.get("reason"), _wz.get("reason"), _ca.get("reason"), _hn_prog("M42", "Seestar S30 Pro").get("readySince")]))
+_hn_order = ["NGC1499", "NGC7380", "M64", "M42", "M31", "M13", "M27", "M44", "M81"]
+_hn_shuffled = probe(HN.env, "import random\n"
+                     f"o = json.loads({json.dumps([p for t in _ho.get('targets', []) for p in t['programmes']])!r})\n"
+                     "random.Random(7).shuffle(o)\n"
+                     "o.sort(key=m.dataset_sort_key)\n"
+                     "print(json.dumps([[p['target'], p['camera']] for p in o]))\n") if _ho else None
+check("HN one order for every list the engine writes (dataset_sort_key): most recent capture first, then the "
+      "newest readySince, then hours, then name — projects.json projects and the Observatory's targets agree, "
+      "a shuffled list of programmes sorts back to the engine's order, and the docstring states the rule",
+      lambda: [p["target_id"] for p in _hd["projects"]] == _hn_order
+      and [t["id"] for t in _ho["targets"]] == _hn_order
+      and [p["scope"] for p in pl_ds(_hd, "M81", "FRA400")[0]["datasets"]] == ["107PHQ", "FRA400"]
+      and _hn_shuffled == [[t["name"], p["camera"]] for t in _ho["targets"] for p in t["programmes"]]
+      and all(w in _hn["doc"] for w in ("most recent capture first", "readySince", "hours", "name")),
+      json.dumps([[p["target_id"] for p in _hd.get("projects", [])], [t["id"] for t in _ho.get("targets", [])], _hn_shuffled])[:600])
+
+# §6.1 — before: an unreadable Final Astro Images or a missing inventory rewrote projects.json with
+# degraded states (Done fell back to Ready), so a folder briefly offline undid finished work
+_hn_prev = json.dumps(_hd)
+_hn_gone = dict(HN.env, ASTRO_FINALS_DIR=os.path.join(HN.root, "finals-not-there"))
+_k1 = hn_build(_hn_gone, extra=f", previous=json.loads({_hn_prev!r})")
+_k1d, _k1o = _k1.get("d") or {}, _k1.get("o") or {}
+_k1_be, _k1_bh, _k1_bf = (pl_ds(_k1d, t, s)[1] for t, s in (("M64", "S50"), ("M44", "FRA400"), ("M81", "FRA400")))
+check("HN with Final Astro Images unreadable the done datasets keep their state (and their finals and date) from "
+      "the previous projects.json, say where it came from, and a 'states kept from' notice names what failed; "
+      "a dataset that was not done is judged afresh",
+      lambda: _k1_be["status"] == "done" and _k1_be["finals"] == ["Black_Eye_S50.jpg"] and _k1_be["final_date"] == "2026-08-20"
+      and _k1_be["state_kept_from"] == _hd["generated_at"] and _k1_bh["status"] == "done"
+      and _k1_bf["status"] == "ready_to_process" and "state_kept_from" not in _k1_bf
+      and _k1d["states_kept_from"] == _hd["generated_at"] and _k1o["statesKeptFrom"] == _hd["generated_at"]
+      and any(n["kind"] == "states_kept" and n["count"] == 2 and "Final Astro Images could not be read" in n["text"]
+              for n in _k1d["notices"])
+      and any(n["kind"] == "finals_unchecked" for n in _k1d["notices"])
+      and next(p for p in _k1o["targets"] if p["id"] == "M64")["programmes"][0]["stateKeptFrom"] == _hd["generated_at"],
+      json.dumps([_k1_be, _k1d.get("states_kept_from"), [n["text"] for n in _k1d.get("notices", [])]])[:900])
+_k0 = hn_build(_hn_gone)
+check("HN ...but with no previous file nothing is kept (a fresh build): the Black Eye reads Ready to process",
+      lambda: pl_ds(_k0.get("d") or {}, "M64", "S50")[1]["status"] == "ready_to_process"
+      and (_k0.get("d") or {}).get("states_kept_from") is None,
+      json.dumps(pl_ds(_k0.get("d") or {}, "M64", "S50")[1])[:300])
+os.rename(os.path.join(_hn_pc, "inventory-E.status.json"), os.path.join(_hn_pc, "inventory-E.status.bak"))
+os.rename(os.path.join(_hn_pc, "inventory-E-20261009T033000Z.jsonl"), os.path.join(_hn_pc, "inventory.bak"))
+_k2 = hn_build(extra=f", previous=json.loads({_hn_prev!r})")
+_k2_du = pl_ds(_k2.get("d") or {}, "M27", "S30P")[1]
+_k2n = (_k2.get("d") or {}).get("notices", [])
+os.rename(os.path.join(_hn_pc, "inventory-E.status.bak"), os.path.join(_hn_pc, "inventory-E.status.json"))
+os.rename(os.path.join(_hn_pc, "inventory.bak"), os.path.join(_hn_pc, "inventory-E-20261009T033000Z.jsonl"))
+check("HN with the archive inventory missing an In progress dataset keeps its state and its master from the "
+      "previous build (a 1-minute set stays In progress, not a sample), with the notice; finals are still read",
+      lambda: _k2_du["status"] == "in_progress" and _k2_du["masters"] == ["master_M27.xisf"] and _k2_du["sample"] is False
+      and _k2_du["state_kept_from"] == _hd["generated_at"]
+      and any(n["kind"] == "states_kept" and n["count"] == 1 and "inventory could not be read" in n["text"] for n in _k2n)
+      and any(n["kind"] == "inventory_missing" for n in _k2n)
+      and pl_ds(_k2.get("d") or {}, "M64", "S50")[1]["status"] == "done",
+      json.dumps([_k2_du, [n["text"] for n in _k2n]])[:700])
+# the same, end to end through --projects (run_projects hands the previous file to the build)
+HNk = pl_pc_env("HNk", {"a": pl_snap_row("M 31", "M 31 - Andromeda", OB_N["i1"], "a" * 64, exposureSeconds=600.0),
+                        "b": pl_snap_row("M 31", "M 31 - Andromeda", OB_N["i1"], "b" * 64, exposureSeconds=600.0)},
+               at=_dt.now(_tz.utc).isoformat(timespec="seconds"))
+os.makedirs(os.path.join(HNk.root, "finals")); open(os.path.join(HNk.root, "finals", "M31_S30Pro.jpg"), "w").write("x")
+r1 = HNk.run("--projects")
+_hk1 = json.load(open(os.path.join(HNk.state, "projects.json")))
+shutil.rmtree(os.path.join(HNk.root, "finals"))
+r2 = HNk.run("--projects")
+_hk2 = json.load(open(os.path.join(HNk.state, "projects.json")))
+HNf = pl_pc_env("HNf", {"a": pl_snap_row("M 31", "M 31 - Andromeda", OB_N["i1"], "a" * 64, exposureSeconds=600.0)},
+                at=_dt.now(_tz.utc).isoformat(timespec="seconds"))
+r3 = HNf.run("--projects")
+_hk3 = json.load(open(os.path.join(HNf.state, "projects.json")))
+check("HN --projects itself keeps a Done dataset when the finals folder has gone (the notice is printed), and "
+      "prints the per-state 'States:' line; a computer with no previous projects.json keeps nothing",
+      lambda: r1.returncode == 0 and r2.returncode == 0 and r3.returncode == 0
+      and pl_ds(_hk1, "M31", "S30P")[1]["status"] == "done"
+      and pl_ds(_hk2, "M31", "S30P")[1]["status"] == "done" and _hk2["states_kept_from"] == _hk1["generated_at"]
+      and "states kept from" in r2.stdout and "States: 0 still capturing · 0 ready to process · 0 finish it · 1 done · 0 samples" in r2.stdout
+      and pl_ds(_hk3, "M31", "S30P")[1]["status"] == "ready_to_process" and _hk3["states_kept_from"] is None,
+      f"rc={r1.returncode}/{r2.returncode}/{r3.returncode} {(r2.stdout + r2.stderr)[-500:]!r} "
+      f"{pl_ds(_hk2, 'M31', 'S30P')[1].get('status')} {pl_ds(_hk3, 'M31', 'S30P')[1].get('status')}")
+shutil.rmtree(HNk.root, ignore_errors=True); shutil.rmtree(HNf.root, ignore_errors=True)
+
+# §6.5 — before: only the quiet period was a setting; the sample cut-off and the active window did not exist
+_c1 = hn_build(dict(HN.env, ASTRO_SAMPLE_MINUTES="20", ASTRO_QUIET_PERIOD_DAYS="5", ASTRO_ACTIVE_WINDOW_NIGHTS="7"))
+_c1d = _c1.get("d") or {}
+check("HN ASTRO_SAMPLE_MINUTES=20 makes the 29-minute Andromeda a project again; ASTRO_QUIET_PERIOD_DAYS=5 moves "
+      "Orion's readySince to 7 Sep and California's ready-from to 14 Oct; ASTRO_ACTIVE_WINDOW_NIGHTS reaches rules",
+      lambda: pl_ds(_c1d, "M31", "S30P")[1]["status"] == "ready_to_process"
+      and pl_ds(_c1d, "M42", "S30P")[1]["ready_since"] == "2026-09-07"
+      and pl_ds(_c1d, "NGC1499", "S50")[1]["ready_on"] == "2026-10-14"
+      and pl_ds(_c1d, "NGC1499", "S50")[1]["reason"] == "still capturing · ready from Wed 14 Oct"
+      and _c1d["rules"] == {"quietDays": 5, "sampleMinutes": 20, "activeWindowNights": 7}
+      and (_c1.get("o") or {}).get("rules") == _c1d["rules"],
+      json.dumps([pl_ds(_c1d, "M31", "S30P")[1].get("status"), pl_ds(_c1d, "M42", "S30P")[1].get("ready_since"), _c1d.get("rules")]))
+_hn_cfg = os.path.join(HN.root, "config.json")
+with open(_hn_cfg, "w", encoding="utf-8") as f:
+    f.write('﻿{"ASTRO_SAMPLE_MINUTES": 45, "ASTRO_ACTIVE_WINDOW_NIGHTS": "lots", "ASTRO_QUIET_PERIOD_DAYS": -3}')
+_c2 = hn_build(dict(HN.env, ASIAIR_CONFIG=_hn_cfg))
+_c2d = _c2.get("d") or {}
+check("HN the three rules read from config.json like the quiet period (Notepad's BOM is fine): 45 sample minutes "
+      "makes the 31-minute Orion a sample; a value that isn't a whole number in range ('lots', -3) falls back to "
+      "the default with a 'config' notice naming the key",
+      lambda: pl_ds(_c2d, "M42", "S30P")[1]["status"] == "sample"
+      and _c2d["rules"] == {"quietDays": 14, "sampleMinutes": 45, "activeWindowNights": 30}
+      and sum(1 for n in _c2d["notices"] if n["kind"] == "config") == 2
+      and any("ASTRO_ACTIVE_WINDOW_NIGHTS" in n["text"] and "default of 30" in n["text"] for n in _c2d["notices"])
+      and any("ASTRO_QUIET_PERIOD_DAYS" in n["text"] and "default of 14" in n["text"] for n in _c2d["notices"]),
+      json.dumps([pl_ds(_c2d, "M42", "S30P")[1].get("status"), _c2d.get("rules"), [n["text"] for n in _c2d.get("notices", []) if n["kind"] == "config"]]))
+check("HN build_projects wrote nothing (only the identity, machine.json, made on first use) and made no OS call",
+      lambda: set(os.listdir(HN.state)) <= {"capture-state.json", "machine.json"} and not teh.os_calls(HN.root),
+      str(os.listdir(HN.state)) + str(teh.os_calls(HN.root))[:200])
+shutil.rmtree(HN.root, ignore_errors=True)
+
+# §6.6 — the contract: types and constellations filled, one spelling per kind, the new hash shipped
+with open(os.path.join(HERE, "contract", "targets.json"), "rb") as f:
+    _hn_con_bytes = f.read()
+_hn_con = {t["id"]: t for t in json.loads(_hn_con_bytes.decode("utf-8-sig"))["targets"]}
+_HN_KINDS = {"Emission nebula", "Dark nebula", "Reflection nebula", "Planetary nebula", "Supernova remnant",
+             "Galaxy", "Open cluster", "Globular cluster", "Cluster + nebula", "Wolf-Rayet nebula",
+             "Interstellar comet", "Star", "Galaxy group", "Milky Way region"}
+with open(os.path.join(HERE, "contract", "shipped.sha256"), encoding="utf-8") as f:
+    _hn_ship = [ln for ln in f if ln.strip() and not ln.startswith("#")]
+check("HN contract: the Middle Heart (LDN 1373) and Fish on a Platter (Barnard 144) carry a type and a "
+      "constellation, no target is a bare 'Nebula' any more (one spelling per kind), and the changed "
+      "targets.json's hash is listed in shipped.sha256 with its date, so the installers update an unedited copy",
+      lambda: _hn_con["LDN1373"]["type"] == "Dark nebula" and _hn_con["LDN1373"]["constellation"] == "Cassiopeia"
+      and _hn_con["FISHONAPLATTER"]["type"] == "Dark nebula" and _hn_con["FISHONAPLATTER"]["constellation"] == "Cygnus"
+      and not any(t.get("type") == "Nebula" for t in _hn_con.values())
+      and {t["type"] for t in _hn_con.values() if t.get("type")} <= _HN_KINDS
+      and _hn_con["NGC7023"]["type"] == "Reflection nebula" and _hn_con["IC1805"]["type"] == "Emission nebula"
+      and any(ln.split()[0] == hashlib.sha256(_hn_con_bytes).hexdigest() and "targets.json" in ln and "25 Oct 2026" in ln
+              for ln in _hn_ship),
+      json.dumps([_hn_con.get("LDN1373"), _hn_con.get("FISHONAPLATTER"),
+                  sorted({t.get("type") for t in _hn_con.values()} - _HN_KINDS, key=str), hashlib.sha256(_hn_con_bytes).hexdigest()]))
 
 # ═══════════════ CHAIN AA: --adopt-archive (1.7.3) ═══════════════════════════
 # Frames this computer imported and verified that reached the archive without
