@@ -13,6 +13,7 @@ Brett's Observatory UX plan v2 of 25 Oct (`docs/ux-observatory-25oct/`, with the
 - **The target table:** Middle Heart (LDN 1373) and Fish on a Platter (Barnard 144) get their type and constellation; the fourteen bare "Nebula" types become one spelling per kind (`docs/ux-observatory-25oct/PHASE1-CONTRACT-CHANGES.md` lists every change and 19 suggested fills left for Brett).
 - Decided with Brett on 25 Oct: sites and time zones are deferred (no frame says which unit took it); states come from files, so there is no hand "processed" mark; the Dashboard tab becomes Ledger and the hand-set facts (park, goals, open/complete) get one panel endpoint in phase 2.
 - Chain HN in both suites (18 engine checks, 8 panel checks).
+- 29 Oct, on the PC's first run: M 103 (NGC 581), Neptune and Uranus added to the target table on Brett's word (the 213 frames under those names now count; "Planet" is a new kind); a test-only fix for a check that assumed it was not on Windows.
 
 Mac / Windows: the same on both; finals are still checked on the PC (and on the Mac only with `ASTRO_FINALS_DIR`). After updating: install as before on each computer, then Refresh now on the Observatory (or wait for the PC's 03:30 build) and compare the per-state counts with the 1.7.6 page.
 

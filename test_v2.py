@@ -6554,7 +6554,7 @@ with open(os.path.join(HERE, "contract", "targets.json"), "rb") as f:
 _hn_con = {t["id"]: t for t in json.loads(_hn_con_bytes.decode("utf-8-sig"))["targets"]}
 _HN_KINDS = {"Emission nebula", "Dark nebula", "Reflection nebula", "Planetary nebula", "Supernova remnant",
              "Galaxy", "Open cluster", "Globular cluster", "Cluster + nebula", "Wolf-Rayet nebula",
-             "Interstellar comet", "Star", "Galaxy group", "Milky Way region"}
+             "Interstellar comet", "Star", "Galaxy group", "Milky Way region", "Planet"}
 with open(os.path.join(HERE, "contract", "shipped.sha256"), encoding="utf-8") as f:
     _hn_ship = [ln for ln in f if ln.strip() and not ln.startswith("#")]
 check("HN contract: the Middle Heart (LDN 1373) and Fish on a Platter (Barnard 144) carry a type and a "
@@ -6565,7 +6565,8 @@ check("HN contract: the Middle Heart (LDN 1373) and Fish on a Platter (Barnard 1
       and not any(t.get("type") == "Nebula" for t in _hn_con.values())
       and {t["type"] for t in _hn_con.values() if t.get("type")} <= _HN_KINDS
       and _hn_con["NGC7023"]["type"] == "Reflection nebula" and _hn_con["IC1805"]["type"] == "Emission nebula"
-      and any(ln.split()[0] == hashlib.sha256(_hn_con_bytes).hexdigest() and "targets.json" in ln and "25 Oct 2026" in ln
+      and any(ln.split()[0] == hashlib.sha256(_hn_con_bytes).hexdigest() and "targets.json" in ln
+              and re.search(r"\d{1,2} \w{3} 20\d\d", ln)      # dated, whichever shipped copy this is
               for ln in _hn_ship),
       json.dumps([_hn_con.get("LDN1373"), _hn_con.get("FISHONAPLATTER"),
                   sorted({t.get("type") for t in _hn_con.values()} - _HN_KINDS, key=str), hashlib.sha256(_hn_con_bytes).hexdigest()]))

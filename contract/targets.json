@@ -1641,6 +1641,45 @@
    "aliases": [],
    "type": "Reflection nebula",
    "constellation": "Vulpecula"
+  },
+  {
+   "id": "M103",
+   "name": "Open cluster M 103",
+   "codes": [
+    "M 103",
+    "NGC 581"
+   ],
+   "aliases": [
+    "M103 Star Cluster"
+   ],
+   "ra": 1.555,
+   "dec": 60.65,
+   "type": "Open cluster",
+   "constellation": "Cassiopeia"
+  },
+  {
+   "id": "NEPTUNE",
+   "name": "Neptune",
+   "codes": [],
+   "aliases": [
+    "Neptune"
+   ],
+   "ra": null,
+   "dec": null,
+   "type": "Planet",
+   "constellation": null
+  },
+  {
+   "id": "URANUS",
+   "name": "Uranus",
+   "codes": [],
+   "aliases": [
+    "Uranus"
+   ],
+   "ra": null,
+   "dec": null,
+   "type": "Planet",
+   "constellation": null
   }
  ]
 }
