@@ -171,6 +171,34 @@ class App:
         return [str(t.get("display") or t.get("name") or "") for t in sorted(ts, key=lambda t: -int(t.get("new") or 0))]
 
     @staticmethod
+    def _plan_scope(dest_plan):
+        """Phase 2 (PHASE2-CONTRACT, pendingImport.scope): the scope the
+        ASIAir's new frames are for — the first ASIAir entry of the dest
+        plan, whose `scope` the scan read from the incoming frames' FOCALLEN
+        (a Seestar entry is its own scope and never counts here); None when
+        the plan has no ASIAir entry or couldn't tell."""
+        for e in dest_plan or []:
+            if isinstance(e, dict) and e.get("device") == "asiair":
+                sc = e.get("scope")
+                return sc if isinstance(sc, str) and sc else None
+        return None
+
+    @staticmethod
+    def _summary_extras(scan):
+        """The keywords for save_scan_summary beyond 1.7.5's that THIS engine
+        takes: `scope` (phase 2) from the scan's dest plan. Read from the
+        function's signature, so a panel beside an older engine passes
+        nothing new and never crashes on it."""
+        try:
+            takes = inspect.signature(eng.save_scan_summary).parameters
+        except (TypeError, ValueError):
+            return {}
+        out = {}
+        if "scope" in takes:
+            out["scope"] = App._plan_scope((scan or {}).get("destPlan"))
+        return out
+
+    @staticmethod
     def _sides():
         """This computer's name and the other's, as the engine labels them."""
         here, there = eng.ship_sides()
@@ -530,7 +558,8 @@ class App:
                                           failed_eject=bool(getattr(self, "eject_failed", False)),
                                           elsewhere=self.scan["elsewhereFiles"],
                                           target_names=self._pending_names(),
-                                          elsewhere_machine=(self.scan.get("other") or {}).get("machine"))
+                                          elsewhere_machine=(self.scan.get("other") or {}).get("machine"),
+                                          **self._summary_extras(self.scan))
             except Exception as e:
                 self.logline(f"⚠ scan summary not saved: {e}")
             o = self.scan["other"]
@@ -778,7 +807,8 @@ class App:
                                           camera=" + ".join(l for l, _v in vols) or None,
                                           failed_eject=True, elsewhere=self.scan.get("elsewhereFiles", 0),
                                           target_names=self._pending_names(),
-                                          elsewhere_machine=(self.scan.get("other") or {}).get("machine"))
+                                          elsewhere_machine=(self.scan.get("other") or {}).get("machine"),
+                                          **self._summary_extras(self.scan))
                 except Exception as e:
                     self.logline(f"⚠ scan summary not saved: {e}")
             if ok and not bad:
@@ -908,6 +938,39 @@ class SafeStatus:
 
 STATUS = SafeStatus()
 
+
+def observatory_status(dataset, pend, status):
+    """Phase 2 (PHASE2-CONTRACT, `status`): this computer's live safety facts,
+    injected into the served Observatory record beside pendingImport. `status`
+    is the cached status line (SafeStatus: the engine's --status --json,
+    worked out off the request thread when the ledger changes — never a child
+    process per request), `pend` read_scan_summary()'s dict or None, `dataset`
+    the record about to be served. The page derives the colour: amber when
+    onlyHere > 0, or pendingFiles > 0, or servedAgeHours > 24, or checked is
+    false ("Couldn't check data safety: {reason}"); else quiet."""
+    known = isinstance(status, dict) and isinstance(status.get("onlyHere"), int)
+    machine = status.get("machine") if isinstance(status, dict) and isinstance(status.get("machine"), str) \
+        else ("PC" if eng.IS_WINDOWS else "Mac")
+    served = (dataset or {}).get("servedFrom") if isinstance(dataset, dict) else None
+    out = {"checked": known,
+           "onlyHere": status["onlyHere"] if known else None,
+           "machine": machine,
+           "pendingFiles": int((pend or {}).get("files") or 0),
+           "pendingCamera": pend.get("camera") if isinstance(pend, dict) and isinstance(pend.get("camera"), str) else None,
+           "pendingSeenAt": pend.get("seenAt") if isinstance(pend, dict) and isinstance(pend.get("seenAt"), str) else None,
+           "servedAgeHours": eng._hours_since((dataset or {}).get("generatedAtIso")) if isinstance(dataset, dict) else None,
+           # the other side's label when load_observatory(prefer_published=True) served its copy
+           "publishedFrom": served.get("machine") if isinstance(served, dict) and isinstance(served.get("machine"), str) else None}
+    if not known:
+        if status is None:
+            out["reason"] = "still working it out"
+        else:
+            # status_unknown() words it "Status unknown: {why}"; keep the why
+            text = str(status.get("text") or "") if isinstance(status, dict) else ""
+            out["reason"] = text.partition(": ")[2] or text or "the status line couldn't be read"
+    return out
+
+
 def _observatory_stamp():
     """The engine's stamp of the Observatory dataset this panel would serve."""
     try:
@@ -928,6 +991,7 @@ class DashboardCache:
 
     def __init__(self):
         self.result = None                    # ("file", path) | ("note", text) | ("error", text)
+        self.space = None                     # this computer's Space figures from the last build (phase 2)
         self.at = None                        # when `result` was built; None until the first
         self.ready = threading.Event()
         self._kick = threading.Event()
@@ -1032,6 +1096,28 @@ class DashboardCache:
             return ("note", "The dashboard couldn't be saved in the state folder; see the Activity log.")
         return ("file", path)
 
+    @staticmethod
+    def space_of(result):
+        """Phase 2 (PHASE2-CONTRACT, `space`): this computer's Space figures —
+        what the Ledger page's "Space on this computer" section showed, the
+        engine's mac_space — for the Observatory's Data checks. Read back from
+        the page the build just wrote (generate_dashboard works them out once,
+        into its DATA payload), so they cost no second walk of the workbench
+        and are never worked out on a request thread or more often than the
+        Ledger is built. None when there is no page (nothing imported anywhere)
+        or the figures can't be read."""
+        kind, what = result if isinstance(result, tuple) and len(result) == 2 else (None, None)
+        if kind != "file":
+            return None
+        try:
+            with open(what, encoding="utf-8") as f:
+                html = f.read()
+            m = re.search(r"\nconst DATA = (\{.*?\});\n", html)
+            sp = (json.loads(m.group(1)) if m else {}).get("space")
+            return sp if isinstance(sp, dict) and "totals" in sp else None
+        except (OSError, ValueError, AttributeError):
+            return None
+
     def _loop(self):
         seen, first = None, True
         while True:
@@ -1043,6 +1129,7 @@ class DashboardCache:
                 except Exception as e:
                     res = ("error", f"The dashboard couldn't be built ({e}).")
                 self.result = res
+                self.space = self.space_of(res)   # before `at`: a page that sees the stamp sees the figures
                 self._seen = sig
                 self._n += 1
                 self.at = f"{time.strftime('%H:%M:%S')}#{self._n}"
@@ -1079,9 +1166,22 @@ STATUS_TIP = (f"Cleared from the camera; the only verified copy is on this "
               + (" (the 03:30 sweep, then the next ship)" if eng.IS_WINDOWS else ""))
 LOCAL_HOSTS = ("127.0.0.1", "localhost", "::1")
 # GET routes that build a page, read the archive or carry state: refused when
-# the browser says the request came from another site (1.7.1 review)
+# the browser says the request came from another site (1.7.1 review). One
+# exception, phase 2 (plan §2 "Opening the Observatory on its own", §7.6
+# "Opened on its own"): the Observatory's HTML face opened as a top-level page
+# — a bookmark, a typed URL, or a link clicked from another page — see
+# _observatory_page and Handler._cross_site_costly. "/observatory?json=1" stays
+# refused with the rest.
 COSTLY_GET = ("/dashboard", "/observatory", "/api/archive/", "/api/state", "/api/status",
               "/api/report-text", "/report")
+
+
+def _observatory_page(path):
+    """True for the Observatory's HTML face (/observatory, with any query but
+    json=1), false for its dataset (?json=1) and everything else."""
+    if path != "/observatory" and not path.startswith("/observatory?"):
+        return False
+    return "json=1" not in urllib.parse.urlsplit(path).query.split("&")
 
 
 def _app_bundle(path):
@@ -1104,13 +1204,32 @@ def _split_hostport(raw):
     return host, port
 
 
-def _note_page(text, title="Dashboard"):
+def _note_page(text, title="Ledger"):
     """A one-sentence page in the panel's own colours, for a framed tab."""
     safe = text.replace("&", "&amp;").replace("<", "&lt;").replace(">", "&gt;")
     return (f"<!DOCTYPE html><html><head><meta charset='utf-8'><title>{title}</title>"
             "<style>body{margin:0;padding:28px;font:15px/1.5 system-ui,-apple-system,sans-serif;"
             "color:#1f2937;background:#f8fafc}@media(prefers-color-scheme:dark){body{color:#e5e7eb;"
             "background:#0b1220}}p{max-width:60ch}</style></head><body><p>" + safe + "</p></body></html>")
+
+# the engine's status page carries these two sections; the Ledger tab leaves
+# them out (phase 2): Space reaches the Observatory's Data checks as `space`,
+# the header pill has the camera's storage. Hidden at serve time, never cut
+# from the markup: the page's own script fills those nodes and would stop at
+# a missing one, taking the verdicts and Recent activity with it.
+LEDGER_CSS = "<style>#spaceCard,#storageCard{display:none!important}</style>"
+
+
+def _ledger_face(html):
+    """The Ledger tab's face of the engine's status page (phase 2): the SAFE
+    verdicts, discards, events and Recent activity as before, without the
+    Space and camera-storage sections, titled Ledger."""
+    html = html.replace("<title>BrettjoAstro FITS Importer — Status</title>",
+                        "<title>BrettjoAstro FITS Importer — Ledger</title>", 1)
+    html = html.replace("<h1>BrettjoAstro FITS Importer — Status</h1>",
+                        "<h1>BrettjoAstro FITS Importer — Ledger</h1>", 1)
+    return html.replace("</head>", LEDGER_CSS + "</head>", 1) if "</head>" in html else LEDGER_CSS + html
+
 
 def _started(ok):
     """The answer to a request that starts an operation: when it didn't start,
@@ -1157,6 +1276,19 @@ class Handler(BaseHTTPRequestHandler):
         if (self.headers.get("Sec-Fetch-Site") or "").strip().lower() != "cross-site":
             return False
         p = self.path
+        if _observatory_page(p) and (self.headers.get("Sec-Fetch-Dest") or "").strip().lower() == "document":
+            # Phase 2: the Observatory in its own tab. A link to /observatory on
+            # another page (a note, a chat, a bookmark bar's folder) is a
+            # cross-site top-level navigation (Sec-Fetch-Dest: document), and it
+            # serves the full page. Safe to serve top-level: the page holds no
+            # token and no boot id (only the panel's page does), so it can POST
+            # nothing; it reads the record it was built with, never the archive;
+            # its only words to the panel go by postMessage to a same-origin
+            # parent, and framing by another site stays refused (frame-ancestors
+            # 'self'). A fetch() from another site (Sec-Fetch-Dest: empty) and
+            # the dataset (?json=1) are refused as before: the body would be
+            # opaque anyway, and the GET still costs the read.
+            return False
         return any(p == r or p.startswith(r + "?") or (r.endswith("/") and p.startswith(r))
                    for r in COSTLY_GET)
 
@@ -1170,7 +1302,7 @@ class Handler(BaseHTTPRequestHandler):
 
     def _security_headers(self, frame_self=False):
         # never framed by another site (clickjacking, V2); the dashboard is
-        # framed by the panel's own Dashboard tab
+        # framed by the panel's own Ledger tab
         self.send_header("Content-Security-Policy",
                          "frame-ancestors 'self'" if frame_self else "frame-ancestors 'none'")
         self.send_header("X-Frame-Options", "SAMEORIGIN" if frame_self else "DENY")
@@ -1284,6 +1416,12 @@ class Handler(BaseHTTPRequestHandler):
                     pend = eng.read_scan_summary()
                     if pend is not None:
                         dataset["pendingImport"] = pend
+                    # phase 2 (PHASE2-CONTRACT): this computer's live safety facts for the
+                    # page's status line, and its Space figures for the Data checks, both
+                    # from the panel's caches (SafeStatus, DashboardCache): nothing is
+                    # worked out on this thread
+                    dataset["status"] = observatory_status(dataset, pend, STATUS.value)
+                    dataset["space"] = DASH.space
                 if "json=1" in urllib.parse.urlsplit(self.path).query.split("&"):
                     # 1.7.2: the dataset alone, for the page's in-place refresh
                     self._json(dataset if dataset is not None else {"error": "not built yet"},
@@ -1322,7 +1460,8 @@ class Handler(BaseHTTPRequestHandler):
             except Exception as e:
                 self._html(_note_page(f"The Observatory couldn't be shown ({e}).", "Observatory"), 500, frame_self=True)
         elif self.path == "/dashboard" or self.path.startswith("/dashboard?"):
-            # Framable always (it lives in the panel's own Dashboard tab): a
+            # The Ledger tab (Dashboard until phase 2; the route keeps its name
+            # for bookmarks). Framable always (it lives in the panel's own tab): a
             # reply that forbids framing shows as "refused to connect". Served
             # from the file the worker last built (DashboardCache), never
             # built here: a click costs nothing (1.7.1 review).
@@ -1331,7 +1470,7 @@ class Handler(BaseHTTPRequestHandler):
             if kind == "file":
                 try:
                     with open(what, encoding="utf-8") as f:
-                        self._html(f.read(), frame_self=True)
+                        self._html(_ledger_face(f.read()), frame_self=True)
                 except OSError as e:
                     self._html(_note_page(f"The dashboard couldn't be read ({e})."), 500, frame_self=True)
             elif kind == "note":
@@ -1858,7 +1997,7 @@ button.linkbtn:disabled{opacity:.5;cursor:default}
   <button class="on" data-tab="panel" title="Import from a camera; the activity log">Panel</button>
   <button data-tab="archive" title="What is ready to process, in progress, still capturing or done, with Open in Explorer; and every folder on the archive">To process</button>
   <button data-tab="observatory" title="The whole archive at a glance: targets, coverage, pipeline, nights, sky, scopes">Observatory</button>
-  <button data-tab="dash" title="This computer's imports, Day folders and space">Dashboard</button>
+  <button data-tab="dash" title="This computer's ledger: SAFE verdicts, discards, events and recent activity">Ledger</button>
   <button data-tab="report" title="The ledger's report">Report</button>
 </div>
 
@@ -1896,7 +2035,7 @@ button.linkbtn:disabled{opacity:.5;cursor:default}
   <pre id="reportPre">No report yet — click “Refresh report”.</pre>
 </div>
 <div id="tab-dash" style="display:none">
-  <iframe id="dashFrame" title="dashboard"></iframe>
+  <iframe id="dashFrame" title="ledger"></iframe>
 </div>
 <div id="tab-observatory" style="display:none">
   <div class="ad-head" id="obsHead"><span class="ad-note" id="obsNote" aria-live="polite">Working it out…</span><button type="button" id="obsRefresh" title="Rebuild the To process list and this page from your records now">Refresh now</button></div>
@@ -1948,7 +2087,7 @@ document.querySelectorAll(".tabs button").forEach(b=>b.addEventListener("click",
   if(b.dataset.tab==="archive") loadDesk();
 }));
 
-// The Dashboard is built by the importer in the background (dashboardAt in
+// The Ledger (the Dashboard until phase 2) is built by the importer in the background (dashboardAt in
 // /api/state says when): the frame is loaded once, and again only when that
 // changes, never per click (1.7.1 review).
 let dashShown=false, dashAt=null;

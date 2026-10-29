@@ -1718,7 +1718,7 @@ try:
           and "<script id=\"dataset\"" not in body, f"{code} {xfo} {body[-200:]}")
     with urllib.request.urlopen(URLN + "/", timeout=15) as resp:
         _pagen = resp.read().decode()
-    check("OB the panel's tabs lead with the job (Panel, To process, Observatory, Dashboard, Report), each with a "
+    check("OB the panel's tabs lead with the job (Panel, To process, Observatory, Ledger, Report), each with a "
           "tooltip; the Observatory tab frames /observatory, has its own Refresh, fills the window (flex), and "
           "listens only to its own frame for open / show requests",
           lambda: [m.group(1) for m in re.finditer(r'data-tab="([a-z]+)"[^>]*title="', _pagen)]
@@ -2070,6 +2070,343 @@ process.stdout.write(JSON.stringify(out));
               json.dumps(_o3)[:700] + _h3[:200])
     else:
         skip("HN (phase 1) the page's pure layer and the panel's projectsHtml in node (needs node and the marked regions)")
+    # ── P2 panel ── (phase 2 "scope first", docs/ux-observatory-25oct/PHASE2-CONTRACT.md, the panel's items):
+    # `status` and `space` beside pendingImport in the served record, Dashboard → Ledger, the Observatory
+    # in its own tab, pendingImport.scope from the dest plan. Inputs are set by hand and put back after.
+    _p2_scan_path = os.path.join(envn.state, "last-scan.json")
+    _p2_scan_before = open(_p2_scan_path, encoding="utf-8").read() if os.path.isfile(_p2_scan_path) else None
+    import inspect as _p2_inspect
+    _p2_pan = globals().get("panel")                 # the U10 in-process panel module, for the pure pieces
+    _p2_takes_scope = _p2_pan is not None and "scope" in _p2_inspect.signature(_p2_pan.eng.save_scan_summary).parameters
+    with open(_p2_scan_path, "w", encoding="utf-8") as f:
+        json.dump({"schema": "scan-summary/1", "files": 7, "targets": 1, "camera": "ASIAir", "failedEject": False,
+                   "seenAt": "2026-10-28T20:15:00+00:00", "machine": "PC", "targetNames": ["Wizard Nebula (NGC 7380)"],
+                   "scope": "Askar FRA400"}, f)
+    _p2_t0 = time.time()                             # the Ledger worker has built once (space comes from its build)
+    while time.time() - _p2_t0 < 30 and not api("/api/state", url=URLN).get("dashboardAt"):
+        time.sleep(0.3)
+    def _p2_get(path, headers=None):
+        """A GET as a browser would send it; (status, body)."""
+        req = urllib.request.Request(URLN + path, headers=headers or {})
+        try:
+            with urllib.request.urlopen(req, timeout=30) as r:
+                return r.status, r.read().decode("utf-8", "replace")
+        except urllib.error.HTTPError as e:
+            return e.code, e.read().decode("utf-8", "replace")
+    _p2_rec = json.loads(_p2_get("/observatory?json=1&t=p2a")[1])
+    _p2s = _p2_rec.get("status") if isinstance(_p2_rec.get("status"), dict) else {}
+    check("P2 panel: the served record carries `status` beside pendingImport in the contract's shape: checked true "
+          "with onlyHere from the cached status line (SafeStatus, no child process per request), this computer's "
+          "label, the last scan's files / camera / seenAt, the record's age in hours (just built: under 24) and "
+          "publishedFrom null for its own record; no reason while checked",
+          lambda: set(_p2s) == {"checked", "onlyHere", "machine", "pendingFiles", "pendingCamera", "pendingSeenAt",
+                                "servedAgeHours", "publishedFrom"}
+          and _p2s["checked"] is True and _p2s["onlyHere"] == 0 and _p2s["machine"] in ("Mac", "PC")
+          and _p2s["pendingFiles"] == 7 and _p2s["pendingCamera"] == "ASIAir"
+          and _p2s["pendingSeenAt"] == "2026-10-28T20:15:00+00:00"
+          and isinstance(_p2s["servedAgeHours"], (int, float)) and 0 <= _p2s["servedAgeHours"] < 24
+          and _p2s["publishedFrom"] is None and (_p2_rec.get("pendingImport") or {}).get("files") == 7,
+          json.dumps(_p2s))
+    _p2sp = _p2_rec.get("space")
+    check("P2 panel: `space` is this computer's Space figures (the engine's mac_space, as the Ledger's build worked "
+          "them out: machine, totals safe / waiting / onlyHere / changed / yours, folders, unknown null), read back "
+          "from the Ledger worker's build, never worked out per request",
+          lambda: "space" in _p2_rec and isinstance(_p2sp, dict) and _p2sp["machine"] in ("Mac", "PC")
+          and set(_p2sp["totals"]) == {"safe", "waiting", "onlyHere", "changed", "yours"}
+          and all(set(v) == {"files", "bytes"} for v in _p2sp["totals"].values())
+          and isinstance(_p2sp["folders"], list) and _p2sp["unknown"] is None,
+          json.dumps(_p2sp)[:400])
+    # the amber inputs the panel can't see here: an old record (the file's stamp moved 30 h back, put back after)
+    _p2_obs_path = os.path.join(envn.state, "observatory.json")
+    with open(_p2_obs_path, encoding="utf-8") as f:
+        _p2_obs_text = f.read()
+    _p2_old = json.loads(_p2_obs_text)
+    _p2_old["generatedAtIso"] = time.strftime("%Y-%m-%dT%H:%M:%S+00:00", time.gmtime(time.time() - 30 * 3600))
+    with open(_p2_obs_path, "w", encoding="utf-8") as f:
+        json.dump(_p2_old, f)
+    _p2_aged = (json.loads(_p2_get("/observatory?json=1&t=p2b")[1]).get("status") or {}).get("servedAgeHours")
+    with open(_p2_obs_path, "w", encoding="utf-8") as f:
+        f.write(_p2_obs_text)
+    check("P2 panel: servedAgeHours is the age of the record being served, from its generatedAtIso (a record "
+          "stamped 30 h ago serves as 30 h old: over the page's 24 h amber line)",
+          lambda: isinstance(_p2_aged, (int, float)) and 29.9 <= _p2_aged <= 30.2, json.dumps(_p2_aged))
+    if _p2_pan is not None and hasattr(_p2_pan, "observatory_status"):
+        _p2a = _p2_pan.observatory_status({"generatedAtIso": "2026-10-01T00:00:00+00:00",
+                                           "servedFrom": {"machine": "PC", "ageHours": 3.0}}, None, None)
+        _p2b = _p2_pan.observatory_status({}, {"files": 0, "camera": None, "seenAt": None},
+                                          _p2_pan.eng.status_unknown("the ledger can't be read"))
+        _p2c = _p2_pan.observatory_status({}, {"files": 12, "camera": "Seestar", "seenAt": "2026-10-20T21:00:00+00:00"},
+                                          {"safe": False, "onlyHere": 41, "text": "41 frames only on the Mac", "machine": "Mac"})
+        check("P2 panel: the status derivation (observatory_status) — no status line yet: checked false, reason "
+              "'still working it out', onlyHere null, publishedFrom names the other side when its published copy is "
+              "served, no scan: pendingFiles 0 and pendingSeenAt null; 'Status unknown: …': checked false with the "
+              "engine's reason; a line: onlyHere as counted, the scan's figures, no reason key",
+              lambda: _p2a["checked"] is False and _p2a["reason"] == "still working it out" and _p2a["onlyHere"] is None
+              and _p2a["publishedFrom"] == "PC" and _p2a["servedAgeHours"] > 24 and _p2a["pendingFiles"] == 0
+              and _p2a["pendingSeenAt"] is None and _p2a["pendingCamera"] is None
+              and _p2b["checked"] is False and _p2b["reason"] == "the ledger can't be read" and _p2b["onlyHere"] is None
+              and _p2c["checked"] is True and _p2c["onlyHere"] == 41 and "reason" not in _p2c and _p2c["machine"] == "Mac"
+              and _p2c["pendingFiles"] == 12 and _p2c["pendingCamera"] == "Seestar" and _p2c["servedAgeHours"] is None
+              and _p2c["publishedFrom"] is None,
+              json.dumps([_p2a, _p2b, _p2c]))
+    else:
+        skip("P2 panel: the status derivation in-process (the U10 panel module isn't loaded)")
+    _p2_page = _p2_get("/")[1]
+    _p2_lcode, _p2_led = _p2_get("/dashboard?t=p2c")
+    check("P2 panel: the Dashboard tab is Ledger (same data-tab and /dashboard route, so the frame and bookmarks keep "
+          "working; the tooltip names the ledger); the page served there keeps the verdicts, events and Recent "
+          "activity and loses 'Space on this computer' and 'Camera storage' (hidden at serve time, so the page's own "
+          "script still runs: Space reaches the Observatory as `space`, the header pill has storage); titled Ledger",
+          lambda: ">Ledger</button>" in _p2_page and ">Dashboard</button>" not in _p2_page
+          and 'data-tab="dash" title="This computer\'s ledger' in _p2_page
+          and _p2_lcode == 200 and "#spaceCard,#storageCard{display:none!important}" in _p2_led
+          and "<title>BrettjoAstro FITS Importer — Ledger</title>" in _p2_led and "— Status</title>" not in _p2_led
+          and 'id="events"' in _p2_led and "Recent activity" in _p2_led and "M 31" in _p2_led
+          and 'id="spaceCard"' in _p2_led and "__DATA__" not in _p2_led,
+          _p2_page[:120] + " | " + _p2_led[:300])
+    _p2_nav = {"Sec-Fetch-Site": "cross-site", "Sec-Fetch-Mode": "navigate", "Sec-Fetch-Dest": "document"}
+    _p2_fetch = {"Sec-Fetch-Site": "cross-site", "Sec-Fetch-Mode": "cors", "Sec-Fetch-Dest": "empty"}
+    _p2_c1, _p2_b1 = _p2_get("/observatory?t=p2d", _p2_nav)
+    _p2_codes = [_p2_get("/observatory?t=p2e")[0],                                               # typed, no Fetch Metadata
+                 _p2_get("/observatory?t=p2f", {"Sec-Fetch-Site": "none", "Sec-Fetch-Dest": "document"})[0],   # bookmark / typed
+                 _p2_get("/observatory?t=p2g", {"Sec-Fetch-Site": "same-origin", "Sec-Fetch-Dest": "iframe"})[0],  # the panel's frame
+                 _p2_get("/observatory?json=1&t=p2h", _p2_nav)[0],                               # the dataset, cross-site: refused
+                 _p2_get("/observatory?json=1&t=p2i", {"Sec-Fetch-Site": "cross-site"})[0],
+                 _p2_get("/observatory?t=p2j", _p2_fetch)[0],                                    # fetch() from another site: refused
+                 _p2_get("/observatory?t=p2k", {"Sec-Fetch-Site": "cross-site", "Sec-Fetch-Dest": "iframe"})[0],  # framed by another site
+                 _p2_get("/dashboard?t=p2l", _p2_nav)[0], _p2_get("/api/state", _p2_nav)[0],    # every other costly GET
+                 _p2_get("/api/archive/index", _p2_nav)[0],
+                 _p2_get("/observatory?t=p2m", {"Host": f"skylarkpc:{PORTN}"})[0]]              # the Host check, untouched
+    check("P2 panel: GET /observatory opened in its own tab serves the full page — typed or bookmarked (no Fetch "
+          "Metadata, or Sec-Fetch-Site none / same-origin) and a link clicked from another page (cross-site, "
+          "Sec-Fetch-Dest: document) — while the dataset (?json=1), a cross-site fetch() or frame of the page, and "
+          "every other costly GET stay refused (403); the Host check, the bind and the token are untouched",
+          lambda: _p2_c1 == 200 and "Astro Archive Observatory" in _p2_b1 and "__DATASET__" not in _p2_b1
+          and 'const TOKEN="' not in _p2_b1 and "__ASTRO_BOOT__" not in _p2_b1
+          and _p2_codes == [200, 200, 200, 403, 403, 403, 403, 403, 403, 403, 403],
+          json.dumps([_p2_c1, _p2_codes]))
+    if _p2_pan is not None:
+        _p2_plan = [{"device": "seestar", "target": "M 31", "scope": "Seestar S30 Pro"},
+                    {"device": "asiair", "target": "NGC 7380", "scope": "Askar FRA400"},
+                    {"device": "asiair", "target": "IC 410", "scope": "Askar 107PHQ"}]
+        _p2_kw = _p2_pan.App._summary_extras({"destPlan": _p2_plan}) if hasattr(_p2_pan.App, "_summary_extras") else None
+        check("P2 panel: pendingImport.scope — the dest plan's scope is the FIRST ASIAir entry's (a Seestar entry never "
+              "counts; a plan with no ASIAir entry, an unknown scope or no plan gives null), passed to save_scan_summary "
+              "as scope= only when this engine's signature takes it (an older engine gets nothing new)",
+              lambda: _p2_pan.App._plan_scope(_p2_plan) == "Askar FRA400"
+              and _p2_pan.App._plan_scope([{"device": "seestar", "target": "M 31", "scope": "Seestar S30 Pro"}]) is None
+              and _p2_pan.App._plan_scope([{"device": "asiair", "target": "X", "scope": None}]) is None
+              and _p2_pan.App._plan_scope(None) is None and _p2_pan.App._summary_extras(None) == ({"scope": None} if _p2_takes_scope else {})
+              and _p2_kw == ({"scope": "Askar FRA400"} if _p2_takes_scope else {}),
+              json.dumps([_p2_kw, _p2_takes_scope]))
+    else:
+        skip("P2 panel: the dest plan's scope in-process (the U10 panel module isn't loaded)")
+    if _p2_pan is not None and _p2_takes_scope:
+        # the round trip, in the runner's own state folder (test mode confines the engine to its root): the
+        # panel's keyword reaches last-scan.json and read_scan_summary gives it back; the served record carries it
+        os.makedirs(_p2_pan.eng.STATE_DIR, exist_ok=True)
+        _p2_pan.eng.save_scan_summary(5, 2, camera="ASIAir", **_p2_pan.App._summary_extras({"destPlan": _p2_plan}))
+        _p2_rt = _p2_pan.eng.read_scan_summary() or {}
+        _p2_pan.eng.save_scan_summary(5, 2, camera="Seestar", **_p2_pan.App._summary_extras({"destPlan": _p2_plan[:1]}))
+        _p2_rt2 = _p2_pan.eng.read_scan_summary() or {}
+        check("P2 panel: the scope reaches last-scan.json through save_scan_summary(scope=) and comes back from "
+              "read_scan_summary ('Askar FRA400'; null for a Seestar-only plan), and the panel serves it as "
+              "pendingImport.scope in the record",
+              lambda: _p2_rt.get("scope") == "Askar FRA400" and _p2_rt.get("files") == 5
+              and "scope" in _p2_rt2 and _p2_rt2["scope"] is None
+              and (_p2_rec.get("pendingImport") or {}).get("scope") == "Askar FRA400",
+              json.dumps([_p2_rt, _p2_rt2, _p2_rec.get("pendingImport")])[:500])
+    else:
+        skip("P2 panel: the scope's round trip through last-scan.json (this engine's save_scan_summary doesn't take scope= yet)")
+    if _p2_scan_before is None:
+        os.remove(_p2_scan_path)
+    else:
+        with open(_p2_scan_path, "w", encoding="utf-8") as f:
+            f.write(_p2_scan_before)
+    # ── P2 page ── (phase 2 "scope first", Observatory_UX_Plan §7, PHASE2-CONTRACT.md: the page's side).
+    # The served page's phase 2 pure layer (unitsOf / cardModel, statusLine, nextActionTxt, exploreItems,
+    # findMatches, unitRows, projectModel, the lines under the cards) is cut out of `body` like the HN checks
+    # do and run in node on a fixture that carries the new fields (units[], status, thisMonth, recordsUpTo,
+    # nextAction) and on the same rows in the 1.8.0 and 1.7.6 shapes; the DOM side is checked by its markers.
+    _P2_SCOPES = [{"camera": "Askar FRA400", "id": "FRA400", "colour": "#D55E00", "kind": "askar", "order": 1, "hours": 15.7, "frames": 1100, "nights": 7, "first": "2025-01-10", "last": "2026-10-19"},
+                  {"camera": "Askar 107PHQ", "id": "107PHQ", "colour": "#009E73", "kind": "askar", "order": 2, "hours": 6.0, "frames": 500, "nights": 3, "first": "2025-03-02", "last": "2026-10-18"},
+                  {"camera": "Seestar S30 Pro", "id": "S30P", "colour": "#E69F00", "kind": "seestar", "order": 3, "hours": 6.3, "frames": 1570, "nights": 6, "first": "2025-06-01", "last": "2026-10-22"},
+                  {"camera": "Seestar S50", "id": "S50", "colour": "#1A1A1A", "kind": "seestar", "order": 4, "hours": 29.5, "frames": 3036, "nights": 10, "first": "2024-11-11", "last": "2026-10-01"},
+                  {"camera": "Seestar S30", "id": "S30", "colour": "#0072B2", "kind": "seestar", "order": 5, "hours": 40.0, "frames": 9000, "nights": 30, "first": "2024-09-01", "last": "2025-08-30"}]
+    _P2_SESS = [("2026-10-01", "Wizard Nebula (NGC 7380)", "Askar FRA400", 900, 12.5, {"L-eXtreme": 900}, {"300": 900}),
+                ("2026-10-20", "Wizard Nebula (NGC 7380)", "Seestar S30 Pro", 600, 0.75, {"LP": 600}, {"10": 600}),
+                ("2026-10-01", "Black Eye Galaxy (M 64)", "Seestar S50", 3000, 29.4, {"IRCUT": 3000}, {"10": 3000}),
+                ("2026-10-01", "Great Globular (M 13)", "Seestar S30 Pro", 400, 4.0, {"IRCUT": 400}, {"10": 400}),
+                ("2026-10-18", "Helix Nebula (NGC 7293)", "Askar 107PHQ", 500, 6.0, {"UV/IR": 500}, {"120": 500}),
+                ("2026-10-19", "Beehive Cluster (M 44)", "Askar FRA400", 200, 3.2, {"UV/IR": 200}, {"60": 200}),
+                ("2026-10-21", "NGC 6229", "Seestar S30 Pro", 30, 0.05, {"IRCUT": 30}, {"10": 30}),
+                ("2026-09-01", "Betelgeuse", "Seestar S50", 36, 0.1, {"IRCUT": 36}, {"10": 36}),
+                ("2026-10-22", "Tadpoles Nebula (IC 410)", "Seestar S30 Pro", 540, 1.5, {"LP": 540}, {"10": 540})]
+    _p2_sess = lambda: [{"night": n, "target": t, "camera": c, "frames": f, "hours": h, "filters": fl, "exps": ex} for n, t, c, f, h, fl, ex in _P2_SESS]
+    _p2_sum = lambda tid, target, cam, state, h, f, n, last, **kw: dict({"tid": tid, "target": target, "codes": [], "camera": cam, "scopeId": cam.split()[-1], "state": state, "hours": h, "frames": f, "nights": n, "firstNight": last, "lastNight": last, "readySince": None, "reason": "", "nextAction": "", "calMissing": False, "mosaic": False}, **kw)
+    _P2_UNITS = [   # the engine's units[] (contract): the ZWO unit says "last on the 107PHQ" and the S50 rests, whatever the sessions say
+        {"id": "ZWO", "label": "ZWO", "name": "ZWO ASI585MC Air", "kind": "askar", "scopeIds": ["FRA400", "107PHQ"], "scopes": ["Askar FRA400", "Askar 107PHQ"], "colour": "#009E73", "short": "ZWO",
+         "onScope": "Askar 107PHQ", "onScopeId": "107PHQ", "onScopeCurrent": False, "active": True, "lastOut": "2026-10-19",
+         "current": [_p2_sum("hel", "Helix Nebula (NGC 7293)", "Askar 107PHQ", "in_progress", 6.0, 500, 3, "2026-10-18", nextAction="Finish it · master in the folder")],
+         "moreReady": 2, "moreReadyHours": 15.7, "strip": [{"night": "2026-10-18", "hours": 6.0}, {"night": "2026-10-19", "hours": 3.2}],
+         "latestDone": {"tid": "bee", "target": "Beehive Cluster (M 44)", "camera": "Askar FRA400", "finalDate": "2026-10-16"}},
+        {"id": "S30P", "label": "S30 Pro", "name": "Seestar S30 Pro", "kind": "seestar", "scopeIds": ["S30P"], "scopes": ["Seestar S30 Pro"], "colour": "#E69F00", "short": "S30P",
+         "onScope": "Seestar S30 Pro", "onScopeId": "S30P", "onScopeCurrent": True, "active": True, "lastOut": "2026-10-22",
+         "current": [_p2_sum("tad", "Tadpoles Nebula (IC 410)", "Seestar S30 Pro", "capturing", 1.5, 540, 1, "2026-10-22", nextAction="Darks or flats missing: no flats filed with these lights", calMissing=True)],
+         "moreReady": 1, "moreReadyHours": 4.0, "strip": [{"night": "2026-10-22", "hours": 1.5}], "latestDone": None},
+        {"id": "S50", "label": "S50", "name": "Seestar S50", "kind": "seestar", "scopeIds": ["S50"], "scopes": ["Seestar S50"], "colour": "#1A1A1A", "short": "S50",
+         "onScope": "Seestar S50", "onScopeId": "S50", "onScopeCurrent": False, "active": False, "lastOut": "2026-10-01", "current": [], "moreReady": 1, "moreReadyHours": 29.4, "strip": [], "latestDone": None}]
+    def _p2_obs(rows, **top):
+        """the record for the rows with scopes, their order and one session per row (the derived path); `top` adds the engine's / panel's phase 2 fields"""
+        return _hn_obs(rows, scopes=json.loads(json.dumps(_P2_SCOPES)), scopeOrder=["FRA400", "107PHQ", "S30P", "S50", "S30"], sessions=_p2_sess(), **top)
+    _P2_PATS = _HN_PAGE_PATS[:3] + (r"/\* ---------- scopes: colour and order from the engine only ---------- \*/\n.*?\nconst CAMSHORT=[^\n]*\n",) + _HN_PAGE_PATS[3:] + (
+        r"const WINDOW=\(\)=>RULES\(\)\.activeWindowNights;.*?/\* ==== end of the phase 2 pure layer ==== \*/",
+        r"function splitName\(n\)\{[^\n]*\n", r"const commonName=[^\n]*\n",
+        r"function filtLabel\(f\)[^\n]*\nfunction filtersTxt\(filters\)[^\n]*\nfunction subsTxt\(exps\)[^\n]*\n")
+    _P2_HARNESS = r"""
+let WARN_N=2; const out={};
+out.units=unitsOf().map(u=>[u.id,u.cams,u.onScope,u.onScopeCurrent,u.active,u.fromEngine]);
+out.cards=landingCards().map(c=>({id:c.id,label:c.label,title:c.title,onTxt:c.onTxt,active:c.active,current:c.current.map(p=>[p.target,p.camera,p.hoursTxt,p.nightsTxt,p.scope]),next:c.next,nextCal:c.nextCal,more:c.more,done:c.done,empty:c.empty,strip:c.strip.length,lastOut:c.lastOut,colour:c.colour}));
+out.status=statusLine(); out.explore=exploreItems().map(i=>[i.id,i.label,i.holds,i.count||0]);
+out.find=findMatches("7380").map(h=>[h.name,h.anchor,h.cams]); out.findNone=findMatches("zzz").length;
+const wiz=TG.find(t=>t.name.startsWith("Wizard")); const pm=wiz?projectModel(wiz,"Askar FRA400"):null;
+out.proj=pm&&{target:pm.target,camera:pm.camera,unit:pm.unit&&pm.unit.id,state:pm.state,stateWord:pm.stateWord,reason:pm.reason,next:pm.next,hoursTxt:pm.hoursTxt,nights:pm.nights,first:pm.first,last:pm.last,filters:pm.filters,perNight:pm.perNight.length,others:pm.others.map(o=>[o.camera,o.hours,o.nights]),chips:pm.chips};
+out.also=wiz?alsoOnDisk(wiz,["Askar FRA400","Askar 107PHQ"]):""; out.anchor=wiz?anchorScope(wiz):null;
+const zwo=unitsOf().find(u=>u.id==="ZWO"); out.rows=zwo?Object.fromEntries(Object.entries(unitRows(zwo,{})).map(([k,v])=>[k,Array.isArray(v)?v.map(p=>p.target+"|"+p.camera):v])):null;
+out.rowsFiltered=zwo?unitRows(zwo,{states:["done"]}).total:null;
+out.month=thisMonthLine(); out.ready=readyLine(); out.recent=recentNights(3).map(r=>r.text);
+out.next=Object.fromEntries(PROGS.map(p=>[p.target+"|"+p.camera,nextActionTxt(p)]));
+process.stdout.write(JSON.stringify(out));
+"""
+    _p2_pieces = [re.search(p_, body, re.S) for p_ in _P2_PATS]
+    check("P2 page: the served page carries the phase 2 layers and controls: the landing (RENDER.overview with unit cards), "
+          "the unit layer (openUnit, RENDER.unit) and the project layer (openProjectLayer, RENDER.project) with a way back, "
+          "Explore / Find / Filter in the bar, the status line in the header, the build time and the server pill in the footer, "
+          "container queries at 600 and 840 px, the reduced-motion rule, the layer slide, the pure layer's markers, orderDatasets "
+          "still the one order, the Nights heatmap shared with the unit layer, and every §10 string of SPEC-2",
+          lambda: all(_p2_pieces)
+          and "function openUnit(" in body and "function openProjectLayer(" in body and "function backFrom(" in body
+          and "RENDER.overview=function" in body and "RENDER.unit=function" in body and "RENDER.project=function" in body
+          and "RENDER.ready=function" in body and "RENDER.archive=function" in body and "RENDER.scopes=function" in body
+          and "function unitsOf()" in body and "function cardModel(" in body and "function statusLine()" in body and "function nextActionTxt(" in body
+          and "function exploreItems()" in body and "function findMatches(" in body and "function unitRows(" in body and "function projectModel(" in body
+          and 'id="status"' in body and 'id="exploreBtn"' in body and 'id="exploreMenu"' in body and 'id="find"' in body and 'id="filterBtn"' in body and 'id="filterPop"' in body
+          and re.search(r'<footer class="foot"><div class="wrap"><div class="fresh" id="fresh"></div>', body) and 'lv.id="live"' in body
+          and "@container cards (min-width:600px)" in body and "@container cards (min-width:840px)" in body and "container-type:inline-size" in body
+          and "@media (prefers-reduced-motion: reduce)" in body and "section.view.entering.fwd" in body and "section.view.entering.back" in body and "if(reduced()) instant=true;" in body
+          and body.count("orderDatasets(") >= 10 and "function heatmapInto(" in body and "heatmapInto(hb,new Set(u.cams)" in body
+          and "units:[],thisMonth:null,recordsUpTo:null,status:null,space:null" in body and 'kind:"archive-show",rel:pm.rel' in body
+          and "function openScope(cam)" in body and "function scopePanelFor(cam" in body and body.count("openScope(") >= 4
+          and "function openNight(cam,night,target,host" in body and "function nightPanelFor(cam,night,target)" in body
+          and '["90","90 nights",90],["365","a year",365],["all","everything",' in body and "what it has been doing" in body and "Timeline of its projects" in body
+          and "function normalise(d)" in body and "reconciliation:[],warnings:[]" in body and "What each scope captured" in body and "Needs your attention" in body
+          and "Astro Archive Observatory" in body and body.count('<script id="dataset" type="application/json">') == 1 and "__DATASET__" not in body
+          and 'kind:"observatory-ready"' in body and "Nothing captured in " in body and "The importer isn't answering. Showing the build from " in body
+          and "Couldn't check data safety: " in body and "Everything's safe" in body and "records up to " in body and "more ready to process" in body,
+          str([bool(m_) for m_ in _p2_pieces]))
+    if _node and all(_p2_pieces):
+        _p2_js = ("let D=JSON.parse(require('fs').readFileSync(0,'utf8'));\n" + _p2_pieces[0].group(0) + _p2_pieces[1].group(0) + "D=normalise(D);\n"
+                  + "\n".join(m_.group(0) for m_ in _p2_pieces[2:]) + _P2_HARNESS)
+
+        def _p2_run(record):
+            r_ = subprocess.run([_node, "-e", _p2_js], input=json.dumps(record), capture_output=True, text=True, timeout=30)
+            if r_.returncode != 0:
+                return {"error": r_.stderr[-500:]}
+            try:
+                return json.loads(r_.stdout)
+            except ValueError as e_:
+                return {"error": str(e_) + r_.stdout[-200:]}
+        _d1 = _p2_run(_p2_obs(_HN))                                                   # a 1.8.0 panel: no units[], no status
+        _d2 = _p2_run(_p2_obs(_HN, units=_P2_UNITS, recordsUpTo="2026-10-23", thisMonth={"month": "2026-10", "movedForward": 5, "finished": 2, "items": []},
+                              status={"checked": True, "reason": "", "onlyHere": 0, "machine": "PC", "pendingFiles": 0, "pendingCamera": None, "pendingSeenAt": None, "servedAgeHours": 2.0, "publishedFrom": None}))
+        _c1 = {c["id"]: c for c in _d1.get("cards", [])}
+        check("P2 page: the landing worked out from scopes[] and sessions[] alone (no units[] in the record): one card per unit in the "
+              "fixed order (the two Askars collapsed into the ZWO unit where the first Askar sits, then the Seestars), the ZWO card names "
+              "its scope from the newest Askar session ('ZWO · on the FRA400'), each card carries its current project(s) newest first with "
+              "hours and nights (the Askar per project on the ZWO card), one next action in words (calibration first), '{n} more ready "
+              "to process', and the idle S30 is the Resting row with 'Nothing captured in 30 nights. Last out: Sat 30 Aug 2025'",
+              lambda: "error" not in _d1 and [c["id"] for c in _d1["cards"]] == ["ZWO", "S30P", "S50", "S30"]
+              and [c["active"] for c in _d1["cards"]] == [True, True, True, False] and all(not u[5] for u in _d1["units"])
+              and _c1["ZWO"]["title"] == "ZWO · on the FRA400" and _c1["ZWO"]["onTxt"] == "on the FRA400" and _c1["ZWO"]["colour"] == "#D55E00"
+              and [p[0] for p in _c1["ZWO"]["current"]] == ["Beehive Cluster (M 44)", "Helix Nebula (NGC 7293)"] and _c1["ZWO"]["current"][1][4] == "107PHQ" and _c1["ZWO"]["current"][0][2:4] == ["3.2 h", "2 nights"]
+              and _c1["ZWO"]["more"] == "1 more ready to process · 12.5 h" and _c1["ZWO"]["strip"] == 3
+              and [p[0] for p in _c1["S30P"]["current"]] == ["Tadpoles Nebula (IC 410)", "Wizard Nebula (NGC 7380)"] and _c1["S30P"]["current"][0][4] == ""
+              and _c1["S30P"]["next"] == "Still capturing · ready from " + _hn_date("Fri 6 Nov", 2026) and _c1["S30P"]["more"] == "1 more ready to process · 4.0 h"
+              and _c1["S50"]["current"][0][0] == "Black Eye Galaxy (M 64)" and _c1["S50"]["next"] == "Next step: collect the lights (9 nights, 3,000 frames)" and _c1["S50"]["more"] == ""
+              and _c1["S30"]["current"] == [] and _c1["S30"]["empty"] == "Nothing captured in 30 nights. Last out: " + _hn_date("Sat 30 Aug", 2025)
+              and _c1["S30"]["lastOut"] == "2025-08-30" and _c1["S30"]["title"] == "S30",
+              json.dumps(_d1.get("error") or _d1.get("cards"))[:1200])
+        _c2 = {c["id"]: c for c in _d2.get("cards", [])}
+        check("P2 page: the engine's units[] win when the record carries them (they are the contract): the ZWO card says 'last on the "
+              "107PHQ' with the engine's current project, '2 more ready to process · 15.7 h' and a calm Done note naming the object and "
+              "its final's date; the S30 Pro's next action is the engine's calibration line first; the S50 rests on the engine's word; "
+              "'This month' and 'records up to' come from the record",
+              lambda: "error" not in _d2 and [c["id"] for c in _d2["cards"]] == ["ZWO", "S30P", "S50"] and all(u[5] for u in _d2["units"])
+              and _c2["ZWO"]["title"] == "ZWO · last on the 107PHQ" and _c2["ZWO"]["colour"] == "#009E73"
+              and [p[0] for p in _c2["ZWO"]["current"]] == ["Helix Nebula (NGC 7293)"] and _c2["ZWO"]["next"] == "Finish it · master in the folder"
+              and _c2["ZWO"]["more"] == "2 more ready to process · 15.7 h" and _c2["ZWO"]["done"] == "Done · Beehive Cluster · final of " + _hn_date("Fri 16 Oct", 2026)
+              and _c2["S30P"]["next"] == "Darks or flats missing: no flats filed with these lights" and _c2["S30P"]["nextCal"] is True
+              and _c2["S50"]["active"] is False and _c2["S50"]["empty"] == "Nothing captured in 30 nights. Last out: " + _hn_date("Thu 1 Oct", 2026) and _c2["S50"]["more"] == "1 more ready to process · 29.4 h"
+              and _d2["month"]["text"] == "This month: 5 projects moved forward · 2 finished" and _d2["month"]["fromEngine"] is True
+              and _d2["status"] == {"level": "quiet", "text": "Everything's safe", "more": "records up to " + _hn_date("Fri 23 Oct", 2026), "upTo": "2026-10-23", "facts": []},
+              json.dumps(_d2.get("error") or [_d2.get("cards"), _d2.get("month"), _d2.get("status")])[:1200])
+        _st = lambda **st: _p2_run(_p2_obs(_HN, status=dict({"checked": True, "reason": "", "onlyHere": 0, "machine": "PC", "pendingFiles": 0, "pendingCamera": None, "pendingSeenAt": None, "servedAgeHours": 2.0, "publishedFrom": None}, **st)))["status"]
+        _s_quiet, _s_risk, _s_stale, _s_unch = (_st(), _st(onlyHere=1204, machine="Mac", pendingFiles=87, pendingCamera="ASIAir", pendingSeenAt="2026-10-18T08:50:00+00:00"),
+                                                _st(servedAgeHours=41.0, publishedFrom="PC"), _st(checked=False, reason="the ledger is locked by an import"))
+        check("P2 page: the status line's four variants from the panel's `status`: quiet 'Everything's safe · records up to Thu 22 Oct' "
+              "(the newest night with frames when the record has no recordsUpTo); amber for frames only on this computer and files waiting "
+              "on a camera with its last scan; amber for a served record over 24 h old; amber 'Couldn't check data safety: {reason}'; and "
+              "a record from an older panel (no status) is amber too, saying the facts weren't checked, never 'safe'",
+              lambda: _s_quiet == {"level": "quiet", "text": "Everything's safe", "more": "records up to " + _hn_date("Thu 22 Oct", 2026), "upTo": "2026-10-22", "facts": []}
+              and _s_risk["level"] == "amber" and _s_risk["text"] == "1,204 frames only on the Mac"
+              and _s_risk["more"] == "87 files waiting on the ASIAir, last scan " + _hn_date("Sun 18 Oct", 2026) + " · records up to " + _hn_date("Thu 22 Oct", 2026)
+              and _s_stale["level"] == "amber" and _s_stale["text"] == "this record is 2 days old (the PC's copy)"
+              and _s_unch["level"] == "amber" and _s_unch["text"] == "Couldn't check data safety: the ledger is locked by an import"
+              and _d1["status"]["level"] == "amber" and _d1["status"]["text"] == "Couldn't check data safety: this record doesn't carry the safety facts",
+              json.dumps([_s_quiet, _s_risk, _s_stale, _s_unch, _d1.get("status")])[:1200])
+        _ex = {x[1]: x for x in _d1.get("explore", [])}
+        _holds = " ".join(x[2] for x in _d1.get("explore", []))
+        check("P2 page: the Explore menu names every view of the before record (Ready to process = What to do next, Imaging nights = Nights, "
+              "What each scope captured + What each scope shot + Projects that moved lately, Sky = Sky coverage, Footprints, Coverage, "
+              "Equipment, Data checks with its count and Needs your attention, Archive = the header totals + Where the hours went, Pipeline, "
+              "Targets = Projects); Find opens a project anchored to the scope with the most recent capture and says when nothing matches",
+              lambda: [x[1] for x in _d1["explore"]] == ["Ready to process", "Imaging nights", "What each scope captured", "Sky", "Footprints", "Coverage", "Equipment", "Data checks", "Archive", "Pipeline", "Targets"]
+              and all(s in _holds for s in ("What to do next", "Nights", "What each scope shot", "Projects that moved lately", "Sky coverage", "Needs your attention", "Where the hours went", "Projects", "the header totals"))
+              and _ex["Data checks"][3] == 2 and _ex["Ready to process"][3] == 3
+              and _d1["find"] == [["Wizard Nebula (NGC 7380)", "Seestar S30 Pro", ["Askar FRA400", "Seestar S30 Pro"]]] and _d1["findNone"] == 0 and _d1["anchor"] == "Seestar S30 Pro",
+              json.dumps([_d1.get("explore"), _d1.get("find")])[:1200])
+        check("P2 page: the layers' models: a unit's rows are grouped Ready / Finish it / Still capturing / Done, most recent capture first, "
+              "without its current projects, and the Filter narrows them; a project on one scope carries its state and reason, the next step, "
+              "hours, nights, first and last imaged, integration by filter, one row per night and the other scopes' data; 'Also on disk' names "
+              "the other scopes' hours; the lines under the cards add up (Ready to process, Recent nights, This month)",
+              lambda: _d1["rows"] == {"ready": ["Wizard Nebula (NGC 7380)|Askar FRA400"], "finish": [], "capturing": [], "done": [], "samples": [], "total": 1} and _d1["rowsFiltered"] == 0
+              and _d1["proj"]["camera"] == "Askar FRA400" and _d1["proj"]["unit"] == "ZWO" and _d1["proj"]["stateWord"] == "Ready to process"
+              and _d1["proj"]["reason"] == "ready since Fri 16 Oct · 12.5 h on the FRA400" and _d1["proj"]["next"] == "Next step: collect the lights (5 nights, 900 frames)"
+              and _d1["proj"]["hoursTxt"] == "12.5 h" and _d1["proj"]["first"] == "2026-10-01" and _d1["proj"]["last"] == "2026-10-01"
+              and _d1["proj"]["filters"] == [{"filter": "L-eXtreme", "hours": 12.5}] and _d1["proj"]["perNight"] == 1
+              and _d1["proj"]["others"] == [["Seestar S30 Pro", 0.75, 2]] and _d1["proj"]["chips"] == ["Askar FRA400", "Seestar S30 Pro"]
+              and _d1["also"] == "Also on disk: 45 min on the S30 Pro"
+              and _d1["ready"]["text"] == "Ready to process: 3 datasets · 45.9 h" and _d1["month"]["text"] == "This month: 3 projects moved forward · 1 finished"
+              and _d1["recent"][0] == _hn_date("Thu 22 Oct", 2026) + " · 1.5 h · S30 Pro: Tadpoles Nebula" and len(_d1["recent"]) == 3
+              and _d1["next"]["Helix Nebula (NGC 7293)|Askar 107PHQ"] == "Finish it · master in the folder" and _d1["next"]["Beehive Cluster (M 44)|Askar FRA400"] == "Done · final of " + _hn_date("Fri 16 Oct", 2026)
+              and _d1["next"]["NGC 6229|Seestar S30 Pro"] == "Sample · 3 min",
+              json.dumps([_d1.get("rows"), _d1.get("proj"), _d1.get("also"), _d1.get("ready"), _d1.get("month"), _d1.get("recent"), _d1.get("next")])[:1500])
+        _d3 = _p2_run(_hn_obs(_old_rows))                      # 1.7.6 rows, no scopes, no sessions: nothing to derive from
+        _d4 = _p2_run(_p2_obs(_old_rows))                      # 1.7.6 rows with scopes and sessions: everything derived
+        check("P2 page: an OLD record renders with no script error and no 'undefined': with no scopes or sessions at all the landing is empty "
+              "(no cards, the status line amber and honest); with scopes and sessions but none of the phase 1 or 2 fields the cards, the "
+              "next actions (from readyOn or the last night plus the quiet period), the lines and the layers' models are worked out by the page",
+              lambda: "error" not in _d3 and "error" not in _d4 and "undefined" not in json.dumps(_d3) and "undefined" not in json.dumps(_d4)
+              and _d3["cards"] == [] and _d3["status"]["level"] == "amber"
+              and [c["id"] for c in _d4["cards"]] == ["ZWO", "S30P", "S50", "S30"] and _d4["cards"][0]["title"] == "ZWO · on the FRA400"
+              and _d4["next"]["Tadpoles Nebula (IC 410)|Seestar S30 Pro"] == "Still capturing · ready from " + _hn_date("Fri 6 Nov", 2026)
+              and _d4["next"]["Wizard Nebula (NGC 7380)|Seestar S30 Pro"] == "Still capturing · ready from " + _hn_date("Wed 4 Nov", 2026)
+              and _d4["next"]["Black Eye Galaxy (M 64)|Seestar S50"] == "Next step: collect the lights (9 nights, 3,000 frames)"
+              and _d4["proj"]["reason"] == "nothing new for 22 nights" and _d4["month"]["text"] == "This month: 0 projects moved forward · 0 finished"
+              and _d4["ready"]["n"] == 3,
+              json.dumps([_d3.get("error"), _d4.get("error"), _d3.get("cards"), _d3.get("status"), [c["id"] for c in _d4.get("cards", [])], _d4.get("next")])[:1200])
+    else:
+        skip("P2 page: the phase 2 pure layer in node (needs node and the marked regions)")
 finally:
     procn.terminate()
     procn.wait(timeout=30)

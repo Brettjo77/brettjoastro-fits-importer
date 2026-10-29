@@ -6166,8 +6166,8 @@ check("OB4 (1.7.2) the page counts facts, not sentences: what was not counted (n
       and any(n["kind"] == "unknown_names" and n["count"] == 1 and n["frames"] == 1 for n in _o4["notices"])
       and all(set(n) == {"kind", "count", "frames", "text"} for n in _o4["notices"])
       and len(_o4["notices"]) == len(_o4["warnings"])
-      and [x["id"] for x in _o4["scopes"]] == ["S30P", "FRA400"] and _o4["scopeOrder"] == ["S30P", "FRA400"]
-      and [x["kind"] for x in _o4["scopes"]] == ["seestar", "askar"] and [x["order"] for x in _o4["scopes"]] == [1, 5]
+      and [x["id"] for x in _o4["scopes"]] == ["FRA400", "S30P"] and _o4["scopeOrder"] == ["FRA400", "S30P"]
+      and [x["kind"] for x in _o4["scopes"]] == ["askar", "seestar"] and [x["order"] for x in _o4["scopes"]] == [1, 4]
       and _o4["pendingImport"]["files"] == 3559 and _o4["pendingImport"]["targets"] == 29
       and _o4["pendingImport"]["failedEject"] is True and _o4["pendingImport"]["camera"] == "Seestar"
       and _o4["pendingImport"]["elsewhere"] == 12 and isinstance(_o4["pendingImport"]["ageHours"], (int, float))
@@ -6570,6 +6570,274 @@ check("HN contract: the Middle Heart (LDN 1373) and Fish on a Platter (Barnard 1
               for ln in _hn_ship),
       json.dumps([_hn_con.get("LDN1373"), _hn_con.get("FISHONAPLATTER"),
                   sorted({t.get("type") for t in _hn_con.values()} - _HN_KINDS, key=str), hashlib.sha256(_hn_con_bytes).hexdigest()]))
+
+# ═══════════════ CHAIN P2: scope first (Observatory UX plan, phase 2) ═══════════
+print("\n── Chain P2: scope first — units, next actions, this month, the window (UX plan phase 2) ──")
+# The engine's side of docs/ux-observatory-25oct/PHASE2-CONTRACT.md. The as-of
+# night is PL_TODAY (2026-10-10), so the 30-night window runs from 11 Sep.
+# Both Askars have frames (the FRA400's newest), two Seestars are out this
+# month, and the S50 rested since August. Each check guards one field group.
+P2_ASI = dict(device="asiair", camera="ZWO ASI585MC Air", sourceType="Plan")
+P2_DK = {"NGC 7380": {"2026-09-30": "ZWO ASI AIR/Wizard Nebula/2026-09-30 Day 1",
+                      "2026-10-02": "ZWO ASI AIR/Wizard Nebula/2026-10-02 Day 2"},
+         "M 81": {"2026-09-20": "ZWO ASI AIR/Bodes Galaxy/2026-09-20 Day 1"}}
+def p2_rows(target, display, scope, nights, n, exp, tag, **extra):
+    """n frames of exp seconds on each night; an ASIAir row carries its night's Day key."""
+    out = {}
+    for i, nt in enumerate(nights):
+        for j in range(n):
+            dk = (P2_DK.get(target) or {}).get(nt)
+            out[f"{tag}{i}{j}"] = pl_snap_row(target, display, nt, hashlib.sha256(f"p2{tag}{i}{j}".encode()).hexdigest(),
+                                              scope=scope, exposureSeconds=exp, **({"dayKey": dk} if dk else {}), **extra)
+    return out
+def p2_files(askar_wizard=("2026-09-30", "2026-10-02"), askar_m81=("2026-09-20",), iris=("2026-10-04",)):
+    f = {}
+    f.update(p2_rows("NGC 7380", "NGC 7380 - Wizard", "Askar FRA400", list(askar_wizard), 2, 600.0, "wz", **P2_ASI))  # capturing, cal linked
+    f.update(p2_rows("M 44", "M 44 - Beehive", "Askar FRA400", ["2026-06-01"], 4, 600.0, "bh", **P2_ASI))            # ready, no cal
+    f.update(p2_rows("M 81", "M 81 - Bode's Galaxy", "Askar 107PHQ", list(askar_m81), 4, 600.0, "bo", **P2_ASI))     # ready, darks only
+    f.update(p2_rows("M 101", "M 101 - Pinwheel", "Askar 107PHQ", ["2026-05-01"], 4, 600.0, "pw", **P2_ASI))         # ready, old
+    f.update(p2_rows("M 31", "M 31 - Andromeda", "Seestar S30 Pro", ["2026-10-01"], 16, 60.0, "an"))                 # kept open by hand
+    f.update(p2_rows("M 31", "M 31 - Andromeda", "Seestar S30 Pro", ["2026-10-03"], 15, 60.0, "ab"))
+    f.update(p2_rows("M 42", "M 42 - Orion", "Seestar S30 Pro", ["2026-09-15"], 40, 60.0, "or"))                     # ready, 40 min
+    f.update(p2_rows("M 27", "M 27 - Dumbbell", "Seestar S30 Pro", ["2026-09-12"], 10, 600.0, "du"))                 # a master: Finish it
+    f.update(p2_rows("M 13", "M 13 - Hercules", "Seestar S30 Pro", ["2026-07-01"], 10, 600.0, "hc"))                 # ready, old
+    f.update(p2_rows("M 45", "M 45 - Pleiades", "Seestar S30 Pro", ["2026-10-05"], 5, 60.0, "pl"))                   # a sample, 5 min
+    f.update(p2_rows("NGC 7023", "NGC 7023 - Iris", "Seestar S50 Pro", list(iris), 6, 600.0, "ir"))                   # capturing by rule
+    f.update(p2_rows("M 64", "M 64 - Black Eye", "Seestar S50 Pro", ["2026-08-01"], 2, 600.0, "be"))                 # done: a final of 6 Oct
+    f.update(p2_rows("NGC 1499", "NGC 1499 - California", "Seestar S50", ["2026-08-20"], 4, 600.0, "ca"))            # the resting S50
+    return f
+P2_CAL = {"d1": {"frameType": "Dark", "filename": "Dark_300s.fit", "linkedInto": [P2_DK["NGC 7380"]["2026-09-30"]],
+                 "shipped": [], "exposureSeconds": 300.0, "gain": 100, "filter": ""},
+          "f1": {"frameType": "Flat", "filename": "Flat_L.fit", "linkedInto": [P2_DK["NGC 7380"]["2026-09-30"]],
+                 "shipped": [], "exposureSeconds": 2.0, "gain": 100, "filter": "L"},
+          "d2": {"frameType": "Dark", "filename": "Dark_600s.fit", "linkedInto": [P2_DK["M 81"]["2026-09-20"]],
+                 "shipped": [], "exposureSeconds": 600.0, "gain": 100, "filter": ""}}
+P2 = pl_pc_env("P2", p2_files(), at="2026-10-10T08:00:00Z", calibration=P2_CAL)
+P2.env.pop("ASTRO_SAMPLE_MINUTES", None)                      # the sample rule is on (the default 30 min)
+_p2_pc = os.path.join(P2.archive, "_verify", "pc"); os.makedirs(_p2_pc, exist_ok=True)
+with open(os.path.join(_p2_pc, "inventory-E-20261009T033000Z.jsonl"), "w") as f:
+    f.write(json.dumps(pl_inv_row("S30P/Dumbbell Nebula (M 27)/processed/master_M27.xisf", "S30P", "Dumbbell Nebula (M 27)")) + "\n")
+with open(os.path.join(_p2_pc, "inventory-E.status.json"), "w") as f:
+    json.dump({"schema": "inventory-status/1", "generation": "20261009T033000Z"}, f)
+with open(os.path.join(P2.state, "capture-state.json"), "w") as f:
+    json.dump({"M31|S30P|Shinfield": "open"}, f)
+_p2_fin = os.path.join(P2.root, "finals"); os.makedirs(_p2_fin, exist_ok=True)
+with open(os.path.join(_p2_fin, "Black_Eye_S50P.jpg"), "w") as f:
+    f.write("x")
+_p2_t = _dt(2026, 10, 6, 15, 0).timestamp()
+os.utime(os.path.join(_p2_fin, "Black_Eye_S50P.jpg"), (_p2_t, _p2_t))
+def p2_build(env=None, now="m.datetime(2026, 10, 10, 12, 0)", before=""):
+    """observatory/1 from one pass, with the build's own date fixed (This month)."""
+    return probe(env or P2.env, before + "st = m.State()\nextra, names = m.projects_inputs(st)\ncollect = {}\n"
+                 f"d = m.build_projects(st, extra, today='{PL_TODAY}', custom_names=names, collect=collect)\n"
+                 f"o = m.observatory_from(d, collect, st, now={now}, pending=m.read_scan_summary())\n"
+                 "print(json.dumps(o))\n")
+_p2 = p2_build(before="m.save_scan_summary(5, 1, camera='ASIAir', target_names=['Wizard Nebula (NGC 7380)'], scope='Askar FRA400')\n")
+_p2u = {u.get("id"): u for u in _p2.get("units", [])}
+_p2s = {s.get("id"): s for s in _p2.get("scopes", [])}
+_p2p = {(p["tid"], p["scopeId"]): p for t in _p2.get("targets", []) for p in t.get("programmes", []) if "scopeId" in p}
+P2_SUMMARY_KEYS = {"tid", "target", "codes", "camera", "scopeId", "state", "stateWord", "hours", "frames", "nights",
+                   "firstNight", "lastNight", "readySince", "reason", "nextAction", "calMissing", "mosaic"}
+
+# before: the page had scopes[] only, one per Askar, and worked the ZWO card out itself
+check("P2 units[] come in the card order: scopeOrder with the two Askars collapsed into ONE 'ZWO' unit at the "
+      "first Askar's position, both scope ids on it (the contract's Askars), the camera's name, kind 'askar'; each "
+      "Seestar is its own unit with its short label and id",
+      lambda: _p2["scopeOrder"] == ["FRA400", "107PHQ", "S50P", "S30P", "S50"]      # the plan's card order (contract, 1.9.0)
+      and [u["id"] for u in _p2["units"]] == ["ZWO", "S50P", "S30P", "S50"]
+      and _p2u["ZWO"]["scopeIds"] == ["FRA400", "107PHQ"] and _p2u["ZWO"]["scopes"] == ["Askar FRA400", "Askar 107PHQ"]
+      and _p2u["ZWO"]["name"] == "ZWO ASI585MC Air" and _p2u["ZWO"]["kind"] == "askar"
+      and _p2u["ZWO"]["label"] == "ZWO" and _p2u["ZWO"]["short"] == "ZWO"
+      and _p2u["S30P"]["label"] == "S30 Pro" and _p2u["S30P"]["short"] == "S30P"
+      and _p2u["S30P"]["name"] == "Seestar S30 Pro" and _p2u["S30P"]["kind"] == "seestar"
+      and _p2u["S30P"]["scopeIds"] == ["S30P"] and _p2u["S30P"]["scopes"] == ["Seestar S30 Pro"],
+      json.dumps([_p2.get("scopeOrder"), [(u.get("id"), u.get("scopeIds")) for u in _p2.get("units", [])]])[:600])
+check("P2 the ZWO unit is on the Askar of its newest ASIAir session (the FRA400, 2 Oct), 'on' it since that night "
+      "is inside the window, and wears that Askar's colour; a Seestar unit is on its own scope",
+      lambda: _p2u["ZWO"]["onScope"] == "Askar FRA400" and _p2u["ZWO"]["onScopeId"] == "FRA400"
+      and _p2u["ZWO"]["onScopeCurrent"] is True and _p2u["ZWO"]["colour"] == "#e05a5a"
+      and _p2u["ZWO"]["active"] is True and _p2u["ZWO"]["lastOut"] == "2026-10-02"
+      and _p2u["S30P"]["onScope"] == "Seestar S30 Pro" and _p2u["S30P"]["onScopeId"] == "S30P"
+      and _p2u["S30P"]["onScopeCurrent"] is True and _p2u["S30P"]["colour"] == "#eda100",
+      json.dumps({k: {x: u.get(x) for x in ("onScope", "onScopeId", "onScopeCurrent", "colour", "active", "lastOut")}
+                  for k, u in _p2u.items()})[:800])
+check("P2 current: the unit's datasets with frames inside the window, newest first, at most two (the S30 Pro's "
+      "third, the Dumbbell, is cut) and never a sample (the 5-minute Pleiades of 5 Oct is left out); each is a "
+      "dataset summary with exactly the contract's keys",
+      lambda: [c["tid"] for c in _p2u["S30P"]["current"]] == ["M31", "M42"]
+      and [c["tid"] for c in _p2u["ZWO"]["current"]] == ["NGC7380", "M81"]
+      and [c["scopeId"] for c in _p2u["ZWO"]["current"]] == ["FRA400", "107PHQ"]
+      and [c["tid"] for c in _p2u["S50P"]["current"]] == ["NGC7023"] and _p2u["S50"]["current"] == []
+      and all(set(c) == P2_SUMMARY_KEYS for u in _p2u.values() for c in u["current"])
+      and _p2u["S30P"]["current"][0]["state"] == "capturing" and _p2u["S30P"]["current"][0]["stateWord"] == "Still capturing"
+      and _p2u["S30P"]["current"][0]["frames"] == 31 and _p2u["S30P"]["current"][0]["nights"] == 2
+      and _p2u["S30P"]["current"][0]["hours"] == 0.52 and _p2u["S30P"]["current"][0]["codes"] == ["M 31", "NGC 224"]
+      and _p2u["S30P"]["current"][0]["camera"] == "Seestar S30 Pro" and _p2u["S30P"]["current"][0]["mosaic"] is False,
+      json.dumps({k: u.get("current") for k, u in _p2u.items()})[:1200])
+check("P2 moreReady counts the unit's other Ready to process datasets (not in current) with their hours: the "
+      "S30 Pro's Hercules (1.7 h), the ZWO's Beehive and Pinwheel (1.3 h); the Dumbbell (Finish it) and the "
+      "Pleiades (sample) count for nothing",
+      lambda: _p2u["S30P"]["moreReady"] == 1 and _p2u["S30P"]["moreReadyHours"] == 1.7
+      and _p2u["ZWO"]["moreReady"] == 2 and _p2u["ZWO"]["moreReadyHours"] == 1.3
+      and _p2u["S50P"]["moreReady"] == 0 and _p2u["S50"]["moreReady"] == 1,
+      json.dumps({k: (u.get("moreReady"), u.get("moreReadyHours")) for k, u in _p2u.items()}))
+check("P2 strip: one entry per night with frames inside the window, oldest first, hours per night (the S30 Pro's "
+      "five nights; the ZWO's three across both Askars); a resting unit's strip is empty",
+      lambda: [x["night"] for x in _p2u["S30P"]["strip"]] == ["2026-09-12", "2026-09-15", "2026-10-01", "2026-10-03", "2026-10-05"]
+      and [x["hours"] for x in _p2u["S30P"]["strip"]] == [1.67, 0.67, 0.27, 0.25, 0.08]
+      and [x["night"] for x in _p2u["ZWO"]["strip"]] == ["2026-09-20", "2026-09-30", "2026-10-02"]
+      and [x["hours"] for x in _p2u["ZWO"]["strip"]] == [0.67, 0.33, 0.33]
+      and _p2u["S50"]["strip"] == [],
+      json.dumps({k: u.get("strip") for k, u in _p2u.items()})[:800])
+check("P2 a resting unit (the S50, last out 20 Aug) stays in units[] with active false, its last night out, no "
+      "current project; scopes[] carry active and lastOut too",
+      lambda: _p2u["S50"]["active"] is False and _p2u["S50"]["lastOut"] == "2026-08-20"
+      and _p2u["S50"]["onScope"] == "Seestar S50" and _p2u["S50"]["onScopeCurrent"] is False
+      and _p2s["S50"]["active"] is False and _p2s["S50"]["lastOut"] == "2026-08-20"
+      and _p2s["S30P"]["active"] is True and _p2s["S30P"]["lastOut"] == "2026-10-05"
+      and _p2s["FRA400"]["active"] is True and _p2s["FRA400"]["lastOut"] == "2026-10-02"
+      and _p2s["107PHQ"]["active"] is True and _p2s["107PHQ"]["lastOut"] == "2026-09-20",
+      json.dumps({k: (s.get("active"), s.get("lastOut")) for k, s in _p2s.items()}))
+check("P2 latestDone: the S50 Pro's Black Eye (final of 6 Oct) shows on its card because the unit has not been out "
+      "since (last night 4 Oct); the ZWO and the S30 Pro have none",
+      lambda: _p2u["S50P"]["latestDone"] == {"tid": "M64", "target": "Black Eye Galaxy (M 64)", "codes": ["M 64", "NGC 4826"],
+                                              "camera": "Seestar S50 Pro", "scopeId": "S50P", "finalDate": "2026-10-06"}
+      and _p2u["ZWO"]["latestDone"] is None and _p2u["S30P"]["latestDone"] is None,
+      json.dumps({k: u.get("latestDone") for k, u in _p2u.items()}))
+
+# before: the page composed its own next step from status and dates
+check("P2 programmes carry nextAction in the contract's words for every state: capturing by rule ('ready from "
+      "Sat 17 Oct'), kept open by hand, ready ('collect the lights (1 night, 40 frames)'), Finish it, Done with "
+      "its final's day, Sample with its minutes; plus scopeId, codes and the state word",
+      lambda: _p2p[("NGC7380", "FRA400")]["nextAction"] == "Still capturing · ready from Sat 17 Oct"
+      and _p2p[("NGC7380", "FRA400")]["calMissing"] is False
+      and _p2p[("M31", "S30P")]["nextAction"] == "Still capturing · kept open by hand"
+      and _p2p[("M42", "S30P")]["nextAction"] == "Next step: collect the lights (1 night, 40 frames)"
+      and _p2p[("M27", "S30P")]["nextAction"] == "Finish it · master in the folder"
+      and _p2p[("M64", "S50P")]["nextAction"] == "Done · final of Tue 6 Oct"
+      and _p2p[("M45", "S30P")]["nextAction"] == "Sample · 5 min" and _p2p[("M45", "S30P")]["status"] == "sample"
+      and _p2p[("NGC7023", "S50P")]["nextAction"] == "Still capturing · ready from Mon 19 Oct"
+      and _p2p[("M42", "S30P")]["stateWord"] == "Ready to process" and _p2p[("M27", "S30P")]["stateWord"] == "Finish it"
+      and _p2p[("M64", "S50P")]["stateWord"] == "Done" and _p2p[("M45", "S30P")]["stateWord"] == "Sample"
+      and _p2p[("M42", "S30P")]["scopeId"] == "S30P" and _p2p[("M42", "S30P")]["codes"] == ["M 42", "NGC 1976"],
+      json.dumps({f"{k[0]}|{k[1]}": (p.get("status"), p.get("nextAction"), p.get("calMissing")) for k, p in _p2p.items()})[:1200])
+check("P2 missing darks or flats come first, for an ASIAir dataset still capturing or ready: the Beehive has "
+      "neither, Bode's has darks only; the Wizard, with both linked, reads its capturing step; a Seestar never "
+      "has calMissing",
+      lambda: _p2p[("M44", "FRA400")]["nextAction"] == "Darks or flats missing: darks and flats"
+      and _p2p[("M44", "FRA400")]["calMissing"] is True
+      and _p2p[("M81", "107PHQ")]["nextAction"] == "Darks or flats missing: flats"
+      and _p2p[("M81", "107PHQ")]["calMissing"] is True and _p2p[("M81", "107PHQ")]["status"] == "ready_to_process"
+      and _p2p[("M101", "107PHQ")]["calMissing"] is True
+      and all(p["calMissing"] is False for k, p in _p2p.items() if k[1] in ("S30P", "S50", "S50P"))
+      and _p2u["ZWO"]["current"][1]["nextAction"] == "Darks or flats missing: flats",
+      json.dumps({f"{k[0]}|{k[1]}": (p.get("status"), p.get("nextAction"), p.get("calMissing")) for k, p in _p2p.items()})[:1200])
+
+# before: no month view existed
+check("P2 thisMonth (the build's own date, Oct 2026): Bode's became ready on 5 Oct, the Black Eye's final appeared "
+      "on 6 Oct; movedForward 1, finished 1, items newest first as dataset summaries with 'what' and 'date'",
+      lambda: _p2["thisMonth"]["month"] == "2026-10" and _p2["thisMonth"]["movedForward"] == 1
+      and _p2["thisMonth"]["finished"] == 1
+      and [(x["tid"], x["what"], x["date"]) for x in _p2["thisMonth"]["items"]] == [("M64", "final", "2026-10-06"),
+                                                                                  ("M81", "ready", "2026-10-05")]
+      and all(set(x) == P2_SUMMARY_KEYS | {"what", "date"} for x in _p2["thisMonth"]["items"]),
+      json.dumps(_p2.get("thisMonth"))[:800])
+_p2_sep = p2_build(now="m.datetime(2026, 9, 30, 12, 0)")
+check("P2 thisMonth follows the build's date: built on 30 Sep, the month is 2026-09 with Orion ready since 30 Sep "
+      "and the California Nebula since 4 Sep, nothing finished",
+      lambda: _p2_sep["thisMonth"]["month"] == "2026-09" and _p2_sep["thisMonth"]["finished"] == 0
+      and [(x["tid"], x["what"], x["date"]) for x in _p2_sep["thisMonth"]["items"]] == [("M42", "ready", "2026-09-30"),
+                                                                                      ("NGC1499", "ready", "2026-09-04")]
+      and _p2_sep["thisMonth"]["movedForward"] == 2,
+      json.dumps(_p2_sep.get("thisMonth"))[:600])
+check("P2 recordsUpTo is the newest night with frames (the Pleiades sample of 5 Oct counts: frames are frames), "
+      "activeWindow says which nights the active flags were judged by, and the scan summary's scope reaches "
+      "pendingImport",
+      lambda: _p2["recordsUpTo"] == "2026-10-05"
+      and _p2["activeWindow"] == {"nights": 30, "from": "2026-09-11", "to": "2026-10-10"}
+      and _p2["pendingImport"]["scope"] == "Askar FRA400" and _p2["pendingImport"]["files"] == 5
+      and _p2["pendingImport"]["targetNames"] == ["Wizard Nebula (NGC 7380)"],
+      json.dumps([_p2.get("recordsUpTo"), _p2.get("activeWindow"), _p2.get("pendingImport")])[:600])
+_p2_scan = probe(P2.env, "import json, os\n"
+                 "p = os.path.join(m.STATE_DIR, 'last-scan.json')\n"
+                 "json.dump({'schema': 'scan-summary/1', 'files': 5, 'targets': 1, 'camera': 'ASIAir',"
+                 " 'seenAt': '2026-10-16T08:50:00+00:00', 'machine': 'Mac'}, open(p, 'w'))\n"
+                 "old = m.read_scan_summary()\n"
+                 "json.dump({'schema': 'scan-summary/1', 'files': 5, 'targets': 1, 'scope': 7}, open(p, 'w'))\n"
+                 "bad = m.read_scan_summary()\n"
+                 "m.save_scan_summary(5, 1, camera='ASIAir', scope='   ')\n"
+                 "blank = m.read_scan_summary()\n"
+                 "m.save_scan_summary(3559, 29, camera='Seestar', failed_eject=True, elsewhere=12,"
+                 " target_names=['Tadpoles Nebula (IC 410)'], elsewhere_machine='PC')\n"
+                 "noscope = m.read_scan_summary()\n"
+                 "m.save_scan_summary(5, 1, camera='ASIAir', scope='Askar 107PHQ')\n"
+                 "new = m.read_scan_summary()\n"
+                 "print(json.dumps({'old': old, 'bad': bad, 'blank': blank, 'noscope': noscope, 'new': new,"
+                 " 'raw': json.load(open(p))}))\n")
+check("P2 save_scan_summary(scope=) writes 'scope' into last-scan.json and read_scan_summary returns it; a 1.8.0 "
+      "file without it, a wrong type and a blank read as null; every 1.7.5 argument and default still works",
+      lambda: _p2_scan["old"]["scope"] is None and _p2_scan["old"]["files"] == 5
+      and _p2_scan["bad"]["scope"] is None and _p2_scan["blank"]["scope"] is None
+      and _p2_scan["noscope"]["scope"] is None and _p2_scan["noscope"]["targetNames"] == ["Tadpoles Nebula (IC 410)"]
+      and _p2_scan["noscope"]["elsewhereMachine"] == "PC" and _p2_scan["noscope"]["failedEject"] is True
+      and _p2_scan["new"]["scope"] == "Askar 107PHQ" and _p2_scan["raw"]["scope"] == "Askar 107PHQ"
+      and _p2_scan["raw"]["schema"] == "scan-summary/1",
+      json.dumps(_p2_scan)[:800])
+
+# the record stays additive: every 1.8.0 field is still there, with the 1.7.x ones the page and the phone read
+_P2_TOP = {"schema", "generatedAt", "generatedAtIso", "generatedAtLocal", "timezone", "notCounted", "unknownNames",
+           "notices", "pendingImport", "scopeOrder", "machine", "sourceNote", "provenance", "quietPeriodDays",
+           "asOfNight", "inputs", "rules", "stateCounts", "stateHours", "finalsUnmatched", "finalsUnmatchedCount",
+           "finalsAmbiguous", "finalsAmbiguousCount", "statesKeptFrom", "snapshotRows", "scopes", "askarSplit",
+           "targets", "sessions", "events", "calibration", "shelves", "quarantine", "junk", "totals", "colourMeaning",
+           "parseFailures", "ledgerMeta", "askarRigs", "rigAttribution", "health", "delta", "reconciliation", "warnings"}
+_P2_PROG = {"camera", "target", "tid", "folder", "path", "rel", "lights", "autostacks", "autostackFrames", "processedFiles",
+            "processedFinals", "masters", "working", "thumbs", "other", "mosaic", "collectFiles", "collected", "hours",
+            "bytes", "sizeAll", "nights", "firstNight", "lastNight", "filters", "exposures", "panels", "gains", "askar",
+            "where", "status", "readyOn", "evidence", "action", "calibration", "captureState", "captureStateSource",
+            "sample", "framesWithoutExposure", "exposureOverride", "mastersNamed", "finalsNamed", "masterOwnerUncertain",
+            "sessions", "readySince", "reason", "finalDate", "newFramesSinceFinal", "stateKeptFrom"}
+_P2_CARD = {"target", "label", "camera", "state", "hours", "nights", "lights", "lastNight", "readyOn", "evidence", "action",
+            "source", "badges", "rel", "captureState", "sample", "readySince", "reason"}
+_P2_SCOPE = {"camera", "id", "frames", "hours", "nights", "bytes", "first", "last", "colour", "order", "kind"}
+check("P2 nothing removed or renamed: the record still carries every 1.7.x and 1.8.0 top-level field, programme "
+      "field, status-card field and scope field (the phone app reads them), and the four new top-level fields "
+      "sit beside them",
+      lambda: _P2_TOP <= set(_p2) and {"units", "thisMonth", "recordsUpTo", "activeWindow"} <= set(_p2)
+      and all(_P2_PROG <= set(p) for t in _p2["targets"] for p in t["programmes"])
+      and all(_P2_CARD <= set(c) for t in _p2["targets"] for c in t["statusCards"])
+      and all(_P2_SCOPE <= set(s) for s in _p2["scopes"])
+      and all({"id", "name", "codes", "programmes", "statusCards", "readySince", "state", "pendingProgrammes",
+               "lastNight"} <= set(t) for t in _p2["targets"])
+      and _p2["rules"] == {"quietDays": 14, "sampleMinutes": 30, "activeWindowNights": 30}
+      and _p2["stateCounts"] == {"capturing": 3, "ready_to_process": 6, "in_progress": 1, "done": 1, "sample": 1},
+      json.dumps([sorted(_P2_TOP - set(_p2)), sorted(set().union(*(_P2_PROG - set(p) for t in _p2.get("targets", [])
+                                                                   for p in t.get("programmes", [])))),
+                  _p2.get("stateCounts")])[:600])
+
+# after a quiet spell: the camera was LAST on the FRA400, the ZWO rests, and a night out ends the Done moment
+with open(os.path.join(P2.archive, "_verify", "mac", "ledger-snapshot.json")) as f:
+    _p2_snap = json.load(f)
+_p2_snap["files"] = p2_files(askar_wizard=("2026-07-30", "2026-08-02"), askar_m81=("2026-07-20",),
+                             iris=("2026-10-04", "2026-10-07"))
+with open(os.path.join(P2.archive, "_verify", "mac", "ledger-snapshot.json"), "w") as f:
+    json.dump(_p2_snap, f)
+_p2b = p2_build()
+_p2bu = {u.get("id"): u for u in _p2b.get("units", [])}
+check("P2 after a quiet spell the ZWO unit was 'last on' the FRA400 (its newest session, 2 Aug, is outside the "
+      "window): onScope still names it, onScopeCurrent is false, the unit rests with no current project; the "
+      "S50 Pro's night out of 7 Oct ends the Black Eye's Done moment (latestDone null); the card order holds",
+      lambda: [u["id"] for u in _p2b["units"]] == ["ZWO", "S50P", "S30P", "S50"]
+      and _p2bu["ZWO"]["onScope"] == "Askar FRA400" and _p2bu["ZWO"]["onScopeId"] == "FRA400"
+      and _p2bu["ZWO"]["onScopeCurrent"] is False and _p2bu["ZWO"]["active"] is False
+      and _p2bu["ZWO"]["lastOut"] == "2026-08-02" and _p2bu["ZWO"]["current"] == [] and _p2bu["ZWO"]["strip"] == []
+      and _p2bu["ZWO"]["moreReady"] == 4 and _p2bu["ZWO"]["colour"] == "#e05a5a"
+      and _p2bu["S50P"]["latestDone"] is None and _p2bu["S50P"]["lastOut"] == "2026-10-07"
+      and [c["tid"] for c in _p2bu["S50P"]["current"]] == ["NGC7023"]
+      and _p2b["recordsUpTo"] == "2026-10-07",
+      json.dumps({k: {x: u.get(x) for x in ("onScope", "onScopeCurrent", "active", "lastOut", "moreReady", "latestDone")}
+                  for k, u in _p2bu.items()})[:800])
+shutil.rmtree(P2.root, ignore_errors=True)
 
 # ═══════════════ CHAIN AA: --adopt-archive (1.7.3) ═══════════════════════════
 # Frames this computer imported and verified that reached the archive without

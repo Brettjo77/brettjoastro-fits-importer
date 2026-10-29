@@ -808,6 +808,205 @@ svg.fp text.fl{font:600 11px var(--sans);fill:var(--ink)}
 footer.foot{border-top:1px solid var(--line);margin-top:var(--s6);padding:var(--s4) 0 var(--s5);font-size:var(--fs-sm);color:var(--muted);line-height:var(--lh-small)}
 footer.foot .mono{display:block;margin-top:var(--s1)}
 @media (forced-colors:active){ .st,.dot,.chip,.btn{outline:1px solid CanvasText} }
+
+/* ============================================================================ phase 2 (Observatory_UX_Plan §7, 29 Oct 2026):
+   scope first. The header is one status line; Find, Filter and Explore sit in the bar; the landing is one card per
+   active unit (container queries: 1 column under 600 px, 2 from 600, 3 from 840, by the page's own width); a tap opens
+   the unit's layer, a second tap the project's; the layers slide briefly (200–300 ms) and are instant under reduced
+   motion; the build time and the server pill live in the footer. Nothing lost: every older view is behind Explore. */
+.mast2{display:flex;flex-direction:column;gap:4px;min-width:0}
+.status{display:flex;align-items:center;gap:8px;min-height:22px;font-size:var(--fs-md);line-height:1.35;color:var(--sky-ink2)}
+.status svg{width:15px;height:15px;flex:none}
+.status .led{width:8px;height:8px;border-radius:50%;background:var(--led);flex:none;box-shadow:0 0 0 2px rgba(92,201,222,.25)}
+.status b{color:var(--sky-ink);font-weight:var(--fw-semi)}
+.status .more{color:var(--sky-muted)}
+.status.amber{color:#f6d58b} .status.amber b{color:#fbe3a6} .status.amber .more{color:#e2c884} .status.amber .led{background:#f6d58b;box-shadow:0 0 0 2px rgba(246,213,139,.25)}
+.status .act{margin-left:auto;font:var(--fw-semi) var(--fs-xs)/1 var(--sans);color:var(--sky-ink2);border:1px solid var(--sky-line);border-radius:var(--r-pill);padding:4px 9px;white-space:nowrap}
+.status .act:hover{color:var(--sky-ink);background:var(--sky-wash)}
+.status .fact{min-width:0}
+@media (max-width:700px){ .status{font-size:var(--fs-sm);align-items:flex-start} .status .led{margin-top:5px} .status .more{display:none} .status .act{display:none} .mast2 .eyebrow{display:none} .titlerow{height:auto} }
+/* the bar: Find grows, the right side holds Filter · Explore · Refresh · theme */
+.navin{position:relative;flex-wrap:nowrap}
+.find{flex:1 1 auto;min-width:0;display:flex;align-items:center;position:relative;padding:4px 0}
+.find input.ctl{width:100%;min-width:0;max-width:420px;height:var(--ctl-md);background:rgba(255,255,255,.08);border-color:var(--sky-line);color:var(--sky-ink)}
+.find input.ctl::placeholder{color:var(--sky-muted)}
+.find input.ctl:focus-visible{outline-color:var(--focus);background:rgba(255,255,255,.12)}
+.findlist{position:absolute;left:0;top:calc(100% - 2px);z-index:45;width:min(460px,92vw);max-height:min(60vh,420px);overflow:auto;background:var(--card);color:var(--ink);border:1px solid var(--line);border-radius:var(--r-md);box-shadow:var(--shadow-hover);padding:6px}
+.findlist .fi{display:grid;grid-template-columns:minmax(0,1fr) auto;gap:2px 10px;align-items:center;width:100%;text-align:left;padding:8px 10px;border-radius:var(--r-sm);min-height:var(--tap)}
+.findlist .fi:hover,.findlist .fi[aria-selected="true"]{background:var(--wash2)}
+.findlist .fi .t{font:var(--fw-semi) var(--fs-md)/1.3 var(--sans);color:var(--ink);min-width:0;overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
+.findlist .fi .t .codes{font-size:var(--fs-sm)}
+.findlist .fi .m{grid-column:1/-1;font-size:var(--fs-sm);color:var(--muted);display:flex;gap:6px;flex-wrap:wrap;align-items:center}
+.findlist .fi .h{font-variant-numeric:tabular-nums;color:var(--ink2);font-size:var(--fs-sm);white-space:nowrap}
+.findlist .none{padding:10px;color:var(--muted);font-size:var(--fs-md);display:flex;gap:10px;align-items:center;flex-wrap:wrap}
+.navright .btn.sky .n{display:inline-flex;align-items:center;justify-content:center;min-width:18px;height:18px;padding:0 5px;border-radius:var(--r-pill);background:var(--sky-ink);color:var(--sky1);font-size:var(--fs-xs);font-weight:var(--fw-bold);font-variant-numeric:tabular-nums}
+.navright .btn.sky svg{width:14px;height:14px}
+.pop{position:absolute;right:var(--gutter);top:calc(100% - 4px);z-index:46;background:var(--card);color:var(--ink);border:1px solid var(--line);border-radius:var(--r-md);box-shadow:var(--shadow-hover);padding:10px;width:min(360px,calc(100vw - 2*var(--gutter)));animation:fadein var(--dur-short) var(--ease-out) both}
+.pop.menu{width:min(420px,calc(100vw - 2*var(--gutter)));padding:6px}
+.pop .ph3{font:var(--fw-semi) var(--fs-xs)/1.2 var(--sans);letter-spacing:.06em;text-transform:uppercase;color:var(--muted);margin:8px 6px 4px}
+.pop .chips{display:flex;gap:6px;flex-wrap:wrap;padding:0 4px}
+.pop .pact{display:flex;justify-content:space-between;align-items:center;gap:8px;margin-top:10px;padding:8px 4px 0;border-top:1px solid var(--grid);font-size:var(--fs-sm);color:var(--muted)}
+.pop.menu .mi{display:grid;grid-template-columns:minmax(0,1fr) auto;gap:0 10px;align-items:center;width:100%;text-align:left;padding:8px 10px;border-radius:var(--r-sm);min-height:var(--tap);color:var(--ink)}
+.pop.menu .mi:hover,.pop.menu .mi:focus-visible{background:var(--wash2)}
+.pop.menu .mi[aria-current="true"]{box-shadow:inset 3px 0 0 0 var(--ink)}
+.pop.menu .mi .l{font:var(--fw-semi) var(--fs-md)/1.3 var(--sans)}
+.pop.menu .mi .l .count{margin-left:6px;height:18px;min-width:18px;font-size:var(--fs-xs)}
+.pop.menu .mi .h{grid-column:1/-1;font-size:var(--fs-sm);color:var(--muted);line-height:1.35}
+.pop.menu .mi .k{font-size:var(--fs-xs);color:var(--faint);font-family:var(--mono)}
+.pop.menu .msep{height:1px;background:var(--grid);margin:6px 4px}
+@media (max-width:700px){ .find input.ctl{height:40px} .navright .btn.sky{padding:0 10px} .navright .btn.sky .long{display:none} .pop{right:var(--gutter)} }
+@media (max-width:420px){ .navright{gap:4px;padding-left:4px} .navright .btn.sky{padding:0 8px} }
+/* ---------- layer 1: the landing ---------- */
+#view-overview{padding-top:0}
+main{padding-top:var(--s4)}
+.landing{display:flex;flex-direction:column;gap:var(--s4)}
+.ucards{container-type:inline-size;container-name:cards}
+.ucards .grid{display:grid;grid-template-columns:minmax(0,1fr);gap:12px;align-items:stretch;min-height:120px}
+@container cards (min-width:600px){ .ucards .grid{grid-template-columns:repeat(2,minmax(0,1fr));gap:14px} }
+@container cards (min-width:840px){ .ucards .grid{grid-template-columns:repeat(3,minmax(0,1fr));gap:16px} }
+.ucard{position:relative;display:flex;flex-direction:column;gap:6px;background:var(--card);border:1px solid var(--line);border-radius:12px;padding:12px 14px 12px;box-shadow:var(--shadow),inset var(--accent-bar) 0 0 0 var(--sc);padding-left:calc(14px + var(--accent-bar));cursor:pointer;text-align:left;min-width:0;transition:border-color var(--dur-micro),box-shadow var(--dur-micro),transform var(--dur-micro)}
+.ucard:hover{border-color:var(--faint);box-shadow:var(--shadow-hover),inset var(--accent-bar) 0 0 0 var(--sc);transform:translateY(var(--lift))}
+.ucard:focus-visible{outline-offset:1px}
+.ucard .uh{display:flex;align-items:center;gap:8px;min-width:0}
+.ucard .uh .dot{width:12px;height:12px}
+.ucard .uh .nm{font:var(--fw-bold) var(--fs-lg)/1.2 var(--sans);letter-spacing:-.01em;min-width:0;overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
+.ucard .uh .on{font:var(--fw-regular) var(--fs-md)/1.2 var(--sans);color:var(--ink2);white-space:nowrap}
+.ucard .uh .tag{margin-left:auto;font:var(--fw-semi) 10px/1 var(--mono);letter-spacing:.06em;border:1px solid var(--line);border-radius:4px;padding:3px 5px;color:var(--muted);white-space:nowrap}
+.ucard .uh .chev{width:18px;height:18px;color:var(--muted);flex:none}
+.ucard .cur{display:block;width:100%;text-align:left;border-radius:var(--r-sm);padding:4px 6px;margin:0 -6px;min-width:0;transition:background var(--dur-micro)}
+.ucard .cur:hover{background:var(--wash)}
+.ucard .cur .t{font:var(--fw-semi) var(--fs-lg)/1.25 var(--sans);color:var(--ink);-webkit-line-clamp:2}
+.ucard .cur .t .codes{font-size:var(--fs-sm)}
+.ucard .cur .hn{font-size:var(--fs-md);color:var(--ink2);margin-top:2px;font-variant-numeric:tabular-nums;display:flex;gap:6px;flex-wrap:wrap;align-items:baseline}
+.ucard .cur .hn b{color:var(--ink);font:var(--fw-semi) 15px/1.3 var(--sans)}
+.ucard .cur .hn .sc{color:var(--muted);font-size:var(--fs-sm)}
+.ucard .cur.second .t{font-size:var(--fs-md);-webkit-line-clamp:1} .ucard .cur.second .hn{font-size:var(--fs-sm)} .ucard .cur.second .hn b{font-size:var(--fs-md)}
+.ucard .strip30{display:block;width:100%;height:22px;margin-top:2px}
+.ucard .strip30 svg{width:100%;height:22px;overflow:visible}
+.ucard .next{display:flex;gap:7px;align-items:flex-start;font-size:var(--fs-md);line-height:1.35;color:var(--ink)}
+.ucard .next svg{width:14px;height:14px;flex:none;margin-top:2px;color:var(--ink2)}
+.ucard .next.cal svg{color:var(--attn-glyph)}
+.ucard .more,.ucard .done{font-size:var(--fs-sm);color:var(--muted);line-height:1.35}
+.ucard .done{display:flex;gap:6px;align-items:center;color:var(--ink2)} .ucard .done svg{width:13px;height:13px;color:var(--st-live-ink)}
+.ucard .done b{color:var(--ink);font-weight:var(--fw-semi)}
+.ucard .empty{font-size:var(--fs-md);color:var(--muted);padding:6px 0}
+.ucards.busy .ucard{opacity:.6}
+.ucard.skel{min-height:190px;background:linear-gradient(90deg,var(--card),var(--card2),var(--card));cursor:default}
+/* the resting row and the lines under the cards */
+.uline{display:flex;align-items:center;gap:10px;flex-wrap:wrap;width:100%;text-align:left;min-height:var(--tap);padding:6px 12px;border:1px solid var(--line);border-radius:var(--r-md);background:var(--card);font-size:var(--fs-base);color:var(--ink);transition:background var(--dur-micro),border-color var(--dur-micro)}
+.uline:hover{background:var(--card2);border-color:var(--muted)}
+.uline .k{color:var(--muted);font-weight:var(--fw-regular)}
+.uline b{font-weight:var(--fw-semi);font-variant-numeric:tabular-nums}
+.uline .arrow{margin-left:auto;color:var(--muted);font-size:var(--fs-lg);line-height:1}
+.uline .dots{display:inline-flex;gap:6px;align-items:center}
+.uline.quiet{border-style:dashed;cursor:default} .uline.quiet:hover{background:var(--card);border-color:var(--line)}
+.uline.quiet .arrow{display:none}
+details.fold{border:1px solid var(--line);border-radius:var(--r-md);background:var(--card)}
+details.fold>summary{list-style:none;cursor:pointer;display:flex;align-items:center;gap:10px;flex-wrap:wrap;min-height:var(--tap);padding:6px 12px;font-size:var(--fs-base);color:var(--ink);border-radius:var(--r-md)}
+details.fold>summary::-webkit-details-marker{display:none}
+details.fold>summary:hover{background:var(--card2)}
+details.fold>summary .k{color:var(--muted)} details.fold>summary b{font-weight:var(--fw-semi);font-variant-numeric:tabular-nums}
+details.fold>summary .plus{margin-left:auto;width:22px;height:22px;color:var(--muted);transition:transform var(--dur-base) var(--ease-move)}
+details.fold[open]>summary .plus{transform:rotate(45deg)}
+details.fold .fbody{padding:4px 12px 12px}
+details.fold .fbody .card{border:0;box-shadow:none;padding:0;background:none}
+.restrow{display:flex;flex-direction:column;gap:6px}
+.restrow .ru{display:flex;align-items:center;gap:8px;flex-wrap:wrap;min-height:var(--tap);padding:4px 6px;margin:0 -6px;border-radius:var(--r-sm);text-align:left;width:calc(100% + 12px);font-size:var(--fs-md);color:var(--ink2)}
+.restrow .ru:hover{background:var(--wash)} .restrow .ru b{color:var(--ink);font-weight:var(--fw-semi)}
+.rn3{display:flex;flex-direction:column;gap:4px;width:100%}
+.rn3 .r{display:grid;grid-template-columns:auto minmax(0,1fr);gap:2px 10px;font-size:var(--fs-sm);color:var(--ink2);min-width:0}
+.rn3 .r .d{font-weight:var(--fw-semi);color:var(--ink);white-space:nowrap}
+.rn3 .r .o{min-width:0;overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
+.rn3 .r .o .dot{width:8px;height:8px;margin-right:4px;vertical-align:1px}
+.landing .notefold{font-size:var(--fs-sm);color:var(--muted);padding:0 4px;display:flex;gap:8px;align-items:flex-start;line-height:1.4}
+.landing .notefold svg{width:14px;height:14px;flex:none;margin-top:2px;color:var(--attn-glyph)}
+.landing .emptyline{padding:16px;border:1px dashed var(--line);border-radius:var(--r-md);color:var(--muted);font-size:var(--fs-base)}
+.nothing{display:flex;gap:10px;align-items:center;flex-wrap:wrap;padding:14px;border:1px dashed var(--line);border-radius:var(--r-md);color:var(--muted);font-size:var(--fs-base)}
+@media (max-width:700px){ main{padding-top:10px;padding-bottom:var(--s5)} .landing{gap:10px} .ucards .grid{gap:10px} .ucard{padding:10px 12px;padding-left:calc(12px + var(--accent-bar));gap:4px} .ucard .cur .t{font-size:15px} .ucard .strip30,.ucard .strip30 svg{height:18px} .uline{font-size:var(--fs-md)} }
+/* ---------- layers 2 and 3 ---------- */
+.crumb{display:flex;align-items:center;gap:6px;flex-wrap:wrap;margin-bottom:var(--s3);font-size:var(--fs-md);color:var(--muted);min-height:var(--tap)}
+.crumb .bk{display:inline-flex;align-items:center;gap:6px;min-height:var(--tap);padding:0 10px 0 6px;border-radius:var(--r-sm);font-weight:var(--fw-semi);color:var(--ink2)}
+.crumb .bk:hover{background:var(--wash);color:var(--ink)}
+.crumb .bk svg{width:14px;height:14px}
+.crumb .sep{color:var(--faint)} .crumb .here{color:var(--ink);font-weight:var(--fw-semi);min-width:0;overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
+.layerhead{display:flex;align-items:flex-start;justify-content:space-between;gap:var(--s3);flex-wrap:wrap;margin-bottom:var(--s4)}
+.layerhead h2{display:flex;align-items:center;gap:10px;flex-wrap:wrap;min-width:0}
+.layerhead h2 .dot{width:14px;height:14px}
+.layerhead h2 .on{font:var(--fw-regular) var(--fs-base)/1.3 var(--sans);color:var(--ink2)}
+.layerhead .sub{flex-basis:100%;margin-top:0}
+.layerhead .tools{display:flex;gap:var(--s2);flex-wrap:wrap;align-items:center}
+.curgrid{display:grid;grid-template-columns:repeat(auto-fit,minmax(min(300px,100%),1fr));gap:12px}
+.curcard{display:block;width:100%;text-align:left;background:var(--card);border:1px solid var(--line);border-radius:12px;padding:14px 16px;box-shadow:var(--shadow),inset var(--accent-bar) 0 0 0 var(--sc);padding-left:calc(16px + var(--accent-bar));min-width:0;transition:border-color var(--dur-micro),transform var(--dur-micro)}
+.curcard:hover{border-color:var(--faint);transform:translateY(var(--lift))}
+.curcard .eyebrow{display:flex;gap:8px;align-items:center;flex-wrap:wrap}
+.curcard .t{font:var(--fw-bold) var(--fs-xl)/1.2 var(--sans);letter-spacing:-.01em;margin-top:4px;-webkit-line-clamp:2}
+.curcard .t .codes{font-size:var(--fs-md)}
+.curcard .nums{display:flex;gap:var(--s4);flex-wrap:wrap;margin-top:8px}
+.curcard .nums .n b{display:block;font:var(--fw-bold) var(--fs-xl)/1.2 var(--sans);font-variant-numeric:tabular-nums}
+.curcard .nums .n span{font-size:var(--fs-xs);color:var(--muted)}
+.curcard .nx{display:flex;gap:7px;align-items:flex-start;margin-top:10px;font-size:var(--fs-md);color:var(--ink);line-height:1.35}
+.curcard .nx svg{width:14px;height:14px;flex:none;margin-top:2px;color:var(--ink2)} .curcard .nx.cal svg{color:var(--attn-glyph)}
+.curcard .also{font-size:var(--fs-sm);color:var(--muted);margin-top:8px;line-height:1.4}
+.grp3{margin-top:var(--section-gap)}
+.grp3 h3{display:flex;align-items:center;gap:var(--s2);flex-wrap:wrap;margin-bottom:var(--s2)}
+.grp3 h3 .count{margin-left:0}
+.grp3 .rows{display:flex;flex-direction:column;gap:6px}
+.srow3{display:grid;grid-template-columns:minmax(0,1fr) auto;gap:2px 12px;align-items:center;width:100%;text-align:left;background:var(--card);border:1px solid var(--line);border-radius:var(--r-md);padding:10px 12px;min-height:var(--tap);box-shadow:inset var(--accent-bar) 0 0 0 var(--sc);padding-left:calc(12px + var(--accent-bar));transition:background var(--dur-micro),border-color var(--dur-micro)}
+.srow3:hover{background:var(--card2);border-color:var(--muted)}
+.srow3 .t{font:var(--fw-semi) var(--fs-base)/1.3 var(--sans);color:var(--ink);min-width:0;-webkit-line-clamp:1}
+.srow3 .t .codes{font-size:var(--fs-sm)}
+.srow3 .h{font-variant-numeric:tabular-nums;color:var(--ink);font-weight:var(--fw-semi);white-space:nowrap;text-align:right}
+.srow3 .m{grid-column:1/-1;font-size:var(--fs-sm);color:var(--muted);display:flex;gap:6px;flex-wrap:wrap;align-items:center;line-height:1.35}
+.srow3 .m .scn{display:inline-flex;align-items:center;gap:5px;color:var(--ink2);font-weight:var(--fw-semi)} .srow3 .m .scn .dot{width:8px;height:8px}
+.more3{width:100%;border-style:dashed;justify-content:flex-start;margin-top:6px}
+.summ{display:grid;grid-template-columns:repeat(auto-fit,minmax(min(150px,100%),1fr));gap:10px 16px;margin-top:var(--s3)}
+.summ .n b{display:block;font:var(--fw-bold) var(--fs-xl)/1.2 var(--sans);font-variant-numeric:tabular-nums;color:var(--ink)}
+.summ .n span{font-size:var(--fs-xs);color:var(--muted)}
+.summ .n small{display:block;font-size:var(--fs-sm);color:var(--ink2);margin-top:2px}
+.statebox{display:flex;gap:10px;align-items:flex-start;flex-wrap:wrap;margin-top:var(--s3);padding:12px 14px;background:var(--card2);border:1px solid var(--line);border-radius:var(--r-md);font-size:var(--fs-md);color:var(--ink2);line-height:1.4}
+.statebox .w{min-width:0;flex:1 1 240px} .statebox .w b{color:var(--ink)}
+.scopechips{display:flex;gap:6px;flex-wrap:wrap;align-items:center;margin-top:var(--s2);font-size:var(--fs-sm);color:var(--muted)}
+details.sec{margin-top:var(--s3);border:1px solid var(--line);border-radius:var(--r-md);background:var(--card)}
+details.sec>summary{list-style:none;cursor:pointer;display:flex;align-items:center;gap:10px;min-height:var(--tap);padding:8px 14px;font:var(--fw-semi) var(--fs-base)/1.3 var(--sans);color:var(--ink);border-radius:var(--r-md)}
+details.sec>summary::-webkit-details-marker{display:none}
+details.sec>summary:hover{background:var(--card2)}
+details.sec>summary .sub{margin:0 0 0 auto;font-weight:var(--fw-regular);text-align:right}
+details.sec>summary .plus{width:20px;height:20px;color:var(--muted);flex:none;transition:transform var(--dur-base) var(--ease-move)}
+details.sec[open]>summary .plus{transform:rotate(45deg)}
+details.sec .sbody{padding:4px 14px 14px}
+details.sec .sbody .panel.auto{margin:0} details.sec .sbody .panelin{border:0;box-shadow:none;padding:0;margin:0}
+.twocol{display:grid;grid-template-columns:repeat(auto-fit,minmax(min(280px,100%),1fr));gap:var(--s4);align-items:start}
+.donut{display:grid;grid-template-columns:120px minmax(0,1fr);gap:var(--s3);align-items:center}
+.donut svg{width:120px;height:120px}
+.donut .dl{display:flex;flex-direction:column;gap:4px;font-size:var(--fs-sm);color:var(--ink2)}
+.donut .dl span{display:flex;align-items:center;gap:7px} .donut .dl i{width:10px;height:10px;border-radius:3px;flex:none} .donut .dl b{margin-left:auto;color:var(--ink);font-variant-numeric:tabular-nums}
+.hpn{width:100%} .hpn svg{width:100%;overflow:visible}
+.paths{font-family:var(--mono);font-size:var(--fs-xs);color:var(--muted);word-break:break-all;line-height:1.5}
+.paths b{color:var(--ink2);font-weight:var(--fw-regular)}
+.pager{display:flex;gap:var(--s2);align-items:center;flex-wrap:wrap;margin-top:var(--s2);font-size:var(--fs-sm);color:var(--muted)}
+.sessions3{width:100%;border-collapse:collapse;font-size:var(--fs-md)}
+.sessions3 th{text-align:left;padding:4px 8px 4px 0;border-bottom:1px solid var(--line);font:var(--fw-semi) var(--fs-xs)/1.2 var(--sans);letter-spacing:.06em;text-transform:uppercase;color:var(--muted);white-space:nowrap}
+.sessions3 td{padding:6px 8px 6px 0;border-bottom:1px solid var(--grid);color:var(--ink2);font-variant-numeric:tabular-nums}
+.sessions3 td.r,.sessions3 th.r{text-align:right} .sessions3 td.d{color:var(--ink);font-weight:var(--fw-semi);white-space:nowrap}
+.sessions3 tr.row{cursor:pointer} .sessions3 tr.row:hover td{background:var(--wash)}
+/* the archive view's hero: today's header band, as a card */
+.archhero{border-radius:var(--r-md);padding:14px var(--card-pad);background:linear-gradient(160deg,var(--sky1) 0%,var(--sky2) 60%,var(--sky3) 100%);color:var(--sky-ink);margin-bottom:var(--section-gap)}
+.archhero .fresh2{font-size:var(--fs-sm);color:var(--sky-ink2);margin-top:4px}
+.archhero .eyebrow{color:var(--sky-muted)}
+/* the footer: the build time (UK), the server pill, Refresh's result */
+footer.foot .fresh{display:flex;gap:8px 12px;align-items:center;flex-wrap:wrap;font-size:var(--fs-sm);color:var(--ink2);min-height:24px;margin-bottom:var(--s2)}
+footer.foot .fresh .built{white-space:normal;overflow:visible}
+footer.foot .fresh b{color:var(--ink)}
+footer.foot .live{border-color:var(--line);background:var(--card2);color:var(--ink2)}
+footer.foot .live[data-state="rebuilding"]{background:var(--wash2);border-color:var(--muted)} footer.foot .live[data-state="rebuilding"] .led{background:var(--ink)}
+footer.foot .live[data-state="updated"]{background:var(--st-live-tint);border-color:var(--st-live-line);color:var(--st-live-ink)}
+footer.foot .live[data-state="offline"]{color:var(--ink)}
+footer.foot .said{color:var(--muted)}
+/* motion between layers: a brief slide that says where you came from; instant under reduced motion (the tokens go to 0) */
+section.view.entering.fwd{transform:translateX(28px)} section.view.entering.back{transform:translateX(-28px)}
+section.view.entered{transition:opacity var(--dur-fade) var(--ease-out),transform var(--dur-short) var(--ease-out)}
+@media (prefers-reduced-motion: reduce){ :root:not([data-motion="full"]) section.view.entering,:root:not([data-motion="full"]) section.view.entered{transition:none;transform:none;opacity:1} :root:not([data-motion="full"]) .pop{animation:none} }
+:root[data-motion="reduce"] section.view.entering,:root[data-motion="reduce"] section.view.entered{transition:none;transform:none;opacity:1}
 </style>
 </head>
 <body>
@@ -816,29 +1015,42 @@ footer.foot .mono{display:block;margin-top:var(--s1)}
   <header class="sky">
     <svg class="stars" id="stars" aria-hidden="true"></svg>
     <div class="wrap">
-      <div class="mast">
-        <div>
-          <div class="titlerow"><h1 class="wordmark">Astro Archive Observatory</h1><span class="eyebrow" id="mastEyebrow"></span></div>
-          <div class="fresh" id="fresh"></div>
-        </div>
-        <div>
-          <div class="hero" id="hero"></div>
-          <div class="comps" id="comps"></div>
-        </div>
+      <!-- phase 2 (Observatory_UX_Plan §7.1): the header is the wordmark and ONE status line about data safety.
+           Today's totals (hero, share strip, key) live in the Archive view (#archiveHero below); the build
+           time and the server pill sit in the footer (#fresh). -->
+      <div class="mast2">
+        <div class="titlerow"><h1 class="wordmark">Astro Archive Observatory</h1><span class="eyebrow" id="mastEyebrow"></span></div>
+        <div class="status" id="status" role="status" aria-live="polite"></div>
       </div>
-      <div class="share" id="share"><div class="sharebar" id="sharebar"></div><div class="sharekey" id="sharekey" aria-label="Hours by scope"></div></div>
     </div>
   </header>
   <div class="navbar"><div class="wrap navin">
     <a class="back hid" id="back" href="/" title="Back to the importer's panel"><span aria-hidden="true">&#8592;</span><span class="long">Importer</span></a>
-    <nav class="tabs" role="tablist" aria-label="Views" id="tabs"><span class="ink" id="ink"></span></nav>
-    <label class="viewsel"><span>View</span><span class="selwrap"><select id="viewsel" aria-label="View"></select></span></label>
-    <div class="navright"><button class="btn sky" id="keyBtn" type="button" aria-expanded="false" aria-controls="keyfold" title="What the glyphs, bands and marks mean">Key</button><button class="btn sky hid" id="refreshBtn" type="button"><span class="long">Refresh now</span><span class="short hid">Refresh</span></button><button class="theme" id="theme" type="button" aria-label="Switch between dark and light"></button></div>
+    <nav class="tabs hid" role="tablist" aria-label="Views" id="tabs"><span class="ink" id="ink"></span></nav>
+    <label class="viewsel hid"><span>View</span><span class="selwrap"><select id="viewsel" aria-label="View"></select></span></label>
+    <div class="find" id="findBox"><input class="ctl" id="find" type="search" placeholder="Find a project" aria-label="Find a project: type an object's name or catalogue code" autocomplete="off" aria-expanded="false" aria-controls="findList" role="combobox"><div class="findlist hid" id="findList" role="listbox" aria-label="Matching projects"></div></div>
+    <div class="navright">
+      <button class="btn sky" id="filterBtn" type="button" aria-expanded="false" aria-controls="filterPop" title="Filter by scope, state or period"><svg viewBox="0 0 16 16" aria-hidden="true"><path d="M2 3.5h12M4.5 8h7M7 12.5h2" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round"/></svg><span class="long">Filter</span><span class="n hid" id="filterN"></span></button>
+      <button class="btn sky" id="exploreBtn" type="button" aria-expanded="false" aria-controls="exploreMenu" aria-haspopup="menu" title="Every view: Ready to process, Imaging nights, Sky, Footprints, Coverage, Equipment, Data checks, Archive, Pipeline, Targets">Explore<span class="n hid" id="exploreN"></span><svg viewBox="0 0 16 16" aria-hidden="true"><path d="M4 6.5l4 4 4-4" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"/></svg></button>
+      <button class="btn sky hid" id="refreshBtn" type="button"><span class="long">Refresh now</span><span class="short hid">Refresh</span></button>
+      <button class="btn sky hid" id="keyBtn" type="button" aria-expanded="false" aria-controls="keyfold" title="What the glyphs, bands and marks mean">Key</button>
+      <button class="theme" id="theme" type="button" aria-label="Switch between dark and light"></button>
+    </div>
+    <div class="pop hid" id="filterPop" role="group" aria-label="Filter"></div>
+    <div class="pop menu hid" id="exploreMenu" role="menu" aria-label="Explore"></div>
   </div>
   <div class="keyfold" id="keyfold" hidden><div class="wrap"><div class="legend" id="legend"></div></div></div>
   </div>
+  <!-- today's header totals, adopted by the Archive view (nothing lost): the hero, the share strip and its key line -->
+  <div class="sky archhero hid" id="archiveHero">
+    <div class="mast">
+      <div><div class="eyebrow">The whole archive</div><div class="fresh2" id="archBuilt"></div></div>
+      <div><div class="hero" id="hero"></div><div class="comps" id="comps"></div></div>
+    </div>
+    <div class="share" id="share"><div class="sharebar" id="sharebar"></div><div class="sharekey" id="sharekey" aria-label="Hours by scope"></div></div>
+  </div>
   <main class="wrap" id="main"></main>
-  <footer class="foot"><div class="wrap" id="footNote"></div></footer>
+  <footer class="foot"><div class="wrap"><div class="fresh" id="fresh"></div><div id="footNote"></div></div></footer>
 </div>
 <div class="tt" id="tt" aria-hidden="true" role="tooltip"></div>
 <div id="toast" role="status" aria-live="polite"></div>
@@ -858,7 +1070,9 @@ let D = JSON.parse(document.getElementById("dataset").textContent);
 const DEFAULTS = {targets:[],sessions:[],scopes:[],events:[],health:[],reconciliation:[],warnings:[],shelves:{},calibration:{},askarRigs:{},junk:{files:0,bytes:0},totals:{},inputs:{},
   notices:[],unknownNames:[],scopeOrder:[],notCounted:{},pendingImport:null,
   /* phase 1 (25 Oct, honest numbers): absent in an older record, so every reader degrades quietly */
-  stateCounts:null,stateHours:null,rules:{},finalsUnmatched:[],finalsAmbiguous:[],statesKeptFrom:null};
+  stateCounts:null,stateHours:null,rules:{},finalsUnmatched:[],finalsAmbiguous:[],statesKeptFrom:null,
+  /* phase 2 (29 Oct, scope first; PHASE2-CONTRACT.md): the cards' units, the status line's facts, this month, the newest night */
+  units:[],thisMonth:null,recordsUpTo:null,status:null,space:null};
 function normalise(d){
   /* a dataset from another engine version may lack a key: fill the gaps once, so no tab goes blank */
   if(!d||typeof d!=="object") d={};
@@ -873,9 +1087,19 @@ function normalise(d){
     for(const p of t.programmes){ p.hours=+p.hours||0; p.lights=+p.lights||0; p.nights=+p.nights||0; p.sessions=Array.isArray(p.sessions)?p.sessions:[]; p.mastersNamed=Array.isArray(p.mastersNamed)?p.mastersNamed:[]; p.finalsNamed=Array.isArray(p.finalsNamed)?p.finalsNamed:[]; p.captureState=p.captureState||"auto"; p.captureStateSource=p.captureStateSource||"rule"; p.sample=!!p.sample; p.framesWithoutExposure=+p.framesWithoutExposure||0; p.filters=p.filters||{}; p.exposures=p.exposures||{}; if(!p.status) p.status=STATUS_OF_STATE[(t.statusCards.find(c=>c.camera===p.camera)||{}).state]||"capturing";
       /* phase 1: the engine's state word (may be "sample"), when it became ready, its reason in words, the final's date and the frames after it */
       p.state=typeof p.state==="string"?p.state:""; p.readySince=(typeof p.readySince==="string"&&p.readySince)?p.readySince.slice(0,10):null; p.reason=typeof p.reason==="string"?p.reason.trim():"";
-      p.finalDate=(typeof p.finalDate==="string"&&p.finalDate)?p.finalDate.slice(0,10):null; p.newFramesSinceFinal=(p.newFramesSinceFinal===true)?1:(+p.newFramesSinceFinal||0); p.stateKeptFrom=(typeof p.stateKeptFrom==="string"&&p.stateKeptFrom)?p.stateKeptFrom.slice(0,10):null; } }
+      p.finalDate=(typeof p.finalDate==="string"&&p.finalDate)?p.finalDate.slice(0,10):null; p.newFramesSinceFinal=(p.newFramesSinceFinal===true)?1:(+p.newFramesSinceFinal||0); p.stateKeptFrom=(typeof p.stateKeptFrom==="string"&&p.stateKeptFrom)?p.stateKeptFrom.slice(0,10):null;
+      /* phase 2: the first unfinished step in words, and whether darks or flats are missing (absent in an older record) */
+      p.nextAction=typeof p.nextAction==="string"?p.nextAction.trim():""; p.calMissing=p.calMissing===true; } }
   d.finalsUnmatched=d.finalsUnmatched.filter(x=>x&&typeof x==="object"); d.finalsAmbiguous=d.finalsAmbiguous.filter(x=>x&&typeof x==="object");
   if(typeof d.rules!=="object"||d.rules===null) d.rules={}; if(typeof d.stateCounts!=="object") d.stateCounts=null; if(typeof d.stateHours!=="object") d.stateHours=null;
+  /* phase 2: units (the cards), the status line's facts, this month, the newest night; each absent in a 1.8.0 record */
+  d.units=Array.isArray(d.units)?d.units.filter(u=>u&&typeof u==="object"&&(u.id||u.label||u.name)):[];
+  for(const u of d.units){ u.id=String(u.id||u.label||u.name); u.label=String(u.label||u.short||u.id); u.scopes=Array.isArray(u.scopes)?u.scopes.map(String):[]; u.scopeIds=Array.isArray(u.scopeIds)?u.scopeIds.map(String):[]; u.current=Array.isArray(u.current)?u.current.filter(x=>x&&typeof x==="object"):[]; u.strip=Array.isArray(u.strip)?u.strip.filter(x=>x&&x.night):[]; u.moreReady=+u.moreReady||0; u.moreReadyHours=+u.moreReadyHours||0; u.active=u.active!==false; u.latestDone=(u.latestDone&&typeof u.latestDone==="object")?u.latestDone:null; u.onScope=typeof u.onScope==="string"?u.onScope:null; u.lastOut=typeof u.lastOut==="string"?u.lastOut.slice(0,10):null; }
+  d.status=(d.status&&typeof d.status==="object")?d.status:null;
+  d.thisMonth=(d.thisMonth&&typeof d.thisMonth==="object")?d.thisMonth:null;
+  d.recordsUpTo=(typeof d.recordsUpTo==="string"&&d.recordsUpTo)?d.recordsUpTo.slice(0,10):null;
+  d.space=(d.space&&typeof d.space==="object")?d.space:null;
+  if(d.pendingImport&&typeof d.pendingImport.scope!=="string") d.pendingImport.scope=null;
   return d;
 }
 const STATUS_OF_STATE={captured:"capturing",stacked:"ready_to_process",processing:"in_progress",complete:"done"};
@@ -1032,6 +1256,166 @@ function statesKeptText(){ const k=finalsChecks().keptFrom; const n=keptNotice()
   const when=k&&/^\d{4}-\d{2}-\d{2}/.test(k)?fmtDate(k.slice(0,10)):(k||"the last build");
   return (n?n.text+". ":"Final Astro Images or the archive inventory couldn't be read when this record was built, so the datasets that were Done or Finish it kept the state they had on "+when+". ")+"Nothing slipped back; the next rebuild that can read them moves on."; }
 /* ==== end of the phase 1 pure layer ==== */
+
+/* ============================================================================
+   Phase 2, scope first (29 Oct 2026, Observatory_UX_Plan §7, PHASE2-CONTRACT.md): the cards' units, the status
+   line, the next action in words, the lines under the cards, the Explore menu's contents, Find, the layers' models.
+   PURE: no DOM, so test_app (chain NL, "P2 page" checks) cuts this region out and runs it in node beside the phase 1
+   layer. It may use D, SC, BY, PROGS, TG, SESS, the ST vocabulary and the helpers above, nothing else. Every field the
+   engine or the panel adds (units[], status, thisMonth, recordsUpTo, nextAction, calMissing) is read when present
+   and worked out from scopes[], programmes[] and sessions[] when the record is older; nothing here throws on a 1.8.0
+   record.
+   ========================================================================== */
+const WINDOW=()=>RULES().activeWindowNights;
+const inWindow=iso=>!!iso&&ago(iso)>=0&&ago(iso)<WINDOW();
+const scopeWord=cam=>short(cam);           /* "FRA400", "S30 Pro": the name without its maker */
+const isAskarCam=cam=>!!(BY[cam]&&BY[cam].kind==="askar");
+const progOf=(tid,cam)=>PROGS.find(p=>(p.tid===tid||p.target===tid)&&p.camera===cam)||null;
+/* the first unfinished step in words (contract): the engine's nextAction wins; else from the facts the page has */
+function calMissingOf(p){ if(!p) return []; if(p.calMissing===true&&!(Array.isArray(p.calibration&&p.calibration.missing)&&p.calibration.missing.length)) return ["darks or flats"]; const c=p.calibration||{}; if(isSeestar(p.camera)||c.applies===false||(c.mode&&c.mode!=="tracked")) return []; return Array.isArray(c.missing)?c.missing.map(String):[]; }
+function nextActionTxt(p){
+  if(!p) return "";
+  if(p.nextAction) return p.nextAction;
+  const k=stKey(p); const miss=calMissingOf(p);
+  if(miss.length&&k!=="done"&&k!=="sample") return "Darks or flats missing: "+(miss.length===1&&miss[0]!=="darks or flats"?"no "+miss[0]+" filed with these lights":miss.join(" and ")+" not filed with these lights");
+  if(k==="capturing"){ if(p.captureState==="open") return "Still capturing · kept open by hand"; const from=p.readyOn||(p.lastNight?nightAdd(p.lastNight,RULES().quietDays+1):null); return "Still capturing"+(from?" · ready from "+fmtDate(from):""); }
+  if(k==="ready_to_process") return "Next step: collect the lights ("+nts(p.nights||0)+", "+plural(p.lights||p.frames||0,"frame")+")";
+  if(k==="in_progress") return "Finish it · master in the folder";
+  if(k==="done") return "Done"+(p.finalDate?" · final of "+fmtDate(p.finalDate):"");
+  if(k==="sample") return "Sample · "+hoursTxt(p.hours,p.lights||p.frames);
+  return "";
+}
+const hasCalMissing=p=>!!p&&calMissingOf(p).length>0&&stKey(p)!=="done"&&stKey(p)!=="sample";
+/* a dataset summary (the engine's, on units[] and thisMonth) resolved to the page's programme when it has one */
+function resolveSummary(s){ if(!s) return null; const p=progOf(s.tid||s.target,s.camera)||PROGS.find(p=>p.target===s.target&&p.camera===s.camera)||null; if(p) return (s.nextAction&&!p.nextAction)?{...p,nextAction:String(s.nextAction),calMissing:!!s.calMissing}:p;   /* the engine's words on the summary win over the page's own */ const t=TG.find(t=>t.id===s.tid||t.name===s.target); return {...s,target:String(s.target||(t&&t.name)||"?"),tid:String(s.tid||(t&&t.id)||s.target||"?"),camera:String(s.camera||""),hours:+s.hours||0,lights:+(s.lights!=null?s.lights:s.frames)||0,nights:+s.nights||0,lastNight:s.lastNight||null,status:s.state||"capturing",state:s.state||"",readySince:s.readySince||null,reason:s.reason||"",finalDate:s.finalDate||null,nextAction:s.nextAction||"",calMissing:!!s.calMissing,mastersNamed:[],finalsNamed:[],captureState:"auto",sample:s.state==="sample",t}; }
+/* the units: the engine's units[] (phase 2) when the record carries them, else worked out here from scopes[] and the
+   sessions: one unit per Seestar scope, ONE for the ZWO camera covering both Askars, in the fixed card order */
+function unitsOf(){ return D.units.length?D.units.map(normUnit):deriveUnits(); }
+function normUnit(u){
+  const cams=u.scopes.filter(c=>BY[c]).concat(u.scopes.filter(c=>!BY[c])); const on=u.onScope&&u.scopes.includes(u.onScope)?u.onScope:(u.onScope||cams[0]||null);
+  return {id:u.id,label:u.label,name:String(u.name||u.label),kind:u.kind||(cams.some(isAskarCam)?"askar":"seestar"),cams,short:String(u.short||u.label),colour:u.colour||col(on||cams[0]),
+    onScope:on,onScopeCurrent:u.onScopeCurrent!==false,active:u.active!==false,lastOut:u.lastOut,
+    current:u.current.map(resolveSummary).filter(Boolean).slice(0,2),moreReady:u.moreReady,moreReadyHours:u.moreReadyHours,
+    strip:u.strip.map(x=>({night:String(x.night).slice(0,10),hours:+x.hours||0})),latestDone:u.latestDone?resolveSummary(u.latestDone):null,fromEngine:true};
+}
+function deriveUnits(){
+  const out=[]; let zwo=null;
+  for(const s of SC){
+    if(s.kind==="askar"){ if(!zwo){ zwo={id:"ZWO",label:"ZWO",name:"ZWO camera",kind:"askar",cams:[],short:"ZWO"}; out.push(zwo); } zwo.cams.push(s.camera); continue; }
+    out.push({id:s.id||s.camera,label:s.short,name:s.camera,kind:"seestar",cams:[s.camera],short:s.short});
+  }
+  for(const u of out){
+    const cams=new Set(u.cams); const ss=SESS.filter(z=>cams.has(z.camera)).slice().sort((a,b)=>a.night.localeCompare(b.night)||a.hours-b.hours);
+    const last=ss.length?ss[ss.length-1]:null; u.lastOut=last?last.night:(u.cams.map(c=>BY[c]&&BY[c].last).filter(Boolean).sort().pop()||null);
+    u.active=inWindow(u.lastOut); u.onScope=u.kind==="askar"?(last?last.camera:u.cams[0]):u.cams[0]; u.onScopeCurrent=!!(last&&inWindow(last.night)); u.colour=col(u.onScope||u.cams[0]);
+    const mine=PROGS.filter(p=>cams.has(p.camera)&&!isSample(p));
+    u.current=orderDatasets(mine.filter(p=>inWindow(p.lastNight))).slice(0,2); const cur=new Set(u.current);
+    const more=mine.filter(p=>!cur.has(p)&&stKey(p)==="ready_to_process"); u.moreReady=more.length; u.moreReadyHours=sumH(more.map(p=>p.hours));
+    const byN=new Map(); for(const z of ss) if(inWindow(z.night)) byN.set(z.night,(byN.get(z.night)||0)+z.hours); u.strip=[...byN.entries()].sort((a,b)=>a[0].localeCompare(b[0])).map(([night,hours])=>({night,hours}));
+    const nights=[...new Set(ss.map(z=>z.night))].sort(); const prev=nights.length>1?nights[nights.length-2]:null;
+    u.latestDone=orderDatasets(mine.filter(p=>stKey(p)==="done"&&p.finalDate&&(!prev||p.finalDate>prev))).sort((a,b)=>String(b.finalDate).localeCompare(String(a.finalDate)))[0]||null;
+    u.fromEngine=false;
+  }
+  return out;
+}
+const unitForCam=cam=>unitsOf().find(u=>u.cams.includes(cam))||null;
+/* the card's words */
+function onScopeTxt(u){ if(u.kind!=="askar"||!u.onScope) return ""; return (u.onScopeCurrent?"on the ":"last on the ")+scopeWord(u.onScope); }
+function cardModel(u){
+  const cur=u.current.map(p=>({tid:p.tid,target:p.target,camera:p.camera,hours:p.hours,lights:p.lights,nights:p.nights,lastNight:p.lastNight,state:stKey(p),hoursTxt:hoursTxt(p.hours,p.lights),nightsTxt:nts(p.nights||0),scope:u.kind==="askar"?scopeWord(p.camera):""}));
+  const first=u.current[0]||null; const next=first?nextActionTxt(first):""; const d=u.latestDone;
+  return {id:u.id,label:u.label,name:u.name,colour:u.colour,tag:u.short,kind:u.kind,cams:u.cams,active:u.active,lastOut:u.lastOut,onScope:u.onScope,onTxt:onScopeTxt(u),
+    title:u.label+(onScopeTxt(u)?" · "+onScopeTxt(u):""),current:cur,next,nextCal:hasCalMissing(first),
+    more:u.moreReady>0?fmtI(u.moreReady)+" more ready to process"+(u.moreReadyHours>0?" · "+fmtH(u.moreReadyHours):""):"",
+    done:d?"Done · "+commonName(d.target)+(d.finalDate?" · final of "+fmtDate(d.finalDate):""):"",doneTid:d?d.tid:null,
+    strip:u.strip,empty:(!cur.length)?("Nothing captured in "+WINDOW()+" nights."+(u.lastOut?" Last out: "+fmtDate(u.lastOut):" Never out.")):""};
+}
+const landingCards=()=>unitsOf().map(cardModel);
+/* the status line (§7.1): quiet when all is well; amber when data is at risk, when the record is old, or when the
+   facts couldn't be read. One line: the first fact, the rest in `more`. The panel's `status` wins; an older panel
+   leaves none, and then the page says what the record itself knows and that the safety facts weren't checked */
+function ageWords(h){ h=+h||0; if(h<36) return Math.round(h)+" h"; const d=Math.round(h/24); return d+" day"+(d===1?"":"s"); }
+function statusLine(){
+  const st=D.status, p=D.pendingImport; const upTo=D.recordsUpTo||(SESS.map(s=>s.night).sort().pop())||null; const upToTxt=upTo?"records up to "+fmtDate(upTo):"no nights on record";
+  const facts=[]; let unchecked="";
+  if(st){
+    if(st.checked===false) unchecked="Couldn't check data safety: "+(st.reason?String(st.reason):"the importer didn't say why");
+    else {
+      if(+st.onlyHere>0) facts.push(fmtI(st.onlyHere)+" frames only on "+(st.machine?"the "+st.machine:"this computer"));
+      const pf=st.pendingFiles!=null?+st.pendingFiles:((p&&p.files>0)?+p.files:0); const pcam=st.pendingCamera||(p&&p.camera)||null; const seen=st.pendingSeenAt||(p&&p.seenAt)||null;
+      if(pf>0) facts.push(fmtI(pf)+" files waiting on the "+(pcam||"camera")+(seen?", last scan "+fmtDate(String(seen).slice(0,10)):""));
+      if(+st.servedAgeHours>24) facts.push("this record is "+ageWords(st.servedAgeHours)+" old"+(st.publishedFrom?" (the "+st.publishedFrom+"'s copy)":""));
+    }
+  } else {
+    if(p&&p.files>0) facts.push(fmtI(p.files)+" files waiting on the "+(p.camera||"camera")+(p.seenAt?", last scan "+fmtDate(String(p.seenAt).slice(0,10)):""));
+    const ageH=(Date.now()-(Date.parse(D.generatedAtIso||"")||Date.now()))/3600e3; if(ageH>24) facts.push("this record is "+ageWords(ageH)+" old");
+    unchecked="Couldn't check data safety: this record doesn't carry the safety facts";
+  }
+  if(st&&st.checked!==false&&!facts.length) return {level:"quiet",text:"Everything's safe",more:upToTxt,upTo,facts:[]};
+  const all=facts.slice(); if(unchecked) all.push(unchecked);
+  return {level:"amber",text:all[0],more:all.slice(1).concat([upToTxt]).join(" · "),upTo,facts:all};
+}
+/* the lines under the cards (§7.1) */
+function readyLine(){ const ps=PROGS.filter(p=>!isSample(p)&&stKey(p)==="ready_to_process"); const t=stateTotals(); const n=t.fromEngine?t.counts.ready_to_process:ps.length, h=t.fromEngine?t.hours.ready_to_process:sumH(ps.map(p=>p.hours)); return {n,hours:h,text:"Ready to process: "+plural(n,"dataset")+(h>0?" · "+fmtH(h):"")}; }
+function recentNights(n){
+  const by=new Map(); for(const z of SESS){ if(ago(z.night)<0) continue; let a=by.get(z.night); if(!a){ a=[]; by.set(z.night,a); } a.push(z); }
+  return [...by.keys()].sort().reverse().slice(0,n||3).map(night=>{ const ss=by.get(night); const perCam=scopeOrder([...new Set(ss.map(z=>z.camera))].map(camera=>({camera}))).map(({camera})=>({camera,objects:[...new Set(ss.filter(z=>z.camera===camera).map(z=>commonName(z.target)))]}));
+    const h=sumH(ss.map(z=>z.hours)), f=ss.reduce((a,z)=>a+z.frames,0); return {night,hours:h,frames:f,hoursTxt:ss.every(z=>hoursUnknown(z.hours,z.frames))?"hours unknown":fmtH(h),perCam,text:fmtDate(night)+" · "+(ss.every(z=>hoursUnknown(z.hours,z.frames))?"hours unknown":fmtH(h))+" · "+perCam.map(x=>scopeWord(x.camera)+": "+x.objects.slice(0,2).join(", ")+(x.objects.length>2?" +"+(x.objects.length-2):"")).join(" · ")}; });
+}
+function thisMonthLine(){
+  const tm=D.thisMonth; const month=(tm&&tm.month)||ASOF().slice(0,7);
+  const moved=tm&&Number.isFinite(+tm.movedForward)?+tm.movedForward:PROGS.filter(p=>!isSample(p)&&p.readySince&&p.readySince.slice(0,7)===month).length;
+  const fin=tm&&Number.isFinite(+tm.finished)?+tm.finished:PROGS.filter(p=>stKey(p)==="done"&&p.finalDate&&p.finalDate.slice(0,7)===month).length;
+  return {month,movedForward:moved,finished:fin,fromEngine:!!tm,text:"This month: "+plural(moved,"project")+" moved forward · "+fmtI(fin)+" finished"};
+}
+/* Explore (§7.1): every view of the 1.8.0 page, each with what it holds (the names from the "before" record, so nothing is lost) */
+function exploreItems(){
+  const t=stateTotals(); const n=WARN_N;
+  return [
+    {id:"ready",label:"Ready to process",holds:"What to do next: Ready to process · Finish it · Still capturing, all scopes",count:t.counts.ready_to_process},
+    {id:"nights",label:"Imaging nights",holds:"Nights: the calendar heatmap, one cell per night"},
+    {id:"scopes",label:"What each scope captured",holds:"the scope chart with the moon row · What each scope shot · Projects that moved lately"},
+    {id:"sky",label:"Sky",holds:"Sky coverage: every target at its catalogue position (J2000)"},
+    {id:"footprints",label:"Footprints",holds:"approximate fields of view, to scale"},
+    {id:"coverage",label:"Coverage",holds:"every target against every scope"},
+    {id:"equipment",label:"Equipment",holds:"the scopes, the rhythm of the hobby, exposure lengths"},
+    {id:"health",label:"Data checks",holds:"Needs your attention · how the numbers add up · the rules · where this record came from",count:n},
+    {id:"archive",label:"Archive",holds:"the header totals: hours, frames, targets, nights, the share by scope · Where the hours went"},
+    {id:"pipeline",label:"Pipeline",holds:"every dataset by state, board or list · Samples"},
+    {id:"targets",label:"Targets",holds:"Projects: the detailed list, searchable and sortable"},
+  ];
+}
+/* Find (§7.5): a project by name or code, most recent capture first; opening one anchors to the scope with the most recent capture */
+function findMatches(q,limit){ q=String(q||"").trim().toLowerCase(); if(!q) return []; const norm=s=>String(s||"").toLowerCase().replace(/\s+/g,"");
+  const hit=TG.filter(t=>t.name.toLowerCase().includes(q)||t.codes.some(c=>String(c).toLowerCase().includes(q))||norm(t.name).includes(norm(q))||t.codes.some(c=>norm(c).includes(norm(q))));
+  return orderDatasets(hit).slice(0,limit||8).map(t=>({tid:t.id,name:t.name,hours:sumH(t.programmes.map(p=>p.hours)),nights:t.nights,cams:scopeOrder(t.programmes).map(p=>p.camera),anchor:anchorScope(t)})); }
+function anchorScope(t){ const ps=orderDatasets((t&&t.programmes)||[]); return ps.length?ps[0].camera:null; }
+/* layer 2 (§7.2): a unit's datasets in short rows, grouped, most recent capture first; `f` is the Filter {scopes,states,since} */
+function filterProgs(list,f){ f=f||{}; const sc=f.scopes&&f.scopes.length?new Set(f.scopes):null, stt=f.states&&f.states.length?new Set(f.states):null, since=+f.since||0;
+  return list.filter(p=>(!sc||sc.has(p.camera))&&(!stt||stt.has(stKey(p)))&&(!since||(p.lastNight&&ago(p.lastNight)<since))); }
+function unitRows(u,f){
+  const cams=new Set(u.cams); const cur=new Set(u.current.map(p=>p.tid+"|"+p.camera));
+  const mine=filterProgs(PROGS.filter(p=>cams.has(p.camera)&&!cur.has(p.tid+"|"+p.camera)),f);
+  const g=k=>orderDatasets(mine.filter(p=>stKey(p)===k));
+  return {ready:g("ready_to_process"),finish:g("in_progress"),capturing:g("capturing"),done:g("done"),samples:g("sample"),total:mine.length};
+}
+/* "Also on disk: 59.9 h on the S30 and 20.0 h on the ZWO rig": the same object on scopes outside this unit */
+function alsoOnDisk(t,cams){ const others=scopeOrder((t&&t.programmes||[]).filter(p=>!cams.includes(p.camera)&&(p.hours>0||p.lights>0))); if(!others.length) return "";
+  const parts=others.map(p=>hoursTxt(p.hours,p.lights)+" on the "+scopeWord(p.camera)); return "Also on disk: "+(parts.length>1?parts.slice(0,-1).join(", ")+" and "+parts[parts.length-1]:parts[0]); }
+/* layer 3 (§7.3): one project on one scope, with the other scopes' data */
+function projectModel(t,cam){
+  const progs=scopeOrder(t.programmes); const p=progs.find(x=>x.camera===cam)||progs[0]||null; if(!p) return null;
+  const ss=SESS.filter(z=>z.target===t.name&&z.camera===p.camera).sort((a,b)=>a.night.localeCompare(b.night));
+  const first=ss.length?ss[0].night:(p.firstNight||t.firstNight||null), last=ss.length?ss[ss.length-1].night:(p.lastNight||t.lastNight||null);
+  const byF={}; for(const z of ss){ const fr=Object.entries(z.filters||{}).filter(([k])=>k!=="unrecorded"); const tot=fr.reduce((a,[,v])=>a+(+v||0),0); if(!tot){ byF["unrecorded"]=(byF["unrecorded"]||0)+z.hours; continue; } for(const [k,v] of fr) byF[k]=(byF[k]||0)+z.hours*(+v||0)/tot; }
+  const filters=Object.entries(byF).filter(([,h])=>h>0).sort((a,b)=>b[1]-a[1]).map(([k,h])=>({filter:filtLabel(k),hours:r1(h)}));
+  const perNight=ss.map(z=>({night:z.night,hours:z.hours,frames:z.frames,filters:filtersTxt(z.filters),subs:subsTxt(z.exps),site:z.site||null,cal:isSeestar(p.camera)?null:(z.calDetail||z.cal||null),morning:z.morning}));
+  const others=progs.filter(x=>x!==p).map(x=>({camera:x.camera,hours:x.hours,lights:x.lights,nights:x.nights,bytes:+x.bytes||0,state:stKey(x),lastNight:x.lastNight}));
+  return {tid:t.id,target:t.name,camera:p.camera,unit:unitForCam(p.camera),state:stKey(p),stateWord:stOf(stKey(p)).word,reason:reasonTxt(p),next:nextActionTxt(p),nextCal:hasCalMissing(p),
+    hours:p.hours,hoursTxt:hoursTxt(p.hours,p.lights),frames:p.lights,nights:p.nights||new Set(ss.map(z=>z.night)).size,first,last,filters,perNight,others,
+    masters:p.mastersNamed,finals:p.finalsNamed,finalDate:p.finalDate,newFrames:newFramesNote(p),cal:calMissingOf(p),path:p.path||"",rel:p.rel||"",folder:p.folder||"",mosaic:!!p.mosaic,evidence:p.evidence||"",chips:progs.map(x=>x.camera)};
+}
+/* ==== end of the phase 2 pure layer ==== */
 /* percentages by largest remainder, so they add to 100 */
 function pctLR(vals){ const tot=vals.reduce((a,b)=>a+b,0); if(tot<=0) return vals.map(()=>0); const raw=vals.map(v=>v/tot*100), fl=raw.map(Math.floor); let rem=100-fl.reduce((a,b)=>a+b,0); const idx=raw.map((v,i)=>[v-fl[i],i]).sort((a,b)=>b[0]-a[0]); for(let k=0;k<rem;k++) fl[idx[k%idx.length][1]]++; return fl; }
 /* a name is a common name plus catalogue codes: "Open cluster in the Tadpoles (IC 410) (NGC 1893)" */
@@ -1186,7 +1570,16 @@ function renderHeader(changed){
   const comps=$("comps"); const vals=[[fmtI(D.totals.lights),"frames",""],[fmtI(D.totals.targets),"targets",""],[fmtI(D.totals.nights),"nights","nights with at least one scope out (a night is noon to noon)"],[fmtI(SC.length),SC.length===1?"scope":"scopes",""]];
   if(!comps.children.length) vals.forEach((_,i)=>{ const s=el("span"); s.append(el("b"),document.createTextNode(" ")); comps.append(s); if(i<vals.length-1) comps.append(el("span","sepdot","·")); });
   vals.forEach(([v,l,tip],i)=>{ const s=comps.children[i*2]; const b=s.querySelector("b"); if(b.textContent!==String(v)&&changed) wash(s); b.textContent=v; s.lastChild.textContent=" "+l; if(tip) s.title=tip; });
-  renderShare(changed); renderLegend();
+  const ab=$("archBuilt"); if(ab){ ab.textContent=builtText()+(snapText()?" · "+snapText():""); }
+  renderShare(changed); renderLegend(); renderStatus();
+}
+/* phase 2 (§7.1): the ONE status line in the header, from statusLine() (the pure layer) */
+function renderStatus(){
+  const box=$("status"); if(!box) return; const s=statusLine(); box.replaceChildren(); box.classList.toggle("amber",s.level==="amber");
+  if(s.level==="amber") box.append(glyph("warn")); else box.append(el("i","led"));
+  const f=el("span","fact"); f.append(el("b",null,s.text)); if(s.more) f.append(el("span","more"," · "+s.more)); box.append(f);
+  box.title=s.level==="amber"?"Data at risk, or not checked: "+s.facts.join("; ")+". The panel's Panel tab imports and ships; Data checks explains the record.":"Nothing is only on one computer, no camera holds files the record doesn't know, and the record is fresh.";
+  if(s.level==="amber"&&SAME&&window.parent!==window&&location.protocol!=="file:"&&/waiting on the|only on/.test(s.text)){ const a=el("button","act","Open the Panel"); a.type="button"; a.addEventListener("click",()=>ask({kind:"open-panel"})); box.append(a); }
 }
 /* the share strip: 10 px, 2 px gaps, no labels inside; the key line under it IS the scope legend (click a scope for its timeline) */
 function renderShare(changed){
@@ -1237,15 +1630,18 @@ function builtText(){
   return "Built on "+machineWord()+(D.generatedAt?" · "+D.generatedAt:"");
 }
 function snapText(){ const snap=(D.inputs||{}).snapshot; if(!(snap&&snap.at)) return ""; const d=new Date(snap.at); const when=isNaN(d)?fmtDS(String(snap.at).slice(0,10)):(fmtDS(d.toISOString().slice(0,10))+" "+hhmm(d)); return "from the "+(snap.machine||"other computer")+"'s record of "+when; }
+/* the build time is UK time (the record says its zone; Brett's machines are in the UK) */
+const zoneWord=()=>{ const z=String(D.timezone||""); return (!z||/London|Europe\/London|GMT|BST|UTC/i.test(z))?"UK time":z; };
 function renderFresh(){
+  /* phase 2 (§7.1): the freshness line and the server pill live in the FOOTER; the header keeps only the status line.
+     What is still on a camera is the status line's job now (statusLine), not a chip */
   const f=$("fresh"); f.replaceChildren();
-  const t=el("span","built"); t.append(builtText()); t.append(el("span",null," · "+oldText(live.at))); const sn=snapText(); if(sn){ const x=el("span","snapfrom"," · "+sn); t.append(x); }
+  const t=el("span","built"); t.append(builtText()+(D.generatedAtLocal?", "+zoneWord():"")); t.append(el("span",null," · "+oldText(live.at))); const sn=snapText(); if(sn){ const x=el("span","snapfrom"," · "+sn); t.append(x); }
   t.title=(D.sourceNote||"")+(D.provenance?" "+D.provenance:""); f.append(t);
   const lv=el("span","live"); lv.id="live"; lv.append(el("i","led"),el("span","age")); f.append(lv);
-  /* what is still on a camera: only when the engine says a camera holds files; never a tick the engine did not give */
-  const p=D.pendingImport;
-  if(p&&typeof p==="object"&&p.files>0){ const chip=el("button","camchip"); chip.type="button"; chip.id="camChip"; chip.append(glyph("warn"),document.createTextNode(fmtI(p.files)+" files still on "+(p.camera?"the "+p.camera:"a camera"))); chip.title=pendingSentence(p,true); chip.addEventListener("click",()=>{ go("overview"); const line=$("pendLine"); if(line){ line.scrollIntoView({block:"center",behavior:reduced()?"auto":"smooth"}); wash(line); } }); f.append(chip); }
+  const said=el("span","said"); said.id="refreshSaid"; f.append(said);
   setLive(location.protocol==="file:"?"file":live.state);
+  renderStatus();
 }
 /* the whole sentence about a camera's files, used by the chip's hover and the Recent nights line */
 function pendingSentence(p,full){
@@ -1256,11 +1652,16 @@ function pendingSentence(p,full){
 function setLive(state){
   if(state==="fresh"&&Date.now()-live.at>24*3600e3) state="stale";
   live.state=state; const lv=$("live"); if(!lv) return; lv.dataset.state=state;
-  const txt={fresh:"live",stale:"live",rebuilding:"rebuilding…",updated:"updated just now",offline:"importer not answering",file:"saved record"}[state];
+  /* the pill says only the connection ("importer answering"), never freshness: the status line and the build time say that (§2, §7.6) */
+  const builtAt=()=>{ const loc=D.generatedAtLocal?new Date(String(D.generatedAtLocal).replace(" ","T")):null; return (loc&&!isNaN(loc))?hhmm(loc)+" "+dayWord(loc):(D.generatedAt||"the last build"); };
+  const txt={fresh:"importer answering",stale:"importer answering",rebuilding:"rebuilding…",updated:"updated just now",offline:"The importer isn't answering. Showing the build from "+builtAt()+".",file:"saved record"}[state];
   lv.querySelector(".age").textContent=txt;
   /* the explanation sits in the pill's title (no tooltip on the live pill) */
-  lv.title={fresh:"The importer is answering and this is its latest record. The page checks every 30 s and redraws itself when a rebuild finishes.",stale:"The importer is answering; this record is more than a day old (see the line beside). Refresh now rebuilds it.",rebuilding:"The importer is rebuilding the record from your records. The numbers below stay until the new ones arrive.",updated:"The record was just rebuilt; what changed is highlighted.",offline:"The importer isn't answering (last seen "+ageText(live.lastOk)+"), so this page may be out of date. It keeps trying every 30 s.",file:"Opened from a file: the page shows the record it was saved with."}[state]||"";
+  lv.title={fresh:"The importer is answering and this is its latest record. The page checks every 30 s and redraws itself when a rebuild finishes.",stale:"The importer is answering; this record is more than a day old (the status line says so). Refresh now rebuilds it.",rebuilding:"The importer is rebuilding the record from your records. The numbers stay until the new ones arrive.",updated:"The record was just rebuilt; what changed is highlighted.",offline:"The importer isn't answering (last seen "+ageText(live.lastOk)+"), so this page may be out of date. It keeps trying every 30 s.",file:"Opened from a file: the page shows the record it was saved with."}[state]||"";
   $("main").classList.toggle("busy",state==="rebuilding"); $("main").setAttribute("aria-busy",state==="rebuilding"?"true":"false");
+  const ug=document.querySelector(".ucards"); if(ug) ug.classList.toggle("busy",state==="rebuilding");
+  if(state==="offline"&&!setLive.saidOffline){ setLive.saidOffline=true; toast("The importer isn't answering. Showing the build from "+builtAt()+". The page keeps trying every 30 s.",null,null,9000); }
+  if(state==="fresh"||state==="updated") setLive.saidOffline=false;
 }
 setInterval(()=>{ if(["fresh","stale","offline","file"].includes(live.state)) setLive(live.state); },30000);
 /* the poll: inside the panel (same origin) ask every 30 s; when the stamp changes fetch the dataset and redraw in place */
@@ -1268,7 +1669,8 @@ const SAME=(location.origin&&location.origin!=="null")?location.origin:null;
 let polling=false;
 async function poll(){
   if(location.protocol==="file:"||!SAME||polling) return; polling=true;
-  try{ const r=await fetch("/api/observatory/status",{cache:"no-store",credentials:"same-origin"}); if(!r.ok) throw new Error(r.status); const s=await r.json(); live.fails=0; live.lastOk=Date.now();
+  try{ const r=await fetch("/api/observatory/status",{cache:"no-store",credentials:"same-origin"}); if(!r.ok) throw new Error(r.status); const s=await r.json(); live.fails=0; live.lastOk=Date.now(); POLL.lastOk=Date.now();
+    refreshWatch(s);
     if(s.rebuilding){ setLive("rebuilding"); return; }
     const at=s.generatedAtIso?Date.parse(s.generatedAtIso):NaN;
     if(!isNaN(at)&&at!==live.at){ setLive("rebuilding"); const rj=await fetch("/observatory?json=1",{cache:"no-store",credentials:"same-origin"}); if(!rj.ok) throw new Error(rj.status); const j=await rj.json(); applyDataset(j); }
@@ -1276,15 +1678,29 @@ async function poll(){
   }catch(e){ if(++live.fails>=2) setLive("offline"); }
   finally{ polling=false; }
 }
-if(location.protocol!=="file:"&&SAME){ setInterval(poll,30000); }
+const POLL={lastOk:Date.now()};
+if(location.protocol!=="file:"&&SAME){ setInterval(poll,30000);
+  /* §7.6 back after hours: a tab that was hidden (the lid closed, another tab) polls on return and says when it last updated */
+  document.addEventListener("visibilitychange",()=>{ if(document.visibilityState!=="visible") return; const away=Date.now()-POLL.lastOk; if(away>3600e3){ poll().then(()=>{ toast("Checked for a newer record · "+builtText()+" · "+oldText(live.at),null,null,7000); }); } }); }
 /* Refresh now: the panel rebuilds the record (the same as its own Refresh); the poll shows "rebuilding…" then "updated just now" */
 (function(){ const b=$("refreshBtn"); if(!(SAME&&window.parent!==window&&location.protocol!=="file:")) return; b.classList.remove("hid");
   const other=D.servedFrom&&D.servedFrom.machine; const here=(D.inputs&&D.inputs.machine)||"";
   b.title=other&&other!==here?"Rebuild this computer's record now. The "+other+"'s newer copy is shown while it is under 2 days old, so the page may not change.":"Rebuild the To process list and this page from your records now (a minute or two)";
-  b.addEventListener("click",()=>{ ask({kind:"observatory-refresh"}); setLive("rebuilding"); b.disabled=true; setTimeout(()=>{ b.disabled=false; },8000); setTimeout(poll,4000); setTimeout(poll,12000); }); })();
+  /* §7.6 refreshing: the button can't be pressed twice while the rebuild runs; the footer says when it finished, and
+     says so when it didn't (the stamp unchanged once the importer is idle again) */
+  b.addEventListener("click",()=>{ ask({kind:"observatory-refresh"}); setLive("rebuilding"); b.disabled=true; b.setAttribute("aria-busy","true"); REFRESH.at=Date.now(); REFRESH.stamp=live.at; REFRESH.seenBusy=false; const said=$("refreshSaid"); if(said) said.textContent="Rebuilding…"; setTimeout(poll,4000); setTimeout(poll,12000); setTimeout(poll,25000); }); })();
+const REFRESH={at:0,stamp:0,seenBusy:false};
+function refreshSettled(ok){ const b=$("refreshBtn"); if(b){ b.disabled=false; b.removeAttribute("aria-busy"); } const said=$("refreshSaid"); if(said) said.textContent=ok?"Rebuilt "+hhmm(new Date())+" "+zoneWord()+".":"The rebuild didn't finish: this is still the build from "+builtText().replace(/^Built on [^ ]+ [^ ]+ at /,"")+". Press Refresh now to try again, or see the panel's Activity log."; if(!ok) toast("The rebuild didn't finish. The last good build stays on screen.",null,null,9000); REFRESH.at=0; }
+function refreshWatch(s){ if(!REFRESH.at) return; if(s&&s.rebuilding){ REFRESH.seenBusy=true; return; } const at=s&&s.generatedAtIso?Date.parse(s.generatedAtIso):NaN; const elapsed=Date.now()-REFRESH.at;
+  if(!isNaN(at)&&at!==REFRESH.stamp) refreshSettled(true); else if((REFRESH.seenBusy&&!s.rebuilding)||elapsed>180000) refreshSettled(false); }
 
 /* ---------- tabs: a roving tablist with a sliding ink bar and a crossfade ---------- */
-const VIEWS=[["overview","Overview"],["targets","Targets"],["coverage","Coverage"],["pipeline","Pipeline"],["nights","Nights"],["sky","Sky"],["footprints","Footprints"],["equipment","Equipment"],["health","Data checks"]];
+/* phase 2 (§7): the landing ("overview", layer 1), the unit layer and the project layer (layers 2 and 3, reached by
+   a tap, never listed), then every view of the 1.8.0 page behind Explore. The old tablist and View select stay in the
+   DOM, hidden, so go() and the roving focus keep working; the Explore menu is the visible switcher. */
+const VIEWS=[["overview","Observatory"],["unit","Scope",{layer:true}],["project","Project",{layer:true}],
+  ["ready","Ready to process"],["nights","Imaging nights"],["scopes","What each scope captured"],["sky","Sky"],["footprints","Footprints"],["coverage","Coverage"],["equipment","Equipment"],["health","Data checks"],["archive","Archive"],["pipeline","Pipeline"],["targets","Targets"]];
+const LAYER_VIEWS=new Set(["unit","project"]);
 const RENDER={};
 const tabsNav=$("tabs"), mainEl=$("main"), viewSel=$("viewsel");
 const sections={}; let current=null; const painted={}, failed={}, scrollMem={};
@@ -1300,28 +1716,78 @@ for(const [id,label] of VIEWS){
 viewSel.addEventListener("change",()=>go(viewSel.value));
 tabsNav.addEventListener("keydown",e=>{ const ids=VIEWS.map(v=>v[0]); let i=ids.indexOf(current); if(e.key==="ArrowRight") i=(i+1)%ids.length; else if(e.key==="ArrowLeft") i=(i-1+ids.length)%ids.length; else if(e.key==="Home") i=0; else if(e.key==="End") i=ids.length-1; else return; e.preventDefault(); go(ids[i]); $("tab-"+ids[i]).focus(); });
 function placeInk(){ const b=$("tab-"+current), ink=$("ink"); if(!b||!ink) return; ink.style.left=b.offsetLeft+"px"; ink.style.width=b.offsetWidth+"px"; ink.style.top=(b.offsetTop+b.offsetHeight-3)+"px"; }
-function setHealthCount(n){ WARN_N=n; const b=$("navHealth"); if(b){ b.textContent=n; b.classList.toggle("hid",!n); b.classList.add("tick"); setTimeout(()=>b.classList.remove("tick"),ms("--dur-short")); } const o=viewSel.querySelector('option[value="health"]'); if(o) o.textContent="Data checks"+(n?" · "+n+" to look at":""); }
+/* Data checks' count: on the hidden tab, in the View select, on the Explore button and in its menu (never red: ink on the sky) */
+function setHealthCount(n){ WARN_N=n; const b=$("navHealth"); if(b){ b.textContent=n; b.classList.toggle("hid",!n); b.classList.add("tick"); setTimeout(()=>b.classList.remove("tick"),ms("--dur-short")); } const o=viewSel.querySelector('option[value="health"]'); if(o) o.textContent="Data checks"+(n?" · "+n+" to look at":""); const eb=$("exploreBtn"); if(eb) eb.title="Every view: Ready to process, Imaging nights, Sky, Footprints, Coverage, Equipment, Data checks"+(n?" ("+n+" to look at)":"")+", Archive, Pipeline, Targets"; if(MENU.open) paintExplore(); }
 let switching=false;
 function paintView(id){
   if(painted[id]) return;
   try{ sections[id].replaceChildren(); RENDER[id](sections[id]); }
-  catch(e){ failed[id]=true; sections[id].replaceChildren(el("p","sub","This view couldn't be drawn ("+(e&&e.message||e)+"). The other tabs still work.")); }
+  catch(e){ failed[id]=true; sections[id].replaceChildren(el("p","sub","This view couldn't be drawn ("+(e&&e.message||e)+"). The other views still work.")); }
   painted[id]=true;
 }
-function go(id,instant){
+/* go(id, instant, dir): dir "fwd" slides the next layer in from the right, "back" from the left (200–300 ms, the
+   tokens; instant under reduced motion), so it is clear where you came from */
+function go(id,instant,dir){
   if(!RENDER[id]) id="overview";
+  if(LAYER_VIEWS.has(id)&&!LAYER.ok(id)) id="overview";
   for(const [vid] of VIEWS){ const b=$("tab-"+vid); b.setAttribute("aria-selected",vid===id?"true":"false"); b.tabIndex=vid===id?0:-1; }
-  viewSel.value=id;
-  if(id===current) { placeInk(); return; }
+  viewSel.value=id; closePops();
+  if(reduced()) instant=true;    /* §7.4: with reduced motion set, changes are instant */
+  if(id===current) { placeInk(); if(!painted[id]){ paintView(id); fitAll(); scrollTo({top:0,behavior:"auto"}); if(!failed[id]&&LAYER_VIEWS.has(id)){ mem.layer={unit:LAYER.unit,tid:LAYER.tid,cam:LAYER.cam,from:LAYER.from}; remember(); } } return; }
   const from=current?sections[current]:null, to=sections[id];
   if(current) scrollMem[current]=scrollY;
   current=id; placeInk(); ttHide();
-  const finish=()=>{ paintView(id); to.classList.add("on"); if(!failed[id]){ mem.tab=id; remember(); } fitAll(); scrollTo({top:scrollMem[id]||0,behavior:"auto"}); };
+  const finish=()=>{ paintView(id); to.classList.add("on"); if(!failed[id]){ mem.tab=id; mem.layer=LAYER_VIEWS.has(id)?{unit:LAYER.unit,tid:LAYER.tid,cam:LAYER.cam,from:LAYER.from}:null; remember(); } fitAll(); scrollTo({top:LAYER_VIEWS.has(id)?0:(scrollMem[id]||0),behavior:"auto"}); paintExplore(); };
   if(!from||instant||switching||ms("--dur-fade")===0){ if(from) from.classList.remove("on","leaving"); finish(); return; }
   switching=true; from.classList.add("leaving");
-  setTimeout(()=>{ from.classList.remove("on","leaving"); to.classList.add("entering"); finish(); nextFrame(()=>{ to.classList.remove("entering"); to.classList.add("entered"); setTimeout(()=>{ to.classList.remove("entered"); switching=false; },Math.max(ms("--dur-fade"),ms("--dur-base"))); }); },ms("--dur-fade"));
+  setTimeout(()=>{ from.classList.remove("on","leaving"); to.classList.add("entering"); if(dir) to.classList.add(dir); finish(); nextFrame(()=>{ to.classList.remove("entering"); to.classList.add("entered"); setTimeout(()=>{ to.classList.remove("entered","fwd","back"); switching=false; },Math.max(ms("--dur-fade"),ms("--dur-short"))); }); },ms("--dur-fade"));
 }
 addEventListener("resize",placeInk);
+
+/* ---------- the layers' context: which unit, which project, where you came from ---------- */
+const LAYER={unit:null,tid:null,cam:null,from:"overview",ok(id){ if(id==="unit") return !!(this.unit&&unitsOf().some(u=>u.id===this.unit)); if(id==="project") return !!(this.tid&&TG.some(t=>t.id===this.tid)); return true; }};
+function openUnit(uid,cam,opts){ opts=opts||{}; const u=unitsOf().find(x=>x.id===uid)||(cam?unitForCam(cam):null); if(!u) return; LAYER.unit=u.id; LAYER.cam=cam||u.onScope||u.cams[0]; LAYER.from=opts.from||(current==="project"?"overview":current||"overview"); painted.unit=false; go("unit",!!opts.instant,opts.back?"back":"fwd"); }
+function openProjectLayer(tid,cam,opts){ opts=opts||{}; const t=TG.find(x=>x.id===tid)||byName[tid]; if(!t) return; const anchor=cam&&t.programmes.some(p=>p.camera===cam)?cam:anchorScope(t); LAYER.tid=t.id; LAYER.cam=anchor; const u=unitForCam(anchor); if(u) LAYER.unit=u.id; LAYER.from=opts.from||current||"overview"; painted.project=false; go("project",!!opts.instant,"fwd"); }
+function backFrom(id){ if(id==="project"&&LAYER.unit&&LAYER.from!=="find"&&LAYER.from!=="overview"&&LAYER.from!=="unit"){ go(LAYER.from,false,"back"); return; } if(id==="project"&&LAYER.unit){ painted.unit=false; go("unit",false,"back"); return; } go(LAYER.from&&!LAYER_VIEWS.has(LAYER.from)&&RENDER[LAYER.from]?LAYER.from:"overview",false,"back"); }
+
+/* ---------- the bar: Explore (one control holding every view), Find, Filter ---------- */
+const MENU={open:null};
+function closePops(){ for(const id of ["filterPop","exploreMenu"]){ const p=$(id); if(p) p.classList.add("hid"); } for(const id of ["filterBtn","exploreBtn"]){ const b=$(id); if(b) b.setAttribute("aria-expanded","false"); } MENU.open=null; const fl=$("findList"); if(fl){ fl.classList.add("hid"); $("find").setAttribute("aria-expanded","false"); } }
+function togglePop(id,btnId){ const p=$(id), b=$(btnId); const open=p.classList.contains("hid"); closePops(); if(!open) return; p.classList.remove("hid"); b.setAttribute("aria-expanded","true"); MENU.open=id; if(id==="exploreMenu") paintExplore(); else paintFilter(); const f=p.querySelector("button,input"); if(f) f.focus(); }
+function paintExplore(){ const m=$("exploreMenu"); if(!m||m.classList.contains("hid")) return; m.replaceChildren();
+  const home=el("button","mi"); home.type="button"; home.setAttribute("role","menuitem"); home.setAttribute("aria-current",current==="overview"?"true":"false"); const hl=el("div","l","Observatory"); home.append(hl,el("div","h","the landing: one card per active scope, Ready to process, Recent nights, this month")); home.addEventListener("click",()=>go("overview",false,"back")); m.append(home);
+  m.append(el("div","msep"));
+  for(const it of exploreItems()){ const b=el("button","mi"); b.type="button"; b.setAttribute("role","menuitem"); b.setAttribute("aria-current",current===it.id?"true":"false"); const l=el("div","l",it.label); if(it.count){ const c=el("span","count",fmtI(it.count)); c.title=it.id==="health"?plural(it.count,"thing")+" to look at":plural(it.count,"dataset"); l.append(c); } b.append(l,el("div","h",it.holds)); b.addEventListener("click",()=>go(it.id)); m.append(b); }
+  m.append(el("div","msep"));
+  /* the Key (the legend fold) is the last item; it works the hidden #keyBtn, whose handler owns the fold */
+  const k=el("button","mi"); k.type="button"; k.setAttribute("role","menuitem"); k.setAttribute("aria-expanded",$("keyfold").hidden?"false":"true"); k.setAttribute("aria-controls","keyfold"); k.title="What the glyphs, bands and marks mean"; k.append(el("div","l",$("keyfold").hidden?"Key":"Key · hide"),el("div","h","what the glyphs, bands and marks mean")); k.addEventListener("click",()=>{ $("keyBtn").click(); closePops(); }); m.append(k);
+}
+(function(){ $("exploreBtn").addEventListener("click",()=>togglePop("exploreMenu","exploreBtn")); $("filterBtn").addEventListener("click",()=>togglePop("filterPop","filterBtn"));
+  document.addEventListener("pointerdown",e=>{ if(!MENU.open&&$("findList").classList.contains("hid")) return; if(e.target.closest&&e.target.closest("#filterPop,#exploreMenu,#filterBtn,#exploreBtn,#findBox")) return; closePops(); },{passive:true});
+  document.addEventListener("keydown",e=>{ if(e.key==="Escape"&&(MENU.open||!$("findList").classList.contains("hid"))){ closePops(); } });
+  for(const id of ["exploreMenu","filterPop"]) $(id).addEventListener("keydown",e=>{ const bs=[...$(id).querySelectorAll("button")]; const i=bs.indexOf(document.activeElement); if(e.key==="ArrowDown"||e.key==="ArrowUp"){ e.preventDefault(); const j=(i+(e.key==="ArrowDown"?1:-1)+bs.length)%bs.length; bs[j].focus(); } });
+})();
+/* the Filter (§7.2): scope, state and period behind ONE control; remembered in this browser; applied to the landing's cards and the layers' rows */
+let FILTER=(mem.filter&&typeof mem.filter==="object")?{scopes:Array.isArray(mem.filter.scopes)?mem.filter.scopes:[],states:Array.isArray(mem.filter.states)?mem.filter.states:[],since:+mem.filter.since||0}:{scopes:[],states:[],since:0};
+const filterOn=()=>!!(FILTER.scopes.length||FILTER.states.length||FILTER.since);
+function setFilter(f){ FILTER=f; mem.filter=f; remember(); const n=$("filterN"); if(n){ const k=(f.scopes.length?1:0)+(f.states.length?1:0)+(f.since?1:0); n.textContent=k; n.classList.toggle("hid",!k); } $("filterBtn").classList.toggle("on",filterOn()); for(const id of ["overview","unit","project","ready"]) painted[id]=false; if(current) paintView(current); }
+function clearFilter(){ setFilter({scopes:[],states:[],since:0}); paintFilter(); }
+function paintFilter(){ const p=$("filterPop"); if(!p||p.classList.contains("hid")) return; p.replaceChildren();
+  const chips=(title,items,sel,on)=>{ p.append(el("div","ph3",title)); const box=el("div","chips"); for(const it of items){ const ch=el("button","chip"); ch.type="button"; if(it.cam) ch.append(camDot(it.cam)); else if(it.st) ch.append(glyph(stOf(it.st).icon)); ch.append(document.createTextNode(it.label)); ch.setAttribute("aria-pressed",sel.includes(it.id)?"true":"false"); ch.addEventListener("click",()=>on(it.id)); box.append(ch); } p.append(box); };
+  chips("Scope",SC.map(s=>({id:s.camera,cam:s.camera,label:s.short})),FILTER.scopes,id=>{ const s=FILTER.scopes.includes(id)?FILTER.scopes.filter(x=>x!==id):FILTER.scopes.concat([id]); setFilter({...FILTER,scopes:s}); paintFilter(); });
+  chips("State",PIPE_ORDER.map(k=>({id:k,st:k,label:stOf(k).word})),FILTER.states,id=>{ const s=FILTER.states.includes(id)?FILTER.states.filter(x=>x!==id):FILTER.states.concat([id]); setFilter({...FILTER,states:s}); paintFilter(); });
+  chips("Last captured",[[30,"30 nights"],[90,"90 nights"],[365,"a year"]].map(([n,l])=>({id:n,label:l})),[FILTER.since],id=>{ setFilter({...FILTER,since:FILTER.since===id?0:id}); paintFilter(); });
+  const act=el("div","pact"); act.append(el("span",null,filterOn()?"Filtering the cards and the rows":"Showing everything")); const c=el("button","btn","Clear"); c.disabled=!filterOn(); c.addEventListener("click",clearFilter); act.append(c); p.append(act);
+}
+setFilter(FILTER);
+/* Find (§7.5): type a name or a code, pick a project; it opens anchored to the scope with the most recent capture */
+(function(){ const inp=$("find"), list=$("findList"); let sel=-1;
+  function paint(){ const q=inp.value.trim(); list.replaceChildren(); sel=-1; if(!q){ list.classList.add("hid"); inp.setAttribute("aria-expanded","false"); return; } const hits=findMatches(q,8); list.classList.remove("hid"); inp.setAttribute("aria-expanded","true");
+    if(!hits.length){ const n=el("div","none"); n.append(el("span",null,"Nothing found for “"+q+"”. Try a catalogue code (M 31) or part of the name.")); const c=el("button","btn","Clear"); c.addEventListener("click",()=>{ inp.value=""; paint(); inp.focus(); }); n.append(c); list.append(n); return; }
+    hits.forEach((h,i)=>{ const b=el("button","fi"); b.type="button"; b.setAttribute("role","option"); b.setAttribute("aria-selected","false"); b.dataset.i=i; b.append(nameEl(h.name,"t","span")); b.append(el("span","h",fmtH(h.hours)+" · "+nts(h.nights))); const m=el("div","m"); for(const c of h.cams){ const s=el("span","scn"); s.append(camDot(c),document.createTextNode(short(c))); m.append(s); } b.append(m); b.addEventListener("click",()=>{ openProjectLayer(h.tid,h.anchor,{from:"find"}); inp.value=""; list.classList.add("hid"); }); list.append(b); }); }
+  inp.addEventListener("input",paint); inp.addEventListener("focus",()=>{ if(inp.value.trim()) paint(); });
+  inp.addEventListener("keydown",e=>{ const bs=[...list.querySelectorAll(".fi")]; if(e.key==="ArrowDown"||e.key==="ArrowUp"){ if(!bs.length) return; e.preventDefault(); sel=(sel+(e.key==="ArrowDown"?1:-1)+bs.length)%bs.length; bs.forEach((b,i)=>b.setAttribute("aria-selected",i===sel?"true":"false")); } else if(e.key==="Enter"){ const b=bs[sel>=0?sel:0]; if(b){ e.preventDefault(); b.click(); } } else if(e.key==="Escape"){ inp.value=""; paint(); } });
+})();
 /* every SVG is drawn at its real pixel width: redraw what is visible when the width changes */
 const FITTERS=new Set();
 function fitAll(still){ for(const f of [...FITTERS]){ try{ f(!!still); }catch(e){} } }
@@ -1467,7 +1933,7 @@ function nightPanelFor(cam,night,target){
   panelHead(pin,h,(ss.length>1?plural(ss.length,"object")+" · ":"")+(hoursUnknown(tot,fr)?"hours unknown":fmtH(tot))+" · "+plural(fr,"frame")+" · "+(isSeestar(cam)?"calibrates in the camera":"calibration as filed that night"),[],()=>{ const r=panel.returnTo; closePanel("night"); if(r&&r.isConnected) r.focus(); });
   if(!ss.length){ pin.append(el("p","sub","No frames recorded on this scope that night.")); return panel; }
   for(const z of ss){
-    const blk=el("div"); if(ss.length>1||true){ const hh=el("h4"); hh.style.cssText="font:600 14px/1.3 var(--sans);margin:12px 0 6px;display:flex;gap:8px;align-items:center;flex-wrap:wrap"; const nb=el("button","disc"); nb.append(nameEl(z.target,"","span"),glyph("right")); nb.style.height="auto"; nb.style.padding="2px 6px 2px 0"; nb.title="Open the project"; nb.addEventListener("click",()=>openProject(z.target)); hh.append(nb); blk.append(hh); }
+    const blk=el("div"); if(ss.length>1||true){ const hh=el("h4"); hh.style.cssText="font:600 14px/1.3 var(--sans);margin:12px 0 6px;display:flex;gap:8px;align-items:center;flex-wrap:wrap"; const nb=el("button","disc"); nb.append(nameEl(z.target,"","span"),glyph("right")); nb.style.height="auto"; nb.style.padding="2px 6px 2px 0"; nb.title="Open the project"; nb.addEventListener("click",()=>openProject(z.target,cam)); hh.append(nb); blk.append(hh); }
     const grid=el("div","night");
     const b1=el("div","blk"); b1.append(el("h4",null,"Frames"));
     const line=(box,k,v,soft)=>{ const l=el("div","l"+(soft?" soft":"")); l.append(el("span",null,k),el("b",null,v)); box.append(l); };
@@ -1588,7 +2054,7 @@ function scopePanelFor(cam,opts){
     const labW=mode()==="phone"?96:170;
     st=buildStrip({lanes:shown.map(ln=>({key:ln.name,cam,label:commonName(ln.name),sessions:ln.ss,target:ln.name})),laneH:mode()==="phone"?26:30,labelW:labW,
       stageOf:(L)=>{ const t=byName[L.target]; const p=t&&t.programmes.find(x=>x.camera===cam); return p?{key:stKey(p),note:nextWhen(p)}:null; },
-      onDot:(L,a)=>openNight(cam,a.night,L.target,plot,L.g), onLane:(L)=>openProject(L.target)});
+      onDot:(L,a)=>openNight(cam,a.night,L.target,plot,L.g), onLane:(L)=>openProject(L.target,cam)});
     PST.length=0; PST.push(st); plot.append(st.svg);
     const foot=el("div","sub"); foot.textContent=plural(lanes.length,"object")+" on this scope in the last "+N+" nights"+(lanes.length>MAXL?" (the "+MAXL+" most recent shown; the Targets tab lists them all)":"")+" · the glyph at the right is the dataset's next step · click an object's name for its project";
     plot.append(ax); plot.append(foot); axisRow(ax,N,true);
@@ -1600,23 +2066,22 @@ function scopePanelFor(cam,opts){
   panel.onClose=()=>{ FITTERS.delete(fitter); closePanel("night"); };
   return panel;
 }
-/* the strip card is the scope panel's home; Equipment and the share bar open it too */
+/* phase 2 (§7.2): a scope opens its UNIT's layer (the ZWO unit covers both Askars); the scope's timeline of projects
+   (scopePanelFor, Brett's 13 Oct view) sits inside that layer, so every scope row, share-bar slice and Equipment card
+   still leads to it. STRIPCARD is kept for the chart view. */
 let STRIPCARD=null;
 function openScope(cam){
-  /* from another tab (Equipment, or a page that loaded there) the Overview may never have been painted:
-     switch and paint it now, synchronously, so the strip card exists before the panel looks for it */
-  const ret=document.activeElement; go("overview",true);
-  const host=STRIPCARD||sections.overview.querySelector(".card"); if(!host) return;
+  const u=unitForCam(cam); if(u){ openUnit(u.id,cam); return; }
+  /* a camera outside every unit (none today): the old panel under the chart card */
+  const ret=document.activeElement; go("scopes",true);
+  const host=STRIPCARD||sections.scopes.querySelector(".card"); if(!host) return;
   const panel=scopePanelFor(cam); panel.classList.add("flow"); panel.returnTo=ret;
   expandPanel("scope",host,panel,{scrollRef:host});
-  const r=host.getBoundingClientRect(); if(r.top<0) host.scrollIntoView({block:"start",behavior:reduced()?"auto":"smooth"});
 }
-/* the project panel's home is the project card when it is on the page; else the drawer carries it */
-function openProject(name){
-  const t=byName[name]; if(!t) return;
-  const card=document.querySelector('#view-overview .proj[data-tid="'+CSS.escape(t.id)+'"]');
-  if(card&&current==="overview"){ if(card.classList.contains("hid")) showMore(card.closest(".card")); ttHide(); const r=card.getBoundingClientRect(); if(r.top<80||r.bottom>innerHeight) scrollBy({top:r.top-96,behavior:reduced()?"auto":"smooth"}); setTimeout(()=>{ toggleProj(card,true); card.querySelector(".head").focus({preventScroll:true}); },(r.top<80||r.bottom>innerHeight)&&!reduced()?260:0); return; }
-  openTarget(name);
+/* phase 2 (§7.3): a project opens its layer, anchored to the scope with the most recent capture (the other scopes are chips) */
+function openProject(name,cam){
+  const t=byName[name]||TG.find(x=>x.id===name); if(!t) return;
+  openProjectLayer(t.id,cam||null,{from:current});
 }
 
 /* ---------- recent nights: the ledger (history/findings.md §1). Rows are nights, newest first; columns the scopes in
@@ -1728,7 +2193,7 @@ function attentionJobs(){
   const calMiss=PROGS.filter(p=>!isSeestar(p.camera)&&p.calibration&&p.calibration.applies!==false&&(p.calibration.mode||"tracked")==="tracked"&&Array.isArray(p.calibration.missing)&&p.calibration.missing.length&&(p.status==="ready_to_process"||p.status==="in_progress")&&stKey(p)!=="sample");
   if(calMiss.length){ const flats=calMiss.filter(p=>p.calibration.missing.length===1&&p.calibration.missing[0]==="flats").length, darks=calMiss.filter(p=>p.calibration.missing.length===1&&p.calibration.missing[0]==="darks").length, both=calMiss.filter(p=>p.calibration.missing.length===2).length;
     const need=n=>n===1?" needs ":" need ";
-    jobs.push({id:"calibration",n:calMiss.length,u:"waiting",w:plural(calMiss.length,"waiting project")+" "+(calMiss.length===1?"has":"have")+" no darks or flats filed with "+(calMiss.length===1?"its":"their")+" lights",s:[flats?flats+need(flats)+"flats":"",darks?darks+need(darks)+"darks":"",both?both+need(both)+"darks and flats":""].filter(Boolean).join(" · ")+" · done and still-capturing datasets not counted",act:"Show them",more:()=>{ const b=el("div","more"); const ul=el("ul"); for(const p of calMiss){ const li=el("li"); const bt=el("button","disc"); bt.append(document.createTextNode(commonName(p.target)+" · "+short(p.camera)+" · "+calibrationMark(p).word),glyph("right")); bt.addEventListener("click",()=>openProject(p.target)); li.append(bt); ul.append(li); } b.append(ul); return b; }}); }
+    jobs.push({id:"calibration",n:calMiss.length,u:"waiting",w:plural(calMiss.length,"waiting project")+" "+(calMiss.length===1?"has":"have")+" no darks or flats filed with "+(calMiss.length===1?"its":"their")+" lights",s:[flats?flats+need(flats)+"flats":"",darks?darks+need(darks)+"darks":"",both?both+need(both)+"darks and flats":""].filter(Boolean).join(" · ")+" · done and still-capturing datasets not counted",act:"Show them",more:()=>{ const b=el("div","more"); const ul=el("ul"); for(const p of calMiss){ const li=el("li"); const bt=el("button","disc"); bt.append(document.createTextNode(commonName(p.target)+" · "+short(p.camera)+" · "+calibrationMark(p).word),glyph("right")); bt.addEventListener("click",()=>openProject(p.target,p.camera)); li.append(bt); ul.append(li); } b.append(ul); return b; }}); }
   const uns=new Set(["unknown_names","no_scope","no_night","unreadable","snapshot_age"]);
   for(const n of D.notices||[]){ if(!n||uns.has(n.kind)) continue;
     if(n.kind==="inventory_missing") jobs.push({id:"inv:"+n.text,n:"",u:"",w:"The archive wasn't checked for masters and finished pictures",s:n.text,act:"Mark as checked"});
@@ -1965,7 +2430,7 @@ function renderShotBars(box,d){
       let x=0; const gap=2, usable=len-gap*(parts.length-1); const list=el("div","slist");
       parts.forEach((pt,i)=>{ const w=Math.max(4,pt.h/r.hours*usable); const pc=el("button","piece"); pc.type="button"; pc.style.left=x+"px"; pc.style.width=w+"px"; pc.style.background=col(r.s.camera); pc.tabIndex=0;
         const full=pt.label+" "+fmtH(pt.h); const fits=w>=textW(full,"600 12px "+getComputedStyle(document.body).fontFamily)+16; const num=String(i+1); pc.textContent=fits?full:(w>=14?num:""); pc.classList.toggle("num",!fits); pc.style.color="var(--on-scope)";
-        if(pt.o){ const o=pt.o; hoverable(pc,bx=>{ bx.append(el("div","tt-t",o.target)); ttRow(bx,"hours",hoursUnknown(o.hours,o.frames)?"unknown":fmtH(o.hours),col(r.s.camera)); ttRow(bx,"nights",fmtI(o.nights.size)); ttRow(bx,"frames",fmtI(o.frames)); ttRow(bx,"last night",fmtDS(o.last)+" · "+agoTxt(o.last)); bx.append(el("div","hint","click opens the project")); }); pc.addEventListener("click",()=>openProject(o.target)); pc.setAttribute("aria-label",o.target+" · "+fmtH(o.hours)); }
+        if(pt.o){ const o=pt.o; hoverable(pc,bx=>{ bx.append(el("div","tt-t",o.target)); ttRow(bx,"hours",hoursUnknown(o.hours,o.frames)?"unknown":fmtH(o.hours),col(r.s.camera)); ttRow(bx,"nights",fmtI(o.nights.size)); ttRow(bx,"frames",fmtI(o.frames)); ttRow(bx,"last night",fmtDS(o.last)+" · "+agoTxt(o.last)); bx.append(el("div","hint","click opens the project")); }); pc.addEventListener("click",()=>openProject(o.target,r.s.camera)); pc.setAttribute("aria-label",o.target+" · "+fmtH(o.hours)); }
         else { hoverable(pc,bx=>{ bx.append(el("div","tt-t",pt.more.length+" more objects · "+fmtH(pt.h))); for(const o of pt.more.slice(0,8)) ttRow(bx,commonName(o.target),fmtH(o.hours),col(r.s.camera)); if(pt.more.length>8) ttRow(bx,"and "+(pt.more.length-8)+" more",""); bx.append(el("div","hint","the table lists them all")); }); pc.addEventListener("click",()=>{ modeC="table"; paint(); }); pc.setAttribute("aria-label",pt.label+" · "+fmtH(pt.h)); }
         if(i===parts.length-1) pc.classList.add("lastp"); track.append(pc); x+=w+gap;
         const li=el("span","li"); li.append(el("b","no",num),document.createTextNode(" "+pt.label+" "),el("b",null,fmtH(pt.h))); list.append(li); });
@@ -1982,7 +2447,9 @@ function renderQueue(card){
   card.replaceChildren(); card.className="card reveal";
   const head=el("div","cardhead"); const hh=el("div"); hh.append(el("h2",null,"What to do next")); hh.append(el("div","sub","worked out from your records · one card is one target on one scope · click a card for the project")); head.append(hh);
   const pipe=el("button","btn","All of them in Pipeline"); pipe.addEventListener("click",()=>go("pipeline")); head.append(pipe); card.append(head);
-  const real=PROGS.filter(p=>!isSample(p)), samples=PROGS.filter(isSample);
+  /* phase 2: the header's Filter applies here too (scope, state, period); a filter that leaves nothing says so */
+  const real=filterProgs(PROGS.filter(p=>!isSample(p)),FILTER), samples=PROGS.filter(isSample);
+  if(filterOn()&&!real.length){ card.append(nothingFound("No dataset matches the filter.")); return; }
   /* one order everywhere (§6.3): orderDatasets, the rule the Pipeline and the panel's To process tab share */
   const ready=orderDatasets(real.filter(p=>stKey(p)==="ready_to_process"));
   const finish=orderDatasets(real.filter(p=>stKey(p)==="in_progress"));
@@ -1994,7 +2461,7 @@ function renderQueue(card){
     const bar=el("div","bar"); const f=el("i",unk?"sc-hatch":"sc-fill"); f.style.setProperty("--sc",col(p.camera)); f.style.width=(unk?100:Math.max(2,p.hours/maxH*100))+"%"; bar.append(f); b.append(bar);
     const foot=el("div","foot"); foot.append(markEl(calibrationMark(p))); foot.append(pill(stKey(p),{tap:true})); b.append(foot);
     const w=reasonTxt(p); if(w) b.append(el("div","when",w));
-    b.addEventListener("click",()=>openProject(p.target)); return b; }
+    b.addEventListener("click",()=>openProject(p.target,p.camera)); return b; }
   function column(title,sub,list){ const c=el("div","qcol"); const h=el("h3"); h.append(document.createTextNode(title),el("span","count",String(list.length))); c.append(h); c.append(el("div","colsub",sub)); const box=el("div"); c.append(box); let open=false;
     const paint=()=>{ box.replaceChildren(); const shown=open?list:list.slice(0,N()); shown.forEach((p,i)=>{ const j=job(p); if(open&&i>=N()){ j.classList.add("reveal"); j.style.setProperty("--block-delay",Math.min(i-N(),8)*40+"ms"); } box.append(j); }); if(!list.length) box.append(el("p","sub","nothing here")); if(list.length>N()){ const mb=el("button","btn more",open?"show the top "+N():"+ "+(list.length-N())+" more · show all "+list.length); mb.addEventListener("click",()=>{ open=!open; paint(); }); box.append(mb); } };
     paint(); return c; }
@@ -2066,20 +2533,129 @@ function renderProjects(card,list,title,sub,n){
   nextFrame(fitter);
 }
 
-/* ---------- the Overview, block by block ---------- */
+/* ============================================================================
+   Phase 2 (§7): layer 1, the landing; layer 2, a unit's projects; layer 3, a project; and the Explore views that
+   carry today's Overview blocks (Ready to process = What to do next; What each scope captured + What each scope
+   shot + Projects that moved lately; Archive = the header totals + Where the hours went; Needs your attention
+   opens Data checks). Models come from the pure layer (cardModel, unitRows, projectModel); this is the DOM.
+   ========================================================================== */
 let OV={};
+const plusGlyph=()=>{ const s=svgEl("svg",{viewBox:"0 0 16 16","aria-hidden":"true",class:"plus"}); s.append(svgEl("path",{d:"M8 3v10M3 8h10",fill:"none",stroke:"currentColor","stroke-width":1.8,"stroke-linecap":"round"})); return s; };
+/* the 30-night activity strip: a small static SVG, one cell per night of the window, in the unit's colour (§7.1) */
+function strip30(m){
+  const N=WINDOW(), W=300, H=22; const svg=svgEl("svg",{viewBox:"0 0 "+W+" "+H,role:"img","aria-label":"The last "+N+" nights on this scope: "+(m.strip.length?nts(m.strip.length)+" out":"not out")}); svg.setAttribute("preserveAspectRatio","none");
+  const by=new Map(m.strip.map(x=>[x.night,x.hours])); const max=Math.max(0.1,...m.strip.map(x=>x.hours)); const cw=W/N;
+  for(let k=N-1;k>=0;k--){ const night=nightAdd(ASOF(),-k), i=N-1-k, h=by.get(night)||0, x=i*cw+0.8, w=Math.max(1.5,cw-1.6);
+    if(h>0){ const bh=5+(H-7)*Math.sqrt(Math.min(1,h/max)); const r=svgEl("rect",{x:x.toFixed(1),y:(H-bh).toFixed(1),width:w.toFixed(1),height:bh.toFixed(1),rx:1.5,fill:m.colour}); const ti=svgEl("title"); ti.textContent=fmtNight(night,nightAdd(night,1))+" · "+fmtH(h); r.append(ti); svg.append(r); }
+    else svg.append(svgEl("rect",{x:x.toFixed(1),y:H-2.5,width:w.toFixed(1),height:2,rx:1,fill:"var(--track)"})); }
+  return svg;
+}
+function unitCard(m){
+  const c=el("article","ucard"); c.style.setProperty("--sc",m.colour); c.tabIndex=0; c.setAttribute("role","button"); c.dataset.unit=m.id; c.setAttribute("aria-label",m.title+": open this scope's projects");
+  const h=el("div","uh"); h.append(camDot(m.onScope||(m.current[0]&&m.current[0].camera)||m.name)); h.append(el("span","nm",m.label)); if(m.onTxt) h.append(el("span","on","· "+m.onTxt)); const tag=el("span","tag",m.tag); tag.title=m.name; h.append(tag); const ch=glyph("right"); ch.classList.add("chev"); h.append(ch); c.append(h);
+  if(m.current.length){ m.current.forEach((p,i)=>{ const b=el("button","cur"+(i?" second":"")); b.type="button"; b.append(nameEl(p.target,"t")); const hn=el("div","hn"); hn.append(el("b",null,p.hoursTxt),el("span",null,p.nightsTxt)); if(p.scope) hn.append(el("span","sc","on the "+p.scope)); if(!i&&p.lastNight) hn.append(el("span","sc","last "+fmtDate(p.lastNight))); b.append(hn); b.title="Open the project: "+p.target; b.addEventListener("click",e=>{ e.stopPropagation(); openProjectLayer(p.tid,p.camera,{from:"overview"}); }); c.append(b); }); }
+  else c.append(el("div","empty",m.empty));
+  const s=el("div","strip30"); s.append(strip30(m)); c.append(s);
+  if(m.next){ const n=el("div","next"+(m.nextCal?" cal":"")); n.append(glyph(m.nextCal?"warn":stOf(m.current[0]?m.current[0].state:"capturing").icon)); n.append(el("span",null,m.next)); c.append(n); }
+  if(m.more) c.append(el("div","more",m.more));
+  if(m.done){ const d=el("div","done"); d.append(glyph("check")); d.append(el("span",null,m.done)); d.title="A finished picture arrived since this scope was last out (pictures come in phase 3)"; c.append(d); }
+  const open=()=>openUnit(m.id,null,{from:"overview"});
+  c.addEventListener("click",open); c.addEventListener("keydown",e=>{ if(e.key==="Enter"||e.key===" "){ e.preventDefault(); open(); } });
+  return c;
+}
+function nothingFound(what){ const n=el("div","nothing"); n.append(el("span",null,what)); const b=el("button","btn","Clear the filter"); b.addEventListener("click",clearFilter); n.append(b); return n; }
+const crumb=(backLabel,onBack,here)=>{ const c=el("div","crumb"); const b=el("button","bk"); b.type="button"; const g=glyph("right"); g.style.transform="rotate(180deg)"; b.append(g,document.createTextNode(backLabel)); b.addEventListener("click",onBack); c.append(b); if(here){ c.append(el("span","sep","›")); c.append(el("span","here",here)); } return c; };
 RENDER.overview=function(root){
   if(!TG.length){ root.append(el("p","sub","Nothing to show yet: no light frames were counted. Once frames have been imported and shipped, the Observatory fills in.")); return; }
-  const blocks=[];
-  /* history first (Brett, 19 Oct): recent nights, what each scope captured, projects that moved; then the decisions */
-  OV.rn=el("div","card recent reveal"); renderRecent(OV.rn,false); root.append(OV.rn); blocks.push(OV.rn);
-  OV.sc=el("div","card reveal"); root.append(OV.sc); renderStrips(OV.sc,true); blocks.push(OV.sc);
-  OV.pc=el("div","card reveal"); root.append(OV.pc); renderProjects(OV.pc,movedLately(),"Projects that moved lately",movedSub(),6); blocks.push(OV.pc);
-  OV.at=el("div","card reveal"); renderAttention(OV.at); root.append(OV.at); blocks.push(OV.at);
-  OV.q=el("div","card reveal"); renderQueue(OV.q); root.append(OV.q); blocks.push(OV.q);
-  OV.wh=el("div","card reveal"); root.append(OV.wh); renderWhereHours(OV.wh); blocks.push(OV.wh);
-  blocks.forEach((b,i)=>b.style.setProperty("--block-delay",(150+i*ms("--stagger"))+"ms"));
+  const wrap=el("div","landing"); root.append(wrap);
+  const all=landingCards(); const shown=FILTER.scopes.length?all.filter(m=>m.cams.some(c=>FILTER.scopes.includes(c))):all;
+  const active=shown.filter(m=>m.active), resting=shown.filter(m=>!m.active);
+  /* the cards, in the fixed order; the grid's columns follow the page's own width (container queries) */
+  const uc=el("div","ucards"); const grid=el("div","grid"); uc.append(grid); wrap.append(uc);
+  if(active.length) active.forEach((m,i)=>{ const c=unitCard(m); c.classList.add("reveal"); c.style.setProperty("--block-delay",(i*ms("--stagger"))+"ms"); grid.append(c); });
+  else if(!shown.length&&filterOn()) wrap.append(nothingFound("No scope matches the filter."));
+  else { const last=all.map(m=>m.lastOut).filter(Boolean).sort().pop(); wrap.append(el("div","emptyline","Nothing captured in "+WINDOW()+" nights."+(last?" Last out: "+fmtDate(last)+".":"")+(resting.length?" The scopes are in the Resting row below.":""))); }
+  /* the Resting row: idle units fold into one line that expands */
+  if(resting.length){ const d=el("details","fold"); const sm=el("summary"); sm.append(el("span","k","Resting:")); const names=el("span","dots"); resting.forEach((m,i)=>{ if(i) names.append(document.createTextNode(" · ")); names.append(camDot(m.onScope||m.name),document.createTextNode(" "),el("b",null,m.label)); }); sm.append(names,plusGlyph()); d.append(sm);
+    const body=el("div","fbody restrow"); for(const m of resting){ const b=el("button","ru"); b.type="button"; b.append(camDot(m.onScope||m.name),el("b",null,m.name),document.createTextNode(" · nothing captured in "+WINDOW()+" nights"+(m.lastOut?" · last out "+fmtDate(m.lastOut):" · never out")+(m.more?" · "+m.more:""))); b.title="Open this scope's projects"; b.addEventListener("click",()=>openUnit(m.id,null,{from:"overview"})); body.append(b); } d.append(body); wrap.append(d); }
+  /* under the cards (§7.1): Ready to process, Recent nights as a strip that expands into the ledger, this month */
+  const rl=readyLine(); const rb=el("button","uline"+(rl.n?"":" quiet")); rb.type="button"; rb.append(el("span","k","Ready to process:"),el("b",null,rl.n?plural(rl.n,"dataset")+(rl.hours>0?" · "+fmtH(rl.hours):""):"nothing waiting"),el("span","arrow","›")); rb.title="Every dataset waiting to be processed, all scopes, newest ready first"; rb.addEventListener("click",()=>go("ready")); wrap.append(rb);
+  const rn=recentNights(3); const rd=el("details","fold"); const rs=el("summary"); rs.append(el("span","k","Recent nights")); const strip=el("div","rn3"); if(!rn.length) strip.append(el("div","r",el("span","o","no frames on record")));
+  for(const r of rn){ const row=el("div","r"); row.append(el("span","d",fmtDate(r.night)+" · "+r.hoursTxt)); const o=el("span","o"); r.perCam.forEach((x,i)=>{ if(i) o.append(document.createTextNode(" · ")); o.append(camDot(x.camera)); o.append(document.createTextNode(short(x.camera)+": "+x.objects.slice(0,2).join(", ")+(x.objects.length>2?" +"+(x.objects.length-2):""))); }); row.append(o); strip.append(row); }
+  rs.append(strip,plusGlyph()); rd.append(rs); const rbody=el("div","fbody"); rd.append(rbody); let ledger=null; rd.addEventListener("toggle",()=>{ if(rd.open&&!ledger){ ledger=el("div","card recent"); rbody.append(ledger); renderRecent(ledger,false); fitAll(true); } }); wrap.append(rd);
+  const tm=thisMonthLine(); const tl=el("div","uline quiet"); tl.append(el("span","k","This month:"),el("b",null,plural(tm.movedForward,"project")+" moved forward"),el("span","k","·"),el("b",null,fmtI(tm.finished)+" finished")); tl.title="Projects that became ready this month, and finished pictures that arrived"+(tm.fromEngine?"":" (added up by this page)"); wrap.append(tl);
+  /* §7.6 partly unavailable: the record kept its states because an input couldn't be read */
+  const kept=statesKeptText(); if(kept){ const n=el("div","notefold"); n.append(glyph("warn")); const w=el("span",null,"An input couldn't be read when this record was built, so Done and Finish it kept their states. "); const b=el("button","disc"); b.append(document.createTextNode("Data checks"),glyph("right")); b.addEventListener("click",()=>go("health")); w.append(b); n.append(w); wrap.append(n); }
 };
+/* ---------- layer 2: a unit's projects (§7.2) ---------- */
+function rowFor(p,showScope){ const b=el("button","srow3"); b.type="button"; b.style.setProperty("--sc",col(p.camera)); b.append(nameEl(p.target,"t","span")); b.append(el("span","h",hoursTxt(p.hours,p.lights))); const m=el("div","m"); if(showScope){ const s=el("span","scn"); s.append(camDot(p.camera),document.createTextNode(short(p.camera))); m.append(s); } m.append(el("span",null,nts(p.nights||0)+(p.lastNight?" · last "+fmtDate(p.lastNight):""))); const r=reasonTxt(p); if(r) m.append(el("span",null,"· "+r)); b.append(m); b.title="Open the project"; b.addEventListener("click",()=>openProjectLayer(p.tid,p.camera,{from:"unit"})); return b; }
+function groupRows(box,key,list,showScope,n){ if(!list.length) return; n=n||3; const g=el("div","grp3"); const h=el("h3"); h.append(pill(key),el("span","count",String(list.length))); g.append(h); const rows=el("div","rows"); g.append(rows); let open=false;
+  const paint=()=>{ rows.replaceChildren(); (open?list:list.slice(0,n)).forEach(p=>rows.append(rowFor(p,showScope))); if(list.length>n){ const b=el("button","btn more3",open?"Show the first "+n:"Show all "+list.length); b.addEventListener("click",()=>{ open=!open; paint(); }); rows.append(b); } }; paint(); box.append(g); }
+RENDER.unit=function(root){
+  const u=unitsOf().find(x=>x.id===LAYER.unit); if(!u){ root.append(el("p","sub","This scope isn't in the record any more.")); return; }
+  const m=cardModel(u); const askar=u.kind==="askar";
+  root.append(crumb("Observatory",()=>backFrom("unit"),null));
+  const head=el("div","layerhead"); const h2=el("h2"); h2.append(camDot(u.onScope||u.cams[0]),document.createTextNode(u.label)); if(m.onTxt) h2.append(el("span","on","· "+m.onTxt)); head.append(h2);
+  const tools=el("div","tools"); const fb=el("button","btn","Filter"+(filterOn()?" · on":"")); fb.addEventListener("click",()=>togglePop("filterPop","filterBtn")); tools.append(fb); head.append(tools);
+  const scs=u.cams.map(c=>BY[c]).filter(Boolean); const hrs=sumH(scs.map(s=>s.hours)), fr=scs.reduce((a,s)=>a+s.frames,0), nights=new Set(SESS.filter(z=>u.cams.includes(z.camera)).map(z=>z.night)).size; const first=scs.map(s=>s.first).filter(Boolean).sort()[0], last=scs.map(s=>s.last).filter(Boolean).sort().pop();
+  head.append(el("div","sub",(askar?u.cams.map(short).join(" and ")+" · ":"")+fmtH(hrs)+" · "+plural(fr,"frame")+" · "+nts(nights)+(first?" · on the sky "+fmtDate(first)+" to "+fmtDate(last):"")+(u.active?"":" · resting: nothing in the last "+WINDOW()+" nights"))); root.append(head);
+  /* the one or two current projects: object, hours, nights, last night; hours and nights in place of a ring (no goals yet) */
+  if(u.current.length){ const g=el("div","curgrid"); for(const p of u.current){ const t=p.t||byName[p.target]; const c=el("button","curcard"); c.type="button"; c.style.setProperty("--sc",col(p.camera)); const eb=el("div","eyebrow"); if(askar){ const s=el("span","scn"); s.append(camDot(p.camera),document.createTextNode(short(p.camera))); eb.append(s); } eb.append(pill(stKey(p))); c.append(eb); c.append(nameEl(p.target,"t"));
+      const nums=el("div","nums"); [[hoursTxt(p.hours,p.lights),"integration"],[fmtI(p.nights||0),"nights"],[p.lastNight?fmtDate(p.lastNight):"?","last night"]].forEach(([v,l])=>{ const n=el("div","n"); n.append(el("b",null,v),el("span",null,l)); nums.append(n); }); c.append(nums);
+      const nx=el("div","nx"+(hasCalMissing(p)?" cal":"")); nx.append(glyph(hasCalMissing(p)?"warn":stOf(stKey(p)).icon),el("span",null,nextActionTxt(p))); c.append(nx);
+      const also=t?alsoOnDisk(t,u.cams):""; if(also) c.append(el("div","also",also));
+      c.addEventListener("click",()=>openProjectLayer(p.tid,p.camera,{from:"unit"})); g.append(c); } root.append(g); }
+  else root.append(el("div","emptyline",m.empty));
+  /* the other datasets, in short rows: Ready to process · Finish it · Still capturing · Done (3 each, then Show all) */
+  const rows=unitRows(u,FILTER); const box=el("div"); root.append(box);
+  groupRows(box,"ready_to_process",rows.ready,askar); groupRows(box,"in_progress",rows.finish,askar); groupRows(box,"capturing",rows.capturing,askar); groupRows(box,"done",rows.done,askar);
+  if(!rows.total&&!u.current.length){ box.append(filterOn()?nothingFound("Nothing on this scope matches the filter."):el("p","sub","No other datasets on this scope.")); }
+  else if(!rows.total&&filterOn()) box.append(nothingFound("No other dataset on this scope matches the filter."));
+  if(rows.samples.length) box.append(samplesGroup(rows.samples.length,rows.samples.map(p=>rowFor(p,askar)),"under "+RULES().sampleMinutes+" minutes of integration, or flagged by you as a quick look"));
+  /* this unit's Imaging nights: the Nights heatmap drawn for its scopes only */
+  const hm=el("details","sec"); hm.open=mode()!=="phone"; const hs=el("summary"); hs.append(document.createTextNode("Imaging nights"),el("span","sub",nts(nights)+" on this scope"),plusGlyph()); hm.append(hs); const hb=el("div","sbody"); hm.append(hb); let drawn=false; const drawHm=()=>{ if(drawn||!hm.open) return; drawn=true; heatmapInto(hb,new Set(u.cams),"hours",{compact:true}); }; hm.addEventListener("toggle",drawHm); root.append(hm); if(hm.open) nextFrame(drawHm);
+  /* the scope's timeline of projects (Brett, 13 Oct): one panel per scope of the unit, as it was */
+  const tl=el("details","sec"); const ts=el("summary"); ts.append(document.createTextNode("Timeline of its projects"),el("span","sub","one row per object, a dot per night"),plusGlyph()); tl.append(ts); const tb=el("div","sbody"); tl.append(tb); let built=false;
+  tl.addEventListener("toggle",()=>{ if(!tl.open||built) return; built=true; for(const cam of u.cams){ const pp=scopePanelFor(cam); pp.classList.add("auto","open"); pp.style.height="auto"; const cl=pp.querySelector(".ph .tools .btn:last-child"); if(cl) cl.remove(); tb.append(pp); nextFrame(()=>{ if(pp.fit) pp.fit(); }); } }); root.append(tl);
+};
+/* ---------- layer 3: a project (§7.3) ---------- */
+function donutOf(parts,colour){ const size=120,R=size/2,w=14,r=R-w/2; const svg=svgEl("svg",{viewBox:"0 0 "+size+" "+size,role:"img","aria-label":"Integration by filter"}); const tot=parts.reduce((a,x)=>a+x.hours,0); const circ=2*Math.PI*r; let start=0; svg.append(svgEl("circle",{cx:R,cy:R,r,fill:"none",stroke:"var(--track)","stroke-width":w}));
+  parts.forEach((x,i)=>{ const share=tot>0?x.hours/tot:0, len=Math.max(0,share*circ-(parts.length>1?2:0)); const c=svgEl("circle",{cx:R,cy:R,r,fill:"none",stroke:colour,"stroke-opacity":(1-i*0.17).toFixed(2),"stroke-width":w,"stroke-dasharray":len.toFixed(2)+" "+(circ-len).toFixed(2),"stroke-dashoffset":(-start).toFixed(2),transform:"rotate(-90 "+R+" "+R+")"}); const ti=svgEl("title"); ti.textContent=x.filter+" · "+fmtH(x.hours); c.append(ti); svg.append(c); start+=share*circ; });
+  const t=svgEl("text",{x:R,y:R+5,"text-anchor":"middle",class:"dlabel strong"}); t.textContent=tot>0?fmtH(tot):"?"; svg.append(t); return svg; }
+function nightBars(perNight,colour){ const W=Math.max(480,perNight.length*14), H=96, pad=18; const svg=svgEl("svg",{viewBox:"0 0 "+W+" "+H,role:"img","aria-label":"Hours per night"}); svg.style.maxWidth=Math.round(W*1.5)+"px"; const max=Math.max(0.1,...perNight.map(x=>x.hours)); const cw=W/Math.max(1,perNight.length), bw=Math.max(3,Math.min(12,cw*0.7));
+  svg.append(svgEl("line",{class:"baseline",x1:0,x2:W,y1:H-pad,y2:H-pad})); perNight.forEach((x,i)=>{ const h=x.hours>0?Math.max(2,x.hours/max*(H-pad-14)):(x.frames?4:0); const r=svgEl("rect",{x:(i*cw+(cw-bw)/2).toFixed(1),y:(H-pad-h).toFixed(1),width:bw.toFixed(1),height:h.toFixed(1),rx:2,fill:x.hours>0?colour:"var(--faint)"}); const ti=svgEl("title"); ti.textContent=fmtNight(x.night,x.morning)+" · "+hoursTxt(x.hours,x.frames)+" · "+plural(x.frames,"frame"); r.append(ti); svg.append(r); if(i===0||i===perNight.length-1){ const t=svgEl("text",{class:"axis",x:(i*cw+cw/2).toFixed(1),y:H-4,"text-anchor":i===0?"start":"end"}); t.textContent=fmtDS(x.night); svg.append(t); } });
+  return svg; }
+function sec(title,sub,build,open){ const d=el("details","sec"); if(open) d.open=true; const s=el("summary"); s.append(document.createTextNode(title)); if(sub) s.append(el("span","sub",sub)); s.append(plusGlyph()); d.append(s); const b=el("div","sbody"); d.append(b); let done=false; const run=()=>{ if(done||!d.open) return; done=true; build(b); fitAll(true); }; d.addEventListener("toggle",run); if(open) nextFrame(run); return d; }
+RENDER.project=function(root){
+  const t=TG.find(x=>x.id===LAYER.tid); const pm=t?projectModel(t,LAYER.cam):null; if(!pm){ root.append(el("p","sub","This project isn't in the record any more.")); return; }
+  const u=pm.unit; LAYER.cam=pm.camera; const sw=scopeWord(pm.camera);
+  root.append(crumb(u?u.label:"Observatory",()=>backFrom("project"),commonName(pm.target)));
+  const head=el("div","layerhead"); const h2=el("h2"); h2.append(camDot(pm.camera),document.createTextNode(sw+" › ")); h2.append(nameEl(pm.target,"","span")); head.append(h2);
+  const tools=el("div","tools"); const said=el("span","said"); OPEN_SAID.clear();
+  if(pm.rel){ const of=el("button","btn ink","Open files"); of.title="The panel's Archive view for this target and scope: Open folder, Start Siril here, Copy path"; of.addEventListener("click",()=>{ said.textContent=SAME&&window.parent!==window?"Switching to the panel's Archive view…":""; ask({kind:"archive-show",rel:pm.rel}); }); tools.append(of); const opener=(D.inputs&&D.inputs.machine==="PC")?"Explorer":"Finder"; const ob=el("button","btn","Open in "+opener); ob.addEventListener("click",()=>{ said.textContent="Opening…"; ask({kind:"archive-open",rel:pm.rel}); }); tools.append(ob); OPEN_SAID.set(pm.rel,said); }
+  const ff=el("button","btn","Folder and files"); ff.title="Every scope's folder for this object, with what is in it"; ff.addEventListener("click",()=>openTarget(pm.target)); tools.append(ff); tools.append(said); head.append(tools);
+  head.append(el("div","sub",describe(t))); root.append(head);
+  /* the other scopes as chips: the layer anchors to the scope with the most recent capture when opened from Find */
+  if(pm.chips.length>1){ const ch=el("div","scopechips"); ch.append(el("span",null,"On "+plural(pm.chips.length,"scope")+":")); for(const c of pm.chips){ const b=el("button","chip"); b.append(camDot(c),document.createTextNode(short(c))); b.setAttribute("aria-pressed",c===pm.camera?"true":"false"); b.addEventListener("click",()=>{ LAYER.cam=c; root.replaceChildren(); RENDER.project(root); fitAll(true); }); ch.append(b); } root.append(ch); }
+  /* the short summary first: state, reason, next step; hours, nights, first and last imaged */
+  const sb=el("div","statebox"); sb.append(pill(pm.state)); const w=el("div","w"); w.append(el("b",null,pm.reason||pm.stateWord)); if(pm.next&&pm.next.toLowerCase()!==pm.reason.toLowerCase()){ w.append(document.createTextNode(" · ")); const nx=el("span",null,pm.next); if(pm.nextCal) nx.style.color="var(--attn-glyph)"; w.append(nx); } if(pm.newFrames) w.append(document.createTextNode(" · "+pm.newFrames)); sb.append(w); root.append(sb);
+  const summ=el("div","summ"); [[pm.hoursTxt,"integration",pm.frames?plural(pm.frames,"light frame"):""],[fmtI(pm.nights),"nights",""],[pm.first?fmtDate(pm.first):"?","first imaged",""],[pm.last?fmtDate(pm.last):"?","last imaged",pm.last?agoTxt(pm.last):""]].forEach(([v,l,s])=>{ const n=el("div","n"); n.append(el("b",null,v),el("span",null,l)); if(s) n.append(el("small",null,s)); summ.append(n); }); root.append(summ);
+  const also=alsoOnDisk(t,u?u.cams:[pm.camera]); if(also) root.append(el("p","sub",also));
+  /* one tap further */
+  root.append(sec("Integration by filter · hours per night",pm.filters.length?pm.filters.map(f=>f.filter).slice(0,3).join(", "):"",box=>{ const g=el("div","twocol"); const d=el("div","donut"); d.append(donutOf(pm.filters.length?pm.filters:[{filter:"all",hours:pm.hours}],col(pm.camera))); const dl=el("div","dl"); (pm.filters.length?pm.filters:[{filter:"filter not recorded",hours:pm.hours}]).forEach((f,i)=>{ const s=el("span"); const sw2=el("i"); sw2.style.background=col(pm.camera); sw2.style.opacity=String(1-i*0.17); s.append(sw2,document.createTextNode(f.filter),el("b",null,fmtH(f.hours))); dl.append(s); }); d.append(dl); g.append(d); const hp=el("div","hpn"); hp.append(el("div","eyebrow","Hours per night · "+nts(pm.perNight.length))); if(pm.perNight.length) hp.append(nightBars(pm.perNight,col(pm.camera))); else hp.append(el("p","sub","No sessions in this record.")); g.append(hp); box.append(g); },false));
+  root.append(sec("Frames, calibration and processing","",box=>{ const p=t.programmes.find(x=>x.camera===pm.camera); const m3=el("div","marks3"); m3.append(markEl(captureMark(p)),markEl(processingMark(p)),markEl(calibrationMark(p))); box.append(m3); const st=el("div","summ"); [[fmtI(pm.frames),"light frames"],[pm.masters.length?pm.masters.join(", "):"none","masters"],[pm.finals.length?pm.finals.join(", "):"none","finished pictures"+(pm.finalDate?" · "+fmtDate(pm.finalDate):"")],[pm.mosaic?"mosaic":"single field","framing"]].forEach(([v,l])=>{ const n=el("div","n"); n.append(el("b",null,v),el("span",null,l)); st.append(n); }); box.append(st); if(pm.evidence) box.append(el("p","sub","Why: "+pm.evidence)); },false));
+  root.append(sec("Sessions",plural(pm.perNight.length,"night"),box=>{ const PAGE=200; let shown=PAGE; const wrap=el("div","tablewrap"); box.append(wrap); const pager=el("div","pager"); box.append(pager);
+    const paint=()=>{ wrap.replaceChildren(); const tb=el("table","sessions3"); const hd=el("tr"); for(const [h,cls] of [["Night",""],["Site",""],["Frames","r"],["Hours","r"],["Filter · subs",""],["Calibration",""]]) hd.append(el("th",cls,h)); tb.append(hd); const rows=pm.perNight.slice().reverse().slice(0,shown);
+      for(const z of rows){ const tr=el("tr","row"); tr.tabIndex=0; tr.setAttribute("role","button"); tr.append(el("td","d",fmtNight(z.night,z.morning))); tr.append(el("td",null,z.site||"·")); tr.append(el("td","r",fmtI(z.frames))); tr.append(el("td","r",hoursUnknown(z.hours,z.frames)?"unknown":fmtH(z.hours))); tr.append(el("td",null,[z.filters,z.subs].filter(Boolean).join(" · ")||"·")); tr.append(el("td",null,z.cal===null?"in the camera":calLine(z.cal))); const open=()=>openNight(pm.camera,z.night,pm.target,box,tr); tr.addEventListener("click",open); tr.addEventListener("keydown",e=>{ if(e.key==="Enter"||e.key===" "){ e.preventDefault(); open(); } }); tb.append(tr); }
+      wrap.append(tb); pager.replaceChildren(); if(pm.perNight.length>PAGE){ pager.append(el("span",null,"Showing "+fmtI(Math.min(shown,pm.perNight.length))+" of "+fmtI(pm.perNight.length)+" nights, newest first")); if(shown<pm.perNight.length){ const b=el("button","btn","Show "+PAGE+" more"); b.addEventListener("click",()=>{ shown+=PAGE; paint(); }); pager.append(b); } } }; paint(); },false));
+  if(pm.others.length) root.append(sec("Other scopes on this object",pm.others.map(o=>short(o.camera)).join(", "),box=>{ const w=el("div","tablewrap"); simpleTable(w,["Scope","Hours","Nights","Frames","On disk","State"],pm.others.map(o=>[short(o.camera),hoursTxt(o.hours,o.lights),fmtI(o.nights),fmtI(o.lights),o.bytes?fmtGB(o.bytes):"·",stOf(o.state).word]),[1,2,3,4]); box.append(w); box.append(el("p","sub","Pick a scope above to see its own data on this object.")); },true));
+  root.append(sec("Files","",box=>{ const p=t.programmes.find(x=>x.camera===pm.camera); const d=el("div","paths"); d.append(el("div",null,"Folder: "),el("b",null,pm.path||pm.folder||"not on the archive yet")); if(pm.rel) d.append(el("div",null,"On the archive: "),el("b",null,pm.rel)); if(p&&p.bytes) d.append(el("div",null,"Size of the lights: "),el("b",null,fmtGB(p.bytes))); if(p&&p.panels&&p.panels.length) d.append(el("div",null,"Mosaic panels: "),el("b",null,p.panels.join(", "))); box.append(d); box.append(el("p","sub","Frame-by-frame detail is in the panel's Archive view (Open files above); long lists load 200 rows at a time.")); },false));
+  root.append(sec("Lanes and nights, every scope","the project panel: one lane per scope, the three marks, the Day rows",box=>{ const pp=projectPanelFor(t,{slot:"layerproj"}); pp.classList.add("auto","open"); pp.style.height="auto"; const cl=pp.querySelector(".ph .tools .btn:last-child"); if(cl) cl.remove(); box.append(pp); nextFrame(()=>{ if(pp.fit) pp.fit(); }); },false));
+};
+/* ---------- the Explore views that carry today's Overview blocks ---------- */
+RENDER.ready=function(root){ const card=el("div","card reveal"); root.append(card); renderQueue(card); };
+RENDER.scopes=function(root){ OV.sc=el("div","card reveal"); root.append(OV.sc); renderStrips(OV.sc,true); OV.pc=el("div","card reveal"); root.append(OV.pc); renderProjects(OV.pc,movedLately(),"Projects that moved lately",movedSub(),6); };
+RENDER.archive=function(root){ const hero=$("archiveHero"); hero.classList.remove("hid"); root.append(hero); renderShare(true); const fitter=()=>{ if(!hero.isConnected){ FITTERS.delete(fitter); return; } renderShare(false); }; FITTERS.add(fitter); OV.wh=el("div","card reveal"); root.append(OV.wh); renderWhereHours(OV.wh); };
 /* the one order (§6.3): most recent capture first, then biggest; a project that is only samples is set aside (§6.2) */
 const movedLately=()=>orderDatasets(TG.filter(t=>t.lastNight&&ago(t.lastNight)<60&&!sampleOnly(t)));
 const movedOut=()=>TG.filter(t=>t.lastNight&&ago(t.lastNight)<60&&sampleOnly(t)).length;
@@ -2102,7 +2678,7 @@ function renderWhereHours(card){
       if(phone||cn.length<=chars) name.textContent=cn; else { const words=cn.split(" "); let l1="",l2=""; for(const w of words){ if(!l2&&(l1+" "+w).trim().length<=chars) l1=(l1+" "+w).trim(); else l2=(l2+" "+w).trim(); } name.setAttribute("y",y+9); const t1=svgEl("tspan",{x:padL-10,dy:0}); t1.textContent=l1; const t2=svgEl("tspan",{x:padL-10,dy:13}); t2.textContent=l2; name.append(t1,t2); }
       const ti=svgEl("title"); ti.textContent=full; name.append(ti); svg.append(name);
       let x=padL; const unkF=t.programmes.filter(p=>hoursUnknown(p.hours,p.lights)).reduce((a,p)=>a+p.lights,0);
-      for(const p of scopeOrder(t.programmes)){ const h=t.camHours[p.camera]||0; if(h<=0.01) continue; const w=Math.max(1.5,h*scale-2); const r=svgEl("rect",{x,y,width:w,height:phone?14:20,rx:3,fill:col(p.camera),tabindex:"0",role:"img","aria-label":t.name+" · "+p.camera+" · "+fmtH(h)}); hoverable(r,box=>{ box.append(el("div","tt-t",t.name)); ttRow(box,short(p.camera),fmtH(h),col(p.camera)); ttRow(box,"total",fmtH(sumH(Object.values(t.camHours)))); ttRow(box,"nights",fmtI(t.nights)); }); r.addEventListener("click",()=>openProject(t.name)); r.style.cursor="pointer"; svg.append(r); x+=w+2; }
+      for(const p of scopeOrder(t.programmes)){ const h=t.camHours[p.camera]||0; if(h<=0.01) continue; const w=Math.max(1.5,h*scale-2); const r=svgEl("rect",{x,y,width:w,height:phone?14:20,rx:3,fill:col(p.camera),tabindex:"0",role:"img","aria-label":t.name+" · "+p.camera+" · "+fmtH(h)}); hoverable(r,box=>{ box.append(el("div","tt-t",t.name)); ttRow(box,short(p.camera),fmtH(h),col(p.camera)); ttRow(box,"total",fmtH(sumH(Object.values(t.camHours)))); ttRow(box,"nights",fmtI(t.nights)); }); r.addEventListener("click",()=>openProject(t.name,p.camera)); r.style.cursor="pointer"; svg.append(r); x+=w+2; }
       if(unkF){ const w=24; const r=svgEl("rect",{x,y,width:w,height:phone?14:20,rx:3,fill:hatchFor(t.programmes.find(p=>hoursUnknown(p.hours,p.lights)).camera)}); hoverable(r,box=>{ box.append(el("div","tt-t",t.name)); ttRow(box,"hours unknown",fmtI(unkF)+" frames"); }); svg.append(r); x+=w+2; }
       const v=svgEl("text",{x:x+6,y:y+(phone?11.5:14.5),class:"dlabel"}); v.textContent=t.hours>0?fmtH(sumH(Object.values(t.camHours))):"hours unknown"; svg.append(v); });
     body.append(svg); body.append(legendRow(SC.map(s=>({label:s.camera,cam:s.camera})))); }
@@ -2114,27 +2690,22 @@ function simpleTable(wrap,headers,rows,rightCols){ const t=el("table","dt"), tr=
 
 /* ---------- a rebuilt record arrives: redraw in place, highlight what changed ---------- */
 function applyDataset(D2){
-  const old=D, oldSess=new Set(SESS.map(s=>s.camera+"|"+s.night+"|"+s.target)), oldHero=totalHours;
+  const oldSess=new Set(SESS.map(s=>s.camera+"|"+s.night+"|"+s.target)), oldHero=totalHours;
   D=normalise(D2); derive(); live.at=Date.parse(D.generatedAtIso||"")||Date.now();
   const newSess=SESS.filter(s=>!oldSess.has(s.camera+"|"+s.night+"|"+s.target));
   heroVal=oldHero; renderHeader(true); renderFresh();
-  for(const id of Object.keys(painted)) if(id!=="overview") painted[id]=false;
-  if(painted.overview&&OV.rn&&OV.rn.isConnected){
-    renderRecent(OV.rn,newSess.length>0);
-    renderAttention(OV.at);
-    if(CHART.redraw) CHART.redraw();
-    renderQueue(OV.q);
-    const openIds=new Set([...document.querySelectorAll("#view-overview article.proj.open")].map(c=>c.dataset.tid)); collapseAll();
-    renderProjects(OV.pc,movedLately(),"Projects that moved lately",movedSub(),6);
-    for(const c of OV.pc.querySelectorAll(".proj")){ if(openIds.has(c.dataset.tid)) toggleProj(c,true); if(newSess.some(s=>TG.find(t=>t.id===c.dataset.tid&&t.name===s.target))) wash(c); }
-    renderWhereHours(OV.wh);
-  } else if(current) { painted[current]=false; paintView(current); }
-  if(current&&current!=="overview"){ painted[current]=false; paintView(current); fitAll(true); }
+  /* phase 2: every view repaints from the new record on its next visit; the one on screen now, in place (its scroll kept) */
+  collapseAll(); closePanel("night"); for(const [id] of VIEWS) painted[id]=false;
+  if(current){ const y=scrollY; if(LAYER_VIEWS.has(current)&&!LAYER.ok(current)) go("overview",true); else { paintView(current); scrollTo({top:y,behavior:"auto"}); } fitAll(true); }
+  setHealthCount(attentionCount());
+  for(const c of document.querySelectorAll("#view-overview .ucard")){ const u=unitsOf().find(x=>x.id===c.dataset.unit); if(u&&newSess.some(s=>u.cams.includes(s.camera))) wash(c); }
   setLive("updated");
   const add=sumH(newSess.map(s=>s.hours));
-  toast(newSess.length?"Updated · "+plural(newSess.length,"new session")+": "+[...new Set(newSess.map(s=>commonName(s.target)+" on the "+short(s.camera)))].slice(0,3).join(", ")+(newSess.length>3?" …":"")+" · +"+fmtH(add):"Updated · nothing new since last time",newSess.length?"Show":null,()=>{ go("overview"); if(OV.sc) OV.sc.scrollIntoView({behavior:reduced()?"auto":"smooth",block:"start"}); });
+  toast(newSess.length?"Updated · "+plural(newSess.length,"new session")+": "+[...new Set(newSess.map(s=>commonName(s.target)+" on the "+short(s.camera)))].slice(0,3).join(", ")+(newSess.length>3?" …":"")+" · +"+fmtH(add):"Updated · nothing new since last time",newSess.length?"Show":null,()=>{ go("overview",false,"back"); scrollTo({top:0,behavior:reduced()?"auto":"smooth"}); });
   setTimeout(()=>{ if(live.state==="updated") setLive("fresh"); },8000);
 }
+/* the count on Explore and in Data checks, without painting the attention card: jobs not yet dealt with */
+function attentionCount(){ mem.done=mem.done||{}; return attentionJobs().filter(j=>!j.info&&!mem.done[jobDoneKey(j)]).length; }
 </script>
 <script>
 "use strict";
@@ -2258,7 +2829,7 @@ RENDER.pipeline=function(root){
   const holder=el("div"); root.append(holder);
   /* the groups come from pipelineGroups (the pure layer): PIPE_GROUPS in the page's one order, the samples apart */
   const sub=k=>({ready_to_process:"nothing new for "+QUIET()+" nights, or closed by you, and nothing started",in_progress:"a master of yours is saved, no final yet",capturing:"new frames in the last "+QUIET()+" nights, or kept open by you",done:"a finished picture names the target and the scope",sample:"under "+RULES().sampleMinutes+" minutes of integration, or your quick-look flag · set aside from every count and queue"})[k];
-  function item(p,asRow){ const b=el("button",asRow?"prow":"pcard"); b.style.setProperty("--sc",col(p.camera)); const l=el("div"); l.append(nameEl(p.target,asRow?"t":"p-t")); const m=el("div","p-m"); m.append(camDot(p.camera),el("span",null,short(p.camera)),el("b",null,hoursTxt(p.hours,p.lights)),el("span",null,"· "+nts(p.nights)+" · last "+fmtDate(p.lastNight))); l.append(m); const ev=[reasonTxt(p),(!asRow&&!isSeestar(p.camera)&&p.status!=="done"?calibrationMark(p).word:"")].filter(Boolean).join(" · "); if(ev) l.append(el("div","p-ev",ev)); b.append(l); if(asRow) b.append(pill(stKey(p),{tap:true})); b.addEventListener("click",()=>openProject(p.target)); return b; }
+  function item(p,asRow){ const b=el("button",asRow?"prow":"pcard"); b.style.setProperty("--sc",col(p.camera)); const l=el("div"); l.append(nameEl(p.target,asRow?"t":"p-t")); const m=el("div","p-m"); m.append(camDot(p.camera),el("span",null,short(p.camera)),el("b",null,hoursTxt(p.hours,p.lights)),el("span",null,"· "+nts(p.nights)+" · last "+fmtDate(p.lastNight))); l.append(m); const ev=[reasonTxt(p),(!asRow&&!isSeestar(p.camera)&&p.status!=="done"?calibrationMark(p).word:"")].filter(Boolean).join(" · "); if(ev) l.append(el("div","p-ev",ev)); b.append(l); if(asRow) b.append(pill(stKey(p),{tap:true})); b.addEventListener("click",()=>openProject(p.target,p.camera)); return b; }
   function paint(){ holder.replaceChildren(); const useBoard=form==="board"&&wide(); seg.style.display=wide()?"":"none";
     const {groups,samples}=pipelineGroups(p=>!cams.sel.size||cams.sel.has(p.camera));
     if(!groups.length&&!samples.length){ holder.append(el("p","sub","No dataset matches.")); return; }
@@ -2270,22 +2841,21 @@ RENDER.pipeline=function(root){
 };
 
 /* ================= NIGHTS: a heatmap of calendar nights ================= */
-RENDER.nights=function(root){
-  let metric="hours"; const tb=el("div","toolbar"); const cams=chipFilter(SC.map(s=>({id:s.camera,cam:s.camera,label:s.short})),()=>paint()); tb.append(cams.box);
-  const mt=el("button","btn","colour by frames"); mt.setAttribute("aria-pressed","false"); mt.addEventListener("click",()=>{ metric=metric==="hours"?"frames":"hours"; mt.textContent=metric==="hours"?"colour by frames":"colour by hours"; mt.setAttribute("aria-pressed",metric==="frames"); paint(); }); tb.append(mt); root.append(tb);
-  const holder=el("div"); root.append(holder);
-  const valOf=rec=>{ let h=0,f=0; for(const [cam,x] of Object.entries(rec.perCam)){ if(cams.sel.size&&!cams.sel.has(cam)) continue; h+=x.hours; f+=x.frames; } return {h,f,v:metric==="hours"?h:f}; };
+/* phase 2: the drawing is heatmapInto(holder, scopes, metric), so a unit's layer (§7.2) draws its own scopes' Imaging nights with the same code */
+function heatmapInto(holder,sel,metric,opts){ opts=opts||{}; holder.replaceChildren(); sel=sel||new Set(); metric=metric||"hours";
+  const valOf=rec=>{ let h=0,f=0; for(const [cam,x] of Object.entries(rec.perCam)){ if(sel.size&&!sel.has(cam)) continue; h+=x.hours; f+=x.frames; } return {h,f,v:metric==="hours"?h:f}; };
   const HB=[0.5,1.5,3,5], FB=[100,300,700,1200];
   const binVar=v=>{ if(v<=0) return "--card2"; const bins=metric==="hours"?HB:FB; for(let i=0;i<bins.length;i++) if(v<=bins[i]) return "--heat"+(i+1); return "--heat5"; };
   const yearNow=new Date().getFullYear(); const plausible=n=>{ const y=+String(n).slice(0,4); return y>=2015&&y<=yearNow+1; };
-  function paint(){ holder.replaceChildren();
-    const years=[...new Set([...nightly.keys()].filter(plausible).map(n=>+n.slice(0,4)))].sort(); if(!years.length) years.push(yearNow);
+
+    let years=[...new Set([...nightly.keys()].filter(plausible).map(n=>+n.slice(0,4)))].sort(); if(!years.length) years.push(yearNow);
     const cell=12, gap=2.5, step=cell+gap; let totalNights=0,totalH=0,best=null,streak=0,bestStreak=0,prev=null,gapBest=0; const monthAgg={}; const active=[];
-    const oddSess=SESS.filter(s=>!plausible(s.night)&&(!cams.sel.size||cams.sel.has(s.camera))).length;
+    const oddSess=SESS.filter(s=>!plausible(s.night)&&(!sel.size||sel.has(s.camera))).length;
     for(const [night,recN] of [...nightly.entries()].sort()){ if(!plausible(night)) continue; const {h,f,v}=valOf(recN); if(v>0){ active.push(night); totalNights++; totalH+=h; if(!best||h>best.h) best={night,h,f}; const mk=night.slice(0,7); monthAgg[mk]=(monthAgg[mk]||0)+h; } }
     for(const n of active){ if(prev){ const d=(Date.parse(n)-Date.parse(prev))/dayMs; if(d===1) streak++; else streak=1; if(d-1>gapBest) gapBest=d-1; } else streak=1; bestStreak=Math.max(bestStreak,streak); prev=n; }
     const bestMonth=Object.entries(monthAgg).sort((a,b)=>b[1]-a[1])[0];
-    const card=el("div","card"); const hh=el("div","cardhead"); const hd=el("div"); hd.append(el("h2",null,"Imaging nights"),el("div","sub","one cell per calendar night, coloured by "+(metric==="hours"?"hours captured":"frames captured")+(cams.sel.size?" on the selected scopes":" across all scopes")+" · a night is noon to noon, shown on its evening's date")); hh.append(hd); card.append(hh);
+    if(opts.compact&&active.length) years=years.filter(y=>active.some(n=>+n.slice(0,4)===y));   /* a unit's layer: only its own years */
+    const card=el("div","card"); const hh=el("div","cardhead"); const hd=el("div"); hd.append(el("h2",null,"Imaging nights"),el("div","sub","one cell per calendar night, coloured by "+(metric==="hours"?"hours captured":"frames captured")+(sel.size?" on the selected scopes":" across all scopes")+" · a night is noon to noon, shown on its evening's date")); hh.append(hd); card.append(hh);
     for(const yr of years){ const ywrap=el("div","hm-year"); ywrap.append(el("div","eyebrow",String(yr))); const scroll=el("div","hm-scroll"); const jan1=new Date(Date.UTC(yr,0,1)); const startDow=(jan1.getUTCDay()+6)%7; const start=new Date(jan1); start.setUTCDate(start.getUTCDate()-startDow); const end=new Date(Date.UTC(yr,11,31)); const weeks=Math.ceil(((end-start)/dayMs+1)/7); const W=weeks*step+34, H=7*step+22;
       const svg=svgEl("svg",{viewBox:"0 0 "+W+" "+H,width:W,height:H,role:"img","aria-label":"Imaging nights "+yr});
       ["Mon","Wed","Fri","Sun"].forEach((d2,i)=>{ const tx=svgEl("text",{x:0,y:16+step*[0,2,4,6][i]+9,class:"axis","font-size":"10"}); tx.textContent=d2; svg.append(tx); });
@@ -2294,7 +2864,7 @@ RENDER.nights=function(root){
         if(d.getUTCDate()<=7&&dow===0&&d.getUTCMonth()!==lastMon){ lastMon=d.getUTCMonth(); const tx=svgEl("text",{x:34+w*step,y:9,class:"axis","font-size":"10"}); tx.textContent=MONTHS[lastMon]; svg.append(tx); }
         const recN=nightly.get(iso); const res=recN?valOf(recN):{h:0,f:0,v:0}; const r=svgEl("rect",{x:34+w*step,y:14+dow*step,width:cell,height:cell,rx:2.5,fill:"var("+binVar(res.v)+")"}); if(res.v<=0) r.setAttribute("stroke","var(--grid)");
         if(recN&&res.v>0){ r.setAttribute("tabindex","0"); r.style.cursor="pointer"; r.setAttribute("role","button"); r.setAttribute("aria-label","Night of "+fmtNight(iso)+" · "+fmtH(res.h)+" · "+fmtI(res.f)+" frames");
-          hoverable(r,box=>{ box.append(el("div","tt-t","Night of "+fmtNight(iso))); ttRow(box,"hours",hoursUnknown(res.h,res.f)?"unknown":fmtH(res.h)); ttRow(box,"frames",fmtI(res.f)); const tgs=[...recN.targets]; ttRow(box,"objects",tgs.slice(0,3).map(commonName).join(", ")+(tgs.length>3?" +"+(tgs.length-3):"")); for(const cm of SC){ const x=recN.perCam[cm.camera]; if(x&&(!cams.sel.size||cams.sel.has(cm.camera))&&x.frames>0) ttRow(box,cm.short,hoursTxt(x.hours,x.frames),col(cm.camera)); } box.append(el("div","hint","click for the night")); });
+          hoverable(r,box=>{ box.append(el("div","tt-t","Night of "+fmtNight(iso))); ttRow(box,"hours",hoursUnknown(res.h,res.f)?"unknown":fmtH(res.h)); ttRow(box,"frames",fmtI(res.f)); const tgs=[...recN.targets]; ttRow(box,"objects",tgs.slice(0,3).map(commonName).join(", ")+(tgs.length>3?" +"+(tgs.length-3):"")); for(const cm of SC){ const x=recN.perCam[cm.camera]; if(x&&(!sel.size||sel.has(cm.camera))&&x.frames>0) ttRow(box,cm.short,hoursTxt(x.hours,x.frames),col(cm.camera)); } box.append(el("div","hint","click for the night")); });
           r.addEventListener("click",()=>{ const cam=Object.entries(recN.perCam).sort((a,b)=>b[1].hours-a[1].hours)[0][0]; openNight(cam,iso,null,card,r); }); r.addEventListener("keydown",e=>{ if(e.key==="Enter"){ r.dispatchEvent(new MouseEvent("click")); } }); }
         svg.append(r); }
       scroll.append(svg); ywrap.append(scroll); card.append(ywrap); }
@@ -2302,10 +2872,15 @@ RENDER.nights=function(root){
     const stx=el("div","hm-stats"); const s6=(lbl,val)=>{ const s7=el("span"); s7.append(lbl+" "); s7.append(el("b",null,val)); stx.append(s7); };
     s6("nights with light frames",fmtI(totalNights)); s6("hours",fmtH(totalH)); if(best) s6("biggest night",fmtNight(best.night)+" ("+fmtH(best.h)+")"); s6("longest run",bestStreak+" nights in a row"); s6("longest dry spell",Math.round(gapBest)+" nights"); if(bestMonth) s6("busiest month",fmtMonth(bestMonth[0])+" ("+fmtH(bestMonth[1])+")");
     if(oddSess){ const s8=el("span"); s8.append(el("b",null,String(oddSess))," session"+(oddSess===1?"":"s")+" with an implausible night left out"); stx.append(s8); }
-    card.append(stx); holder.append(card); }
+    card.append(stx); holder.append(card);
+}
+RENDER.nights=function(root){
+  let metric="hours"; const tb=el("div","toolbar"); const cams=chipFilter(SC.map(s=>({id:s.camera,cam:s.camera,label:s.short})),()=>paint()); tb.append(cams.box);
+  const mt=el("button","btn","colour by frames"); mt.setAttribute("aria-pressed","false"); mt.addEventListener("click",()=>{ metric=metric==="hours"?"frames":"hours"; mt.textContent=metric==="hours"?"colour by frames":"colour by hours"; mt.setAttribute("aria-pressed",metric==="frames"); paint(); }); tb.append(mt); root.append(tb);
+  const holder=el("div"); root.append(holder);
+  function paint(){ heatmapInto(holder,cams.sel,metric); }
   paint();
-};
-</script>
+};</script>
 <script>
 "use strict";
 /* ================= SKY: every target at its catalogue position ================= */
@@ -2428,8 +3003,13 @@ RENDER.equipment=function(root){
 
 /* ================= DATA CHECKS: how the numbers add up ================= */
 RENDER.health=function(root){
+  /* phase 2 (§7.1): "Needs your attention" lives here now, first (the status line in the header carries the data-safety facts) */
+  const at=el("div","card reveal"); root.append(at); renderAttention(at);
+  /* phase 2: this computer's Space figures (the panel's Dashboard tab showed them; the tab is Ledger now) */
+  if(D.space&&typeof D.space==="object"){ const sp=el("div","card"); sp.style.marginTop="24px"; const sh=el("div","cardhead"); const sd=el("div"); sd.append(el("h2",null,"Space on this computer"),el("div","sub","what the importer's --space works out · from the panel that serves this page")); sh.append(sd); sp.append(sh); const su=el("div","sum"); const put=(k,v)=>{ su.append(el("div","k",k),el("div","v",v)); };
+    for(const [k,v] of Object.entries(D.space)){ if(v==null||typeof v==="object"&&!Array.isArray(v)) continue; const num=typeof v==="number"; put(String(k).replace(/([a-z])([A-Z])/g,"$1 $2").replace(/_/g," ").toLowerCase(),num?(/bytes|free|used|size|total/i.test(k)&&v>1e6?fmtGB(v):fmtI(v)):String(v)); } sp.append(su); root.append(sp); }
   /* phase 1: the rule in one line, the state counts with the samples set aside, from stateTotals (the engine's counts when the record carries them) */
-  const tot=stateTotals(); const rl=el("div","card"); const rlh=el("div","cardhead"); const rld=el("div"); rld.append(el("h2",null,"The states and the rules"),el("div","sub",ruleLine())); rlh.append(rld); rl.append(rlh);
+  const tot=stateTotals(); const rl=el("div","card"); rl.style.marginTop="24px"; const rlh=el("div","cardhead"); const rld=el("div"); rld.append(el("h2",null,"The states and the rules"),el("div","sub",ruleLine())); rlh.append(rld); rl.append(rlh);
   const ssum=el("div","sum"); for(const k of PIPE_GROUPS) ssum.append(el("div","k",ST[k].word),el("div","v",fmtI(tot.counts[k])+(tot.hours[k]>0?" · "+fmtH(tot.hours[k]):"")));
   ssum.append(el("div","k tot",samplesLine()||"no samples set aside"),el("div","v tot",fmtI(tot.samples.n)+(tot.samples.hours>0?" · "+fmtH(tot.samples.hours):""))); rl.append(ssum);
   const rlp=el("p","sub prose"); rlp.style.marginTop="12px"; rlp.textContent="A sample is under "+RULES().sampleMinutes+" minutes of integration, or flagged by you as a quick look: its hours stay in the header's total on disk, but it leaves every count and queue · counts "+(tot.fromEngine?"from the importer's record":"added up by this page")+" · the Pipeline and the Targets list keep the samples in a closed group at the bottom."; rl.append(rlp); root.append(rl);
@@ -2467,8 +3047,12 @@ RENDER.health=function(root){
 
 /* ================= INIT ================= */
 renderHeader(false); renderFresh();
+/* §7.6 opened on its own: the "← Importer" link shows when the page is the top window (the panel serves /observatory top-level) */
 (function(){ const b=$("back"); if(window.parent===window&&SAME&&location.pathname.startsWith("/observatory")){ b.classList.remove("hid"); b.href="/"; } })();
-go((mem.tab&&RENDER[mem.tab])?mem.tab:"overview",true);
+/* the count on Explore before anything is painted; then the remembered view, a layer included (its unit or project restored) */
+WARN_N=attentionCount();
+(function(){ const L=(mem.layer&&typeof mem.layer==="object")?mem.layer:null; if(L){ LAYER.unit=L.unit||null; LAYER.tid=L.tid||null; LAYER.cam=L.cam||null; LAYER.from=L.from||"overview"; }
+  const want=(mem.tab&&RENDER[mem.tab])?mem.tab:"overview"; go(want,true); })();
 setHealthCount(WARN_N);
 $("footNote").append(el("div",null,"Nothing on the archive is touched by this page. Its facts are worked out with the To process list: after each import and each ship, each night on the PC, and whenever you press Refresh now. A night is noon to noon, named by its evening."));
 /* the footer in plain words, from the record's inputs; the line count is the one the Data checks tab adds up */

@@ -55,7 +55,7 @@ from collections import defaultdict
 from datetime import date, datetime, timedelta, timezone
 
 # One version for every platform (1.5.0: the Windows 11 edition joins the Mac).
-VERSION = "1.8.0"
+VERSION = "1.9.0"
 IS_WINDOWS = os.name == "nt"
 IS_MAC = sys.platform == "darwin"
 PLATFORM = "windows" if IS_WINDOWS else ("mac" if IS_MAC else "linux")
@@ -10057,12 +10057,15 @@ def _say_elsewhere(scan):
 SCAN_SUMMARY_FILE = "last-scan.json"
 
 def save_scan_summary(files, targets, camera=None, failed_eject=False, elsewhere=0,
-                      target_names=None, elsewhere_machine=None):
+                      target_names=None, elsewhere_machine=None, scope=None):
     """1.7.2: what the last scan found still on a camera, for the Observatory's
     freshness line. Written by the panel after each scan and by --scan-only;
     one small file in the state folder, never anywhere else. 1.7.5: the
     targets' display names (at most 12) and which other computer already holds
-    the 'elsewhere' frames, so the page can say what to do."""
+    the 'elsewhere' frames, so the page can say what to do. Phase 2 of the UX
+    plan: `scope`, the scope name the panel worked out for the waiting frames
+    (the ASIAir dest plan's scope for the first target), so the status line can
+    name the rig the files are waiting on."""
     path = os.path.join(STATE_DIR, SCAN_SUMMARY_FILE)
     names = [str(n) for n in (target_names or []) if isinstance(n, str) and n.strip()][:12]
     try:
@@ -10071,7 +10074,8 @@ def save_scan_summary(files, targets, camera=None, failed_eject=False, elsewhere
                                   "elsewhere": int(elsewhere), "camera": camera,
                                   "failedEject": bool(failed_eject), "seenAt": _utc_iso(),
                                   "machine": MACHINE_LABEL, "targetNames": names,
-                                  "elsewhereMachine": elsewhere_machine if isinstance(elsewhere_machine, str) else None})
+                                  "elsewhereMachine": elsewhere_machine if isinstance(elsewhere_machine, str) else None,
+                                  "scope": scope if isinstance(scope, str) and scope.strip() else None})
     except Exception as e:
         debug(f"scan summary not written: {e}")
 
@@ -10097,7 +10101,9 @@ def read_scan_summary():
             "ageHours": age, "machine": d.get("machine") if isinstance(d.get("machine"), str) else None,
             "targetNames": [str(n) for n in (d.get("targetNames") or []) if isinstance(n, str)][:12]
             if isinstance(d.get("targetNames"), list) else [],
-            "elsewhereMachine": d.get("elsewhereMachine") if isinstance(d.get("elsewhereMachine"), str) else None}
+            "elsewhereMachine": d.get("elsewhereMachine") if isinstance(d.get("elsewhereMachine"), str) else None,
+            # phase 2: the scope the waiting frames belong to (a 1.8.0 file has none)
+            "scope": d.get("scope") if isinstance(d.get("scope"), str) and d.get("scope").strip() else None}
 
 def run_scan_only(state):
     """Tagged lines for the watcher: count / summary / storage — both devices."""
@@ -11703,6 +11709,134 @@ def _obs_inventory_at(name):
     m = re.search(r"(\d{4})(\d{2})(\d{2})T(\d{2})(\d{2})(\d{2})Z", str(name or ""))
     return f"{m.group(1)}-{m.group(2)}-{m.group(3)}T{m.group(4)}:{m.group(5)}:{m.group(6)}+00:00" if m else None
 
+# ── Phase 2 of the Observatory UX plan ("scope first", 29 Oct 2026) ──────────
+# The landing screen is one card per UNIT: each Seestar is its own unit, and
+# the ZWO camera is ONE unit for both Askars, since it moves between them.
+# Everything below is additive to observatory/1 (the iOS app reads the record):
+# nothing is removed or renamed. The field names are the agreement in
+# docs/ux-observatory-25oct/PHASE2-CONTRACT.md.
+OBS_STATE_WORDS = {"capturing": "Still capturing", "ready_to_process": "Ready to process",
+                   "in_progress": "Finish it", "done": "Done", "sample": "Sample"}
+
+def _obs_next_action(e, year):
+    """One dataset's first unfinished step, in plain words (the contract's
+    wordings; dates 'Sat 31 Oct', hours as the reasons write them). Where the
+    ASIAir's darks or flats are missing that comes first, but only while the
+    dataset is still capturing or ready: a master or a final already exists
+    past that point, so the missing frames are no longer the next step.
+    Returns (words, calMissing)."""
+    status = e.get("status")
+    calib = e.get("calibration") or {}
+    missing = [m for m in (calib.get("missing") or []) if isinstance(m, str)]
+    if calib.get("applies") and missing and status in ("capturing", "ready_to_process"):
+        return "Darks or flats missing: " + " and ".join(missing), True
+    if status == "capturing":
+        return (("Still capturing · ready from " + _day_words(e["ready_on"], year)) if e.get("ready_on")
+                else "Still capturing · kept open by hand"), False
+    if status == "ready_to_process":
+        n, fr = int(e.get("nights") or 0), int(e.get("frames") or 0)
+        return (f"Next step: collect the lights ({n} night{'' if n == 1 else 's'}, "
+                f"{fr:,} frame{'' if fr == 1 else 's'})"), False
+    if status == "in_progress":
+        return "Finish it · master in the folder", False
+    if status == "done":
+        return (("Done · final of " + _day_words(e["final_date"], year)) if e.get("final_date") else "Done"), False
+    if status == "sample":
+        return "Sample · " + _hours_words(e.get("integration_seconds"), e.get("frames")), False
+    return str(status or "?"), False
+
+def _obs_dataset_summary(prog):
+    """The short form of a programme that a unit's `current` list and the This
+    month list carry. Built one way from the programme, so the card and the
+    month's item never disagree with the dataset they stand for."""
+    return {"tid": prog.get("tid"), "target": prog.get("target"), "codes": list(prog.get("codes") or []),
+            "camera": prog.get("camera"), "scopeId": prog.get("scopeId"),
+            "state": prog.get("status"), "stateWord": prog.get("stateWord"),
+            "hours": prog.get("hours"), "frames": prog.get("lights"), "nights": prog.get("nights"),
+            "firstNight": prog.get("firstNight"), "lastNight": prog.get("lastNight"),
+            "readySince": prog.get("readySince"), "reason": prog.get("reason"),
+            "nextAction": prog.get("nextAction"), "calMissing": bool(prog.get("calMissing")),
+            "mosaic": bool(prog.get("mosaic"))}
+
+def _obs_unit(uid, label, name, kind, scopes, by_scope, in_window):
+    """One card's unit. `scopes` are its contract scopes in order (one for a
+    Seestar, both Askars for the ZWO), each {id, name, colour}; `by_scope`
+    maps a scope id to its [(programme, {night: {hours, frames}})]."""
+    on, night_hours = None, {}
+    for sc in scopes:
+        for prog, nights in by_scope.get(sc["id"], []):
+            for nt, hf in nights.items():
+                night_hours[nt] = night_hours.get(nt, 0.0) + hf["hours"]
+                # the newest session says which scope the camera is on; the same
+                # night on both (a data slip) goes to the one with more frames,
+                # then to the first in the contract's order
+                if on is None or (nt, hf["frames"]) > on[0]:
+                    on = ((nt, hf["frames"]), sc)
+    on_scope = on[1] if on else (scopes[0] if scopes else None)
+    last_out = max(night_hours) if night_hours else None
+    progs = [prog for sc in scopes for prog, _n in by_scope.get(sc["id"], [])]
+    # the datasets with frames inside the window, newest first, at most two; a
+    # sample is a quick look, kept out of every queue (UX plan §6.2), so it is
+    # not a card's current project either
+    current = sorted((prog for sc in scopes for prog, nights in by_scope.get(sc["id"], [])
+                      if prog.get("status") != "sample" and any(in_window(nt) for nt in nights)),
+                     key=dataset_sort_key)[:2]
+    more = [p for p in progs if p.get("status") == "ready_to_process" and not any(p is c for c in current)]
+    # a finished dataset stays on the card until the unit's next night out: its
+    # final must be newer than the newest night with frames (dates compare as ISO)
+    done = [p for p in progs if p.get("status") == "done" and isinstance(p.get("finalDate"), str)
+            and last_out and p["finalDate"] > last_out]
+    latest = max(done, key=lambda p: (p["finalDate"], dataset_sort_key(p)), default=None)
+    return {"id": uid, "label": label, "name": name, "kind": kind,
+            "scopeIds": [sc["id"] for sc in scopes], "scopes": [sc["name"] for sc in scopes],
+            "colour": (on_scope or {}).get("colour"), "short": uid,
+            "onScope": on_scope["name"] if on_scope else None,
+            "onScopeId": on_scope["id"] if on_scope else None,
+            "onScopeCurrent": bool(on and in_window(on[0][0])),
+            "active": any(in_window(nt) for nt in night_hours), "lastOut": last_out,
+            "current": [_obs_dataset_summary(p) for p in current],
+            "moreReady": len(more),
+            "moreReadyHours": round(float(sum(float(p.get("hours") or 0) for p in more)), 1),
+            "strip": [{"night": nt, "hours": round(h, 2)} for nt, h in sorted(night_hours.items()) if in_window(nt)],
+            "latestDone": ({"tid": latest.get("tid"), "target": latest.get("target"),
+                            "codes": list(latest.get("codes") or []), "camera": latest.get("camera"),
+                            "scopeId": latest.get("scopeId"), "finalDate": latest.get("finalDate")}
+                           if latest else None)}
+
+def _obs_units(out_scopes, contract, rows, in_window):
+    """The cards' units in the fixed card order: `scopeOrder` (the contract's
+    order, scopes with frames only) with the two Askars collapsed into ONE
+    'ZWO' unit at the position of the first of them. `rows` are the datasets
+    as (scope id, programme, {night: {hours, frames}})."""
+    by_scope = {}
+    for sid, prog, nights in rows:
+        by_scope.setdefault(sid, []).append((prog, nights))
+    askars, cam_name = [], CAMERA_NAME
+    for x in contract.get("scopes") or []:          # both Askars, whether or not each has frames
+        if not isinstance(x, dict) or "unit" in (x.get("match") or {}):
+            continue
+        camn = str(((x.get("match") or {}).get("camera")) or x.get("name") or "")
+        if "seestar" not in camn.lower():
+            askars.append({"id": x.get("id"), "name": str(x.get("name") or x.get("id")),
+                           "colour": OBS_COLOURS.get(str(x.get("colour") or "").lower())})
+            if (x.get("match") or {}).get("camera"):
+                cam_name = str(x["match"]["camera"])
+    units, zwo_done = [], False
+    for sc in out_scopes:
+        if sc.get("kind") == "seestar":
+            me = {"id": sc["id"], "name": sc["camera"], "colour": sc.get("colour")}
+            units.append(_obs_unit(sc["id"], _scope_short(sc["camera"]), sc["camera"], "seestar",
+                                   [me], by_scope, in_window))
+        elif not zwo_done:
+            zwo_done = True
+            # the contract's Askars in its order, both of them even when only one
+            # has frames (the camera can be on either); with no Askar in the
+            # contract at all, the scope itself stands in
+            units.append(_obs_unit("ZWO", "ZWO", cam_name, "askar",
+                                   askars or [{"id": sc["id"], "name": sc["camera"], "colour": sc.get("colour")}],
+                                   by_scope, in_window))
+    return units
+
 def observatory_from(doc, collect, state=None, now=None, pending=None):
     """The Observatory's dataset from one build_projects() result and the
     working dicts it collected. No I/O. `pending` is the last scan's summary
@@ -11722,6 +11856,25 @@ def observatory_from(doc, collect, state=None, now=None, pending=None):
     quiet = doc.get("quiet_period_days", QUIET_PERIOD_DAYS)
     by_key = {(p["target_id"], e["scope"]): (p, e)
               for p in doc["projects"] for e in p["datasets"]}
+    # phase 2: the active window is the as-of night and the activeWindowNights - 1
+    # before it ("the last 30 nights"); a scope, a unit or a dataset with frames
+    # inside it is active
+    try:
+        as_of = date.fromisoformat(str(today)[:10])
+    except (TypeError, ValueError):
+        as_of = None
+    try:
+        window_n = max(1, int((doc.get("rules") or {}).get("activeWindowNights") or ACTIVE_WINDOW_NIGHTS))
+    except (TypeError, ValueError):
+        window_n = ACTIVE_WINDOW_NIGHTS
+    year = as_of.year if as_of else date.today().year
+
+    def in_window(night):
+        try:
+            return as_of is not None and (as_of - date.fromisoformat(str(night)[:10])).days < window_n
+        except (TypeError, ValueError):
+            return False
+    unit_rows = []                              # (scope id, programme, {night: {hours, frames}})
     scopes, sessions, targets = {}, [], {}
     nights_all, tot_bytes, tot_frames, tot_secs = set(), 0, 0, 0.0
     for (tid, sid), d in sorted(datasets.items()):
@@ -11816,6 +11969,7 @@ def observatory_from(doc, collect, state=None, now=None, pending=None):
         if notes:
             evidence += "; " + ", ".join(notes)
         arel = e.get("archive_rel")
+        next_action, cal_missing = _obs_next_action(e, year)     # phase 2: the first unfinished step
         prog = {"camera": cam, "target": name, "tid": tid,     # the target by name and id (sort key, cards)
                 "folder": arel.split("/")[-1] if arel else name,
                 "path": _obs_path(arel) if arel else "", "rel": arel,
@@ -11841,7 +11995,14 @@ def observatory_from(doc, collect, state=None, now=None, pending=None):
                 "readySince": e.get("ready_since"), "reason": e.get("reason"),
                 "finalDate": e.get("final_date"),
                 "newFramesSinceFinal": bool(e.get("new_frames_since_final")),
-                "stateKeptFrom": e.get("state_kept_from")}
+                "stateKeptFrom": e.get("state_kept_from"),
+                # phase 2 (scope first): the scope by id, the codes, the state as a
+                # word, and the next step in words, so a flat list needs no lookups
+                "scopeId": sid, "codes": codes,
+                "stateWord": OBS_STATE_WORDS.get(e["status"], e["status"]),
+                "nextAction": next_action, "calMissing": cal_missing}
+        unit_rows.append((sid, prog, {nt: {"hours": n["integration"] / 3600, "frames": n["frames"]}
+                                      for nt, n in nights.items()}))
         card = {"target": name, "label": name + (" (mosaic)" if d.get("mosaic") else ""),
                 "camera": cam, "state": state_id, "hours": hours, "nights": len(nights),
                 "lights": frames, "lastNight": e["last_session"], "readyOn": e.get("ready_on"),
@@ -11886,8 +12047,12 @@ def observatory_from(doc, collect, state=None, now=None, pending=None):
         out_targets.append(tg)
     out_scopes = []
     for sc in sorted(scopes.values(), key=lambda x: (x["order"], x["camera"])):
+        # phase 2: active while it has a session inside the window; its last night out
+        sc["active"] = any(in_window(nt) for nt in sc["nights"])
+        sc["lastOut"] = sc["last"]
         sc["nights"] = len(sc["nights"]); sc["hours"] = round(sc["hours"], 1)
         out_scopes.append(sc)
+    units = _obs_units(out_scopes, contract, unit_rows, in_window)
     src = doc.get("sources") or {}
     snaps_used = [m for m in (src.get("snapshots") or []) if isinstance(m, dict) and m.get("rows")]
     ledgers = [l for l in (src.get("ledgers") or []) if l]
@@ -11944,6 +12109,21 @@ def observatory_from(doc, collect, state=None, now=None, pending=None):
               "note": "rounded per scope", "ok": abs(sum(x["hours"] for x in out_scopes) - tot_secs / 3600) < 0.1 * max(1, len(out_scopes))}]
     now = now or datetime.now()
     when_txt = _obs_date(now.date().isoformat()) + now.strftime(", %H:%M")
+    # phase 2: what moved this calendar month (the build's own date), from dates the
+    # record already holds: a dataset became ready (readySince), a final appeared
+    # (finalDate). Masters carry no date yet (phase 3). Newest first.
+    month = now.date().strftime("%Y-%m")
+    month_items = []
+    for _sid, prog, _nights in unit_rows:
+        for what, key in (("ready", "readySince"), ("final", "finalDate")):
+            when = prog.get(key)
+            if isinstance(when, str) and when[:7] == month:
+                month_items.append({**_obs_dataset_summary(prog), "what": what, "date": when})
+    month_items.sort(key=lambda x: (-_iso_ord(x["date"]), dataset_sort_key(x)))
+    this_month = {"month": month,
+                  "movedForward": sum(1 for x in month_items if x["what"] == "ready"),
+                  "finished": sum(1 for x in month_items if x["what"] == "final"),
+                  "items": month_items}
     try:
         local = now.astimezone() if now.tzinfo is None else now
         local_iso, tzname = local.isoformat(timespec="seconds"), (local.tzname() or "")
@@ -11987,6 +12167,12 @@ def observatory_from(doc, collect, state=None, now=None, pending=None):
         "finalsAmbiguousCount": int(doc.get("finals_ambiguous_count") or 0),
         "statesKeptFrom": doc.get("states_kept_from"),
         "snapshotRows": sum(int(m.get("rows") or 0) for m in snaps_used),
+        # phase 2 (scope first): the cards' units, what moved this month, the newest
+        # night with frames, and the window the active flags were judged by
+        "units": units, "thisMonth": this_month,
+        "recordsUpTo": max(nights_all) if nights_all else None,
+        "activeWindow": {"nights": window_n, "to": today,
+                         "from": (as_of - timedelta(days=window_n - 1)).isoformat() if as_of else None},
         "scopes": out_scopes, "askarSplit": {}, "targets": out_targets, "sessions": sessions,
         "events": [], "calibration": {}, "shelves": {}, "quarantine": {},
         "junk": {"files": 0, "bytes": 0},

@@ -4,6 +4,52 @@
  "default_site": "Shinfield",
  "scopes": [
   {
+   "id": "FRA400",
+   "name": "Askar FRA400",
+   "archive_root": "ZWO Askar Scopes",
+   "site": "Shinfield",
+   "colour": "red",
+   "match": {
+    "camera": "ZWO ASI585MC Air",
+    "scope": "Askar FRA400"
+   },
+   "aliases": [
+    "FRA 400",
+    "Askar400"
+   ]
+  },
+  {
+   "id": "107PHQ",
+   "name": "Askar 107PHQ",
+   "archive_root": "ZWO Askar Scopes",
+   "site": "Shinfield",
+   "colour": "green",
+   "match": {
+    "camera": "ZWO ASI585MC Air",
+    "scope": "Askar 107PHQ"
+   },
+   "aliases": [
+    "107 PHQ",
+    "Askar107"
+   ]
+  },
+  {
+   "id": "S50P",
+   "name": "Seestar S50 Pro",
+   "archive_root": "S50P",
+   "site": "Shinfield",
+   "colour": null,
+   "match": {
+    "camera": "ZWO Seestar S50 Pro"
+   },
+   "aliases": [
+    "50P",
+    "S50Pro",
+    "S50-Pro",
+    "Seestar50Pro"
+   ]
+  },
+  {
    "id": "S30P",
    "name": "Seestar S30 Pro",
    "archive_root": "S30P",
@@ -43,52 +89,6 @@
    },
    "aliases": [
     "Seestar50"
-   ]
-  },
-  {
-   "id": "S50P",
-   "name": "Seestar S50 Pro",
-   "archive_root": "S50P",
-   "site": "Shinfield",
-   "colour": null,
-   "match": {
-    "camera": "ZWO Seestar S50 Pro"
-   },
-   "aliases": [
-    "50P",
-    "S50Pro",
-    "S50-Pro",
-    "Seestar50Pro"
-   ]
-  },
-  {
-   "id": "FRA400",
-   "name": "Askar FRA400",
-   "archive_root": "ZWO Askar Scopes",
-   "site": "Shinfield",
-   "colour": "red",
-   "match": {
-    "camera": "ZWO ASI585MC Air",
-    "scope": "Askar FRA400"
-   },
-   "aliases": [
-    "FRA 400",
-    "Askar400"
-   ]
-  },
-  {
-   "id": "107PHQ",
-   "name": "Askar 107PHQ",
-   "archive_root": "ZWO Askar Scopes",
-   "site": "Shinfield",
-   "colour": "green",
-   "match": {
-    "camera": "ZWO ASI585MC Air",
-    "scope": "Askar 107PHQ"
-   },
-   "aliases": [
-    "107 PHQ",
-    "Askar107"
    ]
   },
   {

@@ -1,0 +1,454 @@
+{
+ "phone390": {
+  "gotoMs": 170,
+  "domInteractive": null,
+  "loadEnd": null,
+  "cards": [
+   {
+    "top": 115,
+    "bottom": 323,
+    "h": 208,
+    "w": 358
+   },
+   {
+    "top": 333,
+    "bottom": 512,
+    "h": 180,
+    "w": 358
+   },
+   {
+    "top": 522,
+    "bottom": 730,
+    "h": 208,
+    "w": 358
+   },
+   {
+    "top": 740,
+    "bottom": 947,
+    "h": 208,
+    "w": 358
+   }
+  ],
+  "resting": true,
+  "status": {
+   "top": 32,
+   "bottom": 54,
+   "h": 22,
+   "w": 358
+  },
+  "statusAmber": true,
+  "header": {
+   "top": 0,
+   "bottom": 62,
+   "h": 62,
+   "w": 390
+  },
+  "nav": {
+   "top": 62,
+   "bottom": 115,
+   "h": 53,
+   "w": 390
+  },
+  "grid": {
+   "top": 115,
+   "bottom": 947,
+   "h": 832,
+   "w": 358
+  },
+  "cols": 1,
+  "pageH": 1543,
+  "footer": {
+   "top": 1287,
+   "bottom": 1543,
+   "h": 256,
+   "w": 390
+  },
+  "live": {
+   "top": 1336,
+   "bottom": 1358,
+   "h": 22,
+   "w": 132
+  },
+  "thirdCardBottom": 730,
+  "fitsFirstScreen": true,
+  "exploreItems": [
+   "Observatory",
+   "Ready to process",
+   "Imaging nights",
+   "What each scope captured",
+   "Sky",
+   "Footprints",
+   "Coverage",
+   "Equipment",
+   "Data checks",
+   "Archive",
+   "Pipeline",
+   "Targets",
+   "Key"
+  ],
+  "layer2": {
+   "view": "view-unit",
+   "h2": "ZWO· on the 107PHQ",
+   "pageH": 2677,
+   "groups": [
+    "Ready to process29",
+    "Finish it11",
+    "Still capturing15",
+    "Done12"
+   ]
+  },
+  "layer3": {
+   "view": "view-project",
+   "h2": "107PHQ › Stephan's Quintet (NGC 7320)",
+   "crumb": "ZWO›Stephan's Quintet",
+   "pageH": 1569,
+   "secs": [
+    "Integration by filter · hours per night",
+    "Frames, calibration and processing",
+    "Sessions",
+    "Other scopes on this object",
+    "Files",
+    "Lanes and nights, every scope"
+   ]
+  },
+  "backTo": "view-unit",
+  "backTo2": "view-overview",
+  "find": [
+   "Andromeda Galaxy (M 31)"
+  ],
+  "findOpened": {
+   "view": "view-project",
+   "h2": "S30 Pro › Andromeda Galaxy (M 31)",
+   "chips": [
+    "FRA400",
+    "107PHQ",
+    "S50 Pro",
+    "S30 Pro"
+   ]
+  }
+ },
+ "tablet820": {
+  "gotoMs": 180,
+  "domInteractive": null,
+  "loadEnd": null,
+  "cards": [
+   {
+    "top": 111,
+    "bottom": 338,
+    "h": 227,
+    "w": 379
+   },
+   {
+    "top": 111,
+    "bottom": 338,
+    "h": 227,
+    "w": 379
+   },
+   {
+    "top": 352,
+    "bottom": 579,
+    "h": 227,
+    "w": 379
+   },
+   {
+    "top": 352,
+    "bottom": 579,
+    "h": 227,
+    "w": 379
+   }
+  ],
+  "resting": true,
+  "status": {
+   "top": 34,
+   "bottom": 56,
+   "h": 22,
+   "w": 772
+  },
+  "statusAmber": true,
+  "header": {
+   "top": 0,
+   "bottom": 66,
+   "h": 66,
+   "w": 820
+  },
+  "nav": {
+   "top": 66,
+   "bottom": 111,
+   "h": 45,
+   "w": 820
+  },
+  "grid": {
+   "top": 111,
+   "bottom": 579,
+   "h": 468,
+   "w": 772
+  },
+  "cols": 2,
+  "pageH": 1180,
+  "footer": {
+   "top": 943,
+   "bottom": 1090,
+   "h": 148,
+   "w": 820
+  },
+  "live": {
+   "top": 965,
+   "bottom": 987,
+   "h": 22,
+   "w": 132
+  },
+  "thirdCardBottom": 579,
+  "fitsFirstScreen": true,
+  "exploreItems": [
+   "Observatory",
+   "Ready to process",
+   "Imaging nights",
+   "What each scope captured",
+   "Sky",
+   "Footprints",
+   "Coverage",
+   "Equipment",
+   "Data checks",
+   "Archive",
+   "Pipeline",
+   "Targets",
+   "Key"
+  ],
+  "layer2": {
+   "view": "view-unit",
+   "h2": "ZWO· on the 107PHQ",
+   "pageH": 2668,
+   "groups": [
+    "Ready to process29",
+    "Finish it11",
+    "Still capturing15",
+    "Done12"
+   ]
+  },
+  "layer3": {
+   "view": "view-project",
+   "h2": "107PHQ › Stephan's Quintet (NGC 7320)",
+   "crumb": "ZWO›Stephan's Quintet",
+   "pageH": 1180,
+   "secs": [
+    "Integration by filter · hours per night",
+    "Frames, calibration and processing",
+    "Sessions",
+    "Other scopes on this object",
+    "Files",
+    "Lanes and nights, every scope"
+   ]
+  },
+  "backTo": "view-unit",
+  "backTo2": "view-overview",
+  "find": [
+   "Andromeda Galaxy (M 31)"
+  ],
+  "findOpened": {
+   "view": "view-project",
+   "h2": "S30 Pro › Andromeda Galaxy (M 31)",
+   "chips": [
+    "FRA400",
+    "107PHQ",
+    "S50 Pro",
+    "S30 Pro"
+   ]
+  }
+ },
+ "desk1440": {
+  "gotoMs": 162,
+  "domInteractive": null,
+  "loadEnd": null,
+  "cards": [
+   {
+    "top": 111,
+    "bottom": 338,
+    "h": 227,
+    "w": 400
+   },
+   {
+    "top": 111,
+    "bottom": 338,
+    "h": 227,
+    "w": 400
+   },
+   {
+    "top": 111,
+    "bottom": 338,
+    "h": 227,
+    "w": 400
+   },
+   {
+    "top": 354,
+    "bottom": 581,
+    "h": 227,
+    "w": 400
+   }
+  ],
+  "resting": true,
+  "status": {
+   "top": 34,
+   "bottom": 56,
+   "h": 22,
+   "w": 1232
+  },
+  "statusAmber": true,
+  "header": {
+   "top": 0,
+   "bottom": 66,
+   "h": 66,
+   "w": 1440
+  },
+  "nav": {
+   "top": 66,
+   "bottom": 111,
+   "h": 45,
+   "w": 1440
+  },
+  "grid": {
+   "top": 111,
+   "bottom": 581,
+   "h": 470,
+   "w": 1232
+  },
+  "cols": 3,
+  "pageH": 1092,
+  "footer": {
+   "top": 945,
+   "bottom": 1092,
+   "h": 148,
+   "w": 1440
+  },
+  "live": {
+   "top": 967,
+   "bottom": 989,
+   "h": 22,
+   "w": 132
+  },
+  "thirdCardBottom": 338,
+  "fitsFirstScreen": true,
+  "exploreItems": [
+   "Observatory",
+   "Ready to process",
+   "Imaging nights",
+   "What each scope captured",
+   "Sky",
+   "Footprints",
+   "Coverage",
+   "Equipment",
+   "Data checks",
+   "Archive",
+   "Pipeline",
+   "Targets",
+   "Key"
+  ],
+  "layer2": {
+   "view": "view-unit",
+   "h2": "ZWO· on the 107PHQ",
+   "pageH": 2643,
+   "groups": [
+    "Ready to process29",
+    "Finish it11",
+    "Still capturing15",
+    "Done12"
+   ]
+  },
+  "layer3": {
+   "view": "view-project",
+   "h2": "107PHQ › Stephan's Quintet (NGC 7320)",
+   "crumb": "ZWO›Stephan's Quintet",
+   "pageH": 1083,
+   "secs": [
+    "Integration by filter · hours per night",
+    "Frames, calibration and processing",
+    "Sessions",
+    "Other scopes on this object",
+    "Files",
+    "Lanes and nights, every scope"
+   ]
+  },
+  "backTo": "view-unit",
+  "backTo2": "view-overview",
+  "find": [
+   "Andromeda Galaxy (M 31)"
+  ],
+  "findOpened": {
+   "view": "view-project",
+   "h2": "S30 Pro › Andromeda Galaxy (M 31)",
+   "chips": [
+    "FRA400",
+    "107PHQ",
+    "S50 Pro",
+    "S30 Pro"
+   ]
+  }
+ },
+ "status:fx-quiet": {
+  "text": "Everything's safe · records up to Fri 16 Oct",
+  "amber": false,
+  "cards": 4,
+  "undefinedInLanding": false,
+  "foot": "Built on the PC at 10:12 this morning, UK time · 11 h old · from the Mac's record of 13 Oct 07:40importer answering"
+ },
+ "status:fx-risk": {
+  "text": "1,204 frames only on the Mac · 87 files waiting on the ASIAir, last scan Fri 16 Oct · records up to Fri 16 Oct",
+  "amber": true,
+  "cards": 4,
+  "undefinedInLanding": false,
+  "foot": "Built on the PC at 10:12 this morning, UK time · 11 h old · from the Mac's record of 13 Oct 07:40importer answering"
+ },
+ "status:fx-stale": {
+  "text": "this record is 2 days old (the PC's copy) · records up to Fri 16 Oct",
+  "amber": true,
+  "cards": 4,
+  "undefinedInLanding": false,
+  "foot": "Built on the PC at 10:12 this morning, UK time · 11 h old · from the Mac's record of 13 Oct 07:40importer answering"
+ },
+ "status:fx-unchecked": {
+  "text": "Couldn't check data safety: the ledger is locked by an import · records up to Fri 16 Oct",
+  "amber": true,
+  "cards": 4,
+  "undefinedInLanding": false,
+  "foot": "Built on the PC at 10:12 this morning, UK time · 11 h old · from the Mac's record of 13 Oct 07:40importer answering"
+ },
+ "status:fx-old": {
+  "text": "87 files waiting on the ASIAir, last scan Fri 16 Oct · Couldn't check data safety: this record doesn't carry the safety facts · records up to Fri 16 Oct",
+  "amber": true,
+  "cards": 4,
+  "undefinedInLanding": false,
+  "foot": "Built on the PC at 10:12 this morning, UK time · 11 h old · from the Mac's record of 13 Oct 07:40importer answering"
+ },
+ "old:undefined": false,
+ "state:offline": "The importer isn't answering. Showing the build from 10:12 this morning.",
+ "state:rebuilding": {
+  "pill": "rebuilding…",
+  "busy": "true",
+  "cardsBusy": true
+ },
+ "state:nothingFound": "No dataset matches the filter.Clear the filter",
+ "state:findNone": "Nothing found for “zzzz”. Try a catalogue code (M 31) or part of the name.Clear",
+ "reducedMotion": {
+  "dur": "0ms",
+  "view": "view-unit",
+  "entering": false
+ },
+ "landscape": {
+  "cols": 2,
+  "order": [
+   "ZWO",
+   "S50 Pro",
+   "S30 Pro",
+   "Starfront S50 Pro"
+  ]
+ },
+ "frames": [
+  {
+   "w": 700,
+   "cols": 2
+  },
+  {
+   "w": 560,
+   "cols": 1
+  }
+ ]
+}

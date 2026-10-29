@@ -11,3 +11,4 @@
 0bc6f8ea381bfb6a73a2ec82643a4071e53cbbee72e2554d88a6638518704edf  targets.json   (1.7.3, 18 Oct 2026: five merges on Brett's word: NGC 1893 into IC 410, NGC 6910 into IC 1318, NGC 7822 / Ced 214 into Sh2-171, LDN 386 into M 16, the Squid into Sh2-129)
 10a7e46637053b4666c375f47b1c780bb98ba6ec0510a1012b87bb84fa6d8185  targets.json   (1.8.0, 25 Oct 2026: Observatory UX phase 1 — LDN 1373 and Barnard 144 given a type and constellation; the fourteen bare "Nebula" types made Emission nebula, and the Iris Reflection nebula)
 634a22eec6b9add089bc64dffdc34f71dde99a07a316ad79d677a4fe0699240f  targets.json   (1.8.0, 29 Oct 2026: M 103 (NGC 581), Neptune and Uranus added on Brett's word; 'Planet' is a new kind)
+ea1da489f470df0b2fdf25fb8d51fdefb03bdd6f27834c28ef09a4abdd438d39  scopes.json    (1.9.0, 29 Oct 2026: the card order of the UX plan, ZWO (FRA400, 107PHQ), S50 Pro, S30 Pro, S30, S50; one order everywhere)

@@ -1,5 +1,23 @@
 # Changelog
 
+## 1.9.0 (2026-10-29): scope first (Observatory UX plan, phase 2)
+
+Brett, 29 Oct: "I need the new design in there now." Phase 2 of his plan rebuilds the Observatory around the telescope: scope first, then project, then detail. The first screen answers "what is each scope doing, and what's ready?" without scrolling, on the desktop and at phone width.
+
+- **One status line** at the top, always there: "Everything's safe · records up to Fri 16 Oct" in quiet text, or amber when frames are only on this computer, files are still waiting on a camera ("87 files waiting on the ASIAir, last scan Fri 16 Oct"), the record shown is over 24 hours old, or the safety facts couldn't be read. The rest of the old header moved to the Archive view.
+- **One card per active scope**, in a fixed order: the ZWO camera (one card for both Askars, saying "on the FRA400" or "last on the FRA400"), the S50 Pro, the S30 Pro, then any other scope out in the last 30 nights. Each card: the current project with hours and nights (a second one smaller beneath), a 30-night activity strip in the scope's colour, one next step in words ("Still capturing · ready from Sat 31 Oct", "Next step: collect the lights (3 nights, 650 frames)", "Darks or flats missing" first when that is so), "{n} more ready to process", and a calm Done note when a picture was finished since the scope's last night out. Resting scopes fold into one row.
+- **Under the cards:** "Ready to process: n datasets · hours ›", Recent nights as a three-night strip that expands into the full ledger, and "This month: n projects moved forward · n finished".
+- **Tap a card** for the scope's projects (its current ones, then Ready / Finish it / Done rows, its Imaging nights, and "Also on disk: 59.9 h on the S30" when other scopes hold the object). **Tap a project** for its detail: "ZWO › Stephan's Quintet", the summary first, then integration by filter, hours per night, frames and calibration, the sessions table, the other scopes' data and the file paths one tap further; "Open files" goes to the panel's Archive view.
+- **Nothing lost:** every earlier view is one tap away under **Explore** (Ready to process, Imaging nights, What each scope captured, Sky, Footprints, Coverage, Equipment, Data checks, Archive, Pipeline, Targets). Find opens any project; one Filter control; the build time (UK time) and the "importer answering" dot sit in the footer. Brief transitions between layers, instant with reduced motion; one, two or three cards across by the page's own width.
+- **The panel:** the Dashboard tab is now **Ledger** (verdicts, discards, events); Space on this computer shows in the page's Data checks instead. The Observatory opens in its own browser tab as well as in the panel.
+- **The record** gains `units[]`, `nextAction`, `thisMonth`, `recordsUpTo`, `status`, `space` and `pendingImport.scope` (all additive; the iPhone app keeps reading it). The scope order in `contract/scopes.json` is now the card order: FRA400, 107PHQ, S50 Pro, S30 Pro, S30, S50, so legends, charts and cards agree.
+- Measured here: the landing paints in under 0.2 s; at 390 × 844 the status line and three cards fit the first screen (the page is 1,543 px tall, against 11,796 before); 1,092 px on the desktop (6,355 before). Screenshots at phone, iPad and desktop widths in `docs/ux-observatory-25oct/built/`.
+- Chain P2 in the engine suite, P2 panel and page blocks in the panel suite.
+
+Mac / Windows: the same on both. After updating: install as before on each computer, press Refresh now, and the new page is there; the PC's 03:30 build and the phone copy carry the new fields. Phase 3 (pictures on the cards, goals, park, the list behind "This month") waits for a week or two of use and Brett's notes.
+
+881 end-to-end checks (666 engine + 215 panel). On Linux here: engine 657 passed, 4 skipped, the five Mac/PC-only lines as before; panel 215 passed.
+
 ## 1.8.0 (2026-10-25): honest numbers (Observatory UX plan, phase 1)
 
 Brett's Observatory UX plan v2 of 25 Oct (`docs/ux-observatory-25oct/`, with the iPhone brief and the step-1 report) rebuilds the Observatory around the telescope: scope first, then project, then detail. Phase 1 fixes the numbers first, because the counts drive the overwhelm: 89 "ready" datasets included finished pictures the page could not match and test snaps of a few minutes.
