@@ -7525,6 +7525,7 @@ check("RB ten seestar_volume() calls within a second look at the volumes once; f
 # ── 16. long names and Windows' long paths ──────────────────────────────────
 _rb16 = probe(RB10.env,
     "cut = m.clean_target_name('A' * 100)\n"
+    "m.IS_WINDOWS = False\n"      # the 'off Windows' half, on every OS (the PC run of 1.8.0 hit this)
     "same = m._win_long('/tmp/' + 'y' * 300)\n"
     "m.IS_WINDOWS = True\n"
     "win = m._win_long('C:\\\\' + 'x' * 300 + '\\\\f.fit'); short = m._win_long('C:\\\\short\\\\f.fit')\n"
