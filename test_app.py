@@ -120,6 +120,24 @@ def wait_for(pred, timeout=60, step=0.3):
 
 PANEL_LOGS = []   # each panel's own output, printed when anything fails
 
+
+def node_script(node, js, **kw):
+    """Run a JavaScript program with node from a FILE in the session's test
+    root, never as `node -e <program>`: a Windows command line is capped at
+    about 32 KB, and the phase 2 page harness is bigger than that (the PC run
+    of 1.9.0 crashed with "The filename or extension is too long")."""
+    import tempfile
+    fd, path = tempfile.mkstemp(prefix="node-", suffix=".js", dir=os.environ.get("ASTRO_TEST_ROOT"))
+    with os.fdopen(fd, "w", encoding="utf-8") as f:
+        f.write(js)
+    try:
+        return subprocess.run([node, path], capture_output=True, text=True, **kw)
+    finally:
+        try:
+            os.unlink(path)
+        except OSError:
+            pass
+
 def start_panel(env, port):
     """Boot the real panel for `env`; its output goes to a log in the root."""
     log = os.path.join(env.root, "panel.log")
@@ -1574,7 +1592,7 @@ try:
                    f"process.stdout.write('\\n---\\n'+projectsHtml({{ok:false,why:'missing',command:'py -3 x'}}));\n"
                    f"process.stdout.write('\\n---\\n'+projectsHtml({json.dumps(fixture)}, {{scope:'Askar FRA400'}}));\n"
                    f"process.stdout.write('\\n---\\n'+projectsHtml({{ok:false,why:'unreadable'}}));\n")
-        r_html = subprocess.run([node, "-e", harness], capture_output=True, text=True, timeout=30)
+        r_html = node_script(node, harness, timeout=30)
         html, _, rest = r_html.stdout.partition("\n---\n")
         missing, _, rest = rest.partition("\n---\n")
         filtered, _, unreadable = rest.partition("\n---\n")
@@ -1958,7 +1976,7 @@ process.stdout.write(JSON.stringify(out));
         _hn_js = "\n".join(m_.group(0) for m_ in _hn_page_pieces) + _HN_HARNESS
 
         def _hn_run(record):
-            r_ = subprocess.run([_node, "-e", _hn_js], input=json.dumps(record), capture_output=True, text=True, timeout=30)
+            r_ = node_script(_node, _hn_js, input=json.dumps(record), timeout=30)
             if r_.returncode != 0:
                 return {"error": r_.stderr[-400:]}
             try:
@@ -1968,7 +1986,7 @@ process.stdout.write(JSON.stringify(out));
 
         def _hn_panel(pj):
             h_ = "let deskSel=null;\n" + "\n".join(m_.group(0) for m_ in _hn_panel_pieces) + f"\nprocess.stdout.write(projectsHtml({json.dumps(pj)}));\n"
-            r_ = subprocess.run([_node, "-e", h_], capture_output=True, text=True, timeout=30)
+            r_ = node_script(_node, h_, timeout=30)
             return r_.stdout if r_.returncode == 0 else "ERROR " + r_.stderr[-400:]
 
         _hn_fc = {"finalsUnmatched": [{"file": "Soul Nebula HOO.jpg", "folder": "ZWO Askar Scopes", "why": "no target named Soul in the importer's list"}],
@@ -2309,7 +2327,7 @@ process.stdout.write(JSON.stringify(out));
                   + "\n".join(m_.group(0) for m_ in _p2_pieces[2:]) + _P2_HARNESS)
 
         def _p2_run(record):
-            r_ = subprocess.run([_node, "-e", _p2_js], input=json.dumps(record), capture_output=True, text=True, timeout=30)
+            r_ = node_script(_node, _p2_js, input=json.dumps(record), timeout=30)
             if r_.returncode != 0:
                 return {"error": r_.stderr[-500:]}
             try:
@@ -2623,7 +2641,7 @@ try:
                  + "process.stdout.write('\\n---\\n'+pillFor({device:'asiair',new:0,elsewhere:3,importedHere:5,elsewhereMachine:'Mac'}));\n"
                  + "process.stdout.write('\\n---\\n'+pillFor({device:'asiair',new:0,elsewhere:3,elsewhereMachine:'Mac'}));\n"
                  + "process.stdout.write('\\n---\\n'+pillFor({device:'asiair',new:0,elsewhere:0,importedHere:5}));\n")
-        r_pr = subprocess.run([_nodep, "-e", _harp], capture_output=True, text=True, timeout=30)
+        r_pr = node_script(_nodep, _harp, timeout=30)
         _outp = r_pr.stdout.split("\n---\n")
         check("PR projectsHtml takes the sides it is given (rendered as the PC: 'on this PC (per its ledger) and on "
               "the Mac'); the ASIAir pill splits what each computer holds, and reads as before when the engine "
