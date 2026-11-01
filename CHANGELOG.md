@@ -13,10 +13,11 @@ Brett, 29 Oct: "I need the new design in there now." Phase 2 of his plan rebuild
 - **The record** gains `units[]`, `nextAction`, `thisMonth`, `recordsUpTo`, `status`, `space` and `pendingImport.scope` (all additive; the iPhone app keeps reading it). The scope order in `contract/scopes.json` is now the card order: FRA400, 107PHQ, S50 Pro, S30 Pro, S30, S50, so legends, charts and cards agree.
 - Measured here: the landing paints in under 0.2 s; at 390 × 844 the status line and three cards fit the first screen (the page is 1,543 px tall, against 11,796 before); 1,092 px on the desktop (6,355 before). Screenshots at phone, iPad and desktop widths in `docs/ux-observatory-25oct/built/`.
 - Chain P2 in the engine suite, P2 panel and page blocks in the panel suite.
+- 1 Nov, after the Mac install: a browser that closes the connection while the 390 KB page is on its way (a reload mid-page) no longer prints two tracebacks in the panel's log; the handler lets the client go quietly. A test-only fix for the PC: node programs run from a file, not the command line (Windows caps it at 32 KB).
 
 Mac / Windows: the same on both. After updating: install as before on each computer, press Refresh now, and the new page is there; the PC's 03:30 build and the phone copy carry the new fields. Phase 3 (pictures on the cards, goals, park, the list behind "This month") waits for a week or two of use and Brett's notes.
 
-881 end-to-end checks (666 engine + 215 panel). On Linux here: engine 657 passed, 4 skipped, the five Mac/PC-only lines as before; panel 215 passed.
+882 end-to-end checks (666 engine + 216 panel). On Linux here: engine 657 passed, 4 skipped, the five Mac/PC-only lines as before; panel 216 passed.
 
 ## 1.8.0 (2026-10-25): honest numbers (Observatory UX plan, phase 1)
 

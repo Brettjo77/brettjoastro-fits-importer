@@ -14,6 +14,7 @@ import os
 import re
 import shutil
 import socket
+import struct
 import subprocess
 import threading
 import time
@@ -2425,6 +2426,36 @@ process.stdout.write(JSON.stringify(out));
               json.dumps([_d3.get("error"), _d4.get("error"), _d3.get("cards"), _d3.get("status"), [c["id"] for c in _d4.get("cards", [])], _d4.get("next")])[:1200])
     else:
         skip("P2 page: the phase 2 pure layer in node (needs node and the marked regions)")
+    # ── P2 panel (1 Nov): a browser that drops the connection mid-reply ─────────
+    # The Mac's panel printed two tracebacks on 1 Nov 2026 when Safari closed the
+    # socket while the 390 KB Observatory page was on its way (BrokenPipeError,
+    # then again from the error page). Loopback buffers here swallow a real
+    # drop, so the handler's send is driven in-process with a socket file that
+    # breaks: it must let the client go quietly and mark the connection closed.
+    _bp_mod = globals().get("panel")
+    if _bp_mod is None:
+        skip("P2 panel: a client that drops the connection mid-reply is let go quietly (the in-process panel module is not loaded)")
+    else:
+        class _BrokenPipe:
+            def write(self, b):
+                raise BrokenPipeError(32, "Broken pipe")
+            def flush(self):
+                pass
+        _bh = _bp_mod.Handler.__new__(_bp_mod.Handler)
+        _bh.request_version = "HTTP/1.1"; _bh.command = "GET"; _bh.path = "/observatory"
+        _bh.requestline = "GET /observatory HTTP/1.1"
+        _bh.client_address = ("127.0.0.1", 1); _bh.close_connection = False
+        _bh.wfile = _BrokenPipe(); _bh.headers = {}
+        try:
+            _bh._html("<p>page</p>", frame_self=True)
+            _bh._json({"ok": True})
+            _bp_ok, _bp_why = _bh.close_connection is True, "closed"
+        except Exception as e_:
+            _bp_ok, _bp_why = False, f"{type(e_).__name__}: {e_}"
+        check("P2 panel: a client that closes the connection while a page or a JSON reply is being sent is let go "
+              "quietly (BrokenPipeError / ConnectionResetError never reach the server's handler, which would print "
+              "a traceback), and the handler marks the connection closed",
+              _bp_ok, _bp_why)
 finally:
     procn.terminate()
     procn.wait(timeout=30)

@@ -1309,23 +1309,27 @@ class Handler(BaseHTTPRequestHandler):
         self.send_header("X-Content-Type-Options", "nosniff")
         self.send_header("Cache-Control", "no-store")
 
+    def _send(self, body, ctype, code, frame_self=False):
+        """Headers and body in one go. A browser that closed the connection
+        while the reply was on its way (a reload mid-page; the Observatory is
+        390 KB from 1.9.0) is not an error: the traceback it used to print on
+        the Mac on 1 Nov 2026, twice, because the error page could not be
+        sent either, is now nothing at all."""
+        try:
+            self.send_response(code)
+            self._security_headers(frame_self)
+            self.send_header("Content-Type", ctype)
+            self.send_header("Content-Length", str(len(body)))
+            self.end_headers()
+            self.wfile.write(body)
+        except (BrokenPipeError, ConnectionResetError):
+            self.close_connection = True          # the client went away: nothing to tell anyone
+
     def _json(self, obj, code=200):
-        body = json.dumps(obj).encode()
-        self.send_response(code)
-        self._security_headers()
-        self.send_header("Content-Type", "application/json")
-        self.send_header("Content-Length", str(len(body)))
-        self.end_headers()
-        self.wfile.write(body)
+        self._send(json.dumps(obj).encode(), "application/json", code)
 
     def _html(self, text, code=200, frame_self=False):
-        body = text.encode()
-        self.send_response(code)
-        self._security_headers(frame_self)
-        self.send_header("Content-Type", "text/html; charset=utf-8")
-        self.send_header("Content-Length", str(len(body)))
-        self.end_headers()
-        self.wfile.write(body)
+        self._send(text.encode(), "text/html; charset=utf-8", code, frame_self)
 
     def _read_body(self):
         """A JSON object, or None for anything malformed or oversized (V8)."""
