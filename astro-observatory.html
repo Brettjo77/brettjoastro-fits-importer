@@ -886,6 +886,18 @@ main{padding-top:var(--s4)}
 .ucard .next{display:flex;gap:7px;align-items:flex-start;font-size:var(--fs-md);line-height:1.35;color:var(--ink)}
 .ucard .next svg{width:14px;height:14px;flex:none;margin-top:2px;color:var(--ink2)}
 .ucard .next.cal svg{color:var(--attn-glyph)}
+/* Starfront (phase 1): the site chip on a card and a layer head, the hours-against-target rows, the flag chips, the storage meter, the nights strip */
+.ucard .uh .site,.layerhead h2 .site{display:inline-flex;align-items:center;height:20px;padding:0 8px;border-radius:var(--r-pill);border:1px solid var(--line);color:var(--ink2);font:var(--fw-semi) var(--fs-xs)/1 var(--sans);letter-spacing:.04em;text-transform:uppercase;white-space:nowrap}
+.sfrows{display:flex;flex-direction:column;gap:10px}
+.sfrow{display:flex;flex-direction:column;gap:6px;width:100%;text-align:left;background:var(--card);border:1px solid var(--line);border-radius:12px;padding:10px 14px;color:var(--ink);cursor:pointer;font:inherit}
+.sfrow:hover{background:var(--card2)} .sfrow:focus-visible{outline:2px solid var(--focus);outline-offset:2px}
+.sfrow .top{display:flex;align-items:baseline;gap:6px 12px;flex-wrap:wrap} .sfrow .top .t{font-weight:var(--fw-semi);font-size:var(--fs-md)} .sfrow .top .lab{margin-left:auto;font-variant-numeric:tabular-nums;color:var(--ink2);font-size:var(--fs-md)}
+.sfbar{height:10px;background:var(--track);border-radius:5px;overflow:hidden;max-width:100%;min-width:40px} .sfbar i{display:block;height:100%;border-radius:5px}
+.sfrow .m{display:flex;align-items:center;gap:6px 10px;flex-wrap:wrap;font-size:var(--fs-sm);color:var(--muted)} .sfrow .m .flags{display:inline-flex;gap:6px;flex-wrap:wrap}
+.chip.flag{height:auto;padding:2px 8px;border:1px solid var(--attn-line);background:var(--attn-wash);color:var(--attn-ink);cursor:default} .statebox .flags{display:inline-flex;gap:6px;flex-wrap:wrap;align-items:center}
+.sfmeter{height:12px;background:var(--track);border-radius:6px;overflow:hidden;margin:8px 0 4px} .sfmeter i{display:block;height:100%;background:var(--st-live-ink)} .sfmeter.full i{background:var(--attn-glyph)}
+.sfsum{grid-template-columns:max-content minmax(0,1fr);max-width:none;gap:var(--s2) var(--s4)} .sfsum .k{color:var(--muted)} .sfsum .v{text-align:left;font-weight:var(--fw-regular);color:var(--ink)}
+.sfstrip svg{width:100%;height:44px;display:block;margin:4px 0 8px} .sfwarn{color:var(--attn-glyph)} .sfblock{margin-top:var(--section-gap)} .sfblock h3 .k{font:inherit}
 .ucard .more,.ucard .done{font-size:var(--fs-sm);color:var(--muted);line-height:1.35}
 .ucard .done{display:flex;gap:6px;align-items:center;color:var(--ink2)} .ucard .done svg{width:13px;height:13px;color:var(--st-live-ink)}
 .ucard .done b{color:var(--ink);font-weight:var(--fw-semi)}
@@ -918,8 +930,8 @@ details.fold .fbody .card{border:0;box-shadow:none;padding:0;background:none}
 .rn3 .r .d{font-weight:var(--fw-semi);color:var(--ink);white-space:nowrap}
 .rn3 .r .o{min-width:0;overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
 .rn3 .r .o .dot{width:8px;height:8px;margin-right:4px;vertical-align:1px}
-.landing .notefold{font-size:var(--fs-sm);color:var(--muted);padding:0 4px;display:flex;gap:8px;align-items:flex-start;line-height:1.4}
-.landing .notefold svg{width:14px;height:14px;flex:none;margin-top:2px;color:var(--attn-glyph)}
+.landing .notefold,.sfnote{font-size:var(--fs-sm);color:var(--muted);padding:0 4px;display:flex;gap:8px;align-items:flex-start;line-height:1.4}
+.landing .notefold svg,.sfnote svg{width:14px;height:14px;flex:none;margin-top:2px;color:var(--attn-glyph)}
 .landing .emptyline{padding:16px;border:1px dashed var(--line);border-radius:var(--r-md);color:var(--muted);font-size:var(--fs-base)}
 .nothing{display:flex;gap:10px;align-items:center;flex-wrap:wrap;padding:14px;border:1px dashed var(--line);border-radius:var(--r-md);color:var(--muted);font-size:var(--fs-base)}
 @media (max-width:700px){ main{padding-top:10px;padding-bottom:var(--s5)} .landing{gap:10px} .ucards .grid{gap:10px} .ucard{padding:10px 12px;padding-left:calc(12px + var(--accent-bar));gap:4px} .ucard .cur .t{font-size:15px} .ucard .strip30,.ucard .strip30 svg{height:18px} .uline{font-size:var(--fs-md)} }
@@ -1072,7 +1084,9 @@ const DEFAULTS = {targets:[],sessions:[],scopes:[],events:[],health:[],reconcili
   /* phase 1 (25 Oct, honest numbers): absent in an older record, so every reader degrades quietly */
   stateCounts:null,stateHours:null,rules:{},finalsUnmatched:[],finalsAmbiguous:[],statesKeptFrom:null,
   /* phase 2 (29 Oct, scope first; PHASE2-CONTRACT.md): the cards' units, the status line's facts, this month, the newest night */
-  units:[],thisMonth:null,recordsUpTo:null,status:null,space:null};
+  units:[],thisMonth:null,recordsUpTo:null,status:null,space:null,
+  /* Starfront (phase 1, 6 Nov 2026, docs/starfront/DESIGN.md): the remote Seestar's scan; absent until the PC has scanned */
+  starfront:null};
 function normalise(d){
   /* a dataset from another engine version may lack a key: fill the gaps once, so no tab goes blank */
   if(!d||typeof d!=="object") d={};
@@ -1094,11 +1108,12 @@ function normalise(d){
   if(typeof d.rules!=="object"||d.rules===null) d.rules={}; if(typeof d.stateCounts!=="object") d.stateCounts=null; if(typeof d.stateHours!=="object") d.stateHours=null;
   /* phase 2: units (the cards), the status line's facts, this month, the newest night; each absent in a 1.8.0 record */
   d.units=Array.isArray(d.units)?d.units.filter(u=>u&&typeof u==="object"&&(u.id||u.label||u.name)):[];
-  for(const u of d.units){ u.id=String(u.id||u.label||u.name); u.label=String(u.label||u.short||u.id); u.scopes=Array.isArray(u.scopes)?u.scopes.map(String):[]; u.scopeIds=Array.isArray(u.scopeIds)?u.scopeIds.map(String):[]; u.current=Array.isArray(u.current)?u.current.filter(x=>x&&typeof x==="object"):[]; u.strip=Array.isArray(u.strip)?u.strip.filter(x=>x&&x.night):[]; u.moreReady=+u.moreReady||0; u.moreReadyHours=+u.moreReadyHours||0; u.active=u.active!==false; u.latestDone=(u.latestDone&&typeof u.latestDone==="object")?u.latestDone:null; u.onScope=typeof u.onScope==="string"?u.onScope:null; u.lastOut=typeof u.lastOut==="string"?u.lastOut.slice(0,10):null; }
+  for(const u of d.units){ u.id=String(u.id||u.label||u.name); u.label=String(u.label||u.short||u.id); u.scopes=Array.isArray(u.scopes)?u.scopes.map(String):[]; u.scopeIds=Array.isArray(u.scopeIds)?u.scopeIds.map(String):[]; u.current=Array.isArray(u.current)?u.current.filter(x=>x&&typeof x==="object"):[]; u.strip=Array.isArray(u.strip)?u.strip.filter(x=>x&&x.night):[]; u.moreReady=+u.moreReady||0; u.moreReadyHours=+u.moreReadyHours||0; u.active=u.active!==false; u.latestDone=(u.latestDone&&typeof u.latestDone==="object")?u.latestDone:null; u.onScope=typeof u.onScope==="string"?u.onScope:null; u.lastOut=typeof u.lastOut==="string"?u.lastOut.slice(0,10):null; u.site=(typeof u.site==="string"&&u.site.trim())?u.site.trim():null; }
   d.status=(d.status&&typeof d.status==="object")?d.status:null;
   d.thisMonth=(d.thisMonth&&typeof d.thisMonth==="object")?d.thisMonth:null;
   d.recordsUpTo=(typeof d.recordsUpTo==="string"&&d.recordsUpTo)?d.recordsUpTo.slice(0,10):null;
   d.space=(d.space&&typeof d.space==="object")?d.space:null;
+  d.starfront=(d.starfront&&typeof d.starfront==="object"&&!Array.isArray(d.starfront))?d.starfront:null;
   if(d.pendingImport&&typeof d.pendingImport.scope!=="string") d.pendingImport.scope=null;
   return d;
 }
@@ -1128,7 +1143,7 @@ const cardKey=c=>(c.sample&&c.state!=="processing"&&c.state!=="complete")?"sampl
 
 /* ---------- scopes: colour and order from the engine only ---------- */
 let SC=[], BY={}, TG=[], byName={}, SESS=[], nightly=new Map(), CARDS=[], PROGS=[], MAXSES=1, totalHours=0;
-const shortName=cam=>String(cam).replace(/^(Seestar|Askar)\s+/,"").replace(/^Starfront S50 Pro$/,"Starfront");
+const shortName=cam=>String(cam).replace(/^ZWO\s+(?=Seestar)/,"").replace(/^(Seestar|Askar)\s+/,"").replace(/^Starfront S50 Pro$/,"Starfront").replace(/^(.*\S)\s*\(Starfront\)$/,"$1 · Starfront");
 function derive(){
   const order=D.scopeOrder||[];
   SC=D.scopes.filter(s=>s&&s.camera).map(s=>({...s,short:shortName(s.camera),hours:+s.hours||0,frames:+s.frames||0,nights:+s.nights||0,
@@ -1294,7 +1309,7 @@ function unitsOf(){ return D.units.length?D.units.map(normUnit):deriveUnits(); }
 function normUnit(u){
   const cams=u.scopes.filter(c=>BY[c]).concat(u.scopes.filter(c=>!BY[c])); const on=u.onScope&&u.scopes.includes(u.onScope)?u.onScope:(u.onScope||cams[0]||null);
   return {id:u.id,label:u.label,name:String(u.name||u.label),kind:u.kind||(cams.some(isAskarCam)?"askar":"seestar"),cams,short:String(u.short||u.label),colour:u.colour||col(on||cams[0]),
-    onScope:on,onScopeCurrent:u.onScopeCurrent!==false,active:u.active!==false,lastOut:u.lastOut,
+    onScope:on,onScopeCurrent:u.onScopeCurrent!==false,active:u.active!==false,lastOut:u.lastOut,site:u.site||null,
     current:u.current.map(resolveSummary).filter(Boolean).slice(0,2),moreReady:u.moreReady,moreReadyHours:u.moreReadyHours,
     strip:u.strip.map(x=>({night:String(x.night).slice(0,10),hours:+x.hours||0})),latestDone:u.latestDone?resolveSummary(u.latestDone):null,fromEngine:true};
 }
@@ -1302,7 +1317,7 @@ function deriveUnits(){
   const out=[]; let zwo=null;
   for(const s of SC){
     if(s.kind==="askar"){ if(!zwo){ zwo={id:"ZWO",label:"ZWO",name:"ZWO camera",kind:"askar",cams:[],short:"ZWO"}; out.push(zwo); } zwo.cams.push(s.camera); continue; }
-    out.push({id:s.id||s.camera,label:s.short,name:s.camera,kind:"seestar",cams:[s.camera],short:s.short});
+    out.push({id:s.id||s.camera,label:s.short,name:s.camera,kind:"seestar",cams:[s.camera],short:s.short,site:(typeof s.site==="string"&&s.site)?s.site:null});
   }
   for(const u of out){
     const cams=new Set(u.cams); const ss=SESS.filter(z=>cams.has(z.camera)).slice().sort((a,b)=>a.night.localeCompare(b.night)||a.hours-b.hours);
@@ -1324,7 +1339,7 @@ function onScopeTxt(u){ if(u.kind!=="askar"||!u.onScope) return ""; return (u.on
 function cardModel(u){
   const cur=u.current.map(p=>({tid:p.tid,target:p.target,camera:p.camera,hours:p.hours,lights:p.lights,nights:p.nights,lastNight:p.lastNight,state:stKey(p),hoursTxt:hoursTxt(p.hours,p.lights),nightsTxt:nts(p.nights||0),scope:u.kind==="askar"?scopeWord(p.camera):""}));
   const first=u.current[0]||null; const next=first?nextActionTxt(first):""; const d=u.latestDone;
-  return {id:u.id,label:u.label,name:u.name,colour:u.colour,tag:u.short,kind:u.kind,cams:u.cams,active:u.active,lastOut:u.lastOut,onScope:u.onScope,onTxt:onScopeTxt(u),
+  return {id:u.id,label:u.label,name:u.name,colour:u.colour,tag:u.short,kind:u.kind,cams:u.cams,active:u.active,lastOut:u.lastOut,onScope:u.onScope,onTxt:onScopeTxt(u),site:siteChipTxt(u),
     title:u.label+(onScopeTxt(u)?" · "+onScopeTxt(u):""),current:cur,next,nextCal:hasCalMissing(first),
     more:u.moreReady>0?fmtI(u.moreReady)+" more ready to process"+(u.moreReadyHours>0?" · "+fmtH(u.moreReadyHours):""):"",
     done:d?"Done · "+commonName(d.target)+(d.finalDate?" · final of "+fmtDate(d.finalDate):""):"",doneTid:d?d.tid:null,
@@ -1375,6 +1390,7 @@ function exploreItems(){
     {id:"ready",label:"Ready to process",holds:"What to do next: Ready to process · Finish it · Still capturing, all scopes",count:t.counts.ready_to_process},
     {id:"nights",label:"Imaging nights",holds:"Nights: the calendar heatmap, one cell per night"},
     {id:"scopes",label:"What each scope captured",holds:"the scope chart with the moon row · What each scope shot · Projects that moved lately"},
+    ...(SF()?[{id:"starfront",label:"Starfront",holds:"the remote Seestar in Texas: hours against target per project, cumulative hours, nights, storage, the tunnel and the roof"}]:[]),
     {id:"sky",label:"Sky",holds:"Sky coverage: every target at its catalogue position (J2000)"},
     {id:"footprints",label:"Footprints",holds:"approximate fields of view, to scale"},
     {id:"coverage",label:"Coverage",holds:"every target against every scope"},
@@ -1415,6 +1431,88 @@ function projectModel(t,cam){
     hours:p.hours,hoursTxt:hoursTxt(p.hours,p.lights),frames:p.lights,nights:p.nights||new Set(ss.map(z=>z.night)).size,first,last,filters,perNight,others,
     masters:p.mastersNamed,finals:p.finalsNamed,finalDate:p.finalDate,newFrames:newFramesNote(p),cal:calMissingOf(p),path:p.path||"",rel:p.rel||"",folder:p.folder||"",mosaic:!!p.mosaic,evidence:p.evidence||"",chips:progs.map(x=>x.camera)};
 }
+/* ==== Starfront pure layer (phase 1, 6 Nov 2026, docs/starfront/DESIGN.md "The record"): the remote Seestar's scan, read
+   only. D.starfront is absent until the PC has scanned; everything here returns null or "" then, and nothing throws. The
+   nights are the site's (America/Chicago); hours and dates use the page's own formats (§9.1). No DOM. ==== */
+const SF_ID="S50P-STARFRONT";
+const SF_STATUS={collecting:{key:"capturing",word:"Collecting"},ready:{key:"ready_to_process",word:"Ready to pull"},pulling:{key:"in_progress",word:"Pulling"},"pulled-awaiting-clear":{key:"in_progress",word:"Pulled, awaiting clear"},cleared:{key:"done",word:"Cleared"}};
+const SF_FLAGS={"site-mismatch":{word:"site mismatch",why:"the header's SITELAT/SITELONG is over 0.1 degrees from Starfront"},"clock-mismatch":{word:"clock mismatch",why:"DATE-OBS and the filename stamp disagree by over 5 minutes"},"mixed-settings":{word:"mixed settings",why:"exposure, gain or filter changed within the project"},"pointing-moved":{word:"pointing moved",why:"RA/Dec moved over about 10 arcmin between nights"},"unknown-name":{word:"unknown name",why:"the contract doesn't know this target name; kept as it is"}};
+const SF_PAL=["#5cc9de","#eda100","#e05a5a","#3cb554","#cc79a7","#9aa0bd"];
+const sfFlag=k=>({key:String(k),word:(SF_FLAGS[k]||{}).word||String(k).replace(/-/g," "),why:(SF_FLAGS[k]||{}).why||""});
+const sfStatus=s=>SF_STATUS[s]||{key:"capturing",word:String(s||"collecting")};
+const sfColour=k=>k==="ready_to_process"?"var(--st-action-bg)":k==="in_progress"?"var(--st-work-bg)":k==="done"?"var(--st-quiet-line)":"var(--st-live-ink)";
+let SF_CACHE=null, SF_SRC=null;
+function SF(){
+  const s=D.starfront; if(!s||typeof s!=="object") return null; if(SF_SRC===s&&SF_CACHE) return SF_CACHE;
+  const num=(v,d)=>Number.isFinite(+v)&&v!==null&&v!==""?+v:(d===undefined?0:d), nn=v=>(v==null||v===""||!Number.isFinite(+v))?null:+v, str=v=>typeof v==="string"?v.trim():"", iso=v=>(typeof v==="string"&&v.trim())?v.trim():null, day=v=>{ const x=iso(v); return x?x.slice(0,10):null; }, obj=v=>(v&&typeof v==="object"&&!Array.isArray(v))?v:{}, arr=v=>Array.isArray(v)?v:[];
+  const projects=arr(s.projects).filter(p=>p&&typeof p==="object").map((p,i)=>{
+    const hours=num(p.hours), target=num(p.targetHours,20)>0?num(p.targetHours,20):20;
+    const nights=arr(p.nights).filter(n=>n&&typeof n==="object"&&n.night).map(n=>({night:String(n.night).slice(0,10),hours:num(n.hours),subs:num(n.subs)})).sort((a,b)=>a.night.localeCompare(b.night));
+    const st=sfStatus(str(p.status)||"collecting"); const e=obj(p.eta); const eta=(p.eta&&(Number.isFinite(+e.nights)||e.date))?{nights:Math.max(0,Math.round(+e.nights||0)),date:day(e.date)}:null;
+    const pct=Number.isFinite(+p.percent)&&p.percent!==null?Math.round(+p.percent):Math.round(hours/target*100);
+    const name=str(p.name)||str(p.target)||"?";
+    return {name,tid:str(p.tid)||name,target:str(p.target)||name,codes:arr(p.codes).map(String),mosaic:p.mosaic===true,hours,subs:num(p.subs),stacks:num(p.stacks),gb:num(p.gb),targetHours:target,percent:pct,eta,
+      status:str(p.status)||"collecting",stKey:st.key,stateWord:st.word,flags:arr(p.flags).map(sfFlag),nights,byFilter:obj(p.byFilter),byGain:obj(p.byGain),
+      firstNight:day(p.firstNight)||(nights.length?nights[0].night:null),lastNight:day(p.lastNight)||(nights.length?nights[nights.length-1].night:null),notifiedReadyAt:iso(p.notifiedReadyAt),colour:SF_PAL[i%SF_PAL.length]};
+  });
+  const sto=obj(s.storage), tu=obj(s.tunnel), ro=obj(s.roof), dl=obj(s.darklibrary);
+  SF_SRC=s; SF_CACHE={camera:str(s.camera)||"ZWO Seestar S50 Pro (Starfront)",site:str(s.site)||"Starfront",timezone:str(s.timezone)||"America/Chicago",scannedAt:iso(s.scannedAt),scanAge:nn(s.scanAge),paused:s.paused===true,clock:str(s.clock),
+    tunnel:s.tunnel?{up:tu.up===true,lastOk:iso(tu.lastOk),mode:str(tu.mode),hold:tu.hold===true}:null,
+    roof:s.roof?{state:str(ro.state)||"unknown",since:iso(ro.since),readAt:iso(ro.readAt)}:null,
+    storage:s.storage?{usedGb:nn(sto.usedGb),freeGb:nn(sto.freeGb),totalGb:nn(sto.totalGb),gbPerNight:nn(sto.gbPerNight),fullInNights:nn(sto.fullInNights),pullNow:sto.pullNow===true}:null,
+    projects:orderDatasets(projects),
+    nightsLog:arr(s.nightsLog).filter(n=>n&&typeof n==="object"&&n.night).map(n=>({night:String(n.night).slice(0,10),darkHours:nn(n.darkHours),roofOpenHours:nn(n.roofOpenHours),capturedHours:nn(n.capturedHours)})).sort((a,b)=>a.night.localeCompare(b.night)),
+    darklibrary:s.darklibrary?{files:num(dl.files),gb:nn(dl.gb),newestMtime:iso(dl.newestMtime)}:null};
+  return SF_CACHE;
+}
+/* GB as the record gives them (numbers of GB, not bytes); a time as "Fri 6 Nov 14:10" from the ISO string as written */
+const sfGb=g=>{ g=+g||0; return g>=1024?(g/1024).toLocaleString("en-GB",{maximumFractionDigits:2})+" TB":g.toLocaleString("en-GB",{maximumFractionDigits:g>=100?0:1})+" GB"; };
+const sfWhen=iso=>{ if(!iso) return "?"; const s=String(iso); const t=(s.length>=16&&s[10]==="T")?s.slice(11,16):""; return fmtDate(s.slice(0,10))+(t?" "+t:""); };
+const sfAge=h=>{ h=+h||0; return h<1?Math.max(1,Math.round(h*60))+" min":ageWords(h); };
+const sfTargetTxt=h=>Number.isInteger(+h)?String(+h):r1(h).toLocaleString("en-GB",{minimumFractionDigits:1,maximumFractionDigits:1});
+const sfHoursOf=p=>(p.hours>0&&p.hours<MIN_H)?fmtH(p.hours):fmtHn(p.hours);
+/* "14.1 of 20 h · 61 %" */
+const sfHoursLine=p=>sfHoursOf(p)+" of "+sfTargetTxt(p.targetHours)+" h · "+p.percent+" %";
+/* "about 3 nights, Tue 10 Nov"; a collecting project with no data in the window has no ETA */
+function sfEtaTxt(p){ if(p.eta){ if(p.eta.nights<=0) return "ready now"; return "about "+plural(p.eta.nights,"night")+(p.eta.date?", "+fmtDate(p.eta.date):""); } return p.status==="collecting"?"no ETA: nothing new in the last 14 nights":""; }
+/* the card's next action, as the engine words it on the unit (DESIGN "The record") */
+function sfNextAction(p){ const h=sfHoursOf(p)+" of "+sfTargetTxt(p.targetHours)+" h"; if(p.status==="collecting") return "Collecting · "+h+(p.eta?" · ready in about "+plural(p.eta.nights,"night"):""); if(p.status==="ready") return "Ready to pull · "+h; return p.stateWord+" · "+h; }
+const sfFlagsTxt=p=>p.flags.map(f=>f.word).join(", ");
+function sfCumulative(p){ let c=0; return p.nights.map(n=>({night:n.night,hours:n.hours,subs:n.subs,cum:(c+=n.hours)})); }
+/* the nights: the log's rows (dark and roof-open hours when the watch has them) joined with the projects' nights */
+function sfNights(sf,limit){ const by=new Map(); for(const l of sf.nightsLog) by.set(l.night,{night:l.night,dark:l.darkHours,roof:l.roofOpenHours,captured:l.capturedHours,fromProjects:0,projects:[]});
+  for(const p of sf.projects) for(const n of p.nights){ let r=by.get(n.night); if(!r){ r={night:n.night,dark:null,roof:null,captured:null,fromProjects:0,projects:[]}; by.set(n.night,r); } r.fromProjects+=n.hours; if(!r.projects.includes(p.name)) r.projects.push(p.name); }
+  for(const r of by.values()){ if(r.captured==null) r.captured=r.fromProjects; }
+  const all=[...by.values()].sort((a,b)=>a.night.localeCompare(b.night)); return limit?all.slice(-limit):all; }
+const sfNightTxt=r=>fmtDate(r.night)+" · "+(r.captured>0?fmtH(r.captured)+" captured":"nothing captured")+(r.dark!=null?" · dark "+fmtH(r.dark):"")+(r.roof!=null?" · roof open "+fmtH(r.roof):"")+(r.projects.length?" · "+r.projects.join(", "):"");
+const sfLastScanTxt=sf=>sf.scannedAt?"last scan "+sfWhen(sf.scannedAt)+(sf.scanAge!=null?", "+sfAge(sf.scanAge)+" ago":""):"no scan yet";
+function sfStorageModel(sf){ const s=sf.storage; if(!s) return null; const used=s.usedGb, free=s.freeGb, total=s.totalGb!=null?s.totalGb:(used!=null&&free!=null?used+free:null); const pct=(total>0&&used!=null)?Math.max(0,Math.min(100,Math.round(used/total*100))):null;
+  const fullTxt=s.fullInNights!=null?"full in about "+plural(Math.max(0,Math.round(s.fullInNights)),"night"):(s.gbPerNight>0?"":"no nights with data yet, so no forecast");
+  const parts=[used!=null?sfGb(used)+" used":"",free!=null?sfGb(free)+" free"+(total!=null?" of "+sfGb(total):""):"",s.gbPerNight!=null?sfGb(s.gbPerNight)+" a night":"",fullTxt].filter(Boolean);
+  return {used,free,total,pct,pullNow:s.pullNow,fullTxt,line:parts.join(" · "),warn:s.pullNow?"Pull soon: the scope is "+(fullTxt||"filling up")+(s.freeGb!=null?" ("+sfGb(s.freeGb)+" free)":""):""}; }
+/* the status lines: the tunnel, the roof, pausing, the clock note, the dark library, the camera */
+function sfStatusLines(sf){ const out=[]; const t=sf.tunnel;
+  if(t) out.push({k:"Tunnel",v:(t.up?"up":"down")+(t.lastOk?" · last OK "+sfWhen(t.lastOk):"")+(t.mode?" · "+t.mode:"")+(t.hold?" · on hold (starfront-vpn-hold)":""),warn:!t.up||t.hold}); else out.push({k:"Tunnel",v:"not checked",warn:true});
+  const r=sf.roof; if(r) out.push({k:"Roof",v:(r.state||"unknown")+(r.since?" since "+sfWhen(r.since):"")+(r.readAt?" · read "+sfWhen(r.readAt):""),warn:r.state==="unknown"}); else out.push({k:"Roof",v:"not read",warn:true});
+  out.push({k:"Scanning",v:sf.paused?"paused (starfront-pause in the state folder)":"on, every 2 hours from the PC",warn:sf.paused});
+  if(sf.clock) out.push({k:"Clock",v:sf.clock==="filename, unconfirmed"?"filename clock, unconfirmed":sf.clock,warn:/unconfirmed/i.test(sf.clock)});
+  const d=sf.darklibrary; if(d) out.push({k:"Dark library",v:plural(d.files,"file")+(d.gb!=null?" · "+sfGb(d.gb):"")+(d.newestMtime?" · newest "+sfWhen(d.newestMtime):""),warn:false});
+  out.push({k:"Camera",v:[sf.camera,sf.site,sf.timezone].filter(Boolean).join(" · "),warn:false}); return out; }
+/* the tables behind "view as table" */
+const sfBarsTable=sf=>sf.projects.map(p=>[p.target,p.stateWord,fmtH(p.hours),sfTargetTxt(p.targetHours)+" h",p.percent+" %",sfEtaTxt(p)||"·",sfFlagsTxt(p)||"·"]);
+function sfCumTable(sf){ const nights=[...new Set(sf.projects.flatMap(p=>p.nights.map(n=>n.night)))].sort(); const cums=sf.projects.map(p=>{ const m=new Map(sfCumulative(p).map(x=>[x.night,x.cum])); let last=0; return nights.map(n=>{ if(m.has(n)) last=m.get(n); return last; }); });
+  return {head:["Night",...sf.projects.map(p=>p.name)],rows:nights.map((n,i)=>[fmtDate(n),...cums.map(c=>c[i]>0?fmtH(c[i]):"·")])}; }
+/* the unit: the engine's S50P-STARFRONT card, or any unit on the Starfront site or camera */
+const sfUnit=u=>{ const sf=SF(); if(!sf||!u) return false; return u.id===SF_ID||(!!u.site&&u.site===sf.site)||(!!sf.camera&&(u.cams||[]).includes(sf.camera)); };
+const sfProject=tid=>{ const sf=SF(); if(!sf||!tid) return null; tid=String(tid).replace(/^starfront:/,""); return sf.projects.find(p=>p.tid===tid)||sf.projects.find(p=>p.name===tid||p.target===tid)||null; };
+const sfUnitRows=u=>sfUnit(u)?SF().projects:[];
+/* layer 3 from the scan: when the project is only on the scope (no target in the record), or the target is in the record on other
+   scopes only and the layer is opened on the Starfront camera; once pulled rows exist on that camera the ordinary layer takes over */
+function sfLayerFor(tid,cam){ const sf=SF(); if(!sf) return null; const sp=sfProject(tid); if(!sp) return null; const t=TG.find(x=>x.id===tid)||byName[tid]||null; if(!t) return sp; if(t.programmes.some(p=>p.camera===sf.camera)) return null; return (cam&&cam!==sf.camera&&t.programmes.some(p=>p.camera===cam))?null:sp; }
+function sfUnitSub(sf){ const hrs=sumH(sf.projects.map(p=>p.hours)), subs=sf.projects.reduce((a,p)=>a+p.subs,0), nights=sfNights(sf).filter(r=>r.captured>0).length, first=sf.projects.map(p=>p.firstNight).filter(Boolean).sort()[0], last=sf.projects.map(p=>p.lastNight).filter(Boolean).sort().pop();
+  return fmtH(hrs)+" on the scope · "+plural(subs,"sub")+" · "+nts(nights)+(first?" · on the sky "+fmtDate(first)+" to "+fmtDate(last):"")+" · "+sfLastScanTxt(sf); }
+const siteChipTxt=u=>(u&&u.site&&!String(u.label||"").includes(u.site))?u.site:"";
+/* ==== end of the Starfront pure layer ==== */
 /* ==== end of the phase 2 pure layer ==== */
 /* percentages by largest remainder, so they add to 100 */
 function pctLR(vals){ const tot=vals.reduce((a,b)=>a+b,0); if(tot<=0) return vals.map(()=>0); const raw=vals.map(v=>v/tot*100), fl=raw.map(Math.floor); let rem=100-fl.reduce((a,b)=>a+b,0); const idx=raw.map((v,i)=>[v-fl[i],i]).sort((a,b)=>b[0]-a[0]); for(let k=0;k<rem;k++) fl[idx[k%idx.length][1]]++; return fl; }
@@ -1699,7 +1797,7 @@ function refreshWatch(s){ if(!REFRESH.at) return; if(s&&s.rebuilding){ REFRESH.s
    a tap, never listed), then every view of the 1.8.0 page behind Explore. The old tablist and View select stay in the
    DOM, hidden, so go() and the roving focus keep working; the Explore menu is the visible switcher. */
 const VIEWS=[["overview","Observatory"],["unit","Scope",{layer:true}],["project","Project",{layer:true}],
-  ["ready","Ready to process"],["nights","Imaging nights"],["scopes","What each scope captured"],["sky","Sky"],["footprints","Footprints"],["coverage","Coverage"],["equipment","Equipment"],["health","Data checks"],["archive","Archive"],["pipeline","Pipeline"],["targets","Targets"]];
+  ["ready","Ready to process"],["nights","Imaging nights"],["scopes","What each scope captured"],["sky","Sky"],["footprints","Footprints"],["coverage","Coverage"],["equipment","Equipment"],["health","Data checks"],["archive","Archive"],["pipeline","Pipeline"],["targets","Targets"],["starfront","Starfront"]];
 const LAYER_VIEWS=new Set(["unit","project"]);
 const RENDER={};
 const tabsNav=$("tabs"), mainEl=$("main"), viewSel=$("viewsel");
@@ -1745,9 +1843,11 @@ function go(id,instant,dir){
 addEventListener("resize",placeInk);
 
 /* ---------- the layers' context: which unit, which project, where you came from ---------- */
-const LAYER={unit:null,tid:null,cam:null,from:"overview",ok(id){ if(id==="unit") return !!(this.unit&&unitsOf().some(u=>u.id===this.unit)); if(id==="project") return !!(this.tid&&TG.some(t=>t.id===this.tid)); return true; }};
+const LAYER={unit:null,tid:null,cam:null,from:"overview",ok(id){ if(id==="unit") return !!(this.unit&&unitsOf().some(u=>u.id===this.unit)); if(id==="project") return !!(this.tid&&(TG.some(t=>t.id===this.tid)||sfProject(this.tid))); return true; }};
 function openUnit(uid,cam,opts){ opts=opts||{}; const u=unitsOf().find(x=>x.id===uid)||(cam?unitForCam(cam):null); if(!u) return; LAYER.unit=u.id; LAYER.cam=cam||u.onScope||u.cams[0]; LAYER.from=opts.from||(current==="project"?"overview":current||"overview"); painted.unit=false; go("unit",!!opts.instant,opts.back?"back":"fwd"); }
-function openProjectLayer(tid,cam,opts){ opts=opts||{}; const t=TG.find(x=>x.id===tid)||byName[tid]; if(!t) return; const anchor=cam&&t.programmes.some(p=>p.camera===cam)?cam:anchorScope(t); LAYER.tid=t.id; LAYER.cam=anchor; const u=unitForCam(anchor); if(u) LAYER.unit=u.id; LAYER.from=opts.from||current||"overview"; painted.project=false; go("project",!!opts.instant,"fwd"); }
+function openProjectLayer(tid,cam,opts){ opts=opts||{}; const t=TG.find(x=>x.id===tid)||byName[tid];
+  const sp=sfLayerFor(tid,cam); if(!t||sp){ /* a Starfront project the scan knows and the ledger doesn't yet on that camera (nothing pulled): layer 3 from the scan's facts */ if(!sp) return; const sf=SF(); LAYER.tid=sp.tid; LAYER.cam=cam||sf.camera||null; const u=(cam&&unitForCam(cam))||unitsOf().find(sfUnit)||null; if(u) LAYER.unit=u.id; LAYER.from=opts.from||current||"overview"; painted.project=false; go("project",!!opts.instant,"fwd"); return; }
+  const anchor=cam&&t.programmes.some(p=>p.camera===cam)?cam:anchorScope(t); LAYER.tid=t.id; LAYER.cam=anchor; const u=unitForCam(anchor); if(u) LAYER.unit=u.id; LAYER.from=opts.from||current||"overview"; painted.project=false; go("project",!!opts.instant,"fwd"); }
 function backFrom(id){ if(id==="project"&&LAYER.unit&&LAYER.from!=="find"&&LAYER.from!=="overview"&&LAYER.from!=="unit"){ go(LAYER.from,false,"back"); return; } if(id==="project"&&LAYER.unit){ painted.unit=false; go("unit",false,"back"); return; } go(LAYER.from&&!LAYER_VIEWS.has(LAYER.from)&&RENDER[LAYER.from]?LAYER.from:"overview",false,"back"); }
 
 /* ---------- the bar: Explore (one control holding every view), Find, Filter ---------- */
@@ -2552,7 +2652,7 @@ function strip30(m){
 }
 function unitCard(m){
   const c=el("article","ucard"); c.style.setProperty("--sc",m.colour); c.tabIndex=0; c.setAttribute("role","button"); c.dataset.unit=m.id; c.setAttribute("aria-label",m.title+": open this scope's projects");
-  const h=el("div","uh"); h.append(camDot(m.onScope||(m.current[0]&&m.current[0].camera)||m.name)); h.append(el("span","nm",m.label)); if(m.onTxt) h.append(el("span","on","· "+m.onTxt)); const tag=el("span","tag",m.tag); tag.title=m.name; h.append(tag); const ch=glyph("right"); ch.classList.add("chev"); h.append(ch); c.append(h);
+  const h=el("div","uh"); h.append(camDot(m.onScope||(m.current[0]&&m.current[0].camera)||m.name)); h.append(el("span","nm",m.label)); if(m.onTxt) h.append(el("span","on","· "+m.onTxt)); if(m.site){ const st=el("span","site",m.site); st.title="Site: "+m.site; h.append(st); } const tag=el("span","tag",m.tag); tag.title=m.name; h.append(tag); const ch=glyph("right"); ch.classList.add("chev"); h.append(ch); c.append(h);
   if(m.current.length){ m.current.forEach((p,i)=>{ const b=el("button","cur"+(i?" second":"")); b.type="button"; b.append(nameEl(p.target,"t")); const hn=el("div","hn"); hn.append(el("b",null,p.hoursTxt),el("span",null,p.nightsTxt)); if(p.scope) hn.append(el("span","sc","on the "+p.scope)); if(!i&&p.lastNight) hn.append(el("span","sc","last "+fmtDate(p.lastNight))); b.append(hn); b.title="Open the project: "+p.target; b.addEventListener("click",e=>{ e.stopPropagation(); openProjectLayer(p.tid,p.camera,{from:"overview"}); }); c.append(b); }); }
   else c.append(el("div","empty",m.empty));
   const s=el("div","strip30"); s.append(strip30(m)); c.append(s);
@@ -2598,7 +2698,8 @@ RENDER.unit=function(root){
   const head=el("div","layerhead"); const h2=el("h2"); h2.append(camDot(u.onScope||u.cams[0]),document.createTextNode(u.label)); if(m.onTxt) h2.append(el("span","on","· "+m.onTxt)); head.append(h2);
   const tools=el("div","tools"); const fb=el("button","btn","Filter"+(filterOn()?" · on":"")); fb.addEventListener("click",()=>togglePop("filterPop","filterBtn")); tools.append(fb); head.append(tools);
   const scs=u.cams.map(c=>BY[c]).filter(Boolean); const hrs=sumH(scs.map(s=>s.hours)), fr=scs.reduce((a,s)=>a+s.frames,0), nights=new Set(SESS.filter(z=>u.cams.includes(z.camera)).map(z=>z.night)).size; const first=scs.map(s=>s.first).filter(Boolean).sort()[0], last=scs.map(s=>s.last).filter(Boolean).sort().pop();
-  head.append(el("div","sub",(askar?u.cams.map(short).join(" and ")+" · ":"")+fmtH(hrs)+" · "+plural(fr,"frame")+" · "+nts(nights)+(first?" · on the sky "+fmtDate(first)+" to "+fmtDate(last):"")+(u.active?"":" · resting: nothing in the last "+WINDOW()+" nights"))); root.append(head);
+  const sfu=sfUnit(u), sfOnly=sfu&&!SESS.some(z=>u.cams.includes(z.camera)); if(u.site){ const st=el("span","site",u.site); st.title="Site: "+u.site; h2.append(st); }
+  head.append(el("div","sub",sfu&&!SESS.some(z=>u.cams.includes(z.camera))?sfUnitSub(SF()):(askar?u.cams.map(short).join(" and ")+" · ":"")+fmtH(hrs)+" · "+plural(fr,"frame")+" · "+nts(nights)+(first?" · on the sky "+fmtDate(first)+" to "+fmtDate(last):"")+(u.active?"":" · resting: nothing in the last "+WINDOW()+" nights"))); root.append(head);
   /* the one or two current projects: object, hours, nights, last night; hours and nights in place of a ring (no goals yet) */
   if(u.current.length){ const g=el("div","curgrid"); for(const p of u.current){ const t=p.t||byName[p.target]; const c=el("button","curcard"); c.type="button"; c.style.setProperty("--sc",col(p.camera)); const eb=el("div","eyebrow"); if(askar){ const s=el("span","scn"); s.append(camDot(p.camera),document.createTextNode(short(p.camera))); eb.append(s); } eb.append(pill(stKey(p))); c.append(eb); c.append(nameEl(p.target,"t"));
       const nums=el("div","nums"); [[hoursTxt(p.hours,p.lights),"integration"],[fmtI(p.nights||0),"nights"],[p.lastNight?fmtDate(p.lastNight):"?","last night"]].forEach(([v,l])=>{ const n=el("div","n"); n.append(el("b",null,v),el("span",null,l)); nums.append(n); }); c.append(nums);
@@ -2607,12 +2708,14 @@ RENDER.unit=function(root){
       c.addEventListener("click",()=>openProjectLayer(p.tid,p.camera,{from:"unit"})); g.append(c); } root.append(g); }
   else root.append(el("div","emptyline",m.empty));
   /* the other datasets, in short rows: Ready to process · Finish it · Still capturing · Done (3 each, then Show all) */
+  if(sfu) root.append(sfProjectsBlock(u));
   const rows=unitRows(u,FILTER); const box=el("div"); root.append(box);
   groupRows(box,"ready_to_process",rows.ready,askar); groupRows(box,"in_progress",rows.finish,askar); groupRows(box,"capturing",rows.capturing,askar); groupRows(box,"done",rows.done,askar);
-  if(!rows.total&&!u.current.length){ box.append(filterOn()?nothingFound("Nothing on this scope matches the filter."):el("p","sub","No other datasets on this scope.")); }
+  if(!rows.total&&!u.current.length&&!sfu){ box.append(filterOn()?nothingFound("Nothing on this scope matches the filter."):el("p","sub","No other datasets on this scope.")); }
   else if(!rows.total&&filterOn()) box.append(nothingFound("No other dataset on this scope matches the filter."));
   if(rows.samples.length) box.append(samplesGroup(rows.samples.length,rows.samples.map(p=>rowFor(p,askar)),"under "+RULES().sampleMinutes+" minutes of integration, or flagged by you as a quick look"));
   /* this unit's Imaging nights: the Nights heatmap drawn for its scopes only */
+  if(sfOnly) return;   /* the Starfront unit before anything is pulled: no sessions, so no heatmap and no timeline (its nights are on the Starfront view) */
   const hm=el("details","sec"); hm.open=mode()!=="phone"; const hs=el("summary"); hs.append(document.createTextNode("Imaging nights"),el("span","sub",nts(nights)+" on this scope"),plusGlyph()); hm.append(hs); const hb=el("div","sbody"); hm.append(hb); let drawn=false; const drawHm=()=>{ if(drawn||!hm.open) return; drawn=true; heatmapInto(hb,new Set(u.cams),"hours",{compact:true}); }; hm.addEventListener("toggle",drawHm); root.append(hm); if(hm.open) nextFrame(drawHm);
   /* the scope's timeline of projects (Brett, 13 Oct): one panel per scope of the unit, as it was */
   const tl=el("details","sec"); const ts=el("summary"); ts.append(document.createTextNode("Timeline of its projects"),el("span","sub","one row per object, a dot per night"),plusGlyph()); tl.append(ts); const tb=el("div","sbody"); tl.append(tb); let built=false;
@@ -2627,7 +2730,7 @@ function nightBars(perNight,colour){ const W=Math.max(480,perNight.length*14), H
   return svg; }
 function sec(title,sub,build,open){ const d=el("details","sec"); if(open) d.open=true; const s=el("summary"); s.append(document.createTextNode(title)); if(sub) s.append(el("span","sub",sub)); s.append(plusGlyph()); d.append(s); const b=el("div","sbody"); d.append(b); let done=false; const run=()=>{ if(done||!d.open) return; done=true; build(b); fitAll(true); }; d.addEventListener("toggle",run); if(open) nextFrame(run); return d; }
 RENDER.project=function(root){
-  const t=TG.find(x=>x.id===LAYER.tid); const pm=t?projectModel(t,LAYER.cam):null; if(!pm){ root.append(el("p","sub","This project isn't in the record any more.")); return; }
+  const t=TG.find(x=>x.id===LAYER.tid); const sfp=sfLayerFor(LAYER.tid,LAYER.cam); if(sfp){ renderSfProject(root,sfp,t); return; } const pm=t?projectModel(t,LAYER.cam):null; if(!pm){ root.append(el("p","sub","This project isn't in the record any more.")); return; }
   const u=pm.unit; LAYER.cam=pm.camera; const sw=scopeWord(pm.camera);
   root.append(crumb(u?u.label:"Observatory",()=>backFrom("project"),commonName(pm.target)));
   const head=el("div","layerhead"); const h2=el("h2"); h2.append(camDot(pm.camera),document.createTextNode(sw+" › ")); h2.append(nameEl(pm.target,"","span")); head.append(h2);
@@ -2652,6 +2755,74 @@ RENDER.project=function(root){
   root.append(sec("Files","",box=>{ const p=t.programmes.find(x=>x.camera===pm.camera); const d=el("div","paths"); d.append(el("div",null,"Folder: "),el("b",null,pm.path||pm.folder||"not on the archive yet")); if(pm.rel) d.append(el("div",null,"On the archive: "),el("b",null,pm.rel)); if(p&&p.bytes) d.append(el("div",null,"Size of the lights: "),el("b",null,fmtGB(p.bytes))); if(p&&p.panels&&p.panels.length) d.append(el("div",null,"Mosaic panels: "),el("b",null,p.panels.join(", "))); box.append(d); box.append(el("p","sub","Frame-by-frame detail is in the panel's Archive view (Open files above); long lists load 200 rows at a time.")); },false));
   root.append(sec("Lanes and nights, every scope","the project panel: one lane per scope, the three marks, the Day rows",box=>{ const pp=projectPanelFor(t,{slot:"layerproj"}); pp.classList.add("auto","open"); pp.style.height="auto"; const cl=pp.querySelector(".ph .tools .btn:last-child"); if(cl) cl.remove(); box.append(pp); nextFrame(()=>{ if(pp.fit) pp.fit(); }); },false));
 };
+/* ---------- Starfront (phase 1): the Explore view, the unit's scan block, the project layer from the scan ---------- */
+function sfPillOf(p){ return pill(p.stKey,{text:p.stateWord}); }
+function sfFlagChips(p){ const w=el("span","flags"); for(const f of p.flags){ const c=el("span","chip flag",f.word); c.title=f.why||f.key; w.append(c); } return w; }
+/* (a) hours against target, one row per project: the bar's track is the target (to scale across projects), the fill the hours, the colour the status */
+function sfProjectRow(sf,p,maxTarget,opts){ opts=opts||{}; const b=el("button","sfrow"); b.type="button"; b.style.setProperty("--sc",sfColour(p.stKey)); const top=el("div","top"); top.append(nameEl(p.target,"t","span"),el("span","lab",sfHoursLine(p))); b.append(top);
+  const bar=el("div","sfbar"); bar.style.width=Math.round(100*Math.min(1,p.targetHours/Math.max(0.1,maxTarget)))+"%"; const fill=el("i"); fill.style.width=Math.round(100*Math.min(1,p.hours/p.targetHours))+"%"; fill.style.background=sfColour(p.stKey); bar.append(fill); bar.title=sfHoursLine(p); b.append(bar);
+  const m=el("div","m"); m.append(sfPillOf(p)); const eta=sfEtaTxt(p); if(eta) m.append(el("span",null,(p.eta?"ETA ":"")+eta)); if(opts.nights!==false) m.append(el("span",null,nts(p.nights.length)+(p.lastNight?" · last "+fmtDate(p.lastNight):""))); if(p.flags.length) m.append(sfFlagChips(p)); b.append(m);
+  b.title="Open the project: "+p.target; b.addEventListener("click",()=>openProjectLayer(p.tid,sf.camera,{from:opts.from||"starfront"})); return b; }
+function sfBarsCard(sf){ const card=el("div","card reveal"); const head=el("div","cardhead"); const hh=el("div"); hh.append(el("h2",null,"Hours against target"),el("div","sub",plural(sf.projects.length,"project")+" on the scope · the bar is the target, to scale; the fill the hours; the colour the status")); head.append(hh);
+  const btn=el("button","btn","view as table"); btn.setAttribute("aria-pressed","false"); head.append(btn); card.append(head); const body=el("div"); card.append(body); let modeC="chart";
+  const paint=()=>{ body.replaceChildren(); if(modeC==="table"){ const w=el("div","tablewrap"); simpleTable(w,["Project","Status","Hours","Target","Of target","ETA","Flags"],sfBarsTable(sf),[2,3,4]); body.append(w); btn.textContent="view as chart"; btn.setAttribute("aria-pressed","true"); return; }
+    btn.textContent="view as table"; btn.setAttribute("aria-pressed","false"); if(!sf.projects.length){ body.append(el("p","sub","No projects on the scope.")); return; } const rows=el("div","sfrows"); const maxT=Math.max(...sf.projects.map(p=>p.targetHours)); for(const p of sf.projects) rows.append(sfProjectRow(sf,p,maxT)); body.append(rows);
+    body.append(legendRow([{label:"collecting",fill:sfColour("capturing")},{label:"ready to pull",fill:sfColour("ready_to_process")},{label:"pulling",fill:sfColour("in_progress")}])); };
+  btn.addEventListener("click",()=>{ modeC=modeC==="chart"?"table":"chart"; paint(); }); paint(); return card; }
+/* (b) cumulative hours over nights: one hand-built line per project, its target as a faint line, the ETA as a hollow point */
+function sfCumChart(sf,projects,W){ projects=projects||sf.projects; W=Math.max(360,W||720); const H=220,padL=44,padR=18,padT=14,padB=30; const nights=[...new Set(projects.flatMap(p=>p.nights.map(n=>n.night).concat(p.eta&&p.eta.date?[p.eta.date]:[])))].sort(); if(!nights.length) return el("p","sub","No nights yet.");
+  const n0=nights[0], span=Math.max(1,nightIdx(nights[nights.length-1],n0)); const x=night=>padL+(W-padL-padR)*nightIdx(night,n0)/span; const maxY=Math.max(1,...projects.map(p=>p.targetHours),...projects.flatMap(p=>sfCumulative(p).map(c=>c.cum)))*1.08; const y=h=>padT+(H-padT-padB)*(1-h/maxY);
+  const svg=svgEl("svg",{viewBox:"0 0 "+W+" "+H,width:W,height:H,role:"img","aria-label":"Cumulative hours per project over nights, with each target and ETA"}); svg.style.maxWidth="100%";
+  const topT=Math.max(...projects.map(p=>p.targetHours)); for(const t of [0,Math.round(topT/2),Math.round(topT)]){ const l=svgEl("line",{class:"baseline",x1:padL,x2:W-padR,y1:y(t).toFixed(1),y2:y(t).toFixed(1)}); if(t) l.setAttribute("stroke-dasharray","2 4"); svg.append(l); const tx=svgEl("text",{class:"axis",x:padL-6,y:(y(t)+4).toFixed(1),"text-anchor":"end"}); tx.textContent=t+" h"; svg.append(tx); }
+  projects.forEach((p,i)=>{ const c=p.colour||SF_PAL[i%SF_PAL.length]; const pts=sfCumulative(p); const tl=svgEl("line",{x1:padL,x2:W-padR,y1:y(p.targetHours).toFixed(1),y2:y(p.targetHours).toFixed(1),stroke:c,"stroke-opacity":"0.35","stroke-dasharray":"6 4","stroke-width":"1"}); const tt=svgEl("title"); tt.textContent=p.name+" · target "+sfTargetTxt(p.targetHours)+" h"; tl.append(tt); svg.append(tl);
+    if(pts.length){ const d=pts.map((q,k)=>(k?"L":"M")+x(q.night).toFixed(1)+" "+y(q.cum).toFixed(1)).join(" "); svg.append(svgEl("path",{d,fill:"none",stroke:c,"stroke-width":"2.2","stroke-linejoin":"round","stroke-linecap":"round"})); for(const q of pts){ const dot=svgEl("circle",{cx:x(q.night).toFixed(1),cy:y(q.cum).toFixed(1),r:3,fill:c}); const ti=svgEl("title"); ti.textContent=p.name+" · "+fmtDate(q.night)+" · "+fmtH(q.cum)+" so far ("+fmtH(q.hours)+" that night)"; dot.append(ti); svg.append(dot); } }
+    if(p.eta&&p.eta.date){ const last=pts.length?pts[pts.length-1]:null; if(last) svg.append(svgEl("line",{x1:x(last.night).toFixed(1),y1:y(last.cum).toFixed(1),x2:x(p.eta.date).toFixed(1),y2:y(p.targetHours).toFixed(1),stroke:c,"stroke-opacity":"0.5","stroke-dasharray":"3 3","stroke-width":"1.2"})); const e=svgEl("circle",{cx:x(p.eta.date).toFixed(1),cy:y(p.targetHours).toFixed(1),r:4.5,fill:"var(--card)",stroke:c,"stroke-width":"2"}); const ti=svgEl("title"); ti.textContent=p.name+" · ETA "+sfEtaTxt(p); e.append(ti); svg.append(e); } });
+  for(const [k,anchor] of [[0,"start"],[nights.length-1,"end"]]){ const tx=svgEl("text",{class:"axis",x:x(nights[k]).toFixed(1),y:H-8,"text-anchor":anchor}); tx.textContent=fmtDS(nights[k]); svg.append(tx); }
+  return svg; }
+function sfCumCard(sf){ const card=el("div","card reveal"); const head=el("div","cardhead"); const hh=el("div"); hh.append(el("h2",null,"Cumulative hours over nights"),el("div","sub","one line per project · the faint dashed line is its target · the hollow point its ETA")); head.append(hh);
+  const btn=el("button","btn","view as table"); btn.setAttribute("aria-pressed","false"); head.append(btn); card.append(head); const body=el("div"); card.append(body); let modeC="chart";
+  const paint=()=>{ body.replaceChildren(); if(modeC==="table"){ const t=sfCumTable(sf); const w=el("div","tablewrap"); simpleTable(w,t.head,t.rows,t.head.map((_,i)=>i).slice(1)); body.append(w); btn.textContent="view as chart"; btn.setAttribute("aria-pressed","true"); return; }
+    btn.textContent="view as table"; btn.setAttribute("aria-pressed","false"); body.append(sfCumChart(sf,null,body.clientWidth||720)); body.append(legendRow(sf.projects.map(p=>({label:p.name+" · "+sfHoursLine(p),fill:p.colour})))); };
+  btn.addEventListener("click",()=>{ modeC=modeC==="chart"?"table":"chart"; paint(); }); paint(); const fitter=()=>{ if(!card.isConnected){ FITTERS.delete(fitter); return; } if(modeC==="chart") paint(); }; FITTERS.add(fitter); return card; }
+/* (c) the nights strip: the last 30 nights at the site; the cell's shade is the roof-open share of the dark hours, the bar the hours captured */
+function sfNightsStrip(sf){ const rows=sfNights(sf); const N=30, W=600, H=44; const end=rows.length?rows[rows.length-1].night:(sf.scannedAt?sf.scannedAt.slice(0,10):ASOF()); const by=new Map(rows.map(r=>[r.night,r])); const max=Math.max(0.1,...rows.map(r=>r.captured||0)); const cw=W/N;
+  const svg=svgEl("svg",{viewBox:"0 0 "+W+" "+H,role:"img","aria-label":"The last "+N+" nights at Starfront: hours captured, with the roof-open share of the dark hours"}); svg.setAttribute("preserveAspectRatio","none");
+  for(let k=N-1;k>=0;k--){ const night=nightAdd(end,-k), i=N-1-k, r=by.get(night), x=i*cw+1, w=Math.max(1.5,cw-2); const roofShare=(r&&r.dark>0&&r.roof!=null)?Math.min(1,r.roof/r.dark):null;
+    const cell=svgEl("rect",{x:x.toFixed(1),y:0,width:w.toFixed(1),height:H,rx:2,fill:"var(--track)","fill-opacity":roofShare==null?"0.25":(0.25+0.6*roofShare).toFixed(2)}); const ti=svgEl("title"); ti.textContent=r?sfNightTxt(r):fmtDate(night)+" · no data"; cell.append(ti); svg.append(cell);
+    if(r&&r.captured>0){ const bh=4+(H-6)*Math.sqrt(Math.min(1,r.captured/max)); const bar=svgEl("rect",{x:(x+1).toFixed(1),y:(H-bh).toFixed(1),width:Math.max(1,w-2).toFixed(1),height:bh.toFixed(1),rx:1.5,fill:"var(--st-live-ink)"}); const t2=svgEl("title"); t2.textContent=sfNightTxt(r); bar.append(t2); svg.append(bar); } }
+  return svg; }
+function sfNightsCard(sf){ const card=el("div","card reveal"); const rows=sfNights(sf); const hh=el("div"); hh.append(el("h2",null,"Nights at the site"),el("div","sub",nts(rows.filter(r=>r.captured>0).length)+" with data · "+sfLastScanTxt(sf)+" · nights are America/Chicago, named by their evening")); const head=el("div","cardhead"); head.append(hh); card.append(head);
+  const strip=el("div","sfstrip"); strip.append(sfNightsStrip(sf)); card.append(strip); card.append(legendRow([{label:"hours captured",fill:"var(--st-live-ink)"},{label:"roof open (share of the dark hours)",fill:"var(--track)"}]));
+  const d=el("details","sec"); const s=el("summary"); s.append(document.createTextNode("Night by night"),el("span","sub","newest first"),plusGlyph()); d.append(s); const b=el("div","sbody"); d.append(b); let done=false; d.addEventListener("toggle",()=>{ if(done||!d.open) return; done=true; const w=el("div","tablewrap"); simpleTable(w,["Night","Captured","Dark","Roof open","Projects"],rows.slice().reverse().map(r=>[fmtDate(r.night),r.captured>0?fmtH(r.captured):"·",r.dark!=null?fmtH(r.dark):"·",r.roof!=null?fmtH(r.roof):"·",r.projects.join(", ")||"·"]),[1,2,3]); b.append(w); }); card.append(d); return card; }
+/* (d) storage on the scope */
+function sfStorageCard(sf){ const card=el("div","card reveal"); const m=sfStorageModel(sf); const hh=el("div"); hh.append(el("h2",null,"Storage on the scope"),el("div","sub",m?m.line:"not read by the scan")); const head=el("div","cardhead"); head.append(hh); card.append(head);
+  if(m&&m.pct!=null){ const meter=el("div","sfmeter"+(m.pullNow?" full":"")); meter.setAttribute("role","img"); meter.setAttribute("aria-label",m.pct+" % used"); const f=el("i"); f.style.width=m.pct+"%"; meter.append(f); card.append(meter); card.append(el("div","sub",m.pct+" % used")); }
+  if(m&&m.warn){ const n=el("div","sfnote"); n.append(glyph("warn")); n.append(el("span",null,m.warn)); card.append(n); } return card; }
+/* (e) the status lines */
+function sfStatusCard(sf){ const card=el("div","card reveal"); card.append(el("h2",null,"Tunnel, roof and the scan")); const ul=el("div","sum sfsum"); ul.style.marginTop="12px"; for(const l of sfStatusLines(sf)){ ul.append(el("div","k",l.k)); const v=el("div","v"+(l.warn?" sfwarn":""),l.v); ul.append(v); } card.append(ul);
+  card.append(el("p","sub prose","Phase 1 is read only: the PC lists the share, reads headers and the roof file, and writes nothing on the Seestar. Pull and clear come later.")); return card; }
+RENDER.starfront=function(root){
+  const sf=SF(); if(!sf){ root.append(el("p","sub","No Starfront scan yet. Once the PC has run its Starfront scan and rebuilt the record, this view shows the remote Seestar's projects, nights, storage, tunnel and roof.")); return; }
+  const head=el("div","layerhead"); const h2=el("h2"); h2.append(camDot(sf.camera),document.createTextNode("Starfront")); const st=el("span","site",sf.site); st.title="Site: "+sf.site; h2.append(st); head.append(h2); head.append(el("div","sub",sf.camera+" · "+sfLastScanTxt(sf)+(sf.paused?" · scans paused":"")+(sf.tunnel&&!sf.tunnel.up?" · tunnel down":""))); root.append(head);
+  root.append(sfBarsCard(sf)); root.append(sfCumCard(sf)); root.append(sfNightsCard(sf)); root.append(sfStorageCard(sf)); root.append(sfStatusCard(sf));
+};
+/* layer 2, the Starfront unit: the scan's projects (object, hours of target, ETA, flags) while the ledger has no rows for them */
+function sfProjectsBlock(u){ const sf=SF(); const g=el("div","grp3 sfblock"); const h=el("h3"); h.append(el("span","k","On the scope, from the scan"),el("span","count",String(sf.projects.length))); g.append(h); if(!sf.projects.length){ g.append(el("p","sub","The scan found no projects on the scope.")); return g; }
+  const rows=el("div","sfrows"); const maxT=Math.max(...sf.projects.map(p=>p.targetHours)); for(const p of sf.projects) rows.append(sfProjectRow(sf,p,maxT,{from:"unit"})); g.append(rows); g.append(el("p","sub",sfLastScanTxt(sf)+" · nothing pulled yet, so the ledger has no rows for these")); return g; }
+/* layer 3, a Starfront project from the scan's facts: hours, subs, stacks, the nights, by filter, by gain, the flags */
+function renderSfProject(root,p,t){ const sf=SF(); const u=unitsOf().find(sfUnit)||null; LAYER.cam=sf.camera;
+  root.append(crumb(u?u.label:"Starfront",()=>backFrom("project"),commonName(p.target)));
+  const head=el("div","layerhead"); const h2=el("h2"); h2.append(camDot(sf.camera),document.createTextNode("Starfront › ")); h2.append(nameEl(p.target,"","span")); head.append(h2);
+  head.append(el("div","sub","From the Starfront scan ("+sfLastScanTxt(sf)+") · nothing pulled yet, so this project has no sessions in the record"+(p.mosaic?" · mosaic":""))); root.append(head);
+  /* the same object on the home scopes: chips to its ordinary layer, and the "Also on disk" line */
+  const others=t?scopeOrder(t.programmes.filter(x=>x.camera!==sf.camera)):[]; if(others.length){ const ch=el("div","scopechips"); ch.append(el("span",null,"On "+plural(others.length+1,"scope")+":")); const me=el("button","chip"); me.append(camDot(sf.camera),document.createTextNode(short(sf.camera))); me.setAttribute("aria-pressed","true"); ch.append(me); for(const x of others){ const b=el("button","chip"); b.append(camDot(x.camera),document.createTextNode(short(x.camera))); b.setAttribute("aria-pressed","false"); b.addEventListener("click",()=>{ LAYER.cam=x.camera; root.replaceChildren(); RENDER.project(root); fitAll(true); }); ch.append(b); } root.append(ch); const also=alsoOnDisk(t,[sf.camera]); if(also) root.append(el("p","sub",also)); }
+  const sb=el("div","statebox"); sb.append(sfPillOf(p)); const w=el("div","w"); w.append(el("b",null,sfNextAction(p))); const eta=sfEtaTxt(p); if(eta) w.append(document.createTextNode(" · "+(p.eta?"ETA ":"")+eta)); sb.append(w); if(p.flags.length) sb.append(sfFlagChips(p)); root.append(sb);
+  const summ=el("div","summ"); [[fmtH(p.hours),"on the scope",plural(p.subs,"sub")],[sfTargetTxt(p.targetHours)+" h","target",p.percent+" % there"],[fmtI(p.nights.length),"nights",""],[fmtI(p.stacks),"stacks",""],[p.gb>0?sfGb(p.gb):"?","on the scope",""],[p.firstNight?fmtDate(p.firstNight):"?","first night",""],[p.lastNight?fmtDate(p.lastNight):"?","last night",""]].forEach(([v,l,s])=>{ const n=el("div","n"); n.append(el("b",null,v),el("span",null,l)); if(s) n.append(el("small",null,s)); summ.append(n); }); root.append(summ);
+  if(p.flags.length){ const fl=el("div","sum sfsum"); fl.style.marginTop="12px"; for(const f of p.flags){ fl.append(el("div","k",f.word)); fl.append(el("div","v",f.why||f.key)); } root.append(fl); }
+  root.append(sec("Nights",nts(p.nights.length),box=>{ const w=el("div","tablewrap"); simpleTable(w,["Night","Hours","Subs","So far"],sfCumulative(p).slice().reverse().map(c=>[fmtDate(c.night),fmtH(c.hours),fmtI(c.subs),fmtH(c.cum)]),[1,2,3]); box.append(w); },true));
+  root.append(sec("Cumulative hours","the target and the ETA",box=>{ box.append(sfCumChart(sf,[p],box.clientWidth||720)); },false));
+  root.append(sec("By filter and gain","",box=>{ const g=el("div","twocol"); for(const [title,src] of [["Filter",p.byFilter],["Gain",p.byGain]]){ const w=el("div","tablewrap"); const rows=Object.entries(src).filter(([,h])=>Number.isFinite(+h)).sort((a,b)=>(+b[1])-(+a[1])); if(rows.length) simpleTable(w,[title,"Hours"],rows.map(([k,h])=>[k,fmtH(+h)]),[1]); else w.append(el("p","sub","not recorded")); g.append(w); } box.append(g); },false));
+}
 /* ---------- the Explore views that carry today's Overview blocks ---------- */
 RENDER.ready=function(root){ const card=el("div","card reveal"); root.append(card); renderQueue(card); };
 RENDER.scopes=function(root){ OV.sc=el("div","card reveal"); root.append(OV.sc); renderStrips(OV.sc,true); OV.pc=el("div","card reveal"); root.append(OV.pc); renderProjects(OV.pc,movedLately(),"Projects that moved lately",movedSub(),6); };

@@ -5059,7 +5059,7 @@ PL_LED = {"version": 1, "calibration": {}, "files": {
     # Bubble on the S30 Pro: its final sits in a folder named for the scope → done
     "u2": pl_row("NGC 7635", "NGC 7635 - Bubble Nebula", "2026-08-20",
                  device=True, scope="Seestar S30 Pro", here=True),
-    # a second S50 Pro (Starfront): no unit identity exists yet, so it is the home S50P
+    # a row with the home S50 Pro's camera name: the home S50P (the Starfront unit has its own name, 1.10.0)
     "sf1": pl_row("NGC 6888", "NGC 6888 - Crescent Nebula", "2026-09-02",
                   device=True, scope="Seestar S50 Pro",
                   arch="S50P\\Crescent Nebula (NGC 6888)\\Crescent Day 1\\c1.fit"),
@@ -5225,8 +5225,8 @@ check("PL a final in a folder named for the scope marks that scope's dataset don
       and d_bub.get("archive_rel") == "S30P/NGC 7635 - Bubble", json.dumps(d_bub))
 _, d_sf = pl_ds(doc, "NGC6888", "S50P")
 _, d_sf2 = pl_ds(doc, "NGC6888", "S50P-STARFRONT")
-check("PL a second S50 Pro can't be told apart yet, so its frames are the home S50P at "
-      "Shinfield (the Starfront entry stays switched off); its loose final counts because "
+check("PL a row with the home S50 Pro's camera name is the home S50P at Shinfield (the Starfront "
+      "entry matches only its own camera name, 1.10.0); its loose final counts because "
       "the target has one dataset, and a ._ sidecar is not a second final",
       d_sf.get("site") == "Shinfield" and d_sf.get("status") == "done" and not d_sf2
       and d_sf.get("finals") == ["NGC6888_Crescent_Nebula.jpg"], json.dumps([d_sf, d_sf2]))
@@ -5976,8 +5976,9 @@ check("IN install-windows.ps1 refuses an Administrator window unless -AllowEleva
                                            "Astro sync requests")))
 check("IN install-windows.ps1 takes the account from WindowsIdentity, never USERDOMAIN\\USERNAME",
       "WindowsIdentity]::GetCurrent()" in IN_PS and "$env:USERDOMAIN" not in IN_PS)
-check("IN install-windows.ps1 registers all three tasks through one helper with the Unregister hint",
-      IN_PS.count("Register-AstroTask ") == 3 and IN_PS.count("function Register-AstroTask") == 1
+check("IN install-windows.ps1 registers all five tasks (ship, sweep, tick, and 1.10.0's two Starfront tasks) "
+      "through one helper with the Unregister hint",
+      IN_PS.count("Register-AstroTask ") == 5 and IN_PS.count("function Register-AstroTask") == 1
       and IN_PS.count("Register-ScheduledTask ") == 1 and "Unregister-ScheduledTask -TaskName '$name'" in IN_PS)
 _sw = IN_PS.find("if ($sweepOk) {")
 check("IN install-windows.ps1 sets sweep.ps1 aside only after the Python sweep task registered",
@@ -6838,6 +6839,668 @@ check("P2 after a quiet spell the ZWO unit was 'last on' the FRA400 (its newest 
       json.dumps({k: {x: u.get(x) for x in ("onScope", "onScopeCurrent", "active", "lastOut", "moreReady", "latestDone")}
                   for k, u in _p2bu.items()})[:800])
 shutil.rmtree(P2.root, ignore_errors=True)
+
+print("\n── Chain SF: the Starfront source, Phase 1 (read only): hours from listings, the tunnel, the roof, the record (1.10.0) ──")
+# The hosted S50 Pro's share is a folder in the test root (STARFRONT_SHARE); the
+# tunnel probe is the file <root>/starfront-tunnel-up; sc is recorded, never run
+# (ASTRO_TEST_SC says what it would have answered); the push is recorded. Each
+# check guards one rule of docs/starfront/DESIGN.md. The share's nights are fixed
+# (5 to 7 Nov 2026) and the scans that judge windows get a fixed `now`, so the
+# checks hold whenever they run.
+import math as _sfmath
+from datetime import datetime as _sfdt, timezone as _sftz, timedelta as _sftd
+SF_NOW = "m.datetime(2026, 11, 7, 9, 0, tzinfo=m.timezone.utc)"        # 03:00 in Texas on 7 Nov: the night of 6 Nov
+SF_PUSH = "https://ntfy.example/astro"
+
+def sf_card(key, value, string=False):
+    """One 80-column header card (the suite's _card is rebound by an earlier chain)."""
+    return (f"{key:<8}= {chr(39) + str(value) + chr(39):<20}" if string else f"{key:<8}= {str(value):>20}").ljust(80)
+
+def sf_fits(path, exptime=30.0, dateobs="2026-11-07T03:00:00", gain=200, lat=31.547, lon=-99.383, ra=83.8, dec=-5.4):
+    """A Seestar sub as the Starfront scan reads it: the header cards the sanity
+    checks look at (EXPTIME, GAIN, DATE-OBS, SITELAT, SITELONG, RA, DEC)."""
+    cards = [sf_card("SIMPLE", "T"), sf_card("BITPIX", 8), sf_card("NAXIS", 0), sf_card("EXPTIME", exptime),
+             sf_card("GAIN", gain), sf_card("DATE-OBS", dateobs, string=True)]
+    if lat is not None:
+        cards += [sf_card("SITELAT", lat), sf_card("SITELONG", lon)]
+    if ra is not None:
+        cards += [sf_card("RA", ra), sf_card("DEC", dec)]
+    cards += [sf_card("CREATOR", "ZWO Seestar S50 Pro", string=True), "END".ljust(80)]
+    h = "".join(cards)
+    h += " " * (2880 - len(h) % 2880 if len(h) % 2880 else 0)
+    os.makedirs(os.path.dirname(path), exist_ok=True)
+    with open(path, "w") as f:
+        f.write(h)
+
+def sf_name(target, stamp, exp="30.0", filt="LP", n=1):
+    """The real sub name: Light_<target>_<exposure>s_<filter>_<stamp>_<n>.fit"""
+    return f"Light_{target}_{exp}s_{filt + '_' if filt else ''}{stamp}_{n}.fit"
+
+def sf_stamp_utc(stamp):
+    """DATE-OBS (UTC) that agrees with a stamp on the Texas clock (CST in November)."""
+    d = _sfdt.strptime(stamp, "%Y%m%d-%H%M%S") + _sftd(hours=6)
+    return d.strftime("%Y-%m-%dT%H:%M:%S")
+
+def sf_env(name):
+    e = teh.Env(name, asiair=False, seestar=True)
+    shutil.copytree(os.path.join(HERE, "contract"), os.path.join(e.root, "contract"))
+    e.share = os.path.join(e.root, "starfront-share")
+    e.mw = os.path.join(e.share, "MyWorks")
+    e.roof = os.path.join(e.root, "roof-share")
+    e.tunnel = os.path.join(e.root, "starfront-tunnel-up")
+    os.makedirs(e.mw); os.makedirs(os.path.join(e.roof, "roof"))
+    e.env.update({"STARFRONT_SHARE": e.share, "STARFRONT_ROOF_SHARE": e.roof,
+                  "ASTRO_CONTRACT_DIR": os.path.join(e.root, "contract"), "ASTRO_SHIP_FOLDER": "pc",
+                  "NOTIFY_PUSH_URL": SF_PUSH})
+    return e
+
+def sf_tree(e):
+    """Every file on the share with its size and mtime (the test may walk; the engine may not)."""
+    out = {}
+    for root, _d, files in os.walk(e.share):
+        for f in files:
+            p = os.path.join(root, f)
+            st = os.stat(p)
+            out[os.path.relpath(p, e.share)] = (st.st_size, st.st_mtime_ns)
+    return out
+
+def sf_last(e):
+    return json.load(open(os.path.join(e.state, "starfront-last-scan.json"), encoding="utf-8"))
+
+def sf_scan(e, extra=""):
+    """The scan in a child with the fixed now and a known disk (2 MB, 1 MB free)."""
+    return probe(e.env, extra + "m.sf_disk_usage = lambda p: (2_000_000, 1_000_000, 1_000_000)\n"
+                 f"r = m.run_starfront_scan(now={SF_NOW})\n"
+                 "print(json.dumps({'ok': r.get('ok'), 'pushed': r.get('pushed'), 'reason': r.get('reason'),"
+                 " 'incomplete': r.get('incomplete'), 'scan': r.get('scan')}))\n")
+
+SF = sf_env("SF")
+# M 42: 60 subs of 30 s on the night of 5 Nov, 120 on the night of 6 Nov, plus one
+# at 02:00 Texas time on 7 Nov (the night of 6 Nov); its stack, a preview and a
+# thumbnail are counted in GB, never as subs
+for i in range(60):
+    st = f"20261105-21{i // 60:02d}{i % 60:02d}"
+    sf_fits(os.path.join(SF.mw, "M 42_sub", sf_name("M 42", st, n=i + 1)), dateobs=sf_stamp_utc(st))
+for i in range(120):
+    st = f"20261106-2{i // 60}{i % 60:02d}00"
+    sf_fits(os.path.join(SF.mw, "M 42_sub", sf_name("M 42", st, n=100 + i)), dateobs=sf_stamp_utc(st))
+sf_fits(os.path.join(SF.mw, "M 42_sub", sf_name("M 42", "20261107-020000", n=300)), dateobs=sf_stamp_utc("20261107-020000"))
+sf_fits(os.path.join(SF.mw, "M 42", "Stacked_181_M 42_30.0s_LP_20261107-020000.fit"))
+with open(os.path.join(SF.mw, "M 42", "Stacked_181_M 42_30.0s_LP_20261107-020000.jpg"), "w") as f:
+    f.write("jpeg" * 100)
+with open(os.path.join(SF.mw, "M 42_sub", "Light_M 42_30.0s_LP_20261106-200000_100_thn.jpg"), "w") as f:
+    f.write("thumb")
+# NGC 7023: bare-stamp names (no exposure in the name): the header gives 120 s
+for i in range(3):
+    sf_fits(os.path.join(SF.mw, "NGC 7023_sub", f"20261106-22{i:02d}00.fit"), exptime=120.0,
+            dateobs=sf_stamp_utc(f"20261106-22{i:02d}00"), ra=315.4, dec=68.2)
+# M 45 mosaic: _mosaic_sub subs, _mosaic_pt panels and the _mosaic stack are one project
+for i in range(6):
+    st = f"20261106-2130{i:02d}"
+    sf_fits(os.path.join(SF.mw, "M 45_mosaic_sub", sf_name("M 45", st, exp="10.0", filt="IRCUT", n=i + 1)),
+            exptime=10.0, dateobs=sf_stamp_utc(st), ra=56.8 + i * 0.5, dec=24.1)
+for i in range(2):
+    sf_fits(os.path.join(SF.mw, "M 45_mosaic_pt", f"20261106-2140{i:02d}.fit"), exptime=10.0)
+sf_fits(os.path.join(SF.mw, "M 45_mosaic", "Stacked_6_M 45_10.0s_IRCUT_20261106-214000.fit"), exptime=10.0)
+# Sh2-129: every sanity flag at once (a site 20 degrees off, DATE-OBS 6 h from
+# the stamp, 30 s and 60 s mixed, the pointing a degree away the second night)
+sf_fits(os.path.join(SF.mw, "Sh2-129_sub", sf_name("Sh2-129", "20261105-230000", n=1)),
+        dateobs="2026-11-05T23:00:00", lat=51.4, lon=-0.9, ra=312.0, dec=60.0)
+sf_fits(os.path.join(SF.mw, "Sh2-129_sub", sf_name("Sh2-129", "20261106-230000", exp="60.0", n=2)), exptime=60.0,
+        dateobs="2026-11-06T23:00:00", lat=51.4, lon=-0.9, ra=313.0, dec=60.0)
+# a name the contract doesn't know, a Seestar mode folder, the dark library
+sf_fits(os.path.join(SF.mw, "Blobby Thing_sub", sf_name("Blobby Thing", "20261106-200000", n=1)), dateobs=sf_stamp_utc("20261106-200000"))
+sf_fits(os.path.join(SF.mw, "Lunar_photo", "Moon_001.fit"))
+os.makedirs(os.path.join(SF.share, "darklibrary"))
+for i in range(3):
+    with open(os.path.join(SF.share, "darklibrary", f"dark_{i}.fit"), "wb") as f:
+        f.write(b"d" * 1000)
+# a home S50 Pro, plugged into this PC, with a sub of the same name as a Starfront one
+teh.make_seestar_fits(os.path.join(SF.myworks, "M 42_sub", sf_name("M 42", "20261106-200000", n=100)),
+                      creator="ZWO Seestar S50 Pro", exptime=30.0, dateobs="2026-11-06T20:00:00")
+SF_TREE0 = sf_tree(SF)
+_sf_home0 = SF.run("--scan-only")
+
+# 1. fail closed without the zone
+_r = SF.run("--starfront-scan", extra_env={"STARFRONT_TZ": "Nowhere/Nothing"})
+_rw = SF.run("--starfront-watch", extra_env={"STARFRONT_TZ": "Nowhere/Nothing"})
+check("SF the zone check fails closed: with a zone that can't be loaded the scan and the watch stop with exit 1, "
+      "say to install tzdata (the py -3 -m pip line), and write no Starfront state",
+      _r.returncode == 1 and "tzdata" in _r.stdout + _r.stderr and "pip install --user tzdata" in _r.stdout + _r.stderr
+      and _rw.returncode == 1 and "tzdata" in _rw.stdout + _rw.stderr
+      and not any(f.startswith("starfront-") for f in (os.listdir(SF.state) if os.path.isdir(SF.state) else [])),
+      f"rc={_r.returncode} {(_r.stdout + _r.stderr)[-300:]}")
+
+# 2. the share path rules
+_sfp = probe(SF.env, "print(json.dumps({'drive': m._starfront_share_ok('Z:\\\\MyWorks'), 'unc': m._starfront_share_ok('\\\\\\\\10.15.10.212\\\\EMMC Images'),"
+                     " 'long': m._starfront_share_ok('\\\\\\\\?\\\\UNC\\\\10.15.10.212\\\\EMMC Images'), 'plain': m._starfront_share_ok('/Volumes/Seestar'),"
+                     " 'root': m._starfront_share_ok(m.STARFRONT_SHARE),"
+                     " 'esc': m.sf_inside('\\\\\\\\h\\\\s\\\\MyWorks\\\\..\\\\darklibrary\\\\x.fit', '\\\\\\\\h\\\\s\\\\MyWorks'),"
+                     " 'esc2': m.sf_inside('/share/MyWorks/../darklibrary', '/share/MyWorks'),"
+                     " 'in': m.sf_inside('/share/MyWorks/M 42_sub/x.fit', '/share/MyWorks')}))\n")
+check("SF a mapped drive letter is refused in plain words (the UNC path is named), a UNC path is accepted, "
+      "a plain Mac path is not, and in test mode the folder inside the root stands in for the share",
+      lambda: _sfp["drive"][0] is False and "mapped drive" in _sfp["drive"][1] and "\\\\10.15.10.212\\EMMC Images" in _sfp["drive"][1]
+      and _sfp["unc"][0] is True and _sfp["long"][0] is True and _sfp["plain"][0] is False and _sfp["root"][0] is True,
+      json.dumps(_sfp))
+check("SF a path that climbs out of MyWorks ('..', on a UNC root or any other) is refused by its spelling; a "
+      "path inside is accepted", lambda: _sfp["esc"] is False and _sfp["esc2"] is False and _sfp["in"] is True, json.dumps(_sfp))
+
+# 3. the tunnel must be up before anything is listed
+_r = SF.run("--starfront-scan")
+check("SF with the tunnel down (no probe, no service: ASTRO_TEST_SC missing) the scan says why, exits 1 and "
+      "lists nothing: no inventory, no last scan; the missing service is said once (one notify, one push)",
+      _r.returncode == 1 and "not installed" in _r.stdout + _r.stderr
+      and not os.path.exists(os.path.join(SF.state, "starfront-inventory.json"))
+      and not os.path.exists(os.path.join(SF.state, "starfront-last-scan.json"))
+      and len(teh.os_calls(SF.root, "notify")) == 1 and len(teh.os_calls(SF.root, "push")) == 1
+      and [c["verb"] for c in teh.os_calls(SF.root, "sc")] == ["query"],
+      f"rc={_r.returncode} {(_r.stdout + _r.stderr)[-300:]} {teh.os_calls(SF.root)}")
+open(SF.tunnel, "w").close()
+
+# 4. the scan itself
+_s1 = sf_scan(SF)
+_sc = _s1.get("scan") or {}
+_pr = {p["name"]: p for p in _sc.get("projects", [])}
+check("SF hours come from the filenames alone: M 42 has 181 subs of 30 s (1.51 h) over two nights, its stack, "
+      "preview and thumbnail count in GB (0.0 here) but not as subs; one stack; the Lunar mode folder is not a project",
+      lambda: _s1["ok"] is True and _pr["M 42"]["subs"] == 181 and _pr["M 42"]["hours"] == 1.51
+      and _pr["M 42"]["stacks"] == 1 and _pr["M 42"]["panels"] == 0
+      and _pr["M 42"]["gb"] == 0.0 and "Lunar_photo" not in _pr and _pr["M 42"]["tid"] == "M42"
+      and _pr["M 42"]["target"] == "Orion Nebula (M 42)" and _pr["M 42"]["codes"] == ["M 42", "NGC 1976"]
+      and _pr["M 42"]["flags"] == [] and _pr["M 42"]["byFilter"] == {"LP": 1.51},
+      json.dumps(_s1)[:1500])
+check("SF nights are the site's: the sub stamped 02:00 on 7 Nov belongs to the night of 6 Nov (121 subs, 1.01 h), "
+      "the 5 Nov night has 60 (0.5 h); firstNight and lastNight follow",
+      lambda: [(n["night"], n["subs"], n["hours"]) for n in _pr["M 42"]["nights"]] == [("2026-11-05", 60, 0.5), ("2026-11-06", 121, 1.008)]
+      and _pr["M 42"]["firstNight"] == "2026-11-05" and _pr["M 42"]["lastNight"] == "2026-11-06",
+      json.dumps(_pr.get("M 42", {}).get("nights")))
+check("SF a name without an exposure is read for its header block (EXPTIME 120 s), once, and cached: NGC 7023's "
+      "three bare-stamp subs give 0.1 h; the header cache holds them; the first sub of every project per night "
+      "was read too (one read per project per night: 9 reads in all, one bare-stamp sub being both)",
+      lambda: _pr["NGC 7023"]["hours"] == 0.1 and _pr["NGC 7023"]["subs"] == 3 and _sc["headerReads"] == 9
+      and set(json.load(open(os.path.join(SF.state, "starfront-headers.json")))["entries"]) >= {
+          "MyWorks/NGC 7023_sub/20261106-220000.fit", "MyWorks/NGC 7023_sub/20261106-220100.fit",
+          "MyWorks/NGC 7023_sub/20261106-220200.fit", "MyWorks/M 42_sub/" + sf_name("M 42", "20261105-210000", n=1)},
+      json.dumps([_pr.get("NGC 7023"), _sc.get("headerReads")])[:800])
+check("SF a mosaic is one project from its three folders: M 45_mosaic has the 6 subs of _mosaic_sub (0.1 h, IRCUT), "
+      "the 2 panel stacks of _mosaic_pt and the stack of _mosaic; it is marked mosaic and named so",
+      lambda: _pr["M 45_mosaic"]["subs"] == 6 and _pr["M 45_mosaic"]["panels"] == 2 and _pr["M 45_mosaic"]["stacks"] == 1
+      and _pr["M 45_mosaic"]["mosaic"] is True and _pr["M 45_mosaic"]["target"] == "Pleiades (M 45) (mosaic)"
+      and _pr["M 45_mosaic"]["byFilter"] == {"IRCUT": 0.02} and _pr["M 45_mosaic"]["hours"] == 0.02
+      and "pointing-moved" not in _pr["M 45_mosaic"]["flags"],
+      json.dumps(_pr.get("M 45_mosaic"))[:600])
+check("SF the sanity flags: Sh2-129 is flagged site-mismatch (SITELAT 51.4), clock-mismatch (DATE-OBS 6 h from the "
+      "stamp), mixed-settings (30 s and 60 s) and pointing-moved (a degree between its nights); a name the contract "
+      "doesn't know is flagged unknown-name and kept as it is; M 42 has no flag",
+      lambda: set(_pr["Sh2-129"]["flags"]) == {"site-mismatch", "clock-mismatch", "mixed-settings", "pointing-moved"}
+      and _pr["Blobby Thing"]["flags"] == ["unknown-name"] and _pr["Blobby Thing"]["target"] == "Blobby Thing"
+      and _pr["Blobby Thing"]["tid"] is None and _pr["M 42"]["flags"] == [] and _pr["NGC 7023"]["flags"] == [],
+      json.dumps({k: p.get("flags") for k, p in _pr.items()}))
+check("SF the clock line: each project carries the stamp beside DATE-OBS so rollout step 1 can judge the Seestar's "
+      "clock (M 42 agrees to the minute, Sh2-129 differs by 360 min), and the record says 'filename, unconfirmed'",
+      lambda: _pr["M 42"]["clock"]["agree"] is True and _pr["M 42"]["clock"]["differenceMinutes"] == 0
+      and _pr["M 42"]["clock"]["stamp"] == "20261106-200000" and _pr["M 42"]["clock"]["dateObs"] == "2026-11-07T02:00:00"
+      and _pr["Sh2-129"]["clock"]["agree"] is False and abs(_pr["Sh2-129"]["clock"]["differenceMinutes"]) == 360
+      and _sc["clock"] == "filename, unconfirmed",
+      json.dumps([_pr.get("M 42", {}).get("clock"), _pr.get("Sh2-129", {}).get("clock")]))
+_sf_rate = (0.5 + 1.008) / 2
+check("SF target, per cent and ETA: 20 h by default, 7.5%, and the ETA from the hours per night with data in the "
+      "last 14 nights (two nights, 0.75 h each: about 25 more nights, dated from tonight); the mosaic's 0.02 h "
+      "gives a long ETA; the status is collecting",
+      lambda: _pr["M 42"]["targetHours"] == 20 and _pr["M 42"]["percent"] == 7.5 and _pr["M 42"]["status"] == "collecting"
+      and _pr["M 42"]["eta"]["nights"] == _sfmath.ceil((20 - 1.51) / _sf_rate)
+      and _pr["M 42"]["eta"]["date"] == "2026-12-01" and _pr["M 45_mosaic"]["eta"]["nights"] > 100,
+      json.dumps([_pr.get("M 42", {}).get("eta"), _pr.get("M 42", {}).get("percent")]))
+check("SF storage and the forecast: used, free and total from the share's disk (2 MB here), GB per night from the "
+      "last 14 nights, 'full in N nights' from the free space and that rate, and pullNow when N is under 5; the "
+      "dark library is counted (3 files, 3 KB) but never listed below its top level",
+      lambda: _sc["storage"]["totalGb"] == 0.0 and _sc["storage"]["freeGb"] == 0.0
+      and _sc["storage"]["fullInNights"] is not None and _sc["storage"]["fullInNights"] < 5 and _sc["storage"]["pullNow"] is True
+      and _sc["darklibrary"]["files"] == 3 and _sc["darklibrary"]["bytes"] == 3000 and _sc["darklibrary"]["newestMtime"],
+      json.dumps([_sc.get("storage"), _sc.get("darklibrary")]))
+check("SF the scan writes only its own four state files (inventory, headers, status, last scan), never a ledger, "
+      "and every listed file sits in the inventory keyed by path with its size and mtime",
+      lambda: {f for f in os.listdir(SF.state) if f.startswith("starfront-")} == {
+          "starfront-inventory.json", "starfront-headers.json", "starfront-status.json", "starfront-last-scan.json"}
+      and not os.path.exists(os.path.join(SF.state, "ledger.json"))
+      and all(e.get("size") and e.get("mtimeNs") for e in json.load(open(os.path.join(SF.state, "starfront-inventory.json")))["entries"].values())
+      and len(json.load(open(os.path.join(SF.state, "starfront-inventory.json")))["entries"]) == _sc["files"],
+      str(sorted(os.listdir(SF.state))))
+
+# 5. the cache: an unchanged file is not re-parsed, a changed one is
+_sf_bare = os.path.join(SF.mw, "NGC 7023_sub", "20261106-220100.fit")
+_sf_st = os.stat(_sf_bare)
+sf_fits(_sf_bare, exptime=600.0, dateobs=sf_stamp_utc("20261106-220100"), ra=315.4, dec=68.2)     # same size, new bytes
+os.utime(_sf_bare, ns=(_sf_st.st_atime_ns, _sf_st.st_mtime_ns))                                    # ...mtime put back
+_s2 = sf_scan(SF)
+_pr2 = {p["name"]: p for p in _s2["scan"]["projects"]}
+check("SF an entry unchanged in size and mtime keeps its cached facts: the second scan parses nothing, reads no "
+      "header, and NGC 7023 still counts the cached 120 s although the file's bytes now say 600 s",
+      lambda: _s2["scan"]["parsed"] == 0 and _s2["scan"]["reused"] == _s1["scan"]["files"] and _s2["scan"]["headerReads"] == 0
+      and _pr2["NGC 7023"]["hours"] == 0.1,
+      json.dumps([_s2["scan"].get("parsed"), _s2["scan"].get("reused"), _s2["scan"].get("headerReads"), _pr2.get("NGC 7023", {}).get("hours")]))
+os.utime(_sf_bare, ns=(_sf_st.st_atime_ns, _sf_st.st_mtime_ns + 2_000_000_000))                    # a newer mtime: changed
+SF_TREE0[os.path.relpath(_sf_bare, SF.share)] = (os.stat(_sf_bare).st_size, os.stat(_sf_bare).st_mtime_ns)   # the test's own change
+_s3 = sf_scan(SF)
+_pr3 = {p["name"]: p for p in _s3["scan"]["projects"]}
+check("SF a changed file (a newer mtime) is parsed and its header read again: NGC 7023 now counts 600 s for that "
+      "sub (0.23 h); nothing else was re-read",
+      lambda: _s3["scan"]["parsed"] == 1 and _s3["scan"]["headerReads"] == 1 and _pr3["NGC 7023"]["hours"] == 0.23,
+      json.dumps([_s3["scan"].get("parsed"), _s3["scan"].get("headerReads"), _pr3.get("NGC 7023", {}).get("hours")]))
+
+# 6. targets and the one-time push
+_n_push0 = len(teh.os_calls(SF.root, "push"))
+_rt = SF.run("--starfront-target", "M 42", "1")
+_rt2 = SF.run("--starfront-target", "Blobby Thing", "0.005")
+_rt4 = SF.run("--starfront-target", "M 45", "0.01")            # the object's target covers its mosaic project
+_s4 = sf_scan(SF)
+_pr4 = {p["name"]: p for p in _s4["scan"]["projects"]}
+_pushes = teh.os_calls(SF.root, "push")[_n_push0:]
+check("SF --starfront-target writes starfront-targets.json keyed by the contract's canonical name ('Orion Nebula "
+      "(M 42)' for 'M 42'; an unknown name as given), and the override wins over the default: M 42 at 1 h is "
+      "ready (150.8%), the Blobby Thing at 0.005 h is ready too; a mosaic shares its object's target ('M 45' at "
+      "0.01 h makes M 45_mosaic ready)",
+      lambda: _rt.returncode == 0 and _rt2.returncode == 0 and _rt4.returncode == 0
+      and _pr4["M 45_mosaic"]["targetHours"] == 0.01 and _pr4["M 45_mosaic"]["status"] == "ready"
+      and json.load(open(os.path.join(SF.state, "starfront-targets.json")))["Orion Nebula (M 42)"] == 1
+      and json.load(open(os.path.join(SF.state, "starfront-targets.json")))["Blobby Thing"] == 0.005
+      and _pr4["M 42"]["status"] == "ready" and _pr4["M 42"]["targetHours"] == 1 and _pr4["M 42"]["percent"] == 150.8
+      and _pr4["M 42"]["eta"] is None and _pr4["Blobby Thing"]["status"] == "ready" and _pr4["NGC 7023"]["status"] == "collecting",
+      f"{_rt.stdout + _rt.stderr} {json.dumps({k: (p.get('status'), p.get('targetHours')) for k, p in _pr4.items()})}")
+check("SF one push per crossing: the scan that first finds M 42, the Blobby Thing and the M 45 mosaic ready pushes "
+      "once each ('M 42 ready: 1.5 of 1 h on the Starfront Seestar') and records notifiedReadyAt; the push went to "
+      "NOTIFY_PUSH_URL and was recorded, never sent",
+      lambda: sorted(p["text"] for p in _pushes) == ["Blobby Thing ready: 0.0 of 0.005 h on the Starfront Seestar",
+                                                     "M 42 ready: 1.5 of 1 h on the Starfront Seestar",
+                                                     "M 45_mosaic ready: 0.0 of 0.01 h on the Starfront Seestar"]
+      and all(p["url"] == SF_PUSH and p["title"] == "Starfront" for p in _pushes)
+      and _pr4["M 42"]["notifiedReadyAt"] and sorted(_s4["pushed"]) == ["Blobby Thing", "M 42", "M 45_mosaic"],
+      json.dumps(_pushes))
+_s5 = sf_scan(SF)
+check("SF a second scan with the project still ready pushes nothing more",
+      lambda: _s5["pushed"] == [] and len(teh.os_calls(SF.root, "push")) == _n_push0 + 3, json.dumps(_s5.get("pushed")))
+SF.run("--starfront-target", "M 42", "100")
+_s6 = sf_scan(SF)
+SF.run("--starfront-target", "M 42", "1")
+_s7 = sf_scan(SF)
+check("SF raising the target above the hours clears the mark (M 42 collecting again at 100 h, notifiedReadyAt "
+      "null), so the next crossing, when the target comes back down, pushes again",
+      lambda: {p["name"]: p for p in _s6["scan"]["projects"]}["M 42"]["status"] == "collecting"
+      and {p["name"]: p for p in _s6["scan"]["projects"]}["M 42"]["notifiedReadyAt"] is None and _s6["pushed"] == []
+      and _s7["pushed"] == ["M 42"] and len(teh.os_calls(SF.root, "push")) == _n_push0 + 4,
+      json.dumps([_s6.get("pushed"), _s7.get("pushed")]))
+SF.run("--starfront-target", "M 42", "0")
+SF.run("--starfront-target", "M 45", "0")
+_rt3 = SF.run("--starfront-target", "M 42", "lots")
+check("SF a target of 0 removes the override (the default 20 h is back) and a target that isn't a number is "
+      "refused (exit 2)", lambda: "Orion Nebula (M 42)" not in json.load(open(os.path.join(SF.state, "starfront-targets.json")))
+      and _rt3.returncode == 2 and "number of hours" in _rt3.stdout + _rt3.stderr, _rt3.stdout + _rt3.stderr)
+
+# 7. the sun and the site's night
+_sun = probe(SF.env, "tz = m.sf_zone()\n"
+                     "d = lambda *a: m.datetime(*a, tzinfo=tz)\n"
+                     "print(json.dumps({'dusk': m.sf_sun_altitude(31.54733, -99.38273, d(2026, 10, 30, 20, 12)),"
+                     " 'dawn': m.sf_sun_altitude(31.54733, -99.38273, d(2026, 10, 31, 6, 30)),"
+                     " 'noon': m.sf_is_daytime(d(2026, 10, 30, 13, 0)), 'night': m.sf_is_daytime(d(2026, 10, 30, 22, 0)),"
+                     " 'dark': m.sf_is_dark(d(2026, 10, 30, 22, 0)), 'twilight': m.sf_is_dark(d(2026, 10, 30, 19, 30)),"
+                     " 'darkHours': m.sf_dark_hours('2026-10-30', tz),"
+                     " 'nightUtc': m.sf_night_of(m.datetime(2026, 11, 7, 15, 0, tzinfo=m.timezone.utc), tz),"
+                     " 'nightStamp': m.sf_night_from_stamp('20261107-020000', tz),"
+                     " 'nightEve': m.sf_night_from_stamp('20261106-230000', tz)}))\n")
+check("SF the sun at the site (NOAA's steps, no dependency): astronomical dusk and dawn on 30 Oct 2026 fall at "
+      "20:12 and 06:30 Texas time as time.starfront.tools says (minus 18 degrees within a quarter of a degree); "
+      "noon is daytime, 22:00 is dark, 19:30 is twilight; the night holds about 10.3 dark hours",
+      lambda: abs(_sun["dusk"] + 18) < 0.25 and abs(_sun["dawn"] + 18) < 0.25 and _sun["noon"] is True
+      and _sun["night"] is False and _sun["dark"] is True and _sun["twilight"] is False and 10.0 <= _sun["darkHours"] <= 10.6,
+      json.dumps(_sun))
+check("SF a night is the site's, not this PC's: 15:00 UTC on 7 Nov is 09:00 in Texas, the night of 6 Nov (the UK "
+      "clock would say 7 Nov); a stamp of 02:00 on 7 Nov is the night of 6 Nov; 23:00 on 6 Nov is too",
+      lambda: _sun["nightUtc"] == "2026-11-06" and _sun["nightStamp"] == "2026-11-06" and _sun["nightEve"] == "2026-11-06",
+      json.dumps(_sun))
+
+# 8. the tunnel: every branch of ensure_tunnel, with sc recorded, never run
+_tun = probe(SF.env,
+    "import threading, time\n"
+    "probe_f = os.path.join(m.TEST_ROOT, 'starfront-tunnel-up'); hold = os.path.join(m.STATE_DIR, 'starfront-vpn-hold')\n"
+    "calls = os.path.join(m.TEST_ROOT, 'os-calls.jsonl')\n"
+    "def n(): return sum(1 for _ in open(calls)) if os.path.exists(calls) else 0\n"
+    "res, marks = {}, {}\n"
+    "def step(k, fn):\n"
+    "    a = n(); res[k] = fn(); marks[k] = (a, n())\n"
+    "step('up', lambda: m.ensure_tunnel(timeout=0.1, poll=0.05))\n"
+    "os.remove(probe_f)\n"
+    "open(hold, 'w').close(); step('hold', lambda: m.ensure_tunnel(timeout=0.1, poll=0.05)); os.remove(hold)\n"
+    "m.STARFRONT_VPN_MODE = 'never'; step('never', lambda: m.ensure_tunnel(timeout=0.1, poll=0.05)); m.STARFRONT_VPN_MODE = 'on-demand'\n"
+    "os.environ['ASTRO_TEST_SC'] = 'missing'\n"
+    "step('missing1', lambda: m.ensure_tunnel(timeout=0.1, poll=0.05)); step('missing2', lambda: m.ensure_tunnel(timeout=0.1, poll=0.05))\n"
+    "os.environ['ASTRO_TEST_SC'] = 'denied'\n"
+    "step('denied1', lambda: m.ensure_tunnel(timeout=0.1, poll=0.05)); step('denied2', lambda: m.ensure_tunnel(timeout=0.1, poll=0.05))\n"
+    "os.environ['ASTRO_TEST_SC'] = 'running'; step('running', lambda: m.ensure_tunnel(timeout=0.3, poll=0.05))\n"
+    "os.environ['ASTRO_TEST_SC'] = 'stopped'\n"
+    "t = threading.Timer(0.4, lambda: open(probe_f, 'w').close()); t.start()\n"
+    "t0 = time.monotonic(); step('started', lambda: m.ensure_tunnel(timeout=10, poll=0.05)); res['startedIn'] = time.monotonic() - t0\n"
+    "os.remove(probe_f)\n"
+    "st = m.sf_status_read(); st['tunnel']['lastOk'] = m._utc_iso(m._utc_now() - m.timedelta(hours=13)); st['tunnel']['downAlertedAt'] = None; m.sf_status_write(st)\n"
+    "m.STARFRONT_VPN_MODE = 'never'\n"
+    "step('long1', lambda: m.ensure_tunnel(timeout=0.1, poll=0.05)); step('long2', lambda: m.ensure_tunnel(timeout=0.1, poll=0.05))\n"
+    "open(probe_f, 'w').close(); step('recover', lambda: m.ensure_tunnel(timeout=0.1, poll=0.05)); step('recover2', lambda: m.ensure_tunnel(timeout=0.1, poll=0.05))\n"
+    "res['status'] = m.sf_status_read()['tunnel']\n"
+    "print(json.dumps({'res': res, 'marks': marks}))\n")
+_sfc = teh.os_calls(SF.root)
+def _tc(k, kind):
+    a, b = _tun["marks"][k]
+    return [c for c in _sfc[a:b] if c["kind"] == kind]
+_tr = _tun["res"]
+check("SF tunnel up by the probe: with the probe answering (the file in test mode) the tunnel is up at once, "
+      "no sc call, lastOk written",
+      lambda: _tr["up"]["up"] is True and _tc("up", "sc") == [] and _tr["status"]["lastOk"], json.dumps(_tun)[:600])
+check("SF the hold flag (starfront-vpn-hold) and mode 'never' each mean the tunnel is not started: False with the "
+      "reason, no sc call, no alert",
+      lambda: _tr["hold"]["up"] is False and "vpn-hold" in _tr["hold"]["reason"] and _tc("hold", "sc") == [] and _tc("hold", "notify") == []
+      and _tr["never"]["up"] is False and "never" in _tr["never"]["reason"] and _tc("never", "sc") == [] and _tc("never", "notify") == [],
+      json.dumps([_tr.get("hold"), _tr.get("never")]))
+check("SF a missing tunnel service: sc query recorded (never run), the reason 'WireGuard tunnel service not "
+      "installed', one alert (a notify and a push) the first time and none the second",
+      lambda: _tr["missing1"]["up"] is False and "not installed" in _tr["missing1"]["reason"]
+      and [c["verb"] for c in _tc("missing1", "sc")] == ["query"] and _tc("missing1", "sc")[0]["service"] == "WireGuardTunnel$BrettJohnson-B15"
+      and len(_tc("missing1", "notify")) == 1 and len(_tc("missing1", "push")) == 1
+      and _tc("missing2", "notify") == [] and _tc("missing2", "push") == [] and [c["verb"] for c in _tc("missing2", "sc")] == ["query"],
+      json.dumps([_tr.get("missing1"), _tc("missing1", "sc"), _tc("missing1", "notify")]))
+check("SF sc start is recorded, never run: a stopped service gets sc query then sc start recorded, and once the "
+      "probe answers the tunnel is up with started true (this run started it; the tool never stops one)",
+      lambda: _tr["started"]["up"] is True and _tr["started"]["started"] is True
+      and [c["verb"] for c in _tc("started", "sc")] == ["query", "start"] and 0.3 < _tr["startedIn"] < 8,
+      json.dumps([_tr.get("started"), _tc("started", "sc")]))
+check("SF access denied from sc start means 'start the tunnel yourself' (with the one-off sc config start= auto "
+      "line), one alert, none the second time; a running service with the Seestar silent polls to the timeout "
+      "and says the service is running",
+      lambda: _tr["denied1"]["up"] is False and "start the tunnel yourself" in _tr["denied1"]["reason"]
+      and "start= auto" in _tr["denied1"]["reason"] and len(_tc("denied1", "notify")) == 1 and _tc("denied2", "notify") == []
+      and [c["verb"] for c in _tc("denied1", "sc")] == ["query", "start"]
+      and _tr["running"]["up"] is False and "running" in _tr["running"]["reason"] and [c["verb"] for c in _tc("running", "sc")] == ["query"],
+      json.dumps([_tr.get("denied1"), _tr.get("running")]))
+check("SF lastOk and the 12 h alert: down for 13 h gives one alert (not two); the recovery gives one alert and "
+      "clears the mark; lastOk moves to now",
+      lambda: len(_tc("long1", "notify")) == 1 and "13 h" in _tc("long1", "notify")[0]["message"] and _tc("long2", "notify") == []
+      and _tr["recover"]["up"] is True and len(_tc("recover", "notify")) == 1 and "back up" in _tc("recover", "notify")[0]["message"]
+      and _tc("recover2", "notify") == [] and _tr["status"]["downAlertedAt"] is None,
+      json.dumps([_tc("long1", "notify"), _tc("recover", "notify"), _tr.get("status")]))
+_drop = probe(SF.env, "e = OSError(53, 'x'); e.winerror = 53\n"
+                      "f = OSError(2, 'x'); f.winerror = 2\n"
+                      "print(json.dumps({'w53': m.sf_is_link_drop(e), 'w2': m.sf_is_link_drop(f), 'plain': m.sf_is_link_drop(OSError(5, 'x')),"
+                      " 'stall': m.sf_is_link_drop(m.StarfrontStall()), 'word': m.sf_is_link_drop('stall'),"
+                      " 'secs': m.sf_is_link_drop(130), 'few': m.sf_is_link_drop(5), 'none': m.sf_is_link_drop(None),"
+                      " 'all': [m.sf_is_link_drop(type('E', (OSError,), {})(1, 'x')) for _ in [0]][0]}))\n")
+check("SF a dropped link is classified by progress and by the Windows errors 53, 59, 64, 67, 121 and 1231: winerror 53 "
+      "is a drop, winerror 2 and a plain OSError are not; a StarfrontStall, the word 'stall' and 130 s without "
+      "progress are drops, 5 s is not",
+      lambda: _drop["w53"] is True and _drop["w2"] is False and _drop["plain"] is False and _drop["stall"] is True
+      and _drop["word"] is True and _drop["secs"] is True and _drop["few"] is False and _drop["none"] is False,
+      json.dumps(_drop))
+
+# 9. the roof reader
+_sf_roof_dir = os.path.join(SF.roof, "roof")
+with open(os.path.join(_sf_roof_dir, "B15.json"), "w") as f:
+    json.dump({"building": 15, "roof": "open", "state_update": "2026-11-07T01:00:00Z"}, f)
+_roof = probe(SF.env, f"sys.path.insert(0, {json.dumps(HERE)})\nimport test_env_helper as teh2\n"
+                      "r1 = m.read_roof(); closed = m._SF_ROOF_LAST.closed\n"
+                      "held = True\n"
+                      "try:\n    with teh2.held_exclusively(r1['file']): pass\nexcept OSError as e: held = str(e)\n"
+                      "import time\n"
+                      "p2 = os.path.join(m.STARFRONT_ROOF_SHARE, 'roof', 'status.txt'); open(p2, 'w').write('building=15\\nroof=closed\\nupdated=2026-11-07T02:00:00Z\\n')\n"
+                      "t = time.time() + 10; os.utime(p2, (t, t))\n"
+                      "r2 = m.read_roof()\n"
+                      "p3 = os.path.join(m.STARFRONT_ROOF_SHARE, 'roof', 'roof.txt'); open(p3, 'w').write('Roof B15 is OPEN\\n')\n"
+                      "t = time.time() + 20; os.utime(p3, (t, t))\n"
+                      "r3 = m.read_roof()\n"
+                      "os.remove(p2); os.remove(p3)\n"
+                      "rows = m.sf_roof_log()\n"
+                      "print(json.dumps({'r1': r1, 'closed': closed, 'held': held, 'r2': r2, 'r3': r3, 'rows': rows}))\n")
+check("SF read_roof opens the roof file read only and closes it at once: after the read the file object is closed "
+      "and (on Windows) the file can be held exclusively; it parses JSON ({'roof': 'open'} with its state_update "
+      "as 'since'), key=value lines ('roof=closed') and plain words ('Roof B15 is OPEN'); the newest file under "
+      "roof\\ is the one read",
+      lambda: _roof["r1"]["state"] == "open" and _roof["r1"]["since"] == "2026-11-07T01:00:00Z" and _roof["closed"] is True
+      and _roof["held"] is True and _roof["r2"]["state"] == "closed" and _roof["r2"]["since"] == "2026-11-07T02:00:00Z"
+      and _roof["r3"]["state"] == "open" and os.path.basename(_roof["r3"]["file"]) == "roof.txt",
+      json.dumps(_roof)[:900])
+check("SF every reading is appended to starfront-roof.jsonl with its time, state, since and the raw text, so "
+      "rollout step 1 can fix the parser against the real file",
+      lambda: [r["state"] for r in _roof["rows"]] == ["open", "closed", "open"]
+      and "roof=closed" in _roof["rows"][1]["raw"] and '"roof": "open"' in _roof["rows"][0]["raw"]
+      and all(r.get("at") and r.get("file") for r in _roof["rows"]),
+      json.dumps(_roof.get("rows"))[:600])
+
+# 10. the watch: daytime exits at once; at night the silent alert once per night
+for d in os.listdir(SF.mw):
+    if d.endswith("_sub"):
+        _t = _sfdt(2026, 11, 7, 3, 0, tzinfo=_sftz.utc).timestamp()        # the newest sub at 21:00 Texas time
+        os.utime(os.path.join(SF.mw, d), (_t, _t))
+os.remove(SF.tunnel)
+_n_calls = len(teh.os_calls(SF.root))
+_wd = probe(SF.env, "r = m.run_starfront_watch(now=m.datetime(2026, 11, 7, 18, 0, tzinfo=m.timezone.utc))\nprint(json.dumps(r))\n")
+check("SF the watch in daytime at the site (12:00 Texas time) exits at once: no tunnel probe, no sc, no roof "
+      "reading, no push, exit 0",
+      lambda: _wd["ok"] is True and _wd["daytime"] is True and len(teh.os_calls(SF.root)) == _n_calls
+      and [r["state"] for r in _roof["rows"]] == [r["state"] for r in (json.loads(ln) for ln in open(os.path.join(SF.state, "starfront-roof.jsonl")))],
+      json.dumps(_wd))
+open(SF.tunnel, "w").close()
+_wn = probe(SF.env,
+    "res = {}\n"
+    "res['a'] = m.run_starfront_watch(now=m.datetime(2026, 11, 7, 6, 0, tzinfo=m.timezone.utc))\n"     # 00:00 Texas, dark, roof open, 3 h silent
+    "res['b'] = m.run_starfront_watch(now=m.datetime(2026, 11, 7, 6, 20, tzinfo=m.timezone.utc))\n"    # the same night: no second push
+    "open(os.path.join(m.STARFRONT_ROOF_SHARE, 'roof', 'B15.json'), 'w').write('{\"roof\": \"closed\"}')\n"
+    "res['c'] = m.run_starfront_watch(now=m.datetime(2026, 11, 8, 6, 0, tzinfo=m.timezone.utc))\n"     # next night, roof closed: not silent
+    "open(os.path.join(m.STARFRONT_ROOF_SHARE, 'roof', 'B15.json'), 'w').write('{\"roof\": \"open\"}')\n"
+    "res['d'] = m.run_starfront_watch(now=m.datetime(2026, 11, 8, 6, 20, tzinfo=m.timezone.utc))\n"    # next night, open, silent: once more
+    "t = m.datetime(2026, 11, 9, 5, 50, tzinfo=m.timezone.utc).timestamp()\n"
+    "[os.utime(os.path.join(m.STARFRONT_SHARE, 'MyWorks', d), (t, t)) for d in os.listdir(os.path.join(m.STARFRONT_SHARE, 'MyWorks')) if d.endswith('_sub')]\n"
+    "res['e'] = m.run_starfront_watch(now=m.datetime(2026, 11, 9, 6, 0, tzinfo=m.timezone.utc))\n"     # a sub 10 min ago: not silent
+    "res['f'] = m.run_starfront_watch(now=m.datetime(2026, 11, 9, 0, 30, tzinfo=m.timezone.utc))\n"    # 18:30 Texas: twilight, not dark
+    "res['status'] = m.sf_status_read().get('silentAlertedNight')\n"
+    "print(json.dumps(res))\n")
+_wp = [c for c in teh.os_calls(SF.root, "push") if c["text"].startswith("B15 open")]
+check("SF the 'Seestar silent' alert: at night with the roof open, the sky dark and no new sub for 90 minutes the "
+      "watch pushes 'B15 open but no new subs since 21:00' once; the same night again pushes nothing; the next "
+      "night with the roof closed nothing; open again, once more; a sub 10 minutes old is not silent; twilight "
+      "(18:30 Texas time) is not dark",
+      lambda: _wn["a"]["pushed"] is True and _wn["a"]["silent"] is True and _wn["a"]["dark"] is True
+      and _wn["b"]["pushed"] is False and _wn["b"]["silent"] is True
+      and _wn["c"]["pushed"] is False and _wn["c"]["silent"] is False and _wn["c"]["roof"]["state"] == "closed"
+      and _wn["d"]["pushed"] is True and _wn["e"]["pushed"] is False and _wn["e"]["silent"] is False
+      and _wn["f"]["dark"] is False and _wn["f"]["silent"] is False and _wn["f"]["daytime"] is False
+      and [p["text"] for p in _wp] == ["B15 open but no new subs since 21:00", "B15 open but no new subs since 21:00"]
+      and _wn["status"] == "2026-11-07",
+      json.dumps(_wn)[:1200])
+
+# 11. the pause flag, the listing error, nothing written on the share
+open(os.path.join(SF.state, "starfront-pause"), "w").close()
+_s8 = sf_scan(SF)
+_sec = probe(SF.env, f"print(json.dumps(m.starfront_section(now={SF_NOW})))\n")
+check("SF the pause flag (starfront-pause in the state folder) is reported: the scan still lists (read only) and "
+      "says so, the scan file and the record's section carry paused true, and the hold flag false",
+      lambda: _s8["ok"] is True and _s8["scan"]["paused"] is True and _sec["paused"] is True and _sec["tunnel"]["hold"] is False,
+      json.dumps([_s8.get("ok"), _s8["scan"].get("paused"), _sec.get("paused")]))
+os.remove(os.path.join(SF.state, "starfront-pause"))
+_inv_before = open(os.path.join(SF.state, "starfront-inventory.json"), "rb").read()
+_last_before = open(os.path.join(SF.state, "starfront-last-scan.json"), "rb").read()
+_hdr_before = open(os.path.join(SF.state, "starfront-headers.json"), "rb").read()
+_s9 = sf_scan(SF, "os.environ['ASTRO_TEST_SF_FAIL_LIST'] = 'M 42_sub'\n")
+check("SF a listing error anywhere (M 42_sub stops answering) ends the scan 'incomplete' with exit 1 and leaves "
+      "the inventory, the header cache and the last scan exactly as they were",
+      lambda: _s9["ok"] is False and _s9["incomplete"] is True
+      and open(os.path.join(SF.state, "starfront-inventory.json"), "rb").read() == _inv_before
+      and open(os.path.join(SF.state, "starfront-headers.json"), "rb").read() == _hdr_before
+      and open(os.path.join(SF.state, "starfront-last-scan.json"), "rb").read() == _last_before,
+      json.dumps(_s9)[:400])
+_r9 = SF.run("--starfront-scan", extra_env={"ASTRO_TEST_SF_FAIL_LIST": "MyWorks"})
+check("SF ...and from the command line the same: exit 1 and 'incomplete' in the output",
+      _r9.returncode == 1 and "incomplete" in _r9.stdout + _r9.stderr, (_r9.stdout + _r9.stderr)[-300:])
+_sf_home1 = SF.run("--scan-only")
+check("SF nothing was written on the share: every file's size and mtime is as it was before the first scan, and "
+      "test mode recorded only pushes, notifications and sc calls (no eject, dialog, open or PowerShell)",
+      lambda: sf_tree(SF) == SF_TREE0 and {c["kind"] for c in teh.os_calls(SF.root)} <= {"push", "notify", "sc"},
+      json.dumps([sorted({c["kind"] for c in teh.os_calls(SF.root)}),
+                  [k for k in set(sf_tree(SF)) | set(SF_TREE0) if sf_tree(SF).get(k) != SF_TREE0.get(k)][:5]]))
+check("SF the home S50 Pro plugged into this PC is untouched: --scan-only sees the same camera and files before "
+      "and after the Starfront scans (its M 42 sub of the same name is still new), and no ledger was written",
+      lambda: _sf_home0.stdout.splitlines()[:3] == _sf_home1.stdout.splitlines()[:3] and "Seestar" in _sf_home1.stdout
+      and "COUNT|1" in _sf_home1.stdout
+      and not os.path.exists(os.path.join(SF.state, "ledger.json")),
+      _sf_home1.stdout[-300:] + _sf_home0.stdout[-300:])
+
+# 12. the engine's Starfront section never walks
+with open(SCRIPT, encoding="utf-8") as _f:
+    _eng = _f.read()
+_sfsrc = _eng[_eng.index("# STARFRONT SOURCE (1.10.0"):_eng.index("def run_projects(")]
+check("SF the Starfront listing never calls os.walk or os.listdir (one os.scandir per folder: over a 120 ms "
+      "tunnel every round trip counts); its functions are prefixed sf_ or starfront_",
+      "os.walk(" not in _sfsrc and "os.listdir(" not in _sfsrc and "os.scandir(" in _sfsrc
+      and all(re.match(r"(sf_|starfront_|_starfront_|_sf_|run_starfront_|ensure_tunnel|read_roof|StarfrontStall)", n)
+              for n in re.findall(r"^def (\w+)|^class (\w+)", _sfsrc, re.M) for n in [n[0] or n[1]]),
+      str(re.findall(r"^def (\w+)", _sfsrc, re.M)))
+
+# 13. the record: --projects adds the section, the unit card and the scope; an old record is unchanged
+SF2 = pl_pc_env("SF2", {
+    **{f"ir{i}": pl_snap_row("NGC 7023", "NGC 7023 - Iris", "2026-10-04", hashlib.sha256(f"sfir{i}".encode()).hexdigest(),
+                             scope="Seestar S50 Pro", exposureSeconds=600.0) for i in range(6)},
+    **{f"an{i}": pl_snap_row("M 31", "M 31 - Andromeda", "2026-10-01", hashlib.sha256(f"sfan{i}".encode()).hexdigest(),
+                             scope="Seestar S30 Pro", exposureSeconds=60.0) for i in range(16)},
+}, at="2026-11-06T08:00:00Z")
+SF2.env.update({"STARFRONT_SHARE": os.path.join(SF2.root, "starfront-share"), "STARFRONT_ROOF_SHARE": os.path.join(SF2.root, "roof-share")})
+def sf2_build(today="2026-11-06"):
+    return probe(SF2.env, "st = m.State()\nextra, names = m.projects_inputs(st)\ncollect = {}\n"
+                 f"d = m.build_projects(st, extra, today='{today}', custom_names=names, collect=collect)\n"
+                 f"o = m.observatory_from(d, collect, st, now=m.datetime(2026, 11, 7, 12, 0), pending=None, starfront=m.starfront_section(now={SF_NOW}))\n"
+                 "print(json.dumps(o))\n")
+_o0 = sf2_build()
+for _f in ("starfront-last-scan.json", "starfront-status.json", "starfront-roof.jsonl"):
+    shutil.copy(os.path.join(SF.state, _f), os.path.join(SF2.state, _f))
+_o1 = sf2_build()
+_o1u = {u["id"]: u for u in _o1.get("units", [])}
+_sfu = _o1u.get("S50P-STARFRONT") or {}
+def _strip(o):
+    o = dict(o)
+    for k in ("generatedAt", "generatedAtIso", "generatedAtLocal", "sourceNote", "starfront"):
+        o.pop(k, None)
+    o["units"] = [u for u in o["units"] if u.get("id") != "S50P-STARFRONT"]
+    o["scopes"] = [s for s in o["scopes"] if s.get("id") != "S50P-STARFRONT"]
+    return o
+check("SF with no scan file nothing is added: the record has no 'starfront' key, no Starfront unit and no Starfront "
+      "scope (an old record stays as it was)",
+      lambda: "starfront" not in _o0 and "S50P-STARFRONT" not in {u["id"] for u in _o0["units"]}
+      and "S50P-STARFRONT" not in {s["id"] for s in _o0["scopes"]},
+      json.dumps([list(_o0.get("starfront", {}))[:3], [u["id"] for u in _o0.get("units", [])]]))
+check("SF with a scan the record gains the top-level 'starfront' section in DESIGN.md's shape (camera, site, "
+      "timezone, scannedAt, scanAge, tunnel {up, lastOk, mode, hold}, paused, clock, storage, roof, projects, "
+      "nightsLog, darklibrary), with the site's night dates, and everything else is exactly as without it",
+      lambda: {"camera", "site", "timezone", "scannedAt", "scanAge", "tunnel", "paused", "clock", "storage", "roof",
+               "projects", "nightsLog", "darklibrary"} <= set(_o1["starfront"])
+      and _o1["starfront"]["camera"] == "ZWO Seestar S50 Pro (Starfront)" and _o1["starfront"]["site"] == "Starfront"
+      and _o1["starfront"]["timezone"] == "America/Chicago" and set(_o1["starfront"]["tunnel"]) == {"up", "lastOk", "mode", "hold"}
+      and _o1["starfront"]["tunnel"]["mode"] == "on-demand" and _o1["starfront"]["clock"] == "filename, unconfirmed"
+      and set(_o1["starfront"]["storage"]) >= {"usedGb", "freeGb", "totalGb", "gbPerNight", "fullInNights", "pullNow"}
+      and set(_o1["starfront"]["roof"]) >= {"state", "since", "readAt"} and _o1["starfront"]["roof"]["state"] == "open"
+      and {p["name"] for p in _o1["starfront"]["projects"]} == {"M 42", "NGC 7023", "M 45_mosaic", "Sh2-129", "Blobby Thing"}
+      and all({"name", "tid", "target", "codes", "mosaic", "hours", "subs", "stacks", "gb", "targetHours", "percent", "eta",
+               "status", "flags", "nights", "byFilter", "byGain", "firstNight", "lastNight", "notifiedReadyAt"} <= set(p)
+              for p in _o1["starfront"]["projects"])
+      and _strip(_o0) == _strip(_o1),
+      json.dumps([sorted(_o1.get("starfront", {})), [k for k in _strip(_o0) if _strip(_o0)[k] != _strip(_o1).get(k)]])[:800])
+check("SF nightsLog: one row per site night with data in the last 30 (dark hours from the sun, roof-open hours from "
+      "the log's readings, captured hours from the subs): the night of 6 Nov holds about 10.4 dark hours and "
+      "1.28 captured hours; the night of 7 Nov has roof-open hours from the watch's readings",
+      lambda: {r["night"] for r in _o1["starfront"]["nightsLog"]} >= {"2026-11-05", "2026-11-06", "2026-11-07"}
+      and all(set(r) == {"night", "darkHours", "roofOpenHours", "capturedHours"} for r in _o1["starfront"]["nightsLog"])
+      and 10.0 <= next(r for r in _o1["starfront"]["nightsLog"] if r["night"] == "2026-11-06")["darkHours"] <= 10.8
+      and abs(next(r for r in _o1["starfront"]["nightsLog"] if r["night"] == "2026-11-06")["capturedHours"] - 1.28) < 0.02
+      and next(r for r in _o1["starfront"]["nightsLog"] if r["night"] == "2026-11-07")["roofOpenHours"] > 0,
+      json.dumps(_o1.get("starfront", {}).get("nightsLog")))
+check("SF the Starfront unit card sits in units[] right after the home S50 Pro's: id S50P-STARFRONT, label "
+      "'S50 Pro · Starfront', kind seestar, site Starfront, on its own scope, active (nights inside the window), "
+      "a strip from the hours per night, and the contract's colour",
+      lambda: [u["id"] for u in _o1["units"]] == ["S50P", "S50P-STARFRONT", "S30P"]
+      and _sfu["label"] == "S50 Pro · Starfront" and _sfu["kind"] == "seestar" and _sfu["site"] == "Starfront"
+      and _sfu["name"] == "Seestar S50 Pro (Starfront)" and _sfu["onScope"] == "Seestar S50 Pro (Starfront)"
+      and _sfu["onScopeId"] == "S50P-STARFRONT" and _sfu["scopeIds"] == ["S50P-STARFRONT"] and _sfu["active"] is True
+      and _sfu["lastOut"] == "2026-11-06" and _sfu["colour"] == "#ec835a"
+      and [x["night"] for x in _sfu["strip"]] == ["2026-11-05", "2026-11-06"] and _sfu["strip"][1]["hours"] > 1.0
+      and _sfu["latestDone"] is None,
+      json.dumps([[u["id"] for u in _o1.get("units", [])], {k: v for k, v in _sfu.items() if k not in ("current",)}])[:900])
+check("SF the card's current projects are dataset summaries with exactly the phase 2 keys, at most two, in the one "
+      "order (the ready Blobby Thing first by its readySince, then M 42 by hours): state ready_to_process with "
+      "'Ready to pull · 0.0 of 0.005 h', state capturing with 'Collecting · 1.5 of 20 h · ready in about 25 nights'; "
+      "moreReady counts the ready ones left over (none)",
+      lambda: all(set(c) == P2_SUMMARY_KEYS for c in _sfu["current"])
+      and [c["tid"] for c in _sfu["current"]] == ["starfront:Blobby Thing", "M42"]
+      and _sfu["current"][0]["state"] == "ready_to_process" and _sfu["current"][0]["stateWord"] == "Ready to process"
+      and _sfu["current"][0]["nextAction"] == "Ready to pull · 0.0 of 0.005 h" and _sfu["current"][0]["readySince"] == "2026-11-07"
+      and _sfu["current"][1]["state"] == "capturing" and _sfu["current"][1]["stateWord"] == "Still capturing"
+      and _sfu["current"][1]["nextAction"] == "Collecting · 1.5 of 20 h · ready in about 25 nights"
+      and _sfu["current"][1]["camera"] == "Seestar S50 Pro (Starfront)" and _sfu["current"][1]["scopeId"] == "S50P-STARFRONT"
+      and _sfu["current"][1]["frames"] == 181 and _sfu["current"][1]["nights"] == 2 and _sfu["current"][1]["hours"] == 1.51
+      and _sfu["current"][1]["mosaic"] is False and _sfu["current"][1]["reason"] == "collecting · 1.5 of 20 h on the Starfront Seestar"
+      and _sfu["moreReady"] == 0,
+      json.dumps(_sfu.get("current"))[:1000] + json.dumps(_sfu.get("moreReady")))
+check("SF scopes[] gains the Starfront scope with its site (camera 'Seestar S50 Pro (Starfront)', kind seestar, "
+      "the contract's order, frames and hours from the scan), scopeOrder is untouched, and the home S50 Pro's "
+      "unit and rows are exactly as without the scan",
+      lambda: any(s["id"] == "S50P-STARFRONT" and s["site"] == "Starfront" and s["kind"] == "seestar"
+                  and s["camera"] == "Seestar S50 Pro (Starfront)" and s["frames"] == 193 and abs(s["hours"] - 1.8) < 0.15
+                  and s["active"] is True and s["colour"] == "#ec835a" for s in _o1["scopes"])
+      and _o1["scopeOrder"] == _o0["scopeOrder"] == ["S50P", "S30P"]
+      and _o1u["S50P"] == {u["id"]: u for u in _o0["units"]}["S50P"]
+      and _o1["targets"] == _o0["targets"] and _o1["totals"] == _o0["totals"] and _o1["reconciliation"] == _o0["reconciliation"],
+      json.dumps([_o1.get("scopeOrder"), [s for s in _o1.get("scopes", []) if s.get("id") == "S50P-STARFRONT"]])[:600])
+_r2 = SF2.run("--projects")
+_obs2 = json.load(open(os.path.join(SF2.state, "observatory.json"), encoding="utf-8"))
+check("SF --projects writes the section and the card into observatory.json (the record the panel and the phone read)",
+      lambda: _r2.returncode == 0 and "starfront" in _obs2 and "S50P-STARFRONT" in [u["id"] for u in _obs2["units"]]
+      and _obs2["starfront"]["projects"], (_r2.stdout + _r2.stderr)[-300:])
+
+# 14. the contract: the Starfront entry is on, by its own camera name and archive root
+_con = probe(SF.env, "c = m.load_contract()\n"
+                     "a = m.resolve_scope(c, {'device': 'seestar', 'camera': 'ZWO Seestar S50 Pro (Starfront)', 'scope': 'Seestar S50 Pro (Starfront)'})\n"
+                     "b = m.resolve_scope(c, {'device': 'seestar', 'camera': 'ZWO Seestar S50 Pro', 'scope': 'Seestar S50 Pro'})\n"
+                     "r = m.scopes_for_root(c, 'S50P-Starfront'); h = m.scopes_for_root(c, 'S50P')\n"
+                     "st = m.State(); st.new_ledger()\n"
+                     "st.add_file('MyWorks/M 42_sub/x.fit', device='seestar', camera='ZWO Seestar S50 Pro', size=1)\n"
+                     "st.add_file('MyWorks/M 42_sub/x.fit', device='seestar', camera='ZWO Seestar S50 Pro (Starfront)', size=2)\n"
+                     "print(json.dumps({'a': (a or {}).get('id'), 'b': (b or {}).get('id'), 'r': [x['id'] for x in r], 'h': [x['id'] for x in h],"
+                     " 'tz': (a or {}).get('timezone'), 'arch': (a or {}).get('archive_root'), 'keys': sorted(st.ledger['files']),"
+                     " 'ten': [x['id'] for x in c['scopes'] if 'unit' in (x.get('match') or {})]}))\n")
+check("SF contract: S50P-STARFRONT is switched on (no unit key) and matches only its own camera name 'ZWO Seestar S50 "
+      "Pro (Starfront)' with timezone America/Chicago and archive root S50P-Starfront; the home name still resolves "
+      "to S50P; the roots are separate; Tenerife stays off; a Starfront row and a home row at the same path get "
+      "two ledger keys (they never collide)",
+      lambda: _con["a"] == "S50P-STARFRONT" and _con["b"] == "S50P" and _con["r"] == ["S50P-STARFRONT"] and _con["h"] == ["S50P"]
+      and _con["tz"] == "America/Chicago" and _con["arch"] == "S50P-Starfront" and _con["ten"] == ["S30P-TENERIFE"]
+      and _con["keys"] == ["MyWorks/M 42_sub/x.fit", "MyWorks/M 42_sub/x.fit|cam=ZWO Seestar S50 Pro (Starfront)"],
+      json.dumps(_con))
+
+# 15. the installer and the install check
+_sfps = open(os.path.join(HERE, "install-windows.ps1"), encoding="utf-8-sig").read()
+_sfst = open(os.path.join(HERE, "selftest.py"), encoding="utf-8").read()
+check("SF install-windows.ps1 registers 'Astro Starfront scan' (--starfront-scan, every 2 hours) and 'Astro "
+      "Starfront watch' (--starfront-watch, every 20 minutes) through Register-AstroTask with the one limited "
+      "principal, both -StartWhenAvailable (run as soon as possible after a missed start), neither twice at once, "
+      "and names both among the tasks to unregister",
+      lambda: "Register-AstroTask 'Astro Starfront scan' '--starfront-scan'" in _sfps
+      and "Register-AstroTask 'Astro Starfront watch' '--starfront-watch'" in _sfps
+      and "New-TimeSpan -Hours 2" in _sfps and "New-TimeSpan -Minutes 20" in _sfps
+      and _sfps.count("-RunLevel Limited") == 1 and "RunLevel Highest" not in _sfps
+      and all(f"'{n}'" in _sfps[_sfps.index("foreach ($tn in"):_sfps.index("foreach ($tn in") + 300]
+              for n in ("Astro Starfront scan", "Astro Starfront watch"))
+      and _sfps[_sfps.index("# ── 6b. The Starfront source"):_sfps.index("# ── 7. The archive PC")].count("-StartWhenAvailable") == 2
+      and _sfps[_sfps.index("# ── 6b. The Starfront source"):_sfps.index("# ── 7. The archive PC")].count("-MultipleInstances IgnoreNew") == 2,
+      _sfps[_sfps.find("# ── 6b."):_sfps.find("# ── 6b.") + 400])
+check("SF selftest.py lists the two Starfront tasks beside the others and warns when the site's zone can't be "
+      "loaded (tzdata)", "\"Astro Starfront scan\", True" in _sfst and "\"Astro Starfront watch\", True" in _sfst
+      and "sf_zone() is not None" in _sfst and "tzdata" in _sfst)
+shutil.rmtree(SF.root, ignore_errors=True)
+shutil.rmtree(SF2.root, ignore_errors=True)
+
 
 # ═══════════════ CHAIN AA: --adopt-archive (1.7.3) ═══════════════════════════
 # Frames this computer imported and verified that reached the archive without

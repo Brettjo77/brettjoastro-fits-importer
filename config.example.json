@@ -23,5 +23,7 @@
   "ASTRO_OBSERVATORY_DATASET": "~/Library/Application Support/Astro Import/observatory-dataset.json",
   "//windows": "On Windows, Notepad saves this file as UTF-8 with a byte-order mark: that is fine from 1.7.0 (it was ignored before). Write every backslash twice, as in the archive paths above.",
   "//projects": "The project layer (1.7.0). ASTRO_QUIET_PERIOD_DAYS: a dataset with no new session for this many days counts as ready to process (default 14). ASTRO_FINALS_DIR: where finished pictures live, for 'done' — the Windows default is E:\\Final Astro Images; the Mac's share doesn't carry that folder, so share it from the PC and set it here (for example \"/Volumes/Final Astro Images\") if the Mac should check finals. ASTRO_CONTRACT_DIR only if the contract folder isn't beside the engine.",
-  "ASTRO_QUIET_PERIOD_DAYS": 14
+  "ASTRO_QUIET_PERIOD_DAYS": 14,
+  "//starfront": "1.10.0, PC only. The Seestar hosted at Starfront: STARFRONT_SHARE (default \\\\10.15.10.212\\EMMC Images), STARFRONT_TZ (America/Chicago; install tzdata once), STARFRONT_DEFAULT_HOURS (20), STARFRONT_VPN_MODE (on-demand, always or never), STARFRONT_ROOF_FILE (empty: the newest file under roof\\), and the rest in PARITY.md. NOTIFY_PUSH_URL: an ntfy topic URL for the pushes (a project at its target, the tunnel down, a silent night); empty means no push.",
+  "NOTIFY_PUSH_URL": ""
 }

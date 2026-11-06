@@ -1,0 +1,18 @@
+Subject: B15-SB-B17 - automated file transfer from my Seestar over WireGuard
+
+Hi,
+
+Pier code B15-SB-B17 (owned Seestar S50 Pro).
+
+My WireGuard VPN is working well, thank you. I'm building a small tool on my home PC that:
+- lists my Seestar's EMMC Images share (10.15.10.212) every couple of hours to count imaging hours per target, and
+- reads the B15 roof status file on \\172.16.5.21\sfro-customer (opened read only and closed straight away), and
+- in Texas daytime with the roof closed, copies a finished target's FITS files home, verifies them, and then deletes just that target's files from the Seestar (never the darklibrary folder, never a format).
+
+Three quick questions:
+1. Is listing the Seestar share every 2 hours, and reading the roof file every 20 minutes at night, acceptable? If you'd prefer different intervals, I'll use them.
+2. Is automated per-target deletion over SMB fine, given your Windows transfer guide says owners may delete after transfer?
+3. Is my Seestar's IP (10.15.10.212) reserved, so it won't change?
+
+Thanks,
+Brett

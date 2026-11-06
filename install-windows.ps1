@@ -16,6 +16,8 @@
 #   7. on the archive PC (1.7.0): the archive's _verify\pc, _verify\mac and
 #      _verify\lock folders, the sweep at logon and 03:30, and every five
 #      minutes the answer to what the Mac asks for - all in Python, as you
+#   8. the Starfront source (1.10.0): the hours scan every 2 hours and the
+#      night watch every 20 minutes, read only, as you
 # Your ledger, config and backed-up frames are never touched.
 # While the FITs Importer App is in charge here (1.5.3), only the files are
 # updated: no watcher, Restart button or panel start (4, 5 and the start).
@@ -51,7 +53,7 @@ if ($isAdmin -and -not $AllowElevated) {
     Warn "This window is running as Administrator. The importer is installed for your own account,"
     Warn "so please close this window and run 'Install on Windows.cmd' from a normal (non-admin) one."
     Warn "If an earlier install was done as administrator, first remove its tasks from THIS window:"
-    foreach ($tn in @('BrettjoAstro FITS Importer ship', 'Astro archive sweep', 'Astro sync requests')) {
+    foreach ($tn in @('BrettjoAstro FITS Importer ship', 'Astro archive sweep', 'Astro sync requests', 'Astro Starfront scan', 'Astro Starfront watch')) {
         Warn "  Unregister-ScheduledTask -TaskName '$tn' -Confirm:`$false"
     }
     exit 1
@@ -252,6 +254,23 @@ if ($archiveSet) {
 } else {
     Info "No archive folder configured - skipping the ship schedule (optional; see PC-SYNC.md)."
 }
+
+# ── 6b. The Starfront source (1.10.0): read only, as you ────────────────────
+# "Astro Starfront scan" (every 2 hours) lists the hosted Seestar's share over
+# the WireGuard tunnel and counts hours per project; "Astro Starfront watch"
+# (every 20 minutes) reads the roof at night and says when the Seestar has gone
+# silent, and exits at once in daytime. Both run as you with limited rights:
+# the tunnel service must start by itself (one admin command, see the install
+# notes), because a limited task may not start a service. Nothing is pulled or
+# deleted in Phase 1.
+$t = New-ScheduledTaskTrigger -Daily -At 00:00
+$t.Repetition = (New-ScheduledTaskTrigger -Once -At 00:00 -RepetitionInterval (New-TimeSpan -Hours 2) -RepetitionDuration (New-TimeSpan -Days 1)).Repetition
+$set = New-ScheduledTaskSettingsSet -StartWhenAvailable -ExecutionTimeLimit (New-TimeSpan -Hours 1) -MultipleInstances IgnoreNew -AllowStartIfOnBatteries -DontStopIfGoingOnBatteries
+Register-AstroTask 'Astro Starfront scan' '--starfront-scan' @($t) $set "Starfront scan every 2 hours (hours per project on the hosted Seestar, read only)" "The Observatory will not see the Starfront Seestar until it is." | Out-Null
+$t = New-ScheduledTaskTrigger -Daily -At 00:00
+$t.Repetition = (New-ScheduledTaskTrigger -Once -At 00:00 -RepetitionInterval (New-TimeSpan -Minutes 20) -RepetitionDuration (New-TimeSpan -Days 1)).Repetition
+$set = New-ScheduledTaskSettingsSet -StartWhenAvailable -ExecutionTimeLimit (New-TimeSpan -Minutes 10) -MultipleInstances IgnoreNew -AllowStartIfOnBatteries -DontStopIfGoingOnBatteries
+Register-AstroTask 'Astro Starfront watch' '--starfront-watch' @($t) $set "Starfront watch every 20 minutes (the roof and a silent Seestar at night; nothing in daytime)" "No 'Seestar silent' alert will come until it is." | Out-Null
 
 # ── 7. The archive PC's own jobs (1.7.0): Python, as you ────────────────────
 # "Astro archive sweep" (logon and 03:30) checks every shipped frame from this

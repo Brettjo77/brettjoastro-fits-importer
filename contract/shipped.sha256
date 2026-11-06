@@ -12,3 +12,4 @@
 10a7e46637053b4666c375f47b1c780bb98ba6ec0510a1012b87bb84fa6d8185  targets.json   (1.8.0, 25 Oct 2026: Observatory UX phase 1 — LDN 1373 and Barnard 144 given a type and constellation; the fourteen bare "Nebula" types made Emission nebula, and the Iris Reflection nebula)
 634a22eec6b9add089bc64dffdc34f71dde99a07a316ad79d677a4fe0699240f  targets.json   (1.8.0, 29 Oct 2026: M 103 (NGC 581), Neptune and Uranus added on Brett's word; 'Planet' is a new kind)
 ea1da489f470df0b2fdf25fb8d51fdefb03bdd6f27834c28ef09a4abdd438d39  scopes.json    (1.9.0, 29 Oct 2026: the card order of the UX plan, ZWO (FRA400, 107PHQ), S50 Pro, S30 Pro, S30, S50; one order everywhere)
+e0ad0818ec6431175597da806cd5200bcc15cf82a7a61e620a2c8b20b8143d0e  scopes.json    (1.10.0, 6 Nov 2026: the Starfront S50 Pro switched on, known by its share: camera 'ZWO Seestar S50 Pro (Starfront)', its own archive root S50P-Starfront, timezone America/Chicago)

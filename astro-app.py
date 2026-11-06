@@ -707,6 +707,45 @@ class App:
             self.last_result = "Report refreshed."
         return self._run("reporting", fn, need_camera=False)
 
+    def do_starfront_scan(self):
+        """Scan now (Starfront, phase 1): the engine's --starfront-scan here,
+        read only. It lists the Seestar's share over the tunnel, reads headers
+        and the roof file and writes starfront-last-scan.json in the state
+        folder; nothing on the Seestar is written or deleted. No camera is
+        needed; one engine operation at a time (the oplock); its output goes
+        to the Activity log like the rebuild's, and a scan the engine stops
+        (the tunnel down, the zone missing) is this job's error, never a
+        traceback (_run catches SystemExit and Exception)."""
+        fn = _starfront_scan_fn()
+        if fn is None:
+            self.last_result = ("This importer has no Starfront scan yet (--starfront-scan): "
+                                "update it first. Nothing was done.")
+            return False
+        if not _starfront_scan_here():
+            self.last_result = ("The Starfront scan runs on the PC (the proof it needs is Windows "
+                                "only); the Mac sees Starfront through the PC's record.")
+            return False
+
+        def work():
+            self.logline("▸ Starfront scan: listing the share over the tunnel (read only)")
+            try:
+                params = [p for p in inspect.signature(fn).parameters.values()
+                          if p.default is p.empty
+                          and p.kind in (p.POSITIONAL_ONLY, p.POSITIONAL_OR_KEYWORD)]
+            except (TypeError, ValueError):
+                params = []
+            res = fn(eng.State()) if params else fn()
+            failed = (res is False or (isinstance(res, int) and not isinstance(res, bool) and res != 0)
+                      or (isinstance(res, dict) and res.get("ok") is False))
+            if failed:
+                why = (res.get("reason") if isinstance(res, dict) else "") or "the Activity log says why"
+                self.last_result = (f"Starfront scan did not finish: {why}. "
+                                    "Nothing on the Seestar was touched.")
+            else:
+                self.last_result = ("Starfront scan finished: see the Activity log, and the "
+                                    "Observatory's Starfront view after the next rebuild.")
+        return self._run("starfront scan", work, need_camera=False)
+
     def do_discard(self, name, night=None, reason=""):
         """Delete one Seestar target from the camera without importing it.
         The engine does all the refusing and asks for the typed DISCARD on the
@@ -841,10 +880,100 @@ class App:
             # "status" above is the operation; this is the status line (U9)
             "statusSummary": STATUS.value,
             "sides": self._sides(),
+            # Starfront (phase 1): the last scan's summary and the two flags, or null
+            "starfront": starfront_state(),
         }
 
 
 APP = App()
+
+
+# ── Starfront (phase 1, 6 Nov 2026; docs/starfront/DESIGN.md "The panel") ──
+# The Panel tab's Starfront line reads the last scan's summary, which the
+# engine's --starfront-scan writes to the state folder, and the two flag files
+# Brett creates and removes by hand. Read only: nothing here opens the share.
+STARFRONT_SCAN_FILE = "starfront-last-scan.json"
+STARFRONT_FLAGS = (("paused", "starfront-pause"), ("hold", "starfront-vpn-hold"))
+
+
+def _starfront_scan_fn():
+    """The engine's --starfront-scan as a callable, or None on an engine
+    without it (then the line shows but Scan now says so)."""
+    for name in ("run_starfront_scan", "starfront_scan"):
+        fn = getattr(eng, name, None)
+        if callable(fn):
+            return fn
+    return None
+
+
+def _starfront_scan_here():
+    """PC only, by design (DESIGN decision 3); in test mode the suite's own
+    share folder stands in on any OS."""
+    return bool(eng.IS_WINDOWS or getattr(eng, "TEST_ROOT", None))
+
+
+def _starfront_share():
+    share = getattr(eng, "STARFRONT_SHARE", None)
+    if share is None:          # an engine before the Starfront source: the usual loader's order
+        share = os.environ.get("STARFRONT_SHARE") or (getattr(eng, "_CONFIG", None) or {}).get("STARFRONT_SHARE")
+    return share if isinstance(share, str) and share.strip() else ""
+
+
+def _hours_since(iso):
+    try:
+        return eng._hours_since(iso)
+    except Exception:
+        return None
+
+
+def starfront_state():
+    """What the Starfront line shows, or None when nothing names Starfront
+    here: no scan yet and no share in the config. The file may be the scan's
+    summary itself or wrap it under "starfront"; a missing or unreadable file
+    is "no scan yet", never an error."""
+    path = os.path.join(eng.STATE_DIR, STARFRONT_SCAN_FILE)
+    doc = None
+    try:
+        with open(path, encoding="utf-8") as f:
+            doc = json.load(f)
+    except (OSError, ValueError):
+        doc = None
+    if isinstance(doc, dict) and isinstance(doc.get("starfront"), dict):
+        doc = doc["starfront"]
+    if not isinstance(doc, dict):
+        doc = None
+    share = _starfront_share()
+    if doc is None and not share:
+        return None
+    d = doc or {}
+    # the engine's own reading of its files (the roof log, the status file's tunnel.lastOk, the
+    # flags) when this engine has the Starfront source; the scan file alone on an older one
+    es = {}
+    try:
+        es = eng.starfront_panel_status() if callable(getattr(eng, "starfront_panel_status", None)) else {}
+    except Exception:
+        es = {}
+    if not isinstance(es, dict):
+        es = {}
+    tunnel = d.get("tunnel") if isinstance(d.get("tunnel"), dict) else {}
+    roof = d.get("roof") if isinstance(d.get("roof"), dict) else {}
+    s = lambda v: v.strip() if isinstance(v, str) and v.strip() else None
+    scanned = s(es.get("lastScan")) or s(d.get("scannedAt"))
+    out = {"scannedAt": scanned,
+           "scanAge": _hours_since(scanned) if scanned else None,
+           "tunnelUp": d.get("tunnelUp") is True or tunnel.get("up") is True,
+           "tunnelLastOk": s(es.get("tunnelLastOk")) or s(tunnel.get("lastOk")),
+           "tunnelMode": s(es.get("vpnMode")) or s(tunnel.get("mode")),
+           "roof": s(es.get("roof")) or s(roof.get("state")) or "unknown",
+           "roofReadAt": s(es.get("roofReadAt")) or s(roof.get("readAt")),
+           "paused": False, "hold": False, "share": share or None,
+           "canScan": _starfront_scan_fn() is not None and _starfront_scan_here(),
+           "scanWhy": ("" if _starfront_scan_fn() is not None and _starfront_scan_here()
+                       else "This importer has no Starfront scan yet (--starfront-scan)."
+                       if _starfront_scan_fn() is None else "The Starfront scan runs on the PC.")}
+    for key, name in STARFRONT_FLAGS:
+        out[key] = os.path.exists(os.path.join(eng.STATE_DIR, name))
+    return out
 
 
 # The status line's command (U9). None: this engine's own --status --json, run
@@ -1510,6 +1639,9 @@ class Handler(BaseHTTPRequestHandler):
                 self._json(_started(APP.do_import(names, decisions)))
         elif self.path == "/api/report":
             self._json(_started(APP.do_report()))
+        elif self.path == "/api/starfront/scan":
+            # Starfront (phase 1): Scan now, read only; no camera needed
+            self._json(_started(APP.do_starfront_scan()))
         elif self.path == "/api/discard":
             name, night, reason = body.get("name"), body.get("night"), body.get("reason")
             if not isinstance(name, str) or not name.strip() \
@@ -1856,6 +1988,8 @@ details.ad-sec[open]>summary::before{content:"▾ "}
 #log .lr{border-top:1px solid color-mix(in srgb, var(--logink) 22%, transparent);margin:9px 2px}
 #log .lsp{height:7px}
 .result{font-size:12.5px;color:var(--ink2);margin-top:10px;min-height:18px}
+.result.sfwarn{color:var(--serious)} .sfnote{font-size:11.5px;color:var(--muted)}
+#sfScanned{font-weight:500;letter-spacing:.02em;text-transform:none;color:var(--muted)}
 /* ── question ── */
 .q{border:1px solid color-mix(in srgb, var(--warning) 55%, transparent);
   background:color-mix(in srgb, var(--warning) 7%, var(--surface));
@@ -2021,6 +2155,14 @@ button.linkbtn:disabled{opacity:.5;cursor:default}
         <div class="result" id="calNote"></div>
         <div id="destBox"></div>
         <div id="invBox"></div>
+      </div>
+      <div class="card" id="sfCard" hidden>
+        <div class="eyebrow" style="display:flex;justify-content:space-between;gap:10px;flex-wrap:wrap"><span>Starfront</span><span id="sfScanned"></span></div>
+        <div class="result" id="sfLine" aria-live="polite"></div>
+        <div class="row" style="margin-top:10px">
+          <button id="btnSfScan" title="List the Starfront Seestar's share over the tunnel and write the scan's summary; read only, nothing on the Seestar is changed">Scan now</button>
+          <span class="sfnote" id="sfNote"></span>
+        </div>
       </div>
     </div>
     <div class="card" id="logcard">
@@ -2875,6 +3017,7 @@ async function tick(){
     updateImportBtn();
     renderQuestion(s.question);
     renderDone(s.lastDone);
+    renderStarfront(s.starfront,busy);
     // progress lines REPLACE the last entry, so compare content, not length
     const logSig=s.log.length+"|"+(s.log[s.log.length-1]||"");
     if(logSig!==lastLogSig){ lastLogSig=logSig; renderLog(s.log); }
@@ -2892,6 +3035,26 @@ async function tick(){
 $("#btnScan").onclick=()=>{lastScanStamp="";startOp("/api/scan",{})};
 $("#btnReport").onclick=()=>startOp("/api/report",{});
 $("#btnEject").onclick=()=>startOp("/api/eject",{});
+$("#btnSfScan").onclick=()=>startOp("/api/starfront/scan",{});
+// Starfront (phase 1): the line reads the last scan's summary and the two flags (starfront-pause,
+// starfront-vpn-hold in the state folder); hidden while nothing names Starfront on this computer
+const SF_MON=["Jan","Feb","Mar","Apr","May","Jun","Jul","Aug","Sep","Oct","Nov","Dec"], SF_DOW=["Sun","Mon","Tue","Wed","Thu","Fri","Sat"];
+function sfWhen(iso){ if(!iso) return "?"; const s=String(iso); const t=Date.parse(s.slice(0,10)+"T12:00:00Z"); const d=isNaN(t)?null:new Date(t); const day=d?SF_DOW[d.getUTCDay()]+" "+d.getUTCDate()+" "+SF_MON[d.getUTCMonth()]:s.slice(0,10); return day+(s.length>=16&&s[10]==="T"?" "+s.slice(11,16):""); }
+function sfAge(h){ h=+h||0; if(h<1) return Math.max(1,Math.round(h*60))+" min"; if(h<36) return Math.round(h)+" h"; const d=Math.round(h/24); return d+" day"+(d===1?"":"s"); }
+function renderStarfront(sf,busy){
+  const card=$("#sfCard"); if(!card) return;
+  if(!sf){ card.hidden=true; return; }
+  card.hidden=false;
+  $("#sfScanned").textContent=sf.scannedAt?"last scan "+sfWhen(sf.scannedAt)+(sf.scanAge!=null?", "+sfAge(sf.scanAge)+" ago":""):"no scan yet";
+  const parts=["tunnel "+(sf.tunnelUp?"up":"down")+(sf.tunnelLastOk?" (last OK "+sfWhen(sf.tunnelLastOk)+")":""),
+               "roof "+(sf.roof||"unknown")+(sf.roofReadAt?" (read "+sfWhen(sf.roofReadAt)+")":"")];
+  if(sf.paused) parts.push("scans paused (starfront-pause)");
+  if(sf.hold) parts.push("VPN on hold (starfront-vpn-hold)");
+  const line=$("#sfLine"); line.textContent=parts.join(" · ");
+  line.className="result"+((!sf.tunnelUp||sf.paused||sf.hold)?" sfwarn":"");
+  const b=$("#btnSfScan"); b.disabled=busy||!sf.canScan;
+  $("#sfNote").textContent=sf.canScan?"read only":(sf.scanWhy||"");
+}
 $("#btnImport").onclick=()=>{
   const names=[...document.querySelectorAll(".sel:checked")].map(x=>decodeURIComponent(x.dataset.name));
   if(!names.length) return;

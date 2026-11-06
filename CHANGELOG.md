@@ -1,5 +1,22 @@
 # Changelog
 
+## 1.10.0 (2026-11-06): the Starfront source, phase 1 (read only)
+
+Brett's hosted Seestar S50 Pro at Starfront Observatories (Texas) joins the importer. Phase 1 looks and counts: nothing is downloaded, nothing on that Seestar is written or deleted, and the ledger is never touched. The pull (phase 2) and the clear (phase 3) are built after the first real scan has been read.
+
+- **`--starfront-scan`** (the PC, every 2 hours as the task "Astro Starfront scan"): brings the WireGuard tunnel up when it is down (`on-demand`), lists the Seestar's `EMMC Images` share one folder at a time (`os.scandir` only, so a night's listing is a handful of round trips) and counts integration hours per project from the file names alone, with one header read per project per night to check the clock, the site and the pointing. It prints one line per project ("M 42: 7.5 of 20 h (38%), 900 subs, 3 nights; ready in about 6 nights"), the storage line (used, free, GB a night, full in N nights) and the file-name stamp beside DATE-OBS. A listing that fails leaves the caches exactly as they were.
+- **`--starfront-watch`** (every 20 minutes, "Astro Starfront watch"): by day at the site it exits before the tunnel is touched; at night it reads the roof file from the observatory's share and, with the roof open, the sky dark and no new sub for 90 minutes, sends one push per night ("B15 open but no new subs since 21:00").
+- **`--starfront-target "M 45" 12`** sets a project's target hours (default 20); 0 removes it.
+- **Pushes** go to an ntfy topic (`NOTIFY_PUSH_URL` in config.json): a project reaching its target, the tunnel down for 12 hours and its recovery, the silent night. No topic, no push.
+- **The record** gains a `starfront` section (projects with hours against target, ETA, status and flags; nights; storage; tunnel; roof; dark library) and a unit card "S50 Pro · Starfront" after the home S50 Pro's, all additive; a record from before the first scan is byte for byte as before. **The page** shows the card, a Starfront view under Explore (hours against target, cumulative hours over nights, nights at the site, storage on the scope, tunnel and roof) and the project's detail one tap down. **The panel** shows a Starfront card with a Scan now button.
+- **The contract**: the `S50P-STARFRONT` scope is switched on, with its own archive root `S50P-Starfront`, the camera name `ZWO Seestar S50 Pro (Starfront)`, the time zone America/Chicago and the colour orange. The installer replaces an unedited `scopes.json`.
+- Settings: the `STARFRONT_*` keys and `NOTIFY_PUSH_URL` (PARITY.md). Flags in the state folder: `starfront-pause`, `starfront-vpn-hold`. The Windows installer registers the two tasks with limited rights (so the tunnel service must be set to start by itself, once, as administrator); `selftest.py` lists them and checks that the site's time zone loads (`py -3 -m pip install --user tzdata`, once).
+- Chain SF in the engine suite (49 checks: the listing from a simulated share, the caches, hours and ETA, the clock check, the tunnel's four answers, the roof, the silent night, the pushes, the record, the contract, the installer) and the SF block in the panel suite (12).
+
+Mac / Windows: PC-only by design. The hosted scope is reached over the PC's tunnel, and phase 2's proof that a pulled frame is on disk (an unbuffered re-read) exists only on Windows; on a Mac the three commands say so and exit, and the Mac sees the Starfront card through the PC's published record. Rollout: install on the PC, run the first scan by hand and read its lines (the file-name format, the stamp against DATE-OBS, the headers, free space, the roof file) before phase 2 is built.
+
+943 end-to-end checks (715 engine + 228 panel). On Linux here: engine 706 passed, 4 skipped, the five Mac/PC-only lines as before; panel 228 passed.
+
 ## 1.9.0 (2026-10-29): scope first (Observatory UX plan, phase 2)
 
 Brett, 29 Oct: "I need the new design in there now." Phase 2 of his plan rebuilds the Observatory around the telescope: scope first, then project, then detail. The first screen answers "what is each scope doing, and what's ready?" without scrolling, on the desktop and at phone width.

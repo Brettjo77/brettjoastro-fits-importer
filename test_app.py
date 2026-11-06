@@ -2456,6 +2456,258 @@ process.stdout.write(JSON.stringify(out));
               "quietly (BrokenPipeError / ConnectionResetError never reach the server's handler, which would print "
               "a traceback), and the handler marks the connection closed",
               _bp_ok, _bp_why)
+    # ── SF (starfront) ── (phase 1, read only; docs/starfront/DESIGN.md "The page" and "The panel", 6 Nov 2026).
+    # The page: the Starfront pure layer (SF, sfHoursLine, sfEtaTxt, sfNights, sfStorageModel, sfStatusLines, the tables,
+    # sfUnit / sfUnitRows / sfLayerFor) sits inside the phase 2 pure region, so it is cut out of the served page with the
+    # P2 pieces and run in node on a record carrying a `starfront` section (two projects: one ready with a flag, one
+    # collecting with an ETA; storage, roof, tunnel, nightsLog, darklibrary) and the engine's S50P-STARFRONT unit, then on
+    # the same rows without the section (an old record). The panel: its own env with a share folder in the root, a
+    # hand-written starfront-last-scan.json and the two flags, /api/state.starfront, Scan now as a job that runs the
+    # engine's --starfront-scan, then a rebuild so the served record carries the section and the card.
+    _SF_CAM = "ZWO Seestar S50 Pro (Starfront)"
+    _SF_PROJECTS = [
+        {"name": "M 42", "tid": "M42", "target": "Orion Nebula (M 42)", "codes": ["M 42", "NGC 1976"], "mosaic": False, "hours": 20.3, "subs": 7308, "stacks": 2, "gb": 61.2,
+         "targetHours": 20, "percent": 102, "eta": None, "status": "ready", "flags": ["mixed-settings"],
+         "nights": [{"night": "2026-10-30", "hours": 6.1, "subs": 2196}, {"night": "2026-10-31", "hours": 7.0, "subs": 2520}, {"night": "2026-11-02", "hours": 7.2, "subs": 2592}],
+         "byFilter": {"LP": 20.3}, "byGain": {"200": 14.3, "80": 6.0}, "firstNight": "2026-10-30", "lastNight": "2026-11-02", "notifiedReadyAt": "2026-11-03T13:02:00+00:00"},
+        {"name": "M 45", "tid": "M45", "target": "Pleiades (M 45)", "codes": ["M 45"], "mosaic": False, "hours": 14.1, "subs": 5076, "stacks": 1, "gb": 42.5,
+         "targetHours": 20, "percent": 61, "eta": {"nights": 3, "date": "2026-11-10"}, "status": "collecting", "flags": [],
+         "nights": [{"night": "2026-11-03", "hours": 4.5, "subs": 1620}, {"night": "2026-11-04", "hours": 5.4, "subs": 1944}, {"night": "2026-11-05", "hours": 4.2, "subs": 1512}],
+         "byFilter": {"LP": 14.1}, "byGain": {"200": 14.1}, "firstNight": "2026-11-03", "lastNight": "2026-11-05", "notifiedReadyAt": None}]
+    _SF_SECTION = {"camera": _SF_CAM, "site": "Starfront", "timezone": "America/Chicago", "scannedAt": "2026-11-06T14:10:00+00:00", "scanAge": 2.0,
+                   "tunnel": {"up": True, "lastOk": "2026-11-06T14:10:00+00:00", "mode": "on-demand", "hold": False}, "paused": False, "clock": "filename, unconfirmed",
+                   "storage": {"usedGb": 118.4, "freeGb": 109.6, "totalGb": 228.0, "gbPerNight": 12.2, "fullInNights": 9, "pullNow": False},
+                   "roof": {"state": "open", "since": "2026-11-06T01:30:00+00:00", "readAt": "2026-11-06T14:05:00+00:00"}, "projects": _SF_PROJECTS,
+                   "nightsLog": [{"night": "2026-11-03", "darkHours": 9.6, "roofOpenHours": 8.1, "capturedHours": 4.5}, {"night": "2026-11-04", "darkHours": 9.6, "roofOpenHours": 9.0, "capturedHours": 5.4},
+                                 {"night": "2026-11-05", "darkHours": 9.7, "roofOpenHours": 7.5, "capturedHours": 4.2}, {"night": "2026-11-01", "darkHours": 9.5, "roofOpenHours": 0.0, "capturedHours": 0.0}],
+                   "darklibrary": {"files": 120, "gb": 3.4, "newestMtime": "2026-11-01T09:00:00+00:00"}}
+    _SF_UNIT = {"id": "S50P-STARFRONT", "label": "S50 Pro · Starfront", "name": "Seestar S50 Pro (Starfront)", "kind": "seestar", "site": "Starfront", "short": "S50P-STARFRONT",
+                "scopeIds": ["S50P-STARFRONT"], "scopes": [_SF_CAM], "colour": "#56B4E9", "onScope": _SF_CAM, "onScopeId": "S50P-STARFRONT", "onScopeCurrent": True, "active": True, "lastOut": "2026-11-05",
+                "current": [_p2_sum("M45", "Pleiades (M 45)", _SF_CAM, "capturing", 14.1, 5076, 3, "2026-11-05", scopeId="S50P-STARFRONT", nextAction="Collecting · 14.1 of 20 h · ready in about 3 nights"),
+                            _p2_sum("M42", "Orion Nebula (M 42)", _SF_CAM, "ready_to_process", 20.3, 7308, 3, "2026-11-02", scopeId="S50P-STARFRONT", nextAction="Ready to pull · 20.3 of 20 h")],
+                "moreReady": 0, "moreReadyHours": 0.0, "strip": [{"night": "2026-11-03", "hours": 4.5}, {"night": "2026-11-04", "hours": 5.4}, {"night": "2026-11-05", "hours": 4.2}], "latestDone": None}
+    def _sf_obs(section):
+        rec = _p2_obs(_HN, asOfNight="2026-11-05", units=_P2_UNITS + [_SF_UNIT], **({"starfront": section} if section else {}))
+        rec["scopes"].append({"camera": _SF_CAM, "id": "S50P-STARFRONT", "colour": "#56B4E9", "kind": "seestar", "order": 9, "hours": 0, "frames": 0, "nights": 0, "site": "Starfront"})
+        rec["scopeOrder"].append("S50P-STARFRONT")
+        return rec
+    _SF_HARNESS = r"""
+let WARN_N=0; const out={}; const sf=SF(); out.has=!!sf; out.explore=exploreItems().map(i=>i.id);
+if(sf){
+  out.projects=sf.projects.map(p=>({name:p.name,tid:p.tid,status:p.status,stKey:p.stKey,word:p.stateWord,line:sfHoursLine(p),eta:sfEtaTxt(p),next:sfNextAction(p),flags:p.flags.map(f=>f.word),why:p.flags.map(f=>!!f.why),cum:sfCumulative(p).map(x=>[x.night,r1(x.cum)]),colour:sfColour(p.stKey)}));
+  out.nights=sfNights(sf).map(sfNightTxt); out.lastScan=sfLastScanTxt(sf); const sm=sfStorageModel(sf); out.storage={line:sm.line,pct:sm.pct,warn:sm.warn}; out.status=sfStatusLines(sf);
+  out.barsTable=sfBarsTable(sf); out.cumTable=sfCumTable(sf); out.unitSub=sfUnitSub(sf);
+  out.proj=(sfProject("M42")||{}).name; out.prefixed=(sfProject("starfront:M 45")||{}).tid; out.layerSf=(sfLayerFor("M42",sf.camera)||{}).tid; out.layerHome=sfLayerFor("wiz","Askar FRA400");
+}
+const u=unitsOf().find(x=>x.id==="S50P-STARFRONT"); out.unit=u?{site:u.site,isSf:sfUnit(u),cams:u.cams,short:short(u.cams[0]),rows:sfUnitRows(u).map(p=>[p.name,sfHoursLine(p),sfEtaTxt(p),p.flags.map(f=>f.word)])}:null;
+const c=landingCards().find(x=>x.id==="S50P-STARFRONT"); out.card=c?{title:c.title,site:c.site,current:c.current.map(p=>[p.target,p.hoursTxt,p.nightsTxt,p.state]),next:c.next,strip:c.strip.length}:null;
+process.stdout.write(JSON.stringify(out));
+"""
+    check("SF page: the served page carries the Starfront view and layers: RENDER.starfront, the view in VIEWS, the Explore item, "
+          "the pure layer's markers and its functions (SF, sfHoursLine, sfEtaTxt, sfNights, sfStorageModel, sfStatusLines, sfUnit, "
+          "sfUnitRows, sfLayerFor), the unit's site chip, the scan block on layer 2, the project layer from the scan, two more "
+          "'view as table' toggles, the record's `starfront` default, and the 'No Starfront scan yet' words",
+          lambda: "RENDER.starfront=function" in body and '["starfront","Starfront"]' in body and 'id:"starfront",label:"Starfront"' in body
+          and "/* ==== Starfront pure layer" in body and "/* ==== end of the Starfront pure layer ==== */" in body
+          and body.index("/* ==== end of the Starfront pure layer ==== */") < body.index("/* ==== end of the phase 2 pure layer ==== */")
+          and all(("function " + f + "(") in body or ("const " + f + "=") in body for f in
+                  ("SF", "sfHoursLine", "sfEtaTxt", "sfNextAction", "sfCumulative", "sfNights", "sfNightTxt", "sfLastScanTxt", "sfStorageModel",
+                   "sfStatusLines", "sfBarsTable", "sfCumTable", "sfUnit", "sfProject", "sfUnitRows", "sfLayerFor", "sfUnitSub", "siteChipTxt",
+                   "sfBarsCard", "sfCumChart", "sfCumCard", "sfNightsStrip", "sfNightsCard", "sfStorageCard", "sfStatusCard", "sfProjectsBlock", "renderSfProject"))
+          and 'el("span","site",m.site)' in body and "if(sfu) root.append(sfProjectsBlock(u));" in body and "renderSfProject(root,sfp,t)" in body
+          and body.count('el("button","btn","view as table")') >= 5 and "starfront:null};" in body and "No Starfront scan yet" in body
+          and "units:[],thisMonth:null,recordsUpTo:null,status:null,space:null" in body,
+          body[:120])
+    if _node and all(_p2_pieces):
+        _sf_js = ("let D=JSON.parse(require('fs').readFileSync(0,'utf8'));\n" + _p2_pieces[0].group(0) + _p2_pieces[1].group(0) + "D=normalise(D);\n"
+                  + "\n".join(m_.group(0) for m_ in _p2_pieces[2:]) + _SF_HARNESS)
+
+        def _sf_run(record):
+            r_ = node_script(_node, _sf_js, input=json.dumps(record), timeout=30)
+            if r_.returncode != 0:
+                return {"error": r_.stderr[-500:]}
+            try:
+                return json.loads(r_.stdout)
+            except ValueError as e_:
+                return {"error": str(e_) + r_.stdout[-200:]}
+        _s1 = _sf_run(_sf_obs(_SF_SECTION))
+        _s1p = {p["name"]: p for p in _s1.get("projects", [])}
+        check("SF page: the Starfront view's blocks from the fixture: (a) the projects most recent night first, each 'hours of target · per cent' "
+              "(14.1 of 20 h · 61 %; 20.3 of 20 h · 102 %), coloured by status (collecting = the capturing hue, ready = the ready hue), the ETA "
+              "'about 3 nights, Tue 10 Nov' and the flag 'mixed settings' with its reason; (b) the cumulative hours per night; (c) the nights "
+              "with dark and roof-open hours and 'last scan Fri 6 Nov 14:10, 2 h ago'; (d) storage used, free, total, GB a night, 'full in "
+              "about 9 nights'; (e) the tunnel with its last OK, mode and hold, the roof and when read, paused, the clock note, the dark library",
+              lambda: "error" not in _s1 and _s1["has"] is True
+              and [p["name"] for p in _s1["projects"]] == ["M 45", "M 42"]
+              and _s1p["M 45"]["line"] == "14.1 of 20 h · 61 %" and _s1p["M 42"]["line"] == "20.3 of 20 h · 102 %"
+              and _s1p["M 45"]["stKey"] == "capturing" and _s1p["M 45"]["colour"] == "var(--st-live-ink)" and _s1p["M 45"]["word"] == "Collecting"
+              and _s1p["M 42"]["stKey"] == "ready_to_process" and _s1p["M 42"]["colour"] == "var(--st-action-bg)" and _s1p["M 42"]["word"] == "Ready to pull"
+              and _s1p["M 45"]["eta"] == "about 3 nights, " + _hn_date("Tue 10 Nov", 2026) and _s1p["M 42"]["eta"] == ""
+              and _s1p["M 45"]["next"] == "Collecting · 14.1 of 20 h · ready in about 3 nights" and _s1p["M 42"]["next"] == "Ready to pull · 20.3 of 20 h"
+              and _s1p["M 42"]["flags"] == ["mixed settings"] and _s1p["M 42"]["why"] == [True] and _s1p["M 45"]["flags"] == []
+              and _s1p["M 45"]["cum"] == [["2026-11-03", 4.5], ["2026-11-04", 9.9], ["2026-11-05", 14.1]]
+              and _s1["nights"][-1] == _hn_date("Thu 5 Nov", 2026) + " · 4.2 h captured · dark 9.7 h · roof open 7.5 h · M 45"
+              and _s1["nights"][0] == _hn_date("Fri 30 Oct", 2026) + " · 6.1 h captured · M 42" and len(_s1["nights"]) == 7
+              and _s1["lastScan"] == "last scan " + _hn_date("Fri 6 Nov", 2026) + " 14:10, 2 h ago"
+              and _s1["storage"] == {"line": "118 GB used · 110 GB free of 228 GB · 12.2 GB a night · full in about 9 nights", "pct": 52, "warn": ""}
+              and [(l["k"], l["v"], l["warn"]) for l in _s1["status"]][:5] == [
+                  ("Tunnel", "up · last OK " + _hn_date("Fri 6 Nov", 2026) + " 14:10 · on-demand", False),
+                  ("Roof", "open since " + _hn_date("Fri 6 Nov", 2026) + " 01:30 · read " + _hn_date("Fri 6 Nov", 2026) + " 14:05", False),
+                  ("Scanning", "on, every 2 hours from the PC", False), ("Clock", "filename clock, unconfirmed", True),
+                  ("Dark library", "120 files · 3.4 GB · newest " + _hn_date("Sun 1 Nov", 2026) + " 09:00", False)]
+              and _s1["barsTable"][0] == ["Pleiades (M 45)", "Collecting", "14.1 h", "20 h", "61 %", "about 3 nights, " + _hn_date("Tue 10 Nov", 2026), "·"]
+              and _s1["barsTable"][1][6] == "mixed settings" and _s1["cumTable"]["head"] == ["Night", "M 45", "M 42"]
+              and _s1["cumTable"]["rows"][-1] == [_hn_date("Thu 5 Nov", 2026), "14.1 h", "20.3 h"],
+              json.dumps(_s1)[:2000])
+        check("SF page: the Explore menu lists Starfront right after What each scope captured when the record carries the section; the unit "
+              "card from the engine's units[] is the Starfront unit (site Starfront, the camera short name 'S50 Pro · Starfront', its current "
+              "projects from the summaries with no programme behind them, the engine's next action); layer 2 shows the scan's projects (object, "
+              "hours of target, ETA, flags); layer 3 for a Starfront project comes from the scan (sfLayerFor), a home project never does",
+              lambda: "error" not in _s1 and _s1["explore"][:4] == ["ready", "nights", "scopes", "starfront"]
+              and _s1["unit"] and _s1["unit"]["site"] == "Starfront" and _s1["unit"]["isSf"] is True and _s1["unit"]["short"] == "S50 Pro · Starfront"
+              and _s1["unit"]["rows"] == [["M 45", "14.1 of 20 h · 61 %", "about 3 nights, " + _hn_date("Tue 10 Nov", 2026), []],
+                                          ["M 42", "20.3 of 20 h · 102 %", "", ["mixed settings"]]]
+              and _s1["card"] and _s1["card"]["title"] == "S50 Pro · Starfront" and _s1["card"]["site"] == ""
+              and _s1["card"]["current"] == [["Pleiades (M 45)", "14.1 h", "3 nights", "capturing"], ["Orion Nebula (M 42)", "20.3 h", "3 nights", "ready_to_process"]]
+              and _s1["card"]["next"] == "Collecting · 14.1 of 20 h · ready in about 3 nights" and _s1["card"]["strip"] == 3
+              and _s1["unitSub"].startswith("34.4 h on the scope · 12,384 subs · 6 nights · on the sky " + _hn_date("Fri 30 Oct", 2026) + " to " + _hn_date("Thu 5 Nov", 2026))
+              and _s1["proj"] == "M 42" and _s1["prefixed"] == "M45" and _s1["layerSf"] == "M42" and _s1["layerHome"] is None,
+              json.dumps([_s1.get("error"), _s1.get("explore"), _s1.get("unit"), _s1.get("card"), _s1.get("unitSub")])[:1500])
+        _s0 = _sf_run(_sf_obs(None))                                  # the same record without the section
+        _s2 = _sf_run(_p2_obs(_HN))                                   # a 1.8.0 record: no units, no section
+        check("SF page: without the section (an old record) nothing breaks: no script error, no 'undefined', SF() is null, the Explore menu "
+              "doesn't name Starfront, the Starfront unit (when the engine still lists one) has no scan rows",
+              lambda: "error" not in _s0 and "error" not in _s2 and "undefined" not in json.dumps(_s0) and "undefined" not in json.dumps(_s2)
+              and _s0["has"] is False and _s2["has"] is False and "starfront" not in _s0["explore"] and "starfront" not in _s2["explore"]
+              and _s0["unit"]["isSf"] is False and _s0["unit"]["rows"] == [] and _s2["unit"] is None,
+              json.dumps([_s0.get("error"), _s2.get("error"), _s0.get("explore"), _s0.get("unit")])[:800])
+    else:
+        skip("SF page: the Starfront pure layer in node (needs node and the marked regions)")
+    # ── the panel: its own env, a share folder in the root, the scan file and the flags, Scan now ──
+    envs = teh.Env("SF", asiair=False, seestar=False)
+    shutil.copytree(os.path.join(BUILD, "contract"), os.path.join(envs.root, "contract"))
+    shutil.copy(os.path.join(BUILD, "astro-observatory.html"), os.path.join(envs.root, "astro-observatory.html"))
+    _sf_share = os.path.join(envs.root, "starfront-share")
+    os.makedirs(os.path.join(_sf_share, "MyWorks", "M 45_sub"))
+    os.makedirs(os.path.join(_sf_share, "darklibrary"))
+
+    def _sf_fits(**kv):
+        cards = ["SIMPLE  =                    T", "BITPIX  =                   16", "NAXIS   =                    2", "NAXIS1  =                 3840", "NAXIS2  =                 2160"]
+        for k_, v_ in kv.items():
+            cards.append(f"{k_:<8}= {v_!r:>20}" if isinstance(v_, str) else f"{k_:<8}= {v_:>20}")
+        cards.append("END")
+        return "".join(c_.ljust(80) for c_ in cards).ljust(2880).encode("ascii") + b"\0" * 2880
+    with open(os.path.join(_sf_share, "MyWorks", "M 45_sub", "Light_M 45_10.0s_IRCUT_20261105-213000_0001.fit"), "wb") as f:
+        f.write(_sf_fits(EXPTIME=10.0, GAIN=200, **{"DATE-OBS": "2026-11-06T03:30:00"}))
+    with open(os.path.join(envs.root, "starfront-tunnel-up"), "w") as f:
+        f.write("")
+    envs.env.update({"ASTRO_CONTRACT_DIR": os.path.join(envs.root, "contract"), "ASTRO_SHIP_FOLDER": "pc",
+                     "ASTRO_OBSERVATORY_TEMPLATE": os.path.join(envs.root, "astro-observatory.html"),
+                     "ASTRO_SAMPLE_MINUTES": "0", "STARFRONT_SHARE": _sf_share})
+    os.makedirs(os.path.join(envs.archive, "S30P"), exist_ok=True)
+
+    def _sf_tree(root_):
+        out_ = {}
+        for r_, ds_, fs_ in os.walk(root_):
+            for n_ in ds_ + fs_:
+                p_ = os.path.join(r_, n_)
+                out_[p_] = (os.path.getsize(p_) if os.path.isfile(p_) else -1, os.path.getmtime(p_))
+        return out_
+    _sf_tree0 = _sf_tree(_sf_share)
+    PORTS = int(envs.env["ASTRO_PANEL_PORT"])
+    URLS = f"http://127.0.0.1:{PORTS}"
+    procs = start_panel(envs, PORTS)
+    try:
+        own_panel(URLS, envs, procs, "SF the Starfront panel answers with its own instance id")
+        _sfpage = load_token(URLS)
+        check("SF panel: the Panel tab carries the Starfront line (the card, its last-scan eyebrow, the line, Scan now) and the script that "
+              "draws it from /api/state.starfront on every poll and starts the scan through /api/starfront/scan",
+              'id="sfCard"' in _sfpage and 'id="sfScanned"' in _sfpage and 'id="sfLine"' in _sfpage and 'id="btnSfScan"' in _sfpage
+              and ">Scan now</button>" in _sfpage and 'startOp("/api/starfront/scan",{})' in _sfpage and "function renderStarfront(" in _sfpage
+              and "renderStarfront(s.starfront,busy);" in _sfpage and "starfront-pause" in _sfpage and "starfront-vpn-hold" in _sfpage, _sfpage[:200])
+        _sfs0 = api("/api/state", url=URLS).get("starfront")
+        check("SF panel: before any scan, /api/state.starfront is present because the config names a share (STARFRONT_SHARE), with no scan "
+              "time, the tunnel not up, the roof unknown and both flags off",
+              isinstance(_sfs0, dict) and _sfs0.get("scannedAt") is None and _sfs0.get("tunnelUp") is False and _sfs0.get("roof") == "unknown"
+              and _sfs0.get("paused") is False and _sfs0.get("hold") is False and _sfs0.get("share") == _sf_share, json.dumps(_sfs0))
+        with open(os.path.join(envs.state, "starfront-last-scan.json"), "w", encoding="utf-8") as f:
+            json.dump({"schema": "starfront-scan/1", "scannedAt": "2026-11-06T14:10:00+00:00", "tunnelUp": True,
+                       "roof": {"state": "open", "since": "2026-11-06T01:30:00+00:00", "readAt": "2026-11-06T14:05:00+00:00"},
+                       "projects": [{"name": "M 45", "tid": "M45", "hours": 14.1}]}, f)
+        with open(os.path.join(envs.state, "starfront-pause"), "w") as f:
+            f.write("")
+        _sfs1 = api("/api/state", url=URLS).get("starfront")
+        os.remove(os.path.join(envs.state, "starfront-pause"))
+        with open(os.path.join(envs.state, "starfront-vpn-hold"), "w") as f:
+            f.write("")
+        _sfs2 = api("/api/state", url=URLS).get("starfront")
+        os.remove(os.path.join(envs.state, "starfront-vpn-hold"))
+        check("SF panel: /api/state.starfront reads a hand-written starfront-last-scan.json (scannedAt and its age, tunnelUp, the roof state "
+              "and when read) and reports the two flags by their files: starfront-pause → paused, starfront-vpn-hold → hold",
+              isinstance(_sfs1, dict) and _sfs1.get("scannedAt") == "2026-11-06T14:10:00+00:00" and isinstance(_sfs1.get("scanAge"), (int, float))
+              and _sfs1.get("tunnelUp") is True and _sfs1.get("roof") == "open" and _sfs1.get("paused") is True and _sfs1.get("hold") is False
+              and _sfs2.get("paused") is False and _sfs2.get("hold") is True, json.dumps([_sfs1, _sfs2])[:800])
+        _sfr = api("/api/starfront/scan", {}, url=URLS)
+        if _sfr.get("started") is True:
+            _sf_t0 = time.time()
+            _sfst = api("/api/state", url=URLS)
+            while time.time() - _sf_t0 < 120 and _sfst.get("status") != "idle":
+                time.sleep(0.3)
+                _sfst = api("/api/state", url=URLS)
+            _sf_log = "\n".join(str(l_) for l_ in _sfst.get("log", []))
+            _sf_res = str(_sfst.get("lastResult") or "")
+            check("SF panel: Scan now starts the engine's --starfront-scan as a job (no camera needed, under the oplock, its lines in the Activity "
+                  "log, the verdict in the banner, never a traceback), and the share is exactly as it was (read only)",
+                  _sfst.get("status") == "idle" and "Starfront scan" in _sf_log and _sf_res.startswith("Starfront scan")
+                  and "Traceback" not in _sf_log and "Traceback" not in _sf_res and _sf_tree(_sf_share) == _sf_tree0,
+                  json.dumps([_sf_res, _sf_log[-600:]]))
+            if _sf_res.startswith("Starfront scan finished"):
+                _sfs3 = api("/api/state", url=URLS).get("starfront")
+                check("SF panel: after the scan the line reads the scan the engine just wrote (a new scan time, the tunnel up by the test probe)",
+                      isinstance(_sfs3, dict) and _sfs3.get("scannedAt") not in (None, "2026-11-06T14:10:00+00:00") and _sfs3.get("tunnelUp") is True,
+                      json.dumps(_sfs3))
+                # the round trip: a rebuild with a snapshot on the archive, then the served record carries the section and the card,
+                # and the page's pure layer draws them from the REAL record
+                os.makedirs(os.path.join(envs.archive, "_verify", "mac"), exist_ok=True)
+                with open(os.path.join(envs.archive, "_verify", "mac", "ledger-snapshot.json"), "w") as f:
+                    json.dump({"schema": "ledger-snapshot/1", "machine": "Mac", "machineId": "mac", "machineUid": "m", "at": "2026-11-01T08:00:00Z", "customNames": {},
+                               "files": {"a": {"filename": "Light_M 31_10.0s_20261101-220000.fit", "target": "M 31", "displayName": "M 31 - Andromeda", "night": "2026-11-01",
+                                               "sourceType": "sub", "exposureSeconds": 10.0, "size": 4, "sha256": "aa" * 32, "device": "seestar", "scope": "Seestar S30 Pro", "here": True}}}, f)
+                _sfrb = api("/api/projects/rebuild", {}, url=URLS)
+                _sfds = {}
+                try:
+                    with urllib.request.urlopen(URLS + "/observatory?json=1&t=sf", timeout=30) as resp:
+                        _sfds = json.loads(resp.read().decode())
+                except Exception as e_:
+                    _sfds = {"error": str(e_)}
+                if isinstance(_sfds.get("starfront"), dict):
+                    _sfu = next((u_ for u_ in _sfds.get("units", []) if u_.get("id") == "S50P-STARFRONT"), None)
+                    check("SF round trip: after Refresh the served record carries the `starfront` section the scan filled (M 45, one sub, the "
+                          "storage line, the camera) and the S50P-STARFRONT unit card with its site",
+                          _sfrb.get("ok") is True and [p_.get("name") for p_ in _sfds["starfront"]["projects"]] == ["M 45"]
+                          and _sfds["starfront"]["projects"][0].get("subs") == 1 and isinstance(_sfds["starfront"].get("storage"), dict)
+                          and _sfu is not None and _sfu.get("site") == "Starfront" and [c_.get("target") for c_ in _sfu.get("current", [])] == ["Pleiades (M 45)"],
+                          json.dumps([_sfrb, _sfds.get("starfront"), _sfu])[:1200])
+                    if _node and all(_p2_pieces):
+                        _s3 = _sf_run(_sfds)
+                        check("SF round trip: the page's Starfront layer draws the real record: the view has the project with its hours of target, "
+                              "the nights, the storage and the status lines; Explore names Starfront; the card is the Starfront unit with its scan rows",
+                              lambda: "error" not in _s3 and _s3["has"] is True and [p_["name"] for p_ in _s3["projects"]] == ["M 45"]
+                              and _s3["projects"][0]["line"].endswith(" of 20 h · 0 %") and "starfront" in _s3["explore"] and _s3["storage"]["line"]
+                              and _s3["unit"] and _s3["unit"]["isSf"] is True and _s3["unit"]["rows"][0][0] == "M 45"
+                              and _s3["card"] and _s3["card"]["current"][0][0] == "Pleiades (M 45)" and "undefined" not in json.dumps(_s3),
+                              json.dumps(_s3)[:1500])
+                else:
+                    skip("SF round trip: --projects doesn't add the `starfront` section to the served record yet (" + json.dumps(_sfds)[:200] + ")")
+            else:
+                skip("SF panel: the scan the engine ran did not finish here, so the round trip is not checked: " + _sf_res[:200])
+        else:
+            check("SF panel: on an engine without the Starfront scan, Scan now is refused in words naming --starfront-scan (no job, no traceback)",
+                  _sfr.get("started") is False and "--starfront-scan" in str(_sfr.get("error")), json.dumps(_sfr))
+            skip("SF panel: Scan now runs the engine's --starfront-scan (the engine flag is not there yet)")
+    finally:
+        procs.terminate()
+        procs.wait(timeout=30)
 finally:
     procn.terminate()
     procn.wait(timeout=30)

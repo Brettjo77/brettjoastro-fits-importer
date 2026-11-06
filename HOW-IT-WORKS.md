@@ -303,7 +303,7 @@ The facts come from this computer's ledger, the PC's inventory of the archive, a
 
 **Messages on the Archive tab.** Warnings (an old snapshot, names the contract doesn't know, ledger rows that couldn't be read) sit at the top of the list, in a box you can't miss. What a button did, or why it couldn't, appears under its own row.
 
-Not yet: the Starfront S50 Pro and the rented Tenerife S30 Pro can't be told apart from the home Seestars of the same model, because the importer doesn't record which unit a frame came from. Until it does, their frames count under the Shinfield entry.
+Not yet: the rented Tenerife S30 Pro can't be told apart from the home S30 Pro, because the importer doesn't record which unit a frame came from. Until it does, its frames count under the Shinfield entry. (The Starfront S50 Pro has its own entry from 1.10.0: its hours come from the PC's scan of the scope, not the ledger, until phase 2 pulls the frames.).
 
 On the Mac, "done" isn't checked unless `E:\Final Astro Images` is shared and `"ASTRO_FINALS_DIR": "/Volumes/Final Astro Images"` is in config.json; until then a finished object can show as ready on the Mac. "In progress" needs the share mounted (the masters come from the PC's inventory).
 
@@ -332,6 +332,8 @@ Its facts are the To process list's. `--projects` writes two files side by side 
 **A copy as one file**, to open on another computer or to send: on the Mac, in Terminal, `/usr/local/bin/python3 ~/bin/astro-import.py --observatory`; on the PC, in Terminal (PowerShell), `py -3 -X utf8 "$env:LOCALAPPDATA\BrettjoAstro\bin\astro-import.py" --observatory`. It writes `observatory.html` beside `projects.json` (add a file name after `--observatory` to put it elsewhere; it will never write under the archive, over one of the importer's own files, or over a file that isn't an Observatory page).
 
 **Sky positions.** A target with no position in `contract/targets.json` is listed but sits off the sky map and the footprints. To place it, add `"ra"` (hours, as a decimal) and `"dec"` (degrees, as a decimal) to its entry, as on Andromeda: `"ra": 0.712, "dec": 41.27`. Your copy then counts as edited, so the next update leaves `targets.json.new` beside it to merge.
+
+**The Starfront Seestar (1.10.0).** The S50 Pro hosted at Starfront in Texas sits on the PC's WireGuard tunnel. Every two hours the PC lists the scope's share and counts, from the file names, how many hours each project has against its target ("M 42: 7.5 of 20 h, ready in about 6 nights"); every twenty minutes at night it reads the observatory's roof file and sends a push to your phone when the roof is open but the Seestar has gone quiet. The Observatory shows it as a card of its own, "S50 Pro · Starfront", with a Starfront view under Explore (hours against target, the nights, storage on the scope, the tunnel and the roof). Nothing is downloaded yet and nothing on that Seestar is ever touched: the pull and the clear come in the next two phases, after the first real scan has been read.
 
 ## Frames that reached the archive without a ship
 

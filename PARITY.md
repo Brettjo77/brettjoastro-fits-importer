@@ -86,6 +86,7 @@ way. Every release updates it.
 | `--adopt-archive` (1.7.3): frames this computer imported that reached the archive without a ship are matched to the PC's inventory by hash and recorded as adopted (ledger marks, a "shipped" row in this computer's own log); `--hash-here` reads back un-hashed copies; dry run by default | ✓ over the share | ✓ local E: | engine |
 | The phone copy of the Observatory record (1.7.6): `publish_phone` writes `observatory.json` into the AstroLog iOS app's iCloud folder after each `--projects` and on the panel's stamp check | ✓ `~/Library/Mobile Documents/iCloud~Brettjo~Astrolog/Documents` (`ASTRO_PHONE_DIR`) | ✗ no iCloud Drive on the PC; the Mac's panel carries the PC's record to the phone | engine |
 | Scope first (1.9.0, Observatory UX plan phase 2): the page opens on a status line and one card per active unit (the ZWO camera as one unit over both Askars), a scope's projects one tap down and a project's detail one more; every earlier view behind Explore; the panel injects this computer's live safety facts (`status`) and Space (`space`) into the served record; the Dashboard tab is Ledger; `/observatory` works in its own tab | ✓ (`status.onlyHere` = frames only on the Mac; Space on the Mac) | ✓ (frames only on the PC; Space on C:) | engine + panel + page |
+| The Starfront source, phase 1 (1.10.0, read only): `--starfront-scan`, `--starfront-watch`, `--starfront-target`; the record's `starfront` section and the "S50 Pro · Starfront" unit card; the page's Starfront view and the panel's Starfront card with Scan now; pushes to an ntfy topic (`NOTIFY_PUSH_URL`) | ✗ the commands say the source runs on the PC and exit; the card arrives through the PC's published record | ✓ over the WireGuard tunnel; Scheduled Tasks "Astro Starfront scan" (every 2 h) and "Astro Starfront watch" (every 20 min), limited rights | engine + panel + page + installer |
 | Honest numbers (1.8.0, Observatory UX plan phase 1): finals matched by code or any contract name, scope from tag → folder → root, the ambiguous and unmatched pictures listed; done / in-progress states kept when the finals folder or the inventory can't be read; samples under 30 minutes set aside; one order for every list (engine, page, To process tab) with a `readySince` date and a reason in words; the two new config keys | ✓ (finals still need `ASTRO_FINALS_DIR` on the Mac) | ✓ local E: | engine + panel + page |
 | The Observatory, history first (1.7.5): the Recent nights ledger, the scope chart with the moon row and the selected-night panel, What each scope shot, the card rows and lanes per scope, the compact header; `pendingImport.targetNames` and `elsewhereMachine` from the scan summary; the page's Refresh and Open the Panel reach the panel as `observatory-refresh` / `open-panel`; the panel hides its own row and footer while the page shows | ✓ | ✓ | engine + panel + page |
 | The Observatory's live refresh (1.7.2): `GET /api/observatory/status` answers `{generatedAtIso, rebuilding}`; `GET /observatory?json=1` returns the dataset alone; the page polls and redraws in place. The archive is looked at for the stamp every ten minutes and for the Dashboard's snapshot once a minute, never on every poll | ✓ (the share: a stale mount must not stall the panel) | ✓ local E: | panel + page |
@@ -141,6 +142,17 @@ The same keys on both, in `config.json` next to the ledger:
 | `ASTRO_QUIET_PERIOD_DAYS` | days without a session before a dataset is ready to process (1.7.0) | 14 | 14 |
 | `ASTRO_SAMPLE_MINUTES` | under this much integration a dataset with no master and no final is a sample, set aside from the counts and queues; 0 switches the rule off (1.8.0) | 30 | 30 |
 | `ASTRO_ACTIVE_WINDOW_NIGHTS` | the window that makes a scope "active" on the Observatory; reported in the record from 1.8.0, used by the page from phase 2 | 30 | 30 |
+| `STARFRONT_SHARE` | the hosted Seestar's share, UNC only (1.10.0; a drive letter is refused) | — (PC only) | `\\10.15.10.212\EMMC Images` |
+| `STARFRONT_CAMERA` | the camera name on every Starfront row; must equal the contract's `match.camera` | — | `ZWO Seestar S50 Pro (Starfront)` |
+| `STARFRONT_TZ`, `STARFRONT_LAT`, `STARFRONT_LON` | the site's zone (tzdata must be installed) and position | — | `America/Chicago`, 31.54733, -99.38273 |
+| `STARFRONT_DEFAULT_HOURS` | a project's target unless `--starfront-target` set one | — | 20 |
+| `STARFRONT_VPN_MODE`, `STARFRONT_VPN_TUNNEL`, `STARFRONT_SEESTAR_IP` | `on-demand` (the scan starts the tunnel service when it is down), `always` or `never`; the WireGuard tunnel name (service `WireGuardTunnel$<name>`); the host probed on port 445 | — | `on-demand`, `BrettJohnson-B15`, `10.15.10.212` |
+| `STARFRONT_VPN_ALERT_HOURS` | one push after the tunnel has been down this long, one on recovery | — | 12 |
+| `STARFRONT_ROOF_SHARE`, `STARFRONT_ROOF_FILE` | the observatory's share (the roof file sits under `roof\`); empty file name means the newest file there | — | `\\172.16.5.21\sfro-customer`, empty |
+| `STARFRONT_SILENT_MINUTES` | roof open, sky dark, no new sub for this long: one push a night | — | 90 |
+| `STARFRONT_FULL_WARN_NIGHTS` | "pull soon" when the scope is full in fewer nights than this | — | 5 |
+| `STARFRONT_STALL_SECONDS`, `STARFRONT_ROOF_CLOSED_HOURS`, `STARFRONT_WORKERS`, `STARFRONT_AUTO_CLEAR` | read now, used by phase 2 (the pull) and phase 3 (the clear) | — | 120, 2, 8, false |
+| `NOTIFY_PUSH_URL` | an ntfy topic URL for the Starfront pushes; empty means no push (1.10.0) | empty | empty |
 
 Paths never cross between machines. `--export-settings` / `--import-settings`
 carry the portable part instead: custom target names, the never-import list,
@@ -192,6 +204,12 @@ the scope table, and the non-path keys.
   mounted. So the PC's `projects.json` is the complete one (and `--pc-nightly`
   rebuilds it each night, with the Mac's sessions from the snapshot its ship
   leaves); the Mac's says what it could not check.
+- **The Starfront source (1.10.0)** runs on the PC only. The hosted Seestar is
+  reached over the PC's WireGuard tunnel, the two tasks are the PC's, and
+  phase 2's proof that a pulled frame is on disk (an unbuffered re-read,
+  `FILE_FLAG_NO_BUFFERING`) exists only on Windows. On a Mac `--starfront-scan`,
+  `--starfront-watch` and `--starfront-target` say so and exit; the Mac sees
+  the Starfront card through the PC's published record, as it sees finals.
 - **Finder "done" tags** on imported ASIAir folders are macOS-only. NTFS has
   no Finder labels; the ledger is the real record on both.
 - **The Windows watcher's notification** names the camera but not the new

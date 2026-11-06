@@ -215,7 +215,9 @@ def main():
             check("Restart FITS Importer on the Desktop", os.path.isfile(desk), desk,
                   warn_only=True)
         for task, needed in (("BrettjoAstro FITS Importer ship", os.path.isdir(eng.ARCHIVE_MOUNT)),
-                             ("Astro archive sweep", os.path.isdir(eng.ARCHIVE_MOUNT))):
+                             ("Astro archive sweep", os.path.isdir(eng.ARCHIVE_MOUNT)),
+                             ("Astro Starfront scan", True),        # 1.10.0: every 2 hours
+                             ("Astro Starfront watch", True)):      # 1.10.0: every 20 minutes
             if eng.TEST_ROOT:
                 line("SKIP", f"scheduled task '{task}'",
                      "TEST MODE: the real Task Scheduler is never queried")
@@ -228,6 +230,10 @@ def main():
                       warn_only=True)
             else:
                 line("SKIP", f"scheduled task '{task}'", "no archive on this machine")
+        # the Starfront source (1.10.0) needs the site's zone: python.org's Python
+        # has no zone database until tzdata is installed
+        check(f"Starfront time zone {eng.STARFRONT_TZ} loads (tzdata)", eng.sf_zone() is not None,
+              "run: py -3 -m pip install --user tzdata", warn_only=True)
         if test_8765:                          # the watcher would refuse (exit 3)
             line("SKIP", "watcher runs", "TEST MODE: port 8765 is never used under a test")
         else:
