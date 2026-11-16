@@ -8696,6 +8696,107 @@ else:
     skip("GD install-scripts.sh still parses (bash -n): no bash here")
 
 
+# ── the join: 31 Oct's two _verify folders made one again (--rejoin-verify, on the PC) ──
+# The Mac ships three frames and the PC's sweep checks them; _verify is moved into a tidy-up folder; the Mac
+# ships a fourth and the PC checks it, both into a NEW _verify that knows nothing of the first three.
+GDj = teh.Env("GDj", asiair=False, seestar=True)
+GDj.env.update(D7_MAC)
+_gdj_pc = dict(PCX, ASIAIR_STATE=os.path.join(GDj.root, "pc-state"))     # the PC has its own state folder
+os.makedirs(os.path.join(GDj.archive, "S30P"))
+for st in ("20260910-224402", "20260910-225402", "20260910-230402"):
+    GDj.add_seestar_sub("M 27", st)
+GDj.run("--no-ship")
+GDj.run("--ship")
+GDj.run("--sweep", extra_env=_gdj_pc)
+_gdj_live = os.path.join(GDj.archive, "_verify")
+with open(os.path.join(_gdj_live, "askar_rig_map.csv"), "w") as f:
+    f.write("rig,scope\n")                                                # a file of Brett's own, only in the old folder
+with open(os.path.join(_gdj_live, "mac", "ledger-snapshot.json.21359.86.tmp"), "w") as f:
+    f.write("half a snapshot")                                            # a dead temp file (there was one, 76 MB)
+with open(os.path.join(_gdj_live, "pc", "inventory-E-20261031T111658Z.jsonl"), "w") as f:
+    f.write("{}\n")                                                       # a superseded inventory listing
+_gdj_old = os.path.join(GDj.archive, "zzArchive Scripts and Stuff", "_verify")
+os.makedirs(os.path.dirname(_gdj_old))
+os.rename(_gdj_live, _gdj_old)
+GDj.add_seestar_sub("M 27", "20260911-224402")
+GDj.run("--no-ship")
+r = GDj.run("--ship")
+assert "Shipped 1 file(s)" in r.stdout, r.stdout[-300:]
+GDj.run("--sweep", extra_env=_gdj_pc)
+
+def gdj_tree(d):
+    out = {}
+    for root, _dirs, files in os.walk(d):
+        for fn in files:
+            with open(os.path.join(root, fn), "rb") as f:
+                out[os.path.relpath(os.path.join(root, fn), d).replace("\\", "/")] = f.read()
+    return out
+
+_gdj_old0, _gdj_live0 = gdj_tree(_gdj_old), gdj_tree(_gdj_live)
+r = GDj.run("--rejoin-verify", _gdj_old, extra_env=_gdj_pc)
+_gdj_dry = r.stdout.replace("\\", "/")
+check("GD --rejoin-verify is a dry run unless --apply: it names the two logs to join (old rows, then live rows), "
+      "the file only the old folder has, what stays as it is and what is left behind (a temp file, an old "
+      "inventory listing), exits 0 and changes nothing in either folder",
+      lambda: r.returncode == 0 and "join   mac/shipped.jsonl: 6 old rows" in _gdj_dry and "then the 2 live rows" in _gdj_dry
+      and "join   pc/verified.jsonl: 3 old rows" in _gdj_dry and "askar_rig_map.csv" in _gdj_dry
+      and "an unfinished temporary file" in _gdj_dry and "an old inventory listing" in _gdj_dry
+      and "[dry-run] Nothing changed" in _gdj_dry
+      and gdj_tree(_gdj_old) == _gdj_old0 and gdj_tree(_gdj_live) == _gdj_live0, (r.stdout + r.stderr)[-700:])
+# refusals: a ship in progress (the lock held by another computer), a folder that is no _verify, the live one itself
+_gdj_lock = probe(dict(GDj.env, **_gdj_pc),
+    "p = os.path.join(m.ARCHIVE_MOUNT, '_verify', 'lock', 'ship.lock')\n"
+    "os.makedirs(os.path.dirname(p), exist_ok=True)\n"
+    "json.dump({'schema': m.SHIP_LOCK_SCHEMA, 'machineId': 'mac', 'machine': 'another-computer', 'host': 'Mac', "
+    "'pid': 1, 'op': 'ship', 'startedAt': m._utc_iso(), 'renewedAt': m._utc_iso()}, open(p, 'w'))\n"
+    "print(json.dumps({'ok': True}))\n")
+r_busy = GDj.run("--rejoin-verify", _gdj_old, "--apply", extra_env=_gdj_pc)
+_gdj_busy_same = gdj_tree(_gdj_live) == dict(_gdj_live0, **{"lock/ship.lock": gdj_tree(_gdj_live).get("lock/ship.lock")})
+os.remove(os.path.join(_gdj_live, "lock", "ship.lock"))
+os.makedirs(os.path.join(GDj.root, "not-a-verify"))
+r_not = GDj.run("--rejoin-verify", os.path.join(GDj.root, "not-a-verify"), "--apply", extra_env=_gdj_pc)
+r_self = GDj.run("--rejoin-verify", os.path.join(_gdj_live, "mac"), "--apply", extra_env=_gdj_pc)
+check("GD --rejoin-verify --apply refuses, changing nothing: while a ship holds the archive's lock; for a folder "
+      "that is no _verify; for the live _verify or a folder inside it (each exits 1 and says why)",
+      lambda: _gdj_lock == {"ok": True} and r_busy.returncode == 1 and "nothing was changed" in r_busy.stdout and _gdj_busy_same
+      and r_not.returncode == 1 and "doesn't look like a _verify folder" in r_not.stderr
+      and r_self.returncode == 1 and "live _verify itself" in r_self.stderr and gdj_tree(_gdj_old) == _gdj_old0,
+      f"{r_busy.returncode} {r_busy.stdout[-200:]!r} | {r_not.returncode} {r_not.stderr[-150:]!r} | {r_self.returncode} {r_self.stderr[-150:]!r}")
+r = GDj.run("--rejoin-verify", _gdj_old, "--apply", extra_env=_gdj_pc)
+_gdj_live1 = gdj_tree(_gdj_live)
+check("GD --rejoin-verify --apply: each log is exactly the old bytes then the live bytes, the old-only file is back "
+      "byte for byte, the live snapshot stays the live one, the temp file and the old inventory listing are not "
+      "brought, the note is there, exit 0; and the old folder is unchanged, every byte",
+      lambda: r.returncode == 0
+      and _gdj_live1["mac/shipped.jsonl"] == _gdj_old0["mac/shipped.jsonl"] + _gdj_live0["mac/shipped.jsonl"]
+      and _gdj_live1["pc/verified.jsonl"] == _gdj_old0["pc/verified.jsonl"] + _gdj_live0["pc/verified.jsonl"]
+      and _gdj_live1["askar_rig_map.csv"] == b"rig,scope\n"
+      and _gdj_live1["mac/ledger-snapshot.json"] == _gdj_live0["mac/ledger-snapshot.json"]
+      and not any(k.endswith(".tmp") or "inventory-E-2026" in k for k in _gdj_live1)
+      and "READ ME - do not move this folder.txt" in _gdj_live1 and gdj_tree(_gdj_old) == _gdj_old0,
+      (r.stdout + r.stderr)[-600:])
+_gdj_keep = sorted(k for k in _gdj_live1 if k.startswith("pc/rejoin-"))
+_gdj_man = json.loads(next((_gdj_live1[k] for k in _gdj_keep if k.endswith("/manifest.json")), b"{}"))
+_gdj_logs = probe(dict(GDj.env, **_gdj_pc), "print(json.dumps([p.replace(os.sep, '/') for p in m._ship_log_files(m.ARCHIVE_MOUNT)]))")
+check("GD the join keeps each joined log as it stood, with a manifest, in _verify/pc/rejoin-<stamp> (the PC's own "
+      "folder), and nothing that reads ship logs takes the kept copies for logs",
+      lambda: len(_gdj_keep) == 3 and [j["file"].replace("\\", "/") for j in _gdj_man["joined"]] == ["mac/shipped.jsonl", "pc/verified.jsonl"]
+      and _gdj_man["joined"][0]["bytes"] == len(_gdj_live1["mac/shipped.jsonl"]) and _gdj_man["failed"] == []
+      and next(_gdj_live1[k] for k in _gdj_keep if k.endswith("/mac/shipped.jsonl")) == _gdj_live0["mac/shipped.jsonl"]
+      and isinstance(_gdj_logs, list) and len(_gdj_logs) == 1 and not any("rejoin-" in x for x in _gdj_logs),
+      f"{_gdj_keep} {_gdj_man} {_gdj_logs}")
+r = GDj.run("--rejoin-verify", _gdj_old, "--apply", extra_env=_gdj_pc)
+check("GD run again, the join finds nothing to do and changes nothing (the logs already begin with the old rows)",
+      lambda: r.returncode == 0 and "Nothing to do" in r.stdout and gdj_tree(_gdj_live) == _gdj_live1,
+      (r.stdout + r.stderr)[-300:])
+r = GDj.run("--ship")
+check("GD after the join the Mac's next ship marks all four frames as checked by the PC: the three whose proof "
+      "was in the moved folder as well as the one since",
+      lambda: "4 frame(s) confirmed verified by the PC sweep" in r.stdout
+      and all(e.get("archiveVerifiedAt") for e in GDj.ledger()["files"].values() if e.get("archiveLocation")),
+      r.stdout[:300])
+
+
 # ═══════════════ Summary ═════════════════════════════════════════════════════
 summary()
 sys.exit(1 if FAIL else 0)

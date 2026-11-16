@@ -7280,6 +7280,294 @@ def _respond(mount, rid, kind, status, **fields):
         warn(f"Could not answer request {rid}: {e}")
     return rec
 
+# ── Joining a moved-aside _verify back in (1.10.1) ───────────────────────────
+# 31 Oct 2026: _verify was moved into a tidy-up folder by hand and the importer
+# began an empty one. The old folder holds the history to that day, the live
+# one everything since. --rejoin-verify FOLDER makes the live one whole again:
+#   - a log that is only ever added to (shipped*.jsonl, verified.jsonl,
+#     problems.jsonl, quarantine.jsonl) becomes the old rows, then the live rows;
+#   - a file only the old folder has comes back under its own name;
+#   - a file both have (a snapshot, a status, a receipt) stays as the live one;
+#   - temporary files, locks and superseded inventory listings stay behind.
+# The old folder is only ever read. Each joined log's live copy is kept in
+# _verify\pc\rejoin-<stamp>\ with a manifest of what was done. A dry run
+# unless --apply. On the PC only (the archive is its own disk), under the
+# archive's ship lock and the PC's job locks, so neither computer's ship nor
+# the sweep can add a row meanwhile. Joining the Mac's ship log here is the
+# one time another computer writes it: the repair of a hand move, never
+# routine (rule 6), and the Mac's own copy of it is kept beside the manifest.
+_REJOIN_LOGS = ("verified.jsonl", "problems.jsonl", "quarantine.jsonl")
+
+def _rejoin_is_log(name):
+    n = name.lower()
+    return (n.startswith("shipped") and n.endswith(".jsonl")) or n in _REJOIN_LOGS
+
+def _rejoin_skip(rel):
+    """Why a file in the old folder is left behind, or None."""
+    parts = rel.replace("\\", "/").split("/")
+    name = parts[-1].lower()
+    if parts[0].lower() == "lock" or name == "ship.lock":
+        return "a lock"
+    if name.endswith(".tmp") or name.endswith(".partial"):
+        return "an unfinished temporary file"
+    if name.startswith("inventory-") and name.endswith(".jsonl"):
+        return "an old inventory listing (the PC makes a new one each night)"
+    if any(x.lower().startswith("rejoin-") for x in parts[:-1]):
+        return "an earlier join's own keepsake"
+    return None
+
+def _is_link(path):
+    return os.path.islink(path) or getattr(os.path, "isjunction", lambda _p: False)(path)
+
+def _long_root(path):
+    """A folder to walk whatever the depth below it: on Windows the \\\\?\\
+    form, so a name past 260 characters is listed and opened, never skipped
+    in silence."""
+    p = os.path.abspath(path)
+    if not IS_WINDOWS or p.startswith("\\\\?\\"):
+        return p
+    return ("\\\\?\\UNC\\" + p[2:]) if p.startswith("\\\\") else ("\\\\?\\" + p)
+
+def _file_starts_with(big, small):
+    """Does `big` begin with exactly the bytes of `small`?"""
+    if os.path.getsize(big) < os.path.getsize(small):
+        return False
+    with open(big, "rb") as a, open(small, "rb") as b:
+        while True:
+            want = b.read(1 << 20)
+            if not want:
+                return True
+            if a.read(len(want)) != want:
+                return False
+
+def _count_rows(path):
+    n = 0
+    with open(path, "rb") as f:
+        for chunk in iter(lambda: f.read(1 << 20), b""):
+            n += chunk.count(b"\n")
+    return n
+
+def _copy_new(src, dst):
+    """Copy src to dst, which must not exist (never over anything); flushed to
+    the disk, the source's date kept. Returns the bytes written."""
+    n = 0
+    with open(src, "rb") as f, open(dst, "xb") as out:
+        for chunk in iter(lambda: f.read(1 << 20), b""):
+            out.write(chunk)
+            n += len(chunk)
+        out.flush()
+        os.fsync(out.fileno())
+    try:
+        st = os.stat(src)
+        os.utime(dst, (st.st_atime, st.st_mtime))
+    except OSError:
+        pass
+    return n
+
+def rejoin_plan(old, live):
+    """What joining `old` into `live` would do, reading only:
+    {"join": [(rel, old bytes, live bytes)], "joined": [rel], "bring": [(rel, bytes)],
+     "keep": [rel], "skip": [(rel, why)], "unread": [why]}."""
+    plan = {"join": [], "joined": [], "bring": [], "keep": [], "skip": [], "unread": []}
+    for root, dirs, files in os.walk(old, onerror=lambda e: plan["unread"].append(str(e))):
+        for d in list(dirs):
+            if _is_link(os.path.join(root, d)):
+                dirs.remove(d)
+                plan["skip"].append((os.path.relpath(os.path.join(root, d), old), "a link"))
+        dirs.sort()
+        for fn in sorted(files):
+            src = os.path.join(root, fn)
+            rel = os.path.relpath(src, old)
+            if _is_link(src) or not os.path.isfile(src):
+                plan["skip"].append((rel, "a link"))
+                continue
+            why = _rejoin_skip(rel)
+            if why:
+                plan["skip"].append((rel, why))
+                continue
+            dst = os.path.join(live, rel)
+            try:
+                size = os.path.getsize(src)
+                if not os.path.lexists(dst):
+                    plan["bring"].append((rel, size))
+                elif not _rejoin_is_log(fn):
+                    plan["keep"].append(rel)
+                elif size == 0:
+                    plan["skip"].append((rel, "empty"))
+                elif _file_starts_with(dst, src):
+                    plan["joined"].append(rel)
+                else:
+                    plan["join"].append((rel, size, os.path.getsize(dst)))
+            except OSError as e:
+                plan["unread"].append(f"{rel}: {e}")
+    return plan
+
+def _rejoin_say(plan, old, live):
+    info(f"Joining the records in  {old}")
+    info(f"into the live records at {live}")
+    for rel, osz, lsz in plan["join"]:
+        log(f"  join   {rel}: {_count_rows(os.path.join(old, rel)):,} old rows ({human_size(osz)}), "
+            f"then the {_count_rows(os.path.join(live, rel)):,} live rows ({human_size(lsz)})")
+    for rel in plan["joined"]:
+        log(f"  done   {rel}: the live log already begins with the old rows")
+    bring = plan["bring"]
+    if bring:
+        log(f"  bring back {len(bring)} file(s), {human_size(sum(b for _r, b in bring))}, "
+            f"that only the old folder has:")
+        for rel, b in bring[:12]:
+            log(f"           {rel}  ({human_size(b)})")
+        if len(bring) > 12:
+            log(f"           ... and {len(bring) - 12} more")
+    if plan["keep"]:
+        log(f"  keep   {len(plan['keep'])} file(s) as they are now (both folders have them; the live one is newer)")
+    whys = {}
+    for _rel, why in plan["skip"]:
+        whys[why] = whys.get(why, 0) + 1
+    for why, n in sorted(whys.items()):
+        log(f"  leave  {n} file(s) behind: {why}")
+    for why in plan["unread"][:5]:
+        warn(f"could not be read: {why}")
+
+def run_rejoin_verify(old, apply=False, mount=None):
+    """--rejoin-verify FOLDER [--apply]: see the note above. True when there
+    was nothing to do, the dry run finished, or everything was done."""
+    mount = mount or ARCHIVE_MOUNT
+    _pc_role("--rejoin-verify")
+    old_shown = os.path.abspath(os.path.expanduser(old))
+    live_shown = _verify_path(mount)
+    _confine(old_shown, "--rejoin-verify")
+    if not os.path.isdir(old_shown):
+        error(f"That folder isn't there: {old_shown}")
+        return False
+    if not os.path.isdir(live_shown):
+        error(f"There is no _verify at {live_shown} to join into. With none there, the old folder "
+              f"can simply be moved back to that place, whole.")
+        return False
+    ro = os.path.normcase(os.path.realpath(old_shown)) + os.sep
+    rl = os.path.normcase(os.path.realpath(live_shown)) + os.sep
+    if ro.startswith(rl) or rl.startswith(ro):
+        error("That is the live _verify itself, or a folder inside it, or one that holds it. "
+              "Give the folder that was moved aside.")
+        return False
+    try:
+        names = os.listdir(old_shown)
+    except OSError as e:
+        error(f"That folder can't be read: {e}")
+        return False
+    if not (any(os.path.isdir(os.path.join(old_shown, n)) for n in ("mac", "pc"))
+            or any(_rejoin_is_log(n) for n in names)):
+        error(f"That doesn't look like a _verify folder (no mac or pc folder and no ship log in it): {old_shown}")
+        return False
+    old, live = _long_root(old_shown), _long_root(live_shown)
+    plan = rejoin_plan(old, live)
+    _rejoin_say(plan, old_shown, live_shown)
+    if plan["unread"]:
+        error("Part of the old folder could not be read, so nothing was changed.")
+        return False
+    if not plan["join"] and not plan["bring"]:
+        success("Nothing to do: the live records already hold everything the old folder has.")
+        return True
+    if not apply:
+        info("[dry-run] Nothing changed. Run it again with --apply to do it. The old folder is only ever read.")
+        return True
+    lock = _archive_ship_lock(mount, op="rejoin")
+    if lock is None:
+        warn("A ship is running, or its lock is held, so nothing was changed. Try again when it has finished.")
+        return False
+    try:
+        with _JobLock("sweep") as j1, _JobLock("inventory") as j2, _JobLock("hash") as j3:
+            if not (j1.held and j2.held and j3.held):
+                warn("The PC's sweep, inventory or hash is running, so nothing was changed. "
+                     "Try again when it has finished.")
+                return False
+            plan = rejoin_plan(old, live)          # again, now that nothing else can add a row
+            if plan["unread"]:
+                error("Part of the old folder could not be read, so nothing was changed.")
+                return False
+            return _rejoin_apply(old, live, old_shown, live_shown, mount, plan)
+    finally:
+        lock.release()
+
+def _rejoin_apply(old, live, old_shown, live_shown, mount, plan):
+    keep_shown = _pc_path(mount, f"rejoin-{now_stamp()}")
+    _confine(keep_shown, "the join's keepsake")
+    _confine(live_shown, "the live _verify")
+    keep = _long_root(keep_shown)
+    os.makedirs(keep, exist_ok=True)
+    done = {"schema": "rejoin/1", "at": _utc_iso(), "version": VERSION, "by": machine_identity()["label"],
+            "old": old_shown, "live": live_shown, "joined": [], "brought": [], "failed": [],
+            "kept": len(plan["keep"]), "left": len(plan["skip"])}
+    for rel, osz, _lsz in plan["join"]:
+        src, dst, aside = os.path.join(old, rel), os.path.join(live, rel), os.path.join(keep, rel)
+        tmp = f"{dst}.rejoin.{os.getpid()}.tmp"
+        try:
+            os.makedirs(os.path.dirname(aside), exist_ok=True)
+            lsz = _copy_new(dst, aside)             # the live log as it stood, kept
+            with open(tmp, "xb") as out:
+                last = b"\n"
+                with open(src, "rb") as f:
+                    for chunk in iter(lambda: f.read(1 << 20), b""):
+                        out.write(chunk)
+                        last = chunk[-1:]
+                gap = 0 if last == b"\n" else out.write(b"\n")
+                with open(aside, "rb") as f:        # from the kept copy: exactly what was set aside
+                    for chunk in iter(lambda: f.read(1 << 20), b""):
+                        out.write(chunk)
+                out.flush()
+                os.fsync(out.fileno())
+            if os.path.getsize(dst) != lsz:
+                raise OSError("the live log changed while it was being joined")
+            if os.path.getsize(tmp) != osz + gap + lsz:
+                raise OSError("the joined log is not the size of its two halves")
+            for attempt in range(40):               # a reader holding the log open blocks the swap for a moment
+                try:
+                    os.replace(tmp, dst)
+                    break
+                except OSError as e:
+                    if attempt == 39 or not (isinstance(e, PermissionError) or e.errno in (errno.EBUSY, errno.EACCES)):
+                        raise
+                    time.sleep(0.25)
+            done["joined"].append({"file": rel, "oldBytes": osz, "liveBytes": lsz, "bytes": osz + gap + lsz,
+                                   "rows": _count_rows(dst)})
+            success(f"Joined {rel}: {_count_rows(dst):,} rows now")
+        except OSError as e:
+            done["failed"].append({"file": rel, "why": str(e)})
+            warn(f"{rel} was not joined ({e}); it is as it was.")
+            try:
+                os.remove(tmp)
+            except OSError:
+                pass
+    for rel, size in plan["bring"]:
+        src, dst = os.path.join(old, rel), os.path.join(live, rel)
+        try:
+            os.makedirs(os.path.dirname(dst), exist_ok=True)
+            if _copy_new(src, dst) != size:
+                raise OSError("the copy is not the size of the original")
+            done["brought"].append(rel)
+        except FileExistsError:
+            pass                                    # it appeared meanwhile: the live one stays
+        except OSError as e:
+            done["failed"].append({"file": rel, "why": str(e)})
+            warn(f"{rel} was not brought back ({e}).")
+    try:
+        _atomic_write_json(os.path.join(keep, "manifest.json"), done)
+    except OSError as e:
+        warn(f"The manifest could not be written ({e}).")
+    ensure_verify_note(mount)
+    archive_watch(mount)                            # remember the logs at their new size
+    print()
+    (success if not done["failed"] else warn)(
+        f"Joined {len(done['joined'])} log(s), brought back {len(done['brought'])} file(s), "
+        f"left {done['kept']} as they are" + (f"; {len(done['failed'])} could not be done (see above)"
+                                              if done["failed"] else "") + ".")
+    info(f"What was done, and each joined log as it stood before: {keep_shown}")
+    info(f"The old folder was only read and is unchanged: {old_shown}. When you are happy it can go; "
+         f"that is yours to delete.")
+    info("What follows by itself: the next sweep checks against the whole history, and the Mac's next "
+         "ship marks the frames the PC had already checked.")
+    return not done["failed"]
+
+
 def run_pc_tick(mount=None):
     """Every five minutes on the PC ("Astro sync requests"): the heartbeat,
     then any sweep or inventory the Mac asked for. Idle, it reads one folder
@@ -14162,7 +14450,12 @@ def main():
                    help="frames this computer imported that reached the archive without a ship "
                         "(moved there by hand): record them in the ledger with proof from the PC's "
                         "inventory hashes; a dry run unless --apply (1.7.3)")
-    p.add_argument("--apply", action="store_true", help="with --adopt-archive: write the ledger")
+    p.add_argument("--apply", action="store_true",
+                   help="with --adopt-archive: write the ledger; with --rejoin-verify: do the join")
+    p.add_argument("--rejoin-verify", metavar="FOLDER",
+                   help="archive PC: join a _verify folder that was moved aside back into the live one "
+                        "(old log rows first, then the live rows; files only the old one has come back; "
+                        "the old folder is only read); a dry run unless --apply (1.10.1)")
     p.add_argument("--hash-here", action="store_true",
                    help="with --adopt-archive: read back over the share the copies the PC has not "
                         "hashed yet (slow)")
@@ -14291,6 +14584,8 @@ def main():
     if args.pc_nightly:
         r = run_pc_nightly(max_minutes=args.max_minutes)
         sys.exit(0 if r.get("ok") else 1)        # Task Scheduler's Last Run Result says so
+    if args.rejoin_verify:
+        sys.exit(0 if run_rejoin_verify(args.rejoin_verify, apply=args.apply) else 1)
     if args.request:
         run_request(args.request)
     if args.check_share_rights:
