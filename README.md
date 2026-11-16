@@ -30,7 +30,7 @@ Smart telescopes fill up fast, and hand-copying folders leaves you guessing. Mos
 **The control panel**
 
 - One-page app layout: the page never scrolls; the target list, activity log, and report panes scroll inside their own cards, with camera storage as a live meter in the header
-- **A status line in the header** (1.5.3): **Everything is safe**, or **N frames only on the Mac** ("only on this PC" on Windows). The count is frames already cleared from a camera whose only verified copy is on this computer, until the PC's sweep checks the archive copy; hover over it for that in a sentence. A new machine says "Nothing imported yet", and a ledger it can't read gives "Status unknown": it never says safe when it can't tell
+- **A status line in the header** (1.5.3): **Everything is safe**, or **N frames only on the Mac** ("only on this PC" on Windows). The count is frames already cleared from a camera whose only verified copy is on this computer, until the PC's sweep checks the archive copy; hover over it for that in a sentence. A new machine says "Nothing imported yet", and a ledger it can't read gives "Status unknown": it never says safe when it can't tell. From 1.10.2, frames the ledger remembers that are no longer on this computer and were never checked on the archive are counted apart ("… · N frames in the ledger not found here or on the archive"), not as "only on the Mac"
 - **Calibration pairings up front**: the scan runs the real matching gates and shows which bias/dark/flat *sets* pair with which target — each pairing pre-ticked, untickable, so the import runs without interrupting you; only genuinely questionable pairings still ask (and the question names the set, its date and rotation versus your lights')
 - **"Where files will land"**: a live destination tree showing the exact Day folders and calibration links the import will create — computed by the same code the import uses, updating as you tick and untick
 - Targets and the backed-up inventory in date order, newest first, with last-shot dates
@@ -233,11 +233,11 @@ The panel covers day-to-day use; everything is also scriptable:
 
 ## Testing
 
-973 end-to-end checks run the real engine and the real panel against simulated cameras (hand-built minimal FITS files, every device layout, crash/rename/mosaic/Milky-Way/cleanup/consent/interruption/multi-Seestar scenarios — including that the destination preview must equal the folders the import then actually creates, that a folder holding any unproven file is never offered as SAFE, and that the panel refuses foreign-origin requests):
+978 end-to-end checks run the real engine and the real panel against simulated cameras (hand-built minimal FITS files, every device layout, crash/rename/mosaic/Milky-Way/cleanup/consent/interruption/multi-Seestar scenarios — including that the destination preview must equal the folders the import then actually creates, that a folder holding any unproven file is never offered as SAFE, and that the panel refuses foreign-origin requests):
 
 ```bash
-python3 test_v2.py     # 742 engine checks (chain W1 simulates the Windows drive layer)
-python3 test_app.py    # 231 panel checks (boots the real HTTP server)
+python3 test_v2.py     # 745 engine checks (chain W1 simulates the Windows drive layer)
+python3 test_app.py    # 233 panel checks (boots the real HTTP server)
 # on Windows:  py -3 -X utf8 selftest.py   then the two suites above with  py -3 -X utf8
 ```
 

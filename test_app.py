@@ -2198,8 +2198,17 @@ process.stdout.write(JSON.stringify(out));
               "and checked as before; a line without one adds no alarm key",
               lambda: _gd_a.get("alarm") == _gd_line["alarm"] and _gd_a["checked"] is True and _gd_a["onlyHere"] == 652
               and "alarm" not in _p2c and "alarm" not in _p2a, json.dumps([_gd_a, _p2c]))
+        _gd_nf = _p2_pan.observatory_status({}, None, {"safe": True, "onlyHere": 0, "machine": "Mac", "notFound": 421,
+                                                       "text": "Everything on the Mac is safe · 421 frames in the ledger not found here or on the archive"})
+        check("GD panel (1.10.2): the status line's notFound count reaches the page's `status` (no such key when the line has none), "
+              "and the panel page explains it in a tooltip of its own",
+              lambda: _gd_nf["notFound"] == 421 and _gd_nf["onlyHere"] == 0 and _gd_nf["checked"] is True
+              and "notFound" not in _p2c and "notFound" not in _p2a
+              and "sum.onlyHere?STATUS_TIP:(sum.notFound?NOTFOUND_TIP:\"\")" in open(os.path.join(BUILD, "astro-app.py"), encoding="utf-8").read(),
+              json.dumps([_gd_nf, _p2c]))
     else:
         skip("P2 panel: the status derivation in-process (the U10 panel module isn't loaded)")
+        skip("GD panel (1.10.2): notFound in the page's status (the U10 panel module isn't loaded)")
         skip("GD panel (1.10.1): the alarm in the page's status (the U10 panel module isn't loaded)")
     _p2_page = _p2_get("/")[1]
     _p2_lcode, _p2_led = _p2_get("/dashboard?t=p2c")
@@ -2424,6 +2433,15 @@ process.stdout.write(JSON.stringify(out));
               and "Couldn't check data safety: still working it out" in _s_al2["more"]
               and _s_quiet["level"] == "quiet",
               json.dumps([_s_al, _s_al2])[:900])
+        _s_nf, _s_nf2 = _st(notFound=421), _st(notFound=421, onlyHere=5, machine="Mac")
+        check("GD page (1.10.2): frames in the ledger that are not on this computer or the archive are said apart: with "
+              "nothing only here the line stays quiet ('Everything's safe') and names them beside the date; with frames "
+              "only here it is amber for those, and the not-found count follows",
+              lambda: _s_nf["level"] == "quiet" and _s_nf["text"] == "Everything's safe"
+              and _s_nf["more"].startswith("421 in the ledger not found here or on the archive · records up to ")
+              and _s_nf2["level"] == "amber" and _s_nf2["text"] == "5 frames only on the Mac"
+              and "421 in the ledger not found here or on the archive" in _s_nf2["more"],
+              json.dumps([_s_nf, _s_nf2])[:900])
         _ex = {x[1]: x for x in _d1.get("explore", [])}
         _holds = " ".join(x[2] for x in _d1.get("explore", []))
         check("P2 page: the Explore menu names every view of the before record (Ready to process = What to do next, Imaging nights = Nights, "

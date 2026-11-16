@@ -8810,6 +8810,67 @@ check("GD after the join the Mac's next ship marks all four frames as checked by
       r.stdout[:300])
 
 
+# ── the status line (1.10.2): "only on the Mac" is said only of a copy that is on the Mac ──
+# Brett's Mac, 16 Nov 2026: "421 frames only on the Mac" for 421 ledger rows whose files were not on the Mac
+# at all (moved or deleted by hand long before, never recorded on the archive).
+_gds_fit = next(os.path.join(r_, f_) for r_, _d, fs_ in os.walk(GD.sdest30) for f_ in fs_ if f_.lower().endswith(".fit"))
+_GDS_CODE = (
+    "import os\n"
+    "day, fn = os.path.split(sys.argv[2])\n"
+    "root = m.SEESTAR_DEST_S30\n"
+    "base = {'clearedFromCamera': True, 'verifiedAtImport': True, 'sourceType': 'sub'}\n"
+    "rows = {\n"
+    " 'here':        dict(base, dest=day, filename=fn),\n"
+    " 'file-gone':   dict(base, dest=day, filename='Light_gone_30.0s_LP_20260801-000000.fit'),\n"
+    " 'folder-gone': dict(base, dest=os.path.join(root, 'Moved (X 1)', 'X 1_sub Day 1'), filename='a.fit'),\n"
+    " 'elsewhere':   dict(base, dest=os.path.join(os.environ['ASTRO_TEST_ROOT'], 'not-a-workbench', 'Day 1'), filename='a.fit'),\n"
+    " 'no-path':     dict(base),\n"
+    " 'rider':       dict(base, sourceType='sub-jpg', dest=day, filename='gone.jpg'),\n"
+    " 'archived':    dict(base, dest=day, filename='gone2.fit', archiveVerifiedAt='2026-10-01T033000'),\n"
+    "}\n"
+    "class S: pass\n"
+    "def line(keys):\n"
+    "    st = S(); st.ledger_corrupt = False\n"
+    "    st.ledger = {'version': 1, 'files': {k: rows[k] for k in keys}}\n"
+    "    return m.status_summary(st)\n"
+    "out = {'all': line(rows), 'gone': line(['file-gone', 'folder-gone', 'rider', 'archived']),\n"
+    "       'plain': line(['here', 'elsewhere', 'no-path']), 'none': line(['rider', 'archived']),\n"
+    "       'old': m.only_on_this_machine(type('S', (), {'ledger': {'files': rows}})())}\n"
+    "empty = os.path.join(os.environ['ASTRO_TEST_ROOT'], 'empty-workbench'); os.makedirs(empty, exist_ok=True)\n"
+    "rows['folder-gone']['dest'] = os.path.join(empty, 'Moved (X 1)', 'X 1_sub Day 1')\n"
+    "m.SEESTAR_DEST_S30 = empty\n"
+    "out['emptyRoot'] = line(['folder-gone'])\n"
+    "print(json.dumps(out))\n")
+_r = subprocess.run([sys.executable, "-c",
+                     "import importlib.util, json, os, sys\n"
+                     "s = importlib.util.spec_from_file_location('eng', sys.argv[1])\n"
+                     "m = importlib.util.module_from_spec(s); s.loader.exec_module(m)\n" + _GDS_CODE,
+                     SCRIPT, _gds_fit], env=GD.env, input="", capture_output=True, text=True,
+                    encoding="utf-8", errors="replace", timeout=120)
+try:
+    _gds = json.loads(_r.stdout.strip().splitlines()[-1])
+except (ValueError, IndexError):
+    _gds = {"error": (_r.stdout + _r.stderr)[-400:]}
+check("GD the status line counts a frame as 'only on the Mac' when its copy is there, or can't be looked for (a "
+      "folder outside every import folder, a row with no path); a copy whose folder is there without the file, or "
+      "whose folder has gone from an import folder that is there, is counted apart as not found; riders and "
+      "archive-verified rows count as neither; the ship's own figure is unchanged",
+      lambda: _gds["all"]["onlyHere"] == 3 and _gds["all"]["notFound"] == 2 and _gds["all"]["safe"] is False
+      and _gds["all"]["text"] == "3 frames only on the Mac · 2 frames in the ledger not found here or on the archive"
+      and _gds["old"] == 5, json.dumps(_gds)[:900])
+check("GD with nothing only here the line says this computer is safe and names the not-found frames apart "
+      "(safe true, onlyHere 0, notFound 2); with none not found the line and its keys are exactly as before",
+      lambda: _gds["gone"] == {"safe": True, "onlyHere": 0, "machine": "Mac", "notFound": 2,
+                               "text": "Everything on the Mac is safe · 2 frames in the ledger not found here or on the archive"}
+      and _gds["plain"] == {"safe": False, "onlyHere": 3, "machine": "Mac", "text": "3 frames only on the Mac"}
+      and _gds["none"] == {"safe": True, "onlyHere": 0, "machine": "Mac", "text": "Everything is safe"},
+      json.dumps(_gds)[:900])
+check("GD an import folder that is missing or empty (a disk not connected) tells nothing: a row under it is never "
+      "taken for gone, it stays 'only on the Mac'",
+      lambda: _gds["emptyRoot"] == {"safe": False, "onlyHere": 1, "machine": "Mac", "text": "1 frame only on the Mac"},
+      json.dumps(_gds.get("emptyRoot")))
+
+
 # ═══════════════ Summary ═════════════════════════════════════════════════════
 summary()
 sys.exit(1 if FAIL else 0)

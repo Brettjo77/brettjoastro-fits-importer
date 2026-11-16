@@ -1,5 +1,19 @@
 # Changelog
 
+## 1.10.2 (2026-11-16): "only on the Mac" is said only of frames that are on the Mac
+
+On Brett's Mac the line at the top read "421 frames only on the Mac" after everything had shipped and been checked. None of the 421 was on the Mac: 376 light frames and 45 stacks that the importer had once copied, verified and cleared from a Seestar, and that were later moved or deleted by hand without ever being recorded on the archive. The ledger never forgets a row, so the line kept counting them as if they sat on the Mac at risk.
+
+- **The count is split.** A frame is "only on the Mac" ("only on this PC") when its copy is on this computer, or when the importer can't look for it. A frame whose copy is no longer here, with no checked copy on the archive, is counted apart: "Everything on the Mac is safe · 421 frames in the ledger not found here or on the archive", or "12 frames only on the Mac · 421 frames in the ledger not found here or on the archive".
+- **It never guesses "gone".** A copy counts as not found only when its folder is there without the file, or when its folder has gone from an import folder that is itself there. An import folder that is missing or empty (a disk not connected), a row with no path, a folder that would not answer: all of those stay "only on this computer", as before.
+- `--status --json` and the panel's status gain `notFound` when there are any (nothing changes when there are none); the panel's line has a tooltip of its own for it; the Observatory's status line stays quiet for them and names them beside the date.
+- The ship's closing figure ("Frames cleared from a camera and not yet verified on the archive") is unchanged: it counts both kinds, as its words say.
+- Three more GD checks in the engine suite and two in the panel suite.
+
+Mac / Windows: the same on both.
+
+978 end-to-end checks (745 engine + 233 panel). On Linux here: engine 736 passed, 4 skipped, the five Mac/PC-only lines as before; panel 233 passed.
+
 ## 1.10.1 (2026-11-16): three guards, after the archive's records folder was moved
 
 What happened. On 31 Oct the archive's `_verify` folder was moved into a tidy-up folder by hand. `_verify` is the importer's memory on the archive: each computer's ship log, the PC's proof of which copies it has re-checked, and each computer's record for the other to read. The importer found none and started an empty one without a word. For sixteen days the PC's nightly job failed at its project list and nobody was told; the Observatory on the PC stood at 31 Oct. Separately, the Mac's twice-daily ship had sat installed but not loaded since 11 Oct, behind a green install check, so frames reached the archive only through the panel's ship after an import. No frame was lost by either. Found on 16 Nov by a check of both computers.

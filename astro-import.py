@@ -55,7 +55,7 @@ from collections import defaultdict
 from datetime import date, datetime, timedelta, timezone
 
 # One version for every platform (1.5.0: the Windows 11 edition joins the Mac).
-VERSION = "1.10.1"
+VERSION = "1.10.2"
 IS_WINDOWS = os.name == "nt"
 IS_MAC = sys.platform == "darwin"
 PLATFORM = "windows" if IS_WINDOWS else ("mac" if IS_MAC else "linux")
@@ -4545,6 +4545,68 @@ def only_on_this_machine(state):
                if e.get("clearedFromCamera") and e.get("verifiedAtImport")
                and not e.get("archiveVerifiedAt") and not _is_unshipped_rider(e))
 
+# 1.10.2: "only on this computer" is said only of a copy that is on this
+# computer, or that can't be looked for. On Brett's Mac (16 Nov 2026) the line
+# read "421 frames only on the Mac" for 421 ledger rows whose files were not on
+# the Mac at all: moved or deleted by hand long before, never recorded on the
+# archive. Those are counted apart and never called safe or unsafe here.
+def _live_workbench_roots():
+    """The import folders of this computer that are there to be looked in: a
+    root that is missing or empty (a disk not connected) tells nothing, and a
+    row under it is never taken for gone."""
+    out = []
+    for r in (DEST_DIR, LIBRARY_DIR, SEESTAR_DEST_S30, SEESTAR_DEST_S50,
+              SEESTAR_DEST_S30_ORIG, SEESTAR_DEST_S50PRO):
+        try:
+            if r and os.path.isdir(r) and os.listdir(r):
+                out.append(os.path.normcase(os.path.abspath(r)) + os.sep)
+        except OSError:
+            pass
+    return out
+
+def _copy_state(e, cache, roots):
+    """Where this computer's copy of a ledger frame stands: "here"; "gone"
+    (its folder is there and the file is not, or the folder itself has gone
+    from a workbench that is there: moved or deleted by hand); or "unknown"
+    (no path in the row, the workbench not there, a disk that would not
+    answer). Unknown is never taken for gone. One listing per folder."""
+    dest, fn = e.get("dest"), e.get("filename")
+    if not isinstance(dest, str) or not isinstance(fn, str) or not dest or not fn:
+        return "unknown"
+    names = cache.get(dest)
+    if names is None:
+        try:
+            names = set(os.listdir(dest))
+        except FileNotFoundError:
+            names = "missing"
+        except OSError:
+            names = "unreadable"
+        cache[dest] = names
+    if names == "unreadable":
+        return "unknown"
+    if names == "missing":
+        d = os.path.normcase(os.path.abspath(dest)) + os.sep
+        return "gone" if any(d.startswith(r) for r in roots) else "unknown"
+    return "here" if fn in names else "gone"
+
+def copies_here(state):
+    """(only here, not found): of the frames cleared from a camera, verified
+    at import and not yet verified on the archive (riders aside), how many
+    have their one copy on this computer (or can't be looked for), and how
+    many are in the ledger but no longer on this computer."""
+    if not state.ledger:
+        return 0, 0
+    cache, roots = {}, _live_workbench_roots()
+    here = gone = 0
+    for e in state.ledger["files"].values():
+        if e.get("clearedFromCamera") and e.get("verifiedAtImport") \
+                and not e.get("archiveVerifiedAt") and not _is_unshipped_rider(e):
+            if _copy_state(e, cache, roots) == "gone":
+                gone += 1
+            else:
+                here += 1
+    return here, gone
+
 def status_unknown(why="the ledger can't be read"):
     """The status line when it can't be worked out: never "safe" (1.5.3).
     The panel shows it too when computing the line fails."""
@@ -4563,11 +4625,18 @@ def status_summary(state):
     if not state.ledger:
         return _status_with_alarms({"safe": True, "onlyHere": 0, "text": "Nothing imported yet",
                                     "machine": machine}, quiet=True)
-    n = only_on_this_machine(state)
+    n, gone = copies_here(state)
+    where = "this PC" if IS_WINDOWS else "the Mac"
     text = "Everything is safe" if n == 0 else \
-        f"{n:,} frame{'' if n == 1 else 's'} only on {'this PC' if IS_WINDOWS else 'the Mac'}"
-    return _status_with_alarms({"safe": n == 0, "onlyHere": n, "text": text,
-                                "machine": "PC" if IS_WINDOWS else "Mac"}, quiet=n == 0)
+        f"{n:,} frame{'' if n == 1 else 's'} only on {where}"
+    s = {"safe": n == 0, "onlyHere": n, "text": text, "machine": "PC" if IS_WINDOWS else "Mac"}
+    if gone:
+        # in the ledger, cleared from a camera, no longer on this computer and
+        # never verified on the archive: said apart, and only when there are any
+        s["notFound"] = gone
+        s["text"] = (f"Everything on {where} is safe" if n == 0 else text) + \
+            f" · {gone:,} frame{'' if gone == 1 else 's'} in the ledger not found here or on the archive"
+    return _status_with_alarms(s, quiet=n == 0)
 
 def _status_with_alarms(s, quiet):
     """A standing alarm (1.10.1: the archive's records lost history, the PC's

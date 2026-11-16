@@ -1367,7 +1367,10 @@ function statusLine(){
     const ageH=(Date.now()-(Date.parse(D.generatedAtIso||"")||Date.now()))/3600e3; if(ageH>24) facts.push("this record is "+ageWords(ageH)+" old");
     unchecked="Couldn't check data safety: this record doesn't carry the safety facts";
   }
-  if(st&&st.checked!==false&&!facts.length) return {level:"quiet",text:"Everything's safe",more:upToTxt,upTo,facts:[]};
+  /* 1.10.2: frames in the ledger that are no longer on this computer and were never verified on the archive are said apart, quietly */
+  const nf=st&&+st.notFound>0?fmtI(st.notFound)+" in the ledger not found here or on the archive":"";
+  if(st&&st.checked!==false&&!facts.length) return {level:"quiet",text:"Everything's safe",more:(nf?nf+" · ":"")+upToTxt,upTo,facts:[]};
+  if(nf) facts.push(nf);
   const all=facts.slice(); if(unchecked) all.push(unchecked);
   return {level:"amber",text:all[0],more:all.slice(1).concat([upToTxt]).join(" · "),upTo,facts:all};
 }

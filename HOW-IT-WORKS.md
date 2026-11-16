@@ -223,6 +223,8 @@ the archive. Without an archive on another computer they stay in it,
 because their only copy really is here. Hover over the count to read this
 in a sentence.
 
+From 1.10.2 the count is only of frames that are really on this computer (or that it can't look for). If the ledger also remembers frames that were cleared from a camera, are no longer on this computer and were never checked on the archive (moved or deleted by hand at some point), the line says so apart: *Everything on the Mac is safe · 421 frames in the ledger not found here or on the archive*. Those are not at risk on this computer; they are simply not anywhere the importer can see.
+
 A new computer says *Nothing imported yet*. And if the tool can't read its
 own ledger, the line says *Status unknown* rather than guess: it never says
 safe when it can't tell.

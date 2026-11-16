@@ -1098,6 +1098,10 @@ def observatory_status(dataset, pend, status):
     # nightly failed) leads the page's status line, whatever else is so
     if isinstance(status, dict) and isinstance(status.get("alarm"), str) and status["alarm"]:
         out["alarm"] = status["alarm"]
+    # 1.10.2: ledger frames no longer on this computer and never verified on the
+    # archive, said apart; the key is there only when there are any
+    if known and isinstance(status.get("notFound"), int) and status["notFound"] > 0:
+        out["notFound"] = status["notFound"]
     if not known:
         if status is None:
             out["reason"] = "still working it out"
@@ -2256,6 +2260,8 @@ async function startOp(path, body){
 const TOKEN="__ASTRO_TOKEN__";
 const BOOT="__ASTRO_BOOT__";
 const STATUS_TIP="__STATUS_TIP__";
+// 1.10.2: what "N frames in the ledger not found here or on the archive" means
+const NOTFOUND_TIP="Frames the importer once copied, verified and cleared from a camera that are no longer on this computer and have no checked copy on the archive: moved or deleted by hand at some point. Nothing on this computer is at risk from them.";
 // The importer was restarted or updated since this page opened (its token is
 // gone): say so once, at the top, instead of every button failing silently.
 function showStale(){
@@ -2945,7 +2951,7 @@ async function tick(){
     const sum=s.statusSummary, sl=$("#safeLine");
     sl.hidden=!sum;
     if(sum){ sl.textContent=sum.text; sl.className="safe"+(sum.safe?"":" warn");
-             sl.title=sum.onlyHere?STATUS_TIP:""; }
+             sl.title=sum.onlyHere?STATUS_TIP:(sum.notFound?NOTFOUND_TIP:""); }
     if(s.scan && (s.scannedAt!==lastScanStamp)){
       lastScanStamp=s.scannedAt;      // kept even if the drawing fails: no retry every second
       curScan=s.scan;
