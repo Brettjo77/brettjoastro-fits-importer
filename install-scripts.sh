@@ -251,6 +251,8 @@ if [ -z "$APP_OWNS" ]; then
     if [ -f "$SCRIPT_DIR/com.brettjohnson.astro-import.plist" ]; then
         mkdir -p "$HOME/Library/Logs"
         sed "s|__HOME__|$SED_HOME|g" "$SCRIPT_DIR/com.brettjohnson.astro-import.plist" > "$new_plist"
+        # launchd refuses a plist that carries the quarantine flag (1.10.1)
+        xattr -d com.apple.quarantine "$new_plist" 2>/dev/null || true
         success "Installed com.brettjohnson.astro-import.plist → $new_plist"
         LOAD_SAID=$(launchctl load "$new_plist" 2>&1) || true
         if agent_loaded com.brettjohnson.astro-import "$new_plist"; then
@@ -296,6 +298,10 @@ elif [ -f "$SCRIPT_DIR/com.brettjohnson.astro-ship.plist" ]; then
     info "Installing the twice-daily ship agent (files verified frames to the PC archive)..."
     mkdir -p "$HOME/Library/Logs"
     sed "s|__HOME__|$SED_HOME|g" "$SCRIPT_DIR/com.brettjohnson.astro-ship.plist" > "$ship_plist"
+    # launchd refuses a plist that carries the quarantine flag: "Refusing to
+    # execute/trust quarantined program/file". Brett's ship plist carried it,
+    # and the ship did not run from 11 Oct to 16 Nov 2026 (1.10.1)
+    xattr -d com.apple.quarantine "$ship_plist" 2>/dev/null || true
     LOAD_SAID=$(launchctl load "$ship_plist" 2>&1) || true
     if agent_loaded com.brettjohnson.astro-ship "$ship_plist"; then
         success "Loaded com.brettjohnson.astro-ship (09:00 and 21:00; mounts the share itself)"

@@ -1200,6 +1200,28 @@ def launch_agent_loaded(label):
         return None
     return listed(r.stdout) if r.returncode == 0 else None
 
+def file_quarantined(path):
+    """Does this file carry macOS's quarantine flag (com.apple.quarantine)?
+    launchd will not load a LaunchAgent whose plist does: "Refusing to
+    execute/trust quarantined program/file" (Brett's Mac, 16 Nov 2026: why
+    the twice-daily ship had not run since 11 Oct). True / False, or None
+    when it can't be told. A test never runs xattr: it reads
+    <root>/quarantined.txt (one path per line) or says None."""
+    if TEST_ROOT:
+        try:
+            with open(os.path.join(TEST_ROOT, "quarantined.txt"), encoding="utf-8") as f:
+                return os.path.abspath(path) in {os.path.abspath(ln.strip()) for ln in f if ln.strip()}
+        except OSError:
+            return None
+    if not IS_MAC:
+        return None
+    try:
+        r = subprocess.run(["xattr", "-p", "com.apple.quarantine", path],
+                           capture_output=True, text=True, timeout=10)
+    except (OSError, subprocess.SubprocessError):
+        return None
+    return r.returncode == 0
+
 def notify_push(title, text):
     """A push to the phone through ntfy (1.10.0): one HTTP POST of `text` to
     NOTIFY_PUSH_URL with `title` as the notification's title, 10 s timeout.

@@ -8658,6 +8658,15 @@ check("GD launch_agent_loaded reads launchd's own list: the Mac's list of 16 Nov
       "no ship) says the ship is NOT loaded and the watcher is; with its line there it is; with no list, unknown",
       lambda: _gd_ag0 == [None] and _gd_ag1 == [False, True] and _gd_ag2 == [True],
       f"{_gd_ag0} {_gd_ag1} {_gd_ag2}")
+_gd_q0 = probe(GD.env, "print(json.dumps([m.file_quarantined(sys.argv[1])]))")
+with open(os.path.join(GD.root, "quarantined.txt"), "w", encoding="utf-8") as f:
+    f.write(os.path.join(GD.root, "ship.plist") + "\n")
+_gd_q1 = probe(GD.env, "import os\nr = os.environ['ASTRO_TEST_ROOT']\n"
+               "print(json.dumps([m.file_quarantined(os.path.join(r, 'ship.plist')), "
+               "m.file_quarantined(os.path.join(r, 'watch.plist'))]))")
+check("GD file_quarantined says whether a file carries macOS's quarantine flag (what made launchd refuse the "
+      "ship's plist): the listed one does, another does not; with nothing to go on, unknown",
+      lambda: _gd_q0 == [None] and _gd_q1 == [True, False], f"{_gd_q0} {_gd_q1}")
 _gd_self = open(os.path.join(HERE, "selftest.py"), encoding="utf-8").read()
 _gd_inst = open(os.path.join(HERE, "install-scripts.sh"), encoding="utf-8").read()
 check("GD the install check asks launchd about both agents (a missing ship job is a FAIL with the line that "
@@ -8666,6 +8675,13 @@ check("GD the install check asks launchd about both agents (a missing ship job i
       and 'agent_loaded(eng, "camera watcher LaunchAgent", "com.brettjohnson.astro-import", plist)' in _gd_self
       and 'owner != "app"' in _gd_self and "launchctl bootstrap gui/$(id -u)" in _gd_self
       and "eng.active_alarms()" in _gd_self, "selftest.py")
+check("GD when the job is not loaded and its plist carries the quarantine flag, the install check says that is "
+      "why and gives the line that clears it; the Mac installer clears the flag from both plists before loading them",
+      lambda: "eng.file_quarantined(plist)" in _gd_self and "xattr -d com.apple.quarantine" in _gd_self
+      and re.search(r'> "\$ship_plist"\n(?:\s*#[^\n]*\n)*\s*xattr -d com\.apple\.quarantine "\$ship_plist"', _gd_inst)
+      and re.search(r'> "\$new_plist"\n(?:\s*#[^\n]*\n)*\s*xattr -d com\.apple\.quarantine "\$new_plist"', _gd_inst)
+      and _gd_inst.index('xattr -d com.apple.quarantine "$ship_plist"') < _gd_inst.index('launchctl load "$ship_plist"'),
+      "selftest.py / install-scripts.sh")
 check("GD the Mac installer no longer trusts launchctl load's exit code: after each load it asks launchd whether "
       "the job is there, tries bootstrap once, and counts a job that did not load as a problem with launchctl's words",
       lambda: len(re.findall(r"if launchctl load ", _gd_inst)) == 0

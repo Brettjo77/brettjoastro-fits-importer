@@ -78,6 +78,12 @@ def agent_loaded(eng, name, label, plist):
     if loaded is None:
         line("SKIP", f"{name} loaded", "couldn't ask launchd")
         return None
+    if not loaded and eng.file_quarantined(plist):
+        # launchd: "Refusing to execute/trust quarantined program/file" (16 Nov 2026)
+        return check(f"{name} loaded", False,
+                     f"it is installed but macOS refuses to load it: its file carries the quarantine flag "
+                     f"(it came from a download). In Terminal: xattr -d com.apple.quarantine \"{plist}\" "
+                     f"&& launchctl bootstrap gui/$(id -u) \"{plist}\"")
     return check(f"{name} loaded", loaded,
                  f"it is installed but macOS has not loaded it, so it never runs. In Terminal: "
                  f"launchctl bootstrap gui/$(id -u) \"{plist}\"  (and paste what it says if it refuses)")
