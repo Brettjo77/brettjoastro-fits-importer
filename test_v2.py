@@ -8689,6 +8689,19 @@ check("GD the Mac installer no longer trusts launchctl load's exit code: after e
       and 'agent_loaded com.brettjohnson.astro-import "$new_plist"' in _gd_inst
       and "launchctl bootstrap" in _gd_inst and _gd_inst.count("macOS did not load") == 2,
       "install-scripts.sh")
+_gd_ps = open(os.path.join(HERE, "install-windows.ps1"), encoding="utf-8-sig").read()
+_gd_cmd = open(os.path.join(HERE, "Install on Windows.cmd"), encoding="utf-8-sig").read()
+check("GD the Windows installer works out a contract file's hash through .NET, never Get-FileHash (started from a "
+      "PowerShell 7 window that command is missing, and both files were taken for edited ones on 16 Nov); a hash "
+      "that can't be worked out is said, not guessed; a stale .new beside an up-to-date file goes; and the .cmd "
+      "clears PSModulePath before it starts Windows PowerShell",
+      lambda: not re.search(r"^[^#\n]*Get-FileHash\s+-", _gd_ps, re.M)
+      and "$have = Get-Sha256Hex $dst" in _gd_ps and "$want = Get-Sha256Hex $src" in _gd_ps
+      and "[System.Security.Cryptography.SHA256]::Create()" in _gd_ps and "could not be compared" in _gd_ps
+      and re.search(r"if \(\$have -eq \$want\) \{\s*(?:#[^\n]*\n\s*)?if \(Test-Path -LiteralPath \"\$dst\.new\"\) \{ Remove-Item", _gd_ps)
+      and 'set "PSModulePath="' in _gd_cmd
+      and _gd_cmd.index('set "PSModulePath="') < _gd_cmd.index("powershell -NoProfile"),
+      "install-windows.ps1 / Install on Windows.cmd")
 if shutil.which("bash"):
     _gd_bn = subprocess.run(["bash", "-n", os.path.join(HERE, "install-scripts.sh")], capture_output=True, text=True)
     check("GD install-scripts.sh still parses (bash -n)", lambda: _gd_bn.returncode == 0, _gd_bn.stderr[-300:])

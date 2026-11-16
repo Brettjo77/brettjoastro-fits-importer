@@ -104,6 +104,18 @@ foreach ($f in @('astro-import.py', 'astro-app.py', 'astro-watch.py', 'selftest.
 # copy lands beside it as <name>.new for him to merge. An installed copy that is
 # still one we shipped (its hash is in contract\shipped.sha256) has no edits to
 # lose, so it is simply updated.
+# SHA-256 through .NET, never Get-FileHash (1.10.1): started from a PowerShell 7
+# window, Windows PowerShell inherits its module path and Get-FileHash is "not
+# recognized"; on 16 Nov 2026 both contract files were then taken for edited
+# ones and kept. A hash that can't be worked out is said, never guessed.
+function Get-Sha256Hex($path) {
+    try {
+        $sha = [System.Security.Cryptography.SHA256]::Create()
+        $fs = [System.IO.File]::OpenRead($path)
+        try { return ([System.BitConverter]::ToString($sha.ComputeHash($fs)) -replace '-', '').ToLower() }
+        finally { $fs.Dispose(); $sha.Dispose() }
+    } catch { return $null }
+}
 New-Item -ItemType Directory -Force -Path (Join-Path $bin 'contract') -ErrorAction Stop | Out-Null
 $shippedList = Join-Path $here 'contract\shipped.sha256'
 $shipped = @()
@@ -115,8 +127,17 @@ foreach ($f in @('targets.json', 'scopes.json')) {
     $dst = Join-Path $bin "contract\$f"
     if (-not (Test-Path -LiteralPath $src)) { Warn "Missing from the package: contract\$f"; continue }
     if (-not (Test-Path -LiteralPath $dst)) { Copy-Item -LiteralPath $src -Destination $dst -Force; continue }
-    $have = (Get-FileHash -LiteralPath $dst -Algorithm SHA256).Hash.ToLower()
-    if ($have -eq (Get-FileHash -LiteralPath $src -Algorithm SHA256).Hash.ToLower()) { continue }
+    $have = Get-Sha256Hex $dst
+    $want = Get-Sha256Hex $src
+    if (-not $have -or -not $want) {
+        Warn "contract\$f could not be compared (its hash could not be worked out), so it was left as it is"
+        continue
+    }
+    if ($have -eq $want) {
+        # already the shipped copy: a .new left beside it by an earlier run has nothing to add
+        if (Test-Path -LiteralPath "$dst.new") { Remove-Item -LiteralPath "$dst.new" -Force -ErrorAction SilentlyContinue }
+        continue
+    }
     if ($shipped -contains $have) {
         Copy-Item -LiteralPath $src -Destination $dst -Force
         if (Test-Path -LiteralPath "$dst.new") { Remove-Item -LiteralPath "$dst.new" -Force -ErrorAction SilentlyContinue }
