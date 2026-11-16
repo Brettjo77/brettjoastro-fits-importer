@@ -8278,16 +8278,18 @@ _sf2_calls = {pat: sorted({_sf2_owner(mm.start()) for mm in re.finditer(pat, _sf
 _sf2_json = re.findall(r"_write_json_file\(([^,]+),", _sf2src)
 check("SF2 the Starfront section's source holds no delete and no write aimed at a share: no os.remove, os.unlink, "
       "os.rmdir, shutil.rmtree, shutil.move, shutil.copy, os.truncate or os.utime anywhere in it; os.rename only "
-      "in _sf_local_move, os.makedirs only in _sf_local_makedirs (and for the roof log's state folder), the "
-      "verified copy only in _sf_local_copy, each behind sf_guard_write; files opened for writing only the roof "
-      "log (state folder) and the test-only damage hook; JSON written only to the state folder and the receipt",
+      "in _sf_local_move, os.makedirs only in _sf_local_makedirs (and for the state folder of the roof log and "
+      "of the pull's statistics log, 1.10.4), the verified copy only in _sf_local_copy, each behind sf_guard_write; "
+      "files opened for writing only those two logs (state folder) and the test-only damage hook; JSON written "
+      "only to the state folder and the receipt",
       lambda: not any(tok in _sf2src for tok in ("os.remove(", "os.unlink(", "os.rmdir(", "os.removedirs(", "shutil.rmtree(",
                                                  "shutil.move(", "shutil.copy", "os.truncate(", "os.utime(", ".unlink(",
                                                  "send2trash", "os.walk(", "os.listdir("))
       and _sf2_calls[r"os\.rename\("] == ["_sf_local_move"] and _sf2_calls[r"os\.replace\("] == [] and _sf2_calls[r"os\.mkdir\("] == []
-      and _sf2_calls[r"os\.makedirs\("] == ["_sf_local_makedirs", "read_roof"]
+      and _sf2_calls[r"os\.makedirs\("] == ["_sf_local_makedirs", "read_roof", "sf_stats_say"]
       and _sf2_calls[r"copy_file_verified\("] == ["_sf_local_copy"]
-      and _sf2_calls[r"\bopen\(.*[\"'](?:[wax]|r\+)b?\+?[\"']"] == ["_sf_test_damage", "read_roof"]
+      and _sf2_calls[r"\bopen\(.*[\"'](?:[wax]|r\+)b?\+?[\"']"] == ["_sf_test_damage", "read_roof", "sf_stats_say"]
+      and "sf_state_path(SF_PULLS_LOG)" in _sf2src[_sf2src.index("def sf_stats_say"):_sf2src.index("def sf_pulls_log")]
       and _sf2_calls[r"_atomic_write_json\("] == ["sf_write_receipt"]
       and set(a.strip() for a in _sf2_json) <= {"sf_state_path(SF_STATUS_FILE)", "path", "inv_path", "hdr_path", "sf_state_path(SF_LAST_SCAN_FILE)"}
       and "sf_guard_write(" in _sf2src[_sf2src.index("def _sf_local_move"):_sf2src.index("def sf_set_aside")]
@@ -9575,6 +9577,253 @@ if os.name == "nt":
           lambda: _rb16["win"] == "\\\\?\\" and _rb16["short"] == "C:\\short\\f.fit", json.dumps(_rb16))
 else:
     skip("RB _win_long prefixes a 300-character Windows path with \\\\?\\ (Windows only)")
+
+# ── Chain SF, 1.10.4: the roof file where Starfront keeps it, and the pull's statistics ──
+print("\n── Chain SF, 1.10.4: this building's roof file and no other; the pull's statistics ──")
+
+def sfq_roof(e, building, text, when=None, name="RoofStatusFile.txt"):
+    """A roof file laid out as the real share lays one out (seen 16 Nov 2026):
+    roof/building-<n>/RoofStatusFile.txt, written at `when` (UTC, (y, mo, d, h, mi))."""
+    d = os.path.join(e.roof, "roof", f"building-{building}")
+    os.makedirs(d, exist_ok=True)
+    path = os.path.join(d, name)
+    with open(path, "w", encoding="utf-8") as f:
+        f.write(text)
+    if when:
+        t = _sfdt(*when, tzinfo=_sftz.utc).timestamp()
+        os.utime(path, (t, t))
+    return path
+
+def _sfq_sz(n):
+    """The statistics' sizes, worked out again here (1 GB = 1,000,000,000 bytes, as the scan counts)."""
+    return f"{n / 1e9:.2f} GB" if n >= 1e9 else f"{n / 1e6:.1f} MB" if n >= 1e6 else f"{n / 1e3:.0f} KB"
+
+def _sfq_dur(sec):
+    if sec < 90:
+        return f"{sec:.0f} s"
+    mins = int(round(sec / 60.0))
+    return f"{mins} min" if mins < 60 else f"{mins // 60} h {mins % 60:02d} min"
+
+SFQ = sfp_env("SFQ")
+SFQ.env.update({"STARFRONT_WORKERS": "3", "ASTRO_TEST_UNBUFFERED": "1"})
+_sfq_subs = [sfp_sub(SFQ, "M 45_mosaic", f"20261105-21{i:02d}00") for i in range(6)]
+_sfq_bytes = sum(os.path.getsize(p) for p in _sfq_subs)
+_sfq_size = _sfq_sz(_sfq_bytes)
+for _b in (1, 16, 2):
+    sfq_roof(SFQ, _b, "Roof Status: OPEN\n", (2026, 11, 7, 17, 59))
+_sfq_mine = sfq_roof(SFQ, 15, "Roof Status: CLOSED\n", (2026, 11, 7, 12, 0))
+_q1 = probe(SFQ.env, f"r = m.read_roof(now={SFP_DAY})\nclosed = m._SF_ROOF_LAST.closed\n"
+                     f"h = m.sf_roof_closed_hours(r, {SFP_DAY}, m.sf_zone(), rows=m.sf_roof_log())\n"
+                     "print(json.dumps({'r': r, 'closed': closed, 'h': h}))\n")
+check("SF3 the roof file is this building's own: roof/building-15/RoofStatusFile.txt (the layout on Starfront's "
+      "share). Three other buildings' files say OPEN and are newer; building 15's says CLOSED and is the one "
+      "read, read only and closed at once",
+      lambda: os.path.normpath(_q1["r"]["file"]) == os.path.normpath(_sfq_mine) and _q1["r"]["state"] == "closed"
+      and _q1["closed"] is True, json.dumps(_q1)[:600])
+check("SF3 a roof file with no time in its text is dated by when the file itself was last written (Starfront "
+      "writes it when the roof moves): the reading's fileTime and 'since' are that time, the roof log keeps it, "
+      "and a first closed reading written 6 hours ago counts as closed for 6 hours",
+      lambda: _q1["r"]["fileTime"] == "2026-11-07T12:00:00+00:00" and _q1["r"]["since"] == "2026-11-07T12:00:00+00:00"
+      and _q1["h"] == 6
+      and json.loads(open(os.path.join(SFQ.state, "starfront-roof.jsonl"), encoding="utf-8").read().splitlines()[-1])["fileTime"]
+      == "2026-11-07T12:00:00+00:00", json.dumps(_q1)[:600])
+_q2 = probe({**SFQ.env, "STARFRONT_BUILDING": "9"}, f"r = m.read_roof(now={SFP_DAY})\nprint(json.dumps(r))\n")
+_q3 = probe({**SFQ.env, "STARFRONT_BUILDING": "16"}, f"r = m.read_roof(now={SFP_DAY})\nprint(json.dumps(r))\n")
+check("SF3 another building's roof is NEVER read in place of this one's: with building folders there and none "
+      "for this building (STARFRONT_BUILDING=9) there is no roof file, the state is unknown and the reason says "
+      "so; STARFRONT_BUILDING=16 reads building 16's (open)",
+      lambda: _q2["file"] is None and _q2["state"] == "unknown" and "no folder for building 9" in _q2["why"]
+      and "building-16" in _q3["file"] and _q3["state"] == "open", json.dumps([_q2, _q3])[:700])
+_q4dir = os.path.join(SFQ.root, "roof-other")
+os.makedirs(os.path.join(_q4dir, "roof", "Building_15"))
+os.makedirs(os.path.join(_q4dir, "roof", "building-16"))
+with open(os.path.join(_q4dir, "roof", "building-16", "RoofStatusFile.txt"), "w") as f:
+    f.write("Roof Status: OPEN\n")
+with open(os.path.join(_q4dir, "roof", "Building_15", "status-old.txt"), "w") as f:
+    f.write("roof=open\n")
+os.utime(os.path.join(_q4dir, "roof", "Building_15", "status-old.txt"), (1794000000, 1794000000))
+with open(os.path.join(_q4dir, "roof", "Building_15", "status.txt"), "w") as f:
+    f.write("roof=closed\n")
+_q4 = probe({**SFQ.env, "STARFRONT_ROOF_SHARE": _q4dir}, f"r = m.read_roof(now={SFP_DAY})\nprint(json.dumps(r))\n")
+os.remove(os.path.join(_q4dir, "roof", "Building_15", "status.txt"))
+os.remove(os.path.join(_q4dir, "roof", "Building_15", "status-old.txt"))
+_q5 = probe({**SFQ.env, "STARFRONT_ROOF_SHARE": _q4dir}, f"r = m.read_roof(now={SFP_DAY})\nprint(json.dumps(r))\n")
+check("SF3 inside this building's folder the file named RoofStatusFile.txt is taken; when that name is not there "
+      "the newest file in that folder is (never one from another building's folder), and an empty folder is 'no "
+      "file under <this building's folder>'",
+      lambda: os.path.basename(_q4["file"]) == "status.txt" and _q4["state"] == "closed"
+      and _q5["file"] is None and "no file under" in _q5["why"] and "Building_15" in _q5["why"],
+      json.dumps([_q4, _q5])[:700])
+_q6 = probe(SFQ.env,
+    "tz = m.sf_zone(); now = m.datetime(2026, 11, 7, 18, 0, tzinfo=m.timezone.utc)\n"
+    "def row(h, mi, state, ft):\n"
+    "    return {'at': m._utc_iso(m.datetime(2026, 11, 7, h, mi, tzinfo=m.timezone.utc)), 'state': state, 'raw': 'Roof Status: ' + state.upper(), 'fileTime': ft}\n"
+    "def hours(rows):\n"
+    "    r = rows[-1]; return m.sf_roof_closed_hours(r, now, tz, rows=rows)\n"
+    "w = lambda t: (lambda d: d.isoformat() if d else None)(m.sf_parse_when(t, tz, now))\n"
+    "res = {\n"
+    " 'stable': hours([row(13, 0, 'closed', '2026-11-07T12:30:00+00:00'), row(18, 0, 'closed', '2026-11-07T12:30:00+00:00')]),\n"
+    " 'refreshed': hours([row(13, 0, 'closed', '2026-11-07T13:00:00+00:00'), row(18, 0, 'closed', '2026-11-07T18:00:00+00:00')]),\n"
+    " 'reopened': hours([row(12, 0, 'closed', '2026-11-07T09:00:00+00:00'), row(16, 0, 'open', '2026-11-07T15:50:00+00:00'), row(18, 0, 'closed', '2026-11-07T17:30:00+00:00')]),\n"
+    " 'us': w('11/07/2026 06:30:00 AM'), 'usPm': w('11/6/2026 11:15 PM'), 'usNoon': w('11/06/2026 12:05:00 PM'),\n"
+    " 'isoAm': w('2026-11-07 06:30:00 AM'), 'bad': w('13/45/2026 06:30:00 AM'), 'badHour': w('11/07/2026 14:30:00 PM'),\n"
+    " 'line1': m.sf_parse_roof('11/07/2026 06:30:00 AM Roof Status: CLOSED'),\n"
+    " 'line2': m.sf_parse_roof('2026-11-07 06:30:00 Roof Status: OPEN\\n'),\n"
+    " 'line3': m.sf_parse_roof('Roof Status: CLOSED')}\n"
+    "print(json.dumps(res))\n")
+check("SF3 'closed for how long' with the file's own date: a date that stays the same between closed readings is "
+      "the time of the change (5.5 h); one that moves while the roof stays closed is only a refresh and the "
+      "readings decide (5 h); a roof seen open in between starts again from the new file date (0.5 h)",
+      lambda: _q6["stable"] == 5.5 and _q6["refreshed"] == 5 and _q6["reopened"] == 0.5, json.dumps(_q6))
+check("SF3 a time written in the roof file's line is found and read: month first with AM or PM ('11/07/2026 "
+      "06:30:00 AM' is 06:30 at the site, 12:30 UTC; 11:15 PM; 12:05 PM is just after noon), or year first; a "
+      "date that cannot be one is no time; the state is read from the same line",
+      lambda: _q6["us"] == "2026-11-07T12:30:00+00:00" and _q6["usPm"] == "2026-11-07T05:15:00+00:00"
+      and _q6["usNoon"] == "2026-11-06T18:05:00+00:00" and _q6["isoAm"] == "2026-11-07T12:30:00+00:00"
+      and _q6["bad"] is None and _q6["badHour"] is None
+      and _q6["line1"] == ["closed", "11/07/2026 06:30:00 AM"] and _q6["line2"] == ["open", "2026-11-07 06:30:00"]
+      and _q6["line3"] == ["closed", None], json.dumps(_q6))
+
+# the pull's guards against the real layout
+_qs = SFQ.run("--starfront-scan", extra_env=SFP_DAY_ENV)
+_qd0 = SFQ.run("--starfront-pull", "M 45_mosaic", "--dry-run", extra_env=SFP_DAY_ENV)
+sfq_roof(SFQ, 15, "Roof Status: CLOSED\n", (2026, 11, 7, 17, 30))
+os.remove(os.path.join(SFQ.state, "starfront-roof.jsonl"))
+_qd2 = sfp_pull(SFQ, "M 45_mosaic", dry_run=True)
+sfq_roof(SFQ, 15, "Roof Status: OPEN\n", (2026, 11, 7, 12, 0))
+_qd3 = sfp_pull(SFQ, "M 45_mosaic", dry_run=True)
+sfq_roof(SFQ, 15, "Roof Status: CLOSED\n", (2026, 11, 7, 12, 0))
+os.remove(os.path.join(SFQ.state, "starfront-roof.jsonl"))
+check("SF3 the pull's roof guard reads the real layout: with building 15's file saying CLOSED and written 6 hours "
+      "ago a dry run passes every guard (other buildings open change nothing); written half an hour ago it is "
+      "refused ('closed for 0.5 h'); saying OPEN it is refused ('roof is open')",
+      lambda: _qd0.returncode == 0 and "Dry run: every guard passed" in _qd0.stdout
+      and _qd2["ok"] is False and "closed for 0.5 h" in _qd2["reason"]
+      and _qd3["ok"] is False and "roof is open" in _qd3["reason"],
+      _qd0.stdout + _qd0.stderr + json.dumps([_qd2, _qd3])[:600])
+
+# ── the statistics ──
+_qu = probe(SFQ.env,
+    "st = m.sf_stats_new('Copying', 865, 17_240_000_000)\n"
+    "st['t0'] = 1000.0; st['samples'] = m.deque([(1540.0, 1_800_000_000)]); st['moved'] = 2_000_000_000\n"
+    "st['doneFiles'] = 120; st['doneBytes'] = 1_900_000_000\n"
+    "print(json.dumps({'size': [m.sf_size(n) for n in (37_000, 15_800_000, 17_240_000_000, 0)],\n"
+    " 'dur': [m.sf_duration(n) for n in (42, 89, 90, 720, 3599, 5220, 86400)],\n"
+    " 'speed': [m.sf_speed(n) for n in (3_300_000, 450_000, 0)],\n"
+    " 'line': m.sf_stats_text(st, drops=1, now=1600.0), 'line0': m.sf_stats_text(m.sf_stats_new('Copying', 3, 300), now=m.time.monotonic())}))\n")
+check("SF3 the statistics' words: sizes in the scan's units ('37 KB', '15.8 MB', '17.24 GB'), times as '42 s', "
+      "'12 min', '1 h 27 min', speeds as '3.3 MB/s' (two decimals under one), and the progress line says files, "
+      "bytes, per cent, the speed over the last minute and since the start, the time left at the present speed, "
+      "and the link drops so far",
+      lambda: _qu["size"] == ["37 KB", "15.8 MB", "17.24 GB", "0 KB"]
+      and _qu["dur"] == ["42 s", "89 s", "2 min", "12 min", "1 h 00 min", "1 h 27 min", "24 h 00 min"]
+      and _qu["speed"] == ["3.3 MB/s", "0.45 MB/s", "0.00 MB/s"]
+      and _qu["line"] == ("Copying: 120 of 865 files · 1.90 GB of 17.24 GB (11%) · 3.3 MB/s now, 3.3 MB/s average · "
+                          "about 1 h 17 min left · 1 link drop")
+      and "0 of 3 files" in _qu["line0"] and "time left not known yet" in _qu["line0"] and "0 link drops" in _qu["line0"],
+      json.dumps(_qu))
+check("SF3 a dry run says there is no estimate before the first timed pull, and gives the project's size in the "
+      "scan's units (1 GB = 1,000,000,000 bytes), so the scan, the dry run and the statistics say one number",
+      lambda: "no pull has been timed yet" in _qd0.stdout
+      and f"6 files to bring home ({_sfq_size}, 1 night)" in _qd0.stdout, _qd0.stdout)
+_SFQ_EV = {**SFP_DAY_ENV, "ASTRO_TEST_SF_STATS_EVERY": "0", "ASTRO_TEST_SF_SLOW_MS": "40"}
+_qp = SFQ.run("--starfront-pull", "M 45_mosaic", extra_env=_SFQ_EV)
+_qlog = [json.loads(ln) for ln in open(os.path.join(SFQ.state, "starfront-pulls.jsonl"), encoding="utf-8")]
+_qlines = [ln.strip() for ln in _qp.stdout.splitlines()]
+_qprog = [ln for ln in _qlines if ln.startswith("Copying: ")]
+_qblock = _qlines[_qlines.index("▸ Copy statistics for M 45_mosaic") + 1:] if "▸ Copy statistics for M 45_mosaic" in _qlines else []
+_qrow = {ln.split("   ", 1)[0].strip(): ln.split("   ", 1)[1].strip() for ln in _qblock[:9] if "   " in ln}
+check("SF3 while a pull copies, progress lines say how far and how fast ('Copying: n of 6 files · … MB/s now, … "
+      "average · … · 0 link drops'); they never repeat, the count never goes down, and the last one says 6 of 6 "
+      "files (100%); the second read of the source has its own ('Reading again: …')",
+      lambda: _qp.returncode == 0 and len(_qprog) >= 2 and len(set(_qprog)) == len(_qprog)
+      and all(re.fullmatch(r"Copying: \d of 6 files · .+ of .+ \(\d+%\) · [\d.]+ MB/s now, [\d.]+ MB/s average · .+ · 0 link drops", ln) for ln in _qprog)
+      and [int(ln.split()[1]) for ln in _qprog] == sorted(int(ln.split()[1]) for ln in _qprog)
+      and _qprog[-1].startswith("Copying: 6 of 6 files") and "(100%)" in _qprog[-1] and "· done ·" in _qprog[-1]
+      and any(ln.startswith("Reading again: 6 of 6 files") for ln in _qlines),
+      _qp.stdout[-2500:] + _qp.stderr)
+check("SF3 at the end the pull prints its statistics, the last thing before its closing line: what was copied "
+      "(files, size, time), the speed and how many at once, what was already home, that every copy was read "
+      "back twice, the source check (files, time, all matched), link drops, problems, the dark library and the "
+      "whole run with its start and finish on this computer's clock",
+      lambda: list(_qrow) == ["Copied", "Speed", "Already home", "Checked here", "Source check", "Link drops", "Problems",
+                              "Dark library", "Whole run"]
+      and _qrow["Copied"].startswith(f"6 files, {_sfq_size}, in ") and "on average" in _qrow["Speed"]
+      and "at once" in _qrow["Speed"] and _qrow["Already home"] == "0 files, not copied again"
+      and _qrow["Checked here"] == "6 copies read back twice on this computer and matched"
+      and _qrow["Source check"].startswith(f"6 files ({_sfq_size}) read again from the telescope in ")
+      and _qrow["Source check"].endswith(": all matched") and _qrow["Link drops"] == "none" and _qrow["Problems"] == "none"
+      and _qrow["Dark library"].startswith("3 files copied (") and _qrow["Dark library"].endswith("0 already here")
+      and re.fullmatch(r".+, \d\d:\d\d to \d\d:\d\d on this computer's clock", _qrow["Whole run"])
+      and _qlines[-1].startswith("✓ M 45_mosaic pulled and verified"),
+      "\n".join(_qlines[-16:]))
+check("SF3 the same numbers are kept: one row in starfront-pulls.jsonl (the state folder) and 'pullStats' on the "
+      "project in the status file, with the copy's files, bytes, seconds and bytes a second, the source check's, "
+      "the drops, the workers and the most copies at once (never more than STARFRONT_WORKERS)",
+      lambda: len(_qlog) == 1 and _qlog[0]["project"] == "M 45_mosaic" and _qlog[0]["copy"]["files"] == 6
+      and _qlog[0]["copy"]["of"] == 6 and _qlog[0]["copy"]["bytes"] == _sfq_bytes and _qlog[0]["copy"]["movedBytes"] == _sfq_bytes
+      and _qlog[0]["copy"]["seconds"] > 0 and _qlog[0]["copy"]["bytesPerSecond"] > 0 and _qlog[0]["copy"]["drops"] == 0
+      and _qlog[0]["sourceCheck"]["files"] == 6 and _qlog[0]["sourceCheck"]["bytes"] == _sfq_bytes
+      and _qlog[0]["sourceCheck"]["proven"] == 6 and _qlog[0]["sourceCheck"]["mismatch"] == 0
+      and _qlog[0]["sourceCheck"]["read"] == "unbuffered"
+      and _qlog[0]["workers"] == 3 and 1 <= _qlog[0]["maxActive"] <= 3 and _qlog[0]["alreadyHome"] == 0
+      and _qlog[0]["problems"] == 0 and _qlog[0]["stopped"] is False and _qlog[0]["dark"]["copied"] == 3
+      and sfp_status(SFQ)["projects"]["M 45_mosaic"]["pullStats"] == _qlog[0],
+      json.dumps(_qlog)[:1500])
+_qp2 = SFQ.run("--starfront-pull", "M 45_mosaic", extra_env=_SFQ_EV)
+check("SF3 a pull with nothing to bring and nothing to prove prints no statistics and adds no row (there is "
+      "nothing to time)",
+      lambda: _qp2.returncode == 0 and "everything on the telescope is already home" in _qp2.stdout
+      and "Copy statistics" not in _qp2.stdout and "Copying: " not in _qp2.stdout
+      and len(open(os.path.join(SFQ.state, "starfront-pulls.jsonl"), encoding="utf-8").read().splitlines()) == 1,
+      _qp2.stdout + _qp2.stderr)
+# a second project: a drop that recovers, then one that stops the pull, then the source check alone
+for i in range(4):
+    sfp_sub(SFQ, "M 33", f"20261105-22{i:02d}00")
+    sfp_sub(SFQ, "M 81", f"20261105-23{i:02d}00")
+SFQ.run("--starfront-scan", extra_env=SFP_DAY_ENV)
+_qp3 = SFQ.run("--starfront-pull", "M 33", extra_env={**_SFQ_EV, **_SFR_FAST, "ASTRO_TEST_SF_DROP": "220100:1"})
+_qp4 = SFQ.run("--starfront-pull", "M 81", extra_env={**_SFQ_EV, **_SFR_FAST, "ASTRO_TEST_SF_DROP": "230100"})
+_qlog2 = [json.loads(ln) for ln in open(os.path.join(SFQ.state, "starfront-pulls.jsonl"), encoding="utf-8")]
+check("SF3 link drops are counted: a file that dropped once and came home on the next try gives 'Link drops   1, "
+      "each recovered on another try' (and 1 in the kept row); a pull that stopped on a fourth drop still prints "
+      "its statistics, headed '(stopped part way)', with 3 of 4 files copied ('1 of 4 did not come') and 'the "
+      "pull stopped on the last', before its closing sentence",
+      lambda: _qp3.returncode == 0 and re.search(r"Link drops\s+1, each recovered on another try", _qp3.stdout)
+      and _qlog2[1]["project"] == "M 33" and _qlog2[1]["copy"]["drops"] == 1 and _qlog2[1]["copy"]["files"] == 4
+      and _qp4.returncode == 1 and "▸ Copy statistics for M 81 (stopped part way)" in _qp4.stdout
+      and re.search(r"Copied\s+3 files, .+ \(1 of 4 did not come\)", _qp4.stdout)
+      and re.search(r"Link drops\s+4, the pull stopped on the last", _qp4.stdout)
+      and _qlog2[2]["project"] == "M 81" and _qlog2[2]["stopped"] is True and _qlog2[2]["copy"]["files"] == 3
+      and _qlog2[2]["copy"]["of"] == 4 and _qlog2[2]["sourceCheck"] is None
+      and "M 81: the pull stopped part way. 3 of 4 files are home and recorded." in _qp4.stderr,
+      _qp3.stdout[-1200:] + _qp4.stdout[-1500:] + _qp4.stderr)
+_qp5 = SFQ.run("--starfront-pull", "M 81", "--rehash-only", extra_env=_SFQ_EV)
+_qlog3 = [json.loads(ln) for ln in open(os.path.join(SFQ.state, "starfront-pulls.jsonl"), encoding="utf-8")]
+check("SF3 --rehash-only prints the statistics of the source check alone ('Copy statistics for M 81 (the source "
+      "check only)': files, size, time, speed, all matched) and keeps a row marked rehashOnly with no copy part",
+      lambda: "▸ Copy statistics for M 81 (the source check only)" in _qp5.stdout
+      and re.search(r"Source check\s+3 files \(.+\) read again from the telescope in .+: all matched", _qp5.stdout)
+      and not re.search(r"^\s+Copied\s", _qp5.stdout, re.M)
+      and len(_qlog3) == 4 and _qlog3[3]["rehashOnly"] is True and _qlog3[3]["copy"] is None
+      and _qlog3[3]["sourceCheck"]["files"] == 3 and _qlog3[3]["sourceCheck"]["proven"] == 3,
+      _qp5.stdout + _qp5.stderr)
+with open(os.path.join(SFQ.state, "starfront-pulls.jsonl"), "a", encoding="utf-8") as f:
+    f.write(json.dumps({"project": "M 42_mosaic", "copy": {"bytesPerSecond": 3_300_000, "seconds": 5220.0},
+                        "sourceCheck": {"bytesPerSecond": 6_600_000, "seconds": 2610.0}}) + "\n")
+    f.write("not json at all\n")
+for i in range(3):
+    sfp_sub(SFQ, "M 101", f"20261106-01{i:02d}00")
+SFQ.run("--starfront-scan", extra_env=SFP_DAY_ENV)
+_qd10 = SFQ.run("--starfront-pull", "M 101", "--dry-run", extra_env=SFP_DAY_ENV)
+_sfq_m101 = sum(os.path.getsize(os.path.join(SFQ.mw, "M 101_sub", f)) for f in os.listdir(os.path.join(SFQ.mw, "M 101_sub")))
+check("SF3 once a pull has been timed (a copy and a source check of a minute or more; the tests' own split-second "
+      "pulls do not count, and a broken row in the log is skipped), a dry run gives an estimate from those speeds: "
+      "'at the last pull's speed (3.3 MB/s) the copy would take about …, and the second read of the source about … more'",
+      lambda: _qd10.returncode == 0
+      and (f"at the last pull's speed (3.3 MB/s) the copy would take about {_sfq_dur(_sfq_m101 / 3_300_000)}, and the "
+           f"second read of the source about {_sfq_dur(_sfq_m101 / 6_600_000)} more") in _qd10.stdout
+      and "no pull has been timed yet" not in _qd10.stdout, _qd10.stdout + _qd10.stderr)
 
 print("\n── Chain GD: the guards — the note in _verify, lost history, a failed nightly, agents really loaded (1.10.1) ──")
 # 31 Oct 2026: the archive's _verify folder was moved aside by hand. The

@@ -155,7 +155,7 @@ The same keys on both, in `config.json` next to the ledger:
 | `STARFRONT_DEFAULT_HOURS` | a project's target unless `--starfront-target` set one | — | 20 |
 | `STARFRONT_VPN_MODE`, `STARFRONT_VPN_TUNNEL`, `STARFRONT_SEESTAR_IP` | `on-demand` (the scan starts the tunnel service when it is down), `always` or `never`; the WireGuard tunnel name (service `WireGuardTunnel$<name>`); the host probed on port 445 | — | `on-demand`, `BrettJohnson-B15`, `10.15.10.212` |
 | `STARFRONT_VPN_ALERT_HOURS` | one push after the tunnel has been down this long, one on recovery | — | 12 |
-| `STARFRONT_ROOF_SHARE`, `STARFRONT_ROOF_FILE` | the observatory's share (the roof file sits under `roof\`); empty file name means the newest file there | — | `\\172.16.5.21\sfro-customer`, empty |
+| `STARFRONT_ROOF_SHARE`, `STARFRONT_ROOF_FILE`, `STARFRONT_BUILDING` | the observatory's share; the roof file is `roof\building-<n>\RoofStatusFile.txt` for this building (1.10.4), and another building's file is never read; a file name set here overrides that | — | `\\172.16.5.21\sfro-customer`, empty, 15 |
 | `STARFRONT_SILENT_MINUTES` | roof open, sky dark, no new sub for this long: one push a night | — | 90 |
 | `STARFRONT_FULL_WARN_NIGHTS` | "pull soon" when the scope is full in fewer nights than this | — | 5 |
 | `STARFRONT_STALL_SECONDS`, `STARFRONT_ROOF_CLOSED_HOURS`, `STARFRONT_WORKERS`, `STARFRONT_AUTO_CLEAR` | read now, used by phase 2 (the pull) and phase 3 (the clear) | — | 120, 2, 8, false |

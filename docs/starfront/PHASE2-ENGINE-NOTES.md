@@ -364,3 +364,26 @@ Nothing in chain W1 needed changing (it reads section 7, which is untouched). No
 - `config.example.json`: the same keys.
 - `CLAUDE.md`: the layout note for this build (the alarm kind, the hooks, chain SF's count), and the engine total: 811 checks on this machine (745 before, plus 66).
 - The project map: the receipt format link (AstroLog will meet a new telescope name, `Seestar S50 Pro (Starfront)`, and the new fields `site`, `hours`, `nights`); the archive layout link (a new root, `S50P-Starfront`); the Observatory record link (the new project fields and statuses); and the open question of whether an unbuffered read works on the Seestar's share.
+
+## Addendum, 1.10.4 (16 Nov 2026): what the first dry run on the PC changed
+
+The first dry run was refused: `the roof could not be read (no file under \\172.16.5.21\sfro-customer\roof)`. The real layout, from Brett's listing the same day: `roof\building-1` ... `roof\building-20`, one folder per building, and in `building-15` one file, `RoofStatusFile.txt` (46 bytes, last written when the roof last moved, 14 Nov 00:58 at the site).
+
+- `sf_roof_file()` reads `roof\building-<STARFRONT_BUILDING>\RoofStatusFile.txt` (default building 15), and never another building's file. The old rule ("the newest file under roof") only applies when `roof\` holds no building folders at all.
+- The file's own date (`fileTime` in the reading and in `starfront-roof.jsonl`) is "since" when the text has no time, and `sf_roof_closed_hours` uses it as it used a time in the text: trusted on a first reading and while it stays the same between closed readings.
+- The pull prints a progress line a minute and a statistics block at the end, and keeps the numbers in `starfront-pulls.jsonl` and in `pullStats` in the status file. The result dict gains `stats`. The words:
+
+      Copying: 120 of 865 files · 1.90 GB of 17.24 GB (11%) · 3.3 MB/s now, 3.3 MB/s average · about 1 h 17 min left · 0 link drops
+    ▸ Copy statistics for M 42_mosaic
+        Copied         865 files, 17.24 GB, in 1 h 27 min
+        Speed          3.3 MB/s on average (fastest minute 4.1 MB/s, slowest 2.2 MB/s); up to 8 files at once
+        Already home   0 files, not copied again
+        Checked here   865 copies read back twice on this computer and matched
+        Source check   865 files (17.24 GB) read again from the telescope in 1 h 20 min, 3.6 MB/s: all matched
+        Link drops     2, each recovered on another try
+        Problems       none
+        Dark library   12 files copied (35.0 MB), 0 already here
+        Whole run      2 h 55 min, 18:05 to 21:00 on this computer's clock
+
+- Sizes in the pull's lines are in the scan's units (1 GB = 1,000,000,000 bytes). The examples earlier in this note ("37 KB") were written with the older unit.
+- Still open: the roof file's exact wording (the parser takes open or closed from anywhere in the text; the first real reading is kept raw in `starfront-roof.jsonl`), and whether a pull should stop when night falls or the roof opens part way (both are checked only at the start).

@@ -1,5 +1,21 @@
 # Changelog
 
+## 1.10.4 (2026-11-16): the roof file where Starfront keeps it, and statistics for every pull
+
+The first dry run of a pull on the PC was refused: "the roof could not be read". The importer looked for a roof file directly inside the share's `roof` folder, and Starfront keeps one folder per building there, each with its own `RoofStatusFile.txt`. And Brett asked that a pull always shows the statistics of its file copy.
+
+- **The roof file is this building's own.** It is `roof\building-15\RoofStatusFile.txt`. The share holds every building's roof, so another building's file is never read in place of ours: with building folders there and none for building 15, the roof counts as unreadable and a pull is refused. `STARFRONT_BUILDING` (default 15) names the building; `STARFRONT_ROOF_FILE` still overrides everything.
+- **The roof file's own date counts.** Starfront writes the file when the roof moves, so when its text carries no time, the date the file was last written is "closed since". A first look at a roof that closed two days ago now counts as closed for two days, not for zero hours. A time written in the text is still preferred, and month-first dates with AM or PM are read too.
+- **Progress while a pull copies.** One line a minute: files and gigabytes done, the speed over the last minute and since the start, the time left at that speed, and how often the link dropped. The second read of the source has its own lines.
+- **Statistics at the end of every pull,** the last thing on the screen before the closing line: what was copied and how long it took, the average speed with the fastest and slowest minute, how many files copied at once, what was already home, that every copy was read back twice, the source check (files, time, speed, all matched or not), link drops, problems, the dark library, and the whole run with its start and finish. A pull that stops part way still prints them. `--rehash-only` prints the source check's alone.
+- **The statistics are kept**: one row per pull in `starfront-pulls.jsonl` in the state folder, and on the project in `starfront-status.json` (`pullStats`). A dry run uses the last timed pull to say how long the copy and the source check would take.
+- **One unit for sizes.** The pull's lines count a gigabyte as the scan does (1,000,000,000 bytes), so a project reads "17.24 GB" in the scan, the dry run and the statistics alike.
+- Sixteen more checks in chain SF. One older check changed on purpose: the proof that the Starfront code writes nothing on a share now also allows the statistics log in the state folder.
+
+Mac / Windows: the pull is the PC's, as before. On a Mac the Starfront commands say so and exit.
+
+1060 end-to-end checks (827 engine + 233 panel). On Linux here: engine 818 passed, 4 skipped, the five Mac/PC-only lines as before; panel 233 passed.
+
 ## 1.10.3 (2026-11-16): the Starfront pull, and a telescope-identity check
 
 The first real scan of Brett's hosted Seestar (and a scare: its network address had changed, and the old address now answers as a different owner's empty Seestar) drove this release.

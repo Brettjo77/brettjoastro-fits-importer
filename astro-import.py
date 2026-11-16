@@ -56,7 +56,7 @@ from collections import defaultdict, deque
 from datetime import date, datetime, timedelta, timezone
 
 # One version for every platform (1.5.0: the Windows 11 edition joins the Mac).
-VERSION = "1.10.3"
+VERSION = "1.10.4"
 IS_WINDOWS = os.name == "nt"
 IS_MAC = sys.platform == "darwin"
 PLATFORM = "windows" if IS_WINDOWS else ("mac" if IS_MAC else "linux")
@@ -1027,6 +1027,7 @@ STARFRONT_SILENT_MINUTES = _env_rule("STARFRONT_SILENT_MINUTES", 90, 5, 1440)
 STARFRONT_FULL_WARN_NIGHTS = _env_rule("STARFRONT_FULL_WARN_NIGHTS", 5, 1, 365)
 STARFRONT_AUTO_CLEAR = _env_flag("STARFRONT_AUTO_CLEAR", False)                    # Phase 3 only
 STARFRONT_WORKERS = _env_rule("STARFRONT_WORKERS", 8, 1, 32)                        # the pull's copies in parallel
+STARFRONT_BUILDING = _env_rule("STARFRONT_BUILDING", 15, 1, 999)                    # whose roof: roof\building-15
 NOTIFY_PUSH_URL = _env_text("NOTIFY_PUSH_URL", "")                                  # an ntfy topic URL; empty = no push
 # the state files, all in the state folder (confined in test mode like the ledger)
 SF_INVENTORY_FILE = "starfront-inventory.json"
@@ -1035,6 +1036,7 @@ SF_TARGETS_FILE = "starfront-targets.json"
 SF_STATUS_FILE = "starfront-status.json"
 SF_ROOF_LOG = "starfront-roof.jsonl"
 SF_LAST_SCAN_FILE = "starfront-last-scan.json"
+SF_PULLS_LOG = "starfront-pulls.jsonl"     # one row of statistics per pull or source check (1.10.4)
 SF_PAUSE_FLAG = "starfront-pause"
 SF_VPN_HOLD_FLAG = "starfront-vpn-hold"
 SF_LEDGER_SAVE_EVERY = 25           # the pull saves the ledger after this many files, and at the end
@@ -13728,28 +13730,69 @@ def sf_is_link_drop(exc_or_stall):
 
 # ── the roof ─────────────────────────────────────────────────────────────────
 
+SF_ROOF_NAME = "RoofStatusFile.txt"           # Starfront's roof file, one per building (seen 16 Nov 2026)
+
 def sf_roof_file():
-    """The roof file: STARFRONT_ROOF_FILE when set, else the newest file
-    under <roof share>\\roof. (None, why) when there is none."""
+    """The roof file: STARFRONT_ROOF_FILE when set; else this building's own
+    file, <roof share>\\roof\\building-<STARFRONT_BUILDING>\\RoofStatusFile.txt
+    (the layout seen on 16 Nov 2026; another file in that folder is taken,
+    the newest, only when that name is not there). The share holds every
+    building's roof, so a folder for another building is NEVER read: with
+    building folders there and none for this building, the answer is no file.
+    Only a roof folder with no building folders at all (an older layout) is
+    searched for its newest file. (None, why) when there is none."""
     if STARFRONT_ROOF_FILE:
         return (STARFRONT_ROOF_FILE, "") if os.path.isfile(STARFRONT_ROOF_FILE) \
             else (None, f"the roof file is not there: {STARFRONT_ROOF_FILE}")
     folder = os.path.join(STARFRONT_ROOF_SHARE, "roof")
-    newest, newest_m = None, None
-    try:
-        with os.scandir(folder) as it:
+
+    def newest_in(d, prefer=None):
+        best, best_m = None, None
+        with os.scandir(d) as it:
             for e in it:
                 try:
                     if not e.is_file(follow_symlinks=False):
                         continue
+                    if prefer and e.name.lower() == prefer.lower():
+                        return e.path
                     m = e.stat(follow_symlinks=False).st_mtime
                 except OSError:
                     continue
-                if newest_m is None or m > newest_m:
-                    newest, newest_m = e.path, m
+                if best_m is None or m > best_m:
+                    best, best_m = e.path, m
+        return best
+
+    want = f"building-{STARFRONT_BUILDING}"
+    mine, buildings = None, []
+    try:
+        with os.scandir(folder) as it:
+            for e in it:
+                try:
+                    if not e.is_dir(follow_symlinks=False):
+                        continue
+                except OSError:
+                    continue
+                if re.fullmatch(r"building[-_ ]?\d+", e.name, re.I):
+                    buildings.append(e.name)
+                    if re.sub(r"[-_ ]", "-", e.name.lower()) == want or e.name.lower() == f"building{STARFRONT_BUILDING}":
+                        mine = e.path
     except OSError as e:
         return None, f"the roof folder could not be listed ({folder}): {e}"
-    return (newest, "") if newest else (None, f"no file under {folder}")
+    if mine:
+        try:
+            path = newest_in(mine, prefer=SF_ROOF_NAME)
+        except OSError as e:
+            return None, f"building {STARFRONT_BUILDING}'s roof folder could not be listed ({mine}): {e}"
+        return (path, "") if path else (None, f"no file under {mine}")
+    if buildings:
+        return None, (f"there is no folder for building {STARFRONT_BUILDING} under {folder} (it holds "
+                      f"{len(buildings)} other building{'' if len(buildings) == 1 else 's'}; set STARFRONT_BUILDING "
+                      f"if the telescope moved)")
+    try:
+        path = newest_in(folder)
+    except OSError as e:
+        return None, f"the roof folder could not be listed ({folder}): {e}"
+    return (path, "") if path else (None, f"no file under {folder}")
 
 def sf_parse_roof(text):
     """(state, since) from a roof file of any of the shapes rollout step 1
@@ -13802,6 +13845,13 @@ def sf_parse_roof(text):
         if isinstance(v, (str, int, float)) and str(v).strip():
             since = str(v).strip()
             break
+    if since is None and not isinstance(d, dict):
+        # a line such as "2026-11-14 00:58:33 Roof Status: CLOSED" or
+        # "11/14/2026 12:58:33 AM Roof Status: CLOSED": the time stands alone
+        m = (re.search(r"\d{4}-\d{2}-\d{2}[T ]\d{1,2}:\d{2}(?::\d{2}(?:\.\d+)?)?\s*(?:[AaPp][Mm]\b)?(?:\s*(?:Z|[+-]\d{2}:?\d{2}))?", raw)
+             or re.search(r"\d{1,2}/\d{1,2}/\d{4}[ ,T]+\d{1,2}:\d{2}(?::\d{2})?\s*(?:[AaPp][Mm]\b)?", raw))
+        if m:
+            since = m.group(0).strip()
     return state, since
 
 def read_roof(now=None):
@@ -13815,19 +13865,29 @@ def read_roof(now=None):
     global _SF_ROOF_LAST
     read_at = _utc_iso(now)
     path, why = sf_roof_file()
-    raw, state, since = "", "unknown", None
+    raw, state, since, file_time = "", "unknown", None, None
     if path:
         try:
-            with open(path, "r", encoding="utf-8", errors="replace") as f:
+            # when the file was last written (a look at the folder's entry: no
+            # handle is held). Starfront writes it when the roof moves, so with
+            # no time in the text this is when the roof last changed.
+            file_time = _utc_iso(datetime.fromtimestamp(os.stat(path).st_mtime, timezone.utc))
+        except (OSError, OverflowError, ValueError):
+            file_time = None
+        try:
+            with open(path, "r", encoding="utf-8-sig", errors="replace") as f:
                 _SF_ROOF_LAST = f
                 raw = f.read(65536)
             state, since = sf_parse_roof(raw)
         except OSError as e:
             why = f"the roof file could not be read ({path}): {e}"
-    out = {"state": state, "since": since, "raw": raw, "readAt": read_at, "file": path, "why": why or None}
+    out = {"state": state, "since": since, "raw": raw, "readAt": read_at, "file": path, "why": why or None,
+           "fileTime": file_time}
     try:
         prev = sf_roof_log(limit=1)
-        if since is None and prev and prev[-1].get("state") == state and prev[-1].get("since"):
+        if since is None and state != "unknown" and file_time:
+            out["since"] = file_time
+        elif since is None and prev and prev[-1].get("state") == state and prev[-1].get("since"):
             out["since"] = prev[-1]["since"]          # unchanged since the earlier reading
         elif since is None and state != "unknown":
             out["since"] = read_at
@@ -13836,7 +13896,8 @@ def read_roof(now=None):
         os.makedirs(os.path.dirname(log_path), exist_ok=True)
         with open(log_path, "a", encoding="utf-8") as f:
             f.write(json.dumps({"at": read_at, "state": state, "since": out["since"], "file": path,
-                                "raw": raw[:4000], "why": why or None}, ensure_ascii=False) + "\n")
+                                "raw": raw[:4000], "why": why or None, "fileTime": file_time},
+                               ensure_ascii=False) + "\n")
     except OSError as e:
         debug(f"roof log not written: {e}")
     return out
@@ -14945,10 +15006,27 @@ def sf_parse_when(text, tz, now_utc):
             return datetime.fromtimestamp(v, timezone.utc)
         except (ValueError, OverflowError, OSError):
             return None
-    try:
-        d = datetime.fromisoformat(s.replace("Z", "+00:00").replace(" ", "T", 1))
-    except ValueError:
-        return None
+    d = None
+    m = re.fullmatch(r"(\d{1,2})/(\d{1,2})/(\d{4})[ ,T]+(\d{1,2}):(\d{2})(?::(\d{2}))?\s*([AaPp][Mm])?", s)
+    m2 = re.fullmatch(r"(\d{4})-(\d{2})-(\d{2})[T ](\d{1,2}):(\d{2})(?::(\d{2}))?\s*([AaPp][Mm])", s)
+    if m or m2:
+        # month first, as the site writes a date; AM / PM when it is there
+        g = (m or m2).groups()
+        mo, dy, yr = (g[0], g[1], g[2]) if m else (g[1], g[2], g[0])
+        hh, ampm = int(g[3]), (g[6] or "").lower()
+        if ampm:
+            if not 1 <= hh <= 12:
+                return None
+            hh = (hh % 12) + (12 if ampm == "pm" else 0)
+        try:
+            d = datetime(int(yr), int(mo), int(dy), hh, int(g[4]), int(g[5] or 0))
+        except ValueError:
+            return None
+    else:
+        try:
+            d = datetime.fromisoformat(re.sub(r"\s+(?=[+-]\d{2}:?\d{2}$)", "", s).replace("Z", "+00:00").replace(" ", "T", 1))
+        except ValueError:
+            return None
     if d.tzinfo is not None:
         return d.astimezone(timezone.utc)
     cands = [d.replace(tzinfo=timezone.utc), d.replace(tzinfo=tz).astimezone(timezone.utc)]
@@ -14974,10 +15052,14 @@ def sf_roof_closed_hours(roof, now_utc, tz, rows=None):
         run.append(r)
     run.reverse()
     start = (_parse_utc(run[0].get("at")) if run else None) or now_utc
-    own = sf_parse_roof(roof.get("raw") or "")[1]
+
+    def own_time(r):
+        # the time written in the file, else when the file itself was last written
+        return sf_parse_roof(r.get("raw") or "")[1] or r.get("fileTime") or None
+    own = own_time(roof)
     t_file = sf_parse_when(own, tz, now_utc) if own else None
     if t_file is not None:
-        prev_own = sf_parse_roof(run[-2].get("raw") or "")[1] if len(run) >= 2 else None
+        prev_own = own_time(run[-2]) if len(run) >= 2 else None
         if len(run) < 2 or prev_own == own:
             start = t_file
     return max(0.0, (now_utc - min(start, now_utc)).total_seconds() / 3600.0)
@@ -15156,7 +15238,7 @@ def _sf_worker(job, ctx, work, out_q):
         res = ("error", e)
     out_q.put((ctx, res))
 
-def sf_run_jobs(jobs, work, workers, on_ok, on_problem, doing="copying", watch_stall=True):
+def sf_run_jobs(jobs, work, workers, on_ok, on_problem, doing="copying", watch_stall=True, tick=None):
     """Run work(job, ctx) for every job on at most `workers` threads. The
     calling thread alone hears the answers and calls on_ok(job, result) or
     on_problem(job, exception): it is the ONE thread that touches the ledger.
@@ -15164,8 +15246,9 @@ def sf_run_jobs(jobs, work, workers, on_ok, on_problem, doing="copying", watch_s
     no bytes for STARFRONT_STALL_SECONDS) brings ensure_tunnel() and another
     try of that file after 5, 15 and 45 seconds; a fourth drop of one file
     stops the run: no new file is started, the ones in flight finish or
-    fail by themselves, and what finished is kept. Returns {"done",
-    "stopped" (why, or None), "maxActive", "drops"}."""
+    fail by themselves, and what finished is kept. `tick(drops)` is called
+    on this thread a few times a second (the statistics line). Returns
+    {"done", "stopped" (why, or None), "maxActive", "drops"}."""
     scale = _sf_scale()
     stall_s = STARFRONT_STALL_SECONDS * scale
     waits = [w * scale for w in SF_RETRY_WAITS]
@@ -15237,6 +15320,8 @@ def sf_run_jobs(jobs, work, workers, on_ok, on_problem, doing="copying", watch_s
                 on_problem(job, val)
             else:
                 raise val                                    # Ctrl+C or an exit: not ours to swallow
+        if tick is not None:
+            tick(st["drops"])
         if watch_stall:
             for cid, c in list(active.items()):
                 if time.monotonic() - c["last"] >= stall_s:
@@ -15268,6 +15353,7 @@ def _sf_copy_work(job, ctx):
                 time.sleep(0.01)
         else:
             ctx["last"] = time.monotonic()
+            sf_stats_moved(_SF_STAGE["stats"], _n)
         if ctx["cancel"]:
             raise StarfrontStall(errno.ETIMEDOUT, "the copy stopped moving and was given up", job["path"])
     if _sf_test_hook("ASTRO_TEST_SF_DROP", job):
@@ -15294,6 +15380,221 @@ def _sf_copy_work(job, ctx):
 _SF_ACTIVE = {"now": 0, "max": 0}             # copies in flight right now, and the most at once
 _SF_ACTIVE_LOCK = threading.Lock()
 
+# ── the pull's statistics (1.10.4) ───────────────────────────────────────────
+# Brett, 16 Nov 2026: "when we do actually pull anything down, I need to see
+# statistics of the file copy". While a pull copies (and while it reads the
+# source again) one line a minute says how far it is and how fast; at the end
+# a block says what was copied, how fast, what was checked and what went
+# wrong; the same numbers are kept in starfront-pulls.jsonl and in the
+# status file. Sizes are in the scan's units (1 GB = 1,000,000,000 bytes),
+# so a project reads the same in the scan, the dry run and the statistics.
+
+SF_STATS_EVERY = 60.0                         # seconds between two progress lines
+_SF_STATS_LOCK = threading.Lock()
+_SF_STAGE = {"stats": None}                   # the stage whose bytes the worker threads are counting, or None
+
+def sf_size(n):
+    """A size in the scan's units: '17.24 GB', '15.8 MB', '37 KB'."""
+    n = float(n or 0)
+    if n >= 1e9:
+        return f"{n / 1e9:.2f} GB"
+    if n >= 1e6:
+        return f"{n / 1e6:.1f} MB"
+    return f"{n / 1e3:.0f} KB"
+
+def sf_duration(seconds):
+    """'42 s', '12 min', '1 h 27 min'."""
+    s = max(0.0, float(seconds or 0))
+    if s < 90:
+        return f"{s:.0f} s"
+    m = int(round(s / 60.0))
+    return f"{m} min" if m < 60 else f"{m // 60} h {m % 60:02d} min"
+
+def sf_speed(bytes_per_second):
+    """'3.3 MB/s' (two decimals under 1 MB/s)."""
+    v = max(0.0, float(bytes_per_second or 0)) / 1e6
+    return f"{v:.2f} MB/s" if v < 1 else f"{v:.1f} MB/s"
+
+def sf_stats_every():
+    """Seconds between progress lines (a test may shorten it)."""
+    if TEST_ROOT and os.environ.get("ASTRO_TEST_SF_STATS_EVERY"):
+        try:
+            return max(0.0, float(os.environ["ASTRO_TEST_SF_STATS_EVERY"]))
+        except ValueError:
+            pass
+    return SF_STATS_EVERY
+
+def sf_stats_new(label, files, total_bytes):
+    """A running count for one stage of a pull (the copies, or the second
+    read of the source). `moved` counts every byte that crossed the link
+    (worker threads add to it, under the lock); the rest belongs to the one
+    thread that prints."""
+    t = time.monotonic()
+    return {"label": label, "files": int(files), "bytes": int(total_bytes), "doneFiles": 0, "doneBytes": 0,
+            "moved": 0, "t0": t, "t1": None, "startedAt": _utc_iso(), "samples": deque([(t, 0)]),
+            "minutes": [(t, 0)], "lastSaid": t, "saidAt": (-1, -1), "lines": 0}
+
+def sf_stats_moved(stats, n):
+    """Bytes that crossed the link, from any thread."""
+    if stats is not None and n:
+        with _SF_STATS_LOCK:
+            stats["moved"] += int(n)
+
+def sf_stats_done(stats, size):
+    """One file finished and recorded (the printing thread)."""
+    if stats is not None:
+        stats["doneFiles"] += 1
+        stats["doneBytes"] += int(size or 0)
+
+def sf_stats_rates(stats, now=None):
+    """(bytes a second over the last minute, bytes a second since the
+    start), from the bytes that crossed the link."""
+    now = time.monotonic() if now is None else now
+    with _SF_STATS_LOCK:
+        moved = stats["moved"]
+    t_old, b_old = stats["samples"][0]
+    recent = (moved - b_old) / (now - t_old) if now - t_old > 0.5 else None
+    whole = moved / (now - stats["t0"]) if now - stats["t0"] > 0 else 0.0
+    return (whole if recent is None else recent), whole
+
+def sf_stats_text(stats, drops=0, now=None):
+    """The progress line: files, bytes, the speed now and on average, the
+    time left, the link drops so far."""
+    now = time.monotonic() if now is None else now
+    recent, whole = sf_stats_rates(stats, now)
+    pct = int(stats["doneBytes"] * 100 // stats["bytes"]) if stats["bytes"] else 100
+    left = stats["bytes"] - stats["doneBytes"]
+    rate = recent if recent > 0 else whole
+    eta = f"about {sf_duration(left / rate)} left" if left > 0 and rate > 0 else ("done" if left <= 0 else "time left not known yet")
+    return (f"{stats['label']}: {stats['doneFiles']:,} of {stats['files']:,} files · {sf_size(stats['doneBytes'])} of "
+            f"{sf_size(stats['bytes'])} ({pct}%) · {sf_speed(recent)} now, {sf_speed(whole)} average · {eta} · "
+            f"{drops} link drop{'' if drops == 1 else 's'}")
+
+def sf_stats_tick(stats, drops=0, force=False):
+    """Called by the printing thread a few times a second while a stage
+    runs: keeps the last minute's samples and the minute marks, and prints
+    the progress line once every sf_stats_every() seconds (never the same
+    line twice)."""
+    if stats is None:
+        return
+    now = time.monotonic()
+    with _SF_STATS_LOCK:
+        moved = stats["moved"]
+    stats["samples"].append((now, moved))
+    while len(stats["samples"]) > 2 and now - stats["samples"][1][0] >= 60.0:
+        stats["samples"].popleft()
+    if now - stats["minutes"][-1][0] >= 60.0:
+        stats["minutes"].append((now, moved))
+    at = (stats["doneFiles"], moved)
+    if (force or now - stats["lastSaid"] >= sf_stats_every()) and at != stats["saidAt"]:
+        stats["lastSaid"], stats["saidAt"] = now, at
+        stats["lines"] += 1
+        log(sf_stats_text(stats, drops, now))
+
+def sf_stats_close(stats, drops=0):
+    """The stage is over: its facts as a plain dict (what is saved)."""
+    stats["t1"] = time.monotonic()
+    secs = max(0.0, stats["t1"] - stats["t0"])
+    with _SF_STATS_LOCK:
+        moved = stats["moved"]
+    marks = stats["minutes"] + [(stats["t1"], moved)]
+    per_min = [(b2 - b1) / (t2 - t1) for (t1, b1), (t2, b2) in zip(marks, marks[1:]) if t2 - t1 >= 30.0]
+    return {"files": stats["doneFiles"], "bytes": stats["doneBytes"], "of": stats["files"], "ofBytes": stats["bytes"],
+            "movedBytes": moved, "seconds": round(secs, 1), "startedAt": stats["startedAt"], "finishedAt": _utc_iso(),
+            "bytesPerSecond": round(stats["doneBytes"] / secs) if secs > 0 else None,
+            "fastestMinute": round(max(per_min)) if per_min else None,
+            "slowestMinute": round(min(per_min)) if per_min else None,
+            "drops": int(drops), "progressLines": stats["lines"]}
+
+def sf_stats_block(st):
+    """The lines of the statistics block, from the saved facts."""
+    def rate(part):
+        v = part.get("bytesPerSecond")
+        return sf_speed(v) if v else "too quick to time"
+    rows = []
+    c, r, d = st.get("copy"), st.get("sourceCheck"), st.get("dark") or {}
+    if c:
+        rows.append(("Copied", f"{c['files']:,} file{'' if c['files'] == 1 else 's'}, {sf_size(c['bytes'])}, in "
+                               f"{sf_duration(c['seconds'])}"
+                               + ("" if c["files"] == c["of"] else f" ({c['of'] - c['files']:,} of {c['of']:,} did not come)")))
+        sp = f"{rate(c)} on average"
+        if c.get("fastestMinute") is not None and c.get("slowestMinute") is not None and c["fastestMinute"] != c["slowestMinute"]:
+            sp += f" (fastest minute {sf_speed(c['fastestMinute'])}, slowest {sf_speed(c['slowestMinute'])})"
+        rows.append(("Speed", sp + f"; up to {st.get('maxActive') or 1} file{'' if (st.get('maxActive') or 1) == 1 else 's'} at once"))
+        rows.append(("Already home", f"{st.get('alreadyHome', 0):,} file{'' if st.get('alreadyHome', 0) == 1 else 's'}, not copied again"))
+        rows.append(("Checked here", f"{c['files']:,} cop{'y' if c['files'] == 1 else 'ies'} read back twice on this "
+                                     f"computer and matched" + (f"; {st['setAside']} did not and "
+                                     f"{'was' if st['setAside'] == 1 else 'were'} set aside" if st.get("setAside") else "")))
+    if r:
+        if r.get("read") and r["read"] != "unbuffered":
+            rows.append(("Source check", "not counted: this computer read the telescope through its own cache"))
+        elif r["files"] or r.get("mismatch"):
+            rows.append(("Source check", f"{r['files']:,} file{'' if r['files'] == 1 else 's'} ({sf_size(r['bytes'])}) read again "
+                                         f"from the telescope in {sf_duration(r['seconds'])}, {rate(r)}: "
+                                         + ("all matched" if not r.get("mismatch") and r.get("proven") == r["files"]
+                                            else f"{r.get('proven', 0):,} matched, {r.get('mismatch', 0)} did not")))
+        elif r.get("already"):
+            rows.append(("Source check", f"already done for {r['already']:,} file{'' if r['already'] == 1 else 's'}; nothing read again"))
+    drops = (c or {}).get("drops", 0) + (r or {}).get("drops", 0)
+    rows.append(("Link drops", "none" if not drops else f"{drops}, " + ("the pull stopped on the last" if st.get("stopped")
+                               else "each recovered on another try")))
+    rows.append(("Problems", "none" if not st.get("problems") else f"{st['problems']} file{'' if st['problems'] == 1 else 's'} "
+                             f"to look at (listed above)"))
+    if d.get("files"):
+        rows.append(("Dark library", f"{d.get('copied', 0)} file{'' if d.get('copied', 0) == 1 else 's'} copied "
+                                     f"({sf_size(d.get('bytes', 0))}), {d.get('kept', 0)} already here"))
+    if st.get("seconds") is not None:
+        rows.append(("Whole run", f"{sf_duration(st['seconds'])}, {st.get('startedLocal', '')} to {st.get('finishedLocal', '')} "
+                                  f"on this computer's clock"))
+    width = max(len(k) for k, _ in rows)
+    return [f"  {k.ljust(width)}   {v}" for k, v in rows]
+
+def sf_stats_say(st):
+    """Print the statistics block and keep it: one row in
+    starfront-pulls.jsonl (the state folder). A log that can't be written
+    is said and never stops a pull."""
+    info(f"Copy statistics for {st.get('project')}" + (" (the source check only)" if st.get("rehashOnly") else "")
+         + (" (stopped part way)" if st.get("stopped") else ""))
+    for ln in sf_stats_block(st):
+        log(ln)
+    try:
+        path = sf_state_path(SF_PULLS_LOG)
+        _confine(path, "the Starfront pull log")
+        os.makedirs(os.path.dirname(path), exist_ok=True)
+        with open(path, "a", encoding="utf-8") as f:
+            f.write(json.dumps(st, ensure_ascii=False) + "\n")
+    except OSError as e:
+        warn(f"The pull's statistics could not be kept ({e}); they are the lines above.")
+
+def sf_pulls_log(limit=200):
+    """The last `limit` rows of starfront-pulls.jsonl, oldest first."""
+    out = []
+    try:
+        with open(sf_state_path(SF_PULLS_LOG), encoding="utf-8") as f:
+            for ln in f:
+                try:
+                    r = json.loads(ln)
+                except ValueError:
+                    continue
+                if isinstance(r, dict):
+                    out.append(r)
+    except OSError:
+        return []
+    return out[-limit:]
+
+def sf_last_speed():
+    """Bytes a second of the last timed copy and of the last timed source
+    check, (None, None) before the first pull: what a dry run's estimate
+    stands on."""
+    copy = check = None
+    for r in sf_pulls_log():
+        c, k = r.get("copy") or {}, r.get("sourceCheck") or {}
+        if c.get("bytesPerSecond") and c.get("seconds", 0) >= 60:
+            copy = c["bytesPerSecond"]
+        if k.get("bytesPerSecond") and k.get("seconds", 0) >= 60:
+            check = k["bytesPerSecond"]
+    return copy, check
+
 def _sf_rehash_work(job, _ctx):
     """One source file read again from the telescope, on a worker thread."""
     if _sf_test_hook("ASTRO_TEST_SF_DROP", job):
@@ -15301,6 +15602,7 @@ def _sf_rehash_work(job, _ctx):
         e.winerror = 64
         raise e
     sha, size, read = hash_file_unbuffered(job["path"])
+    sf_stats_moved(_SF_STAGE["stats"], size)
     return {"sha": sha, "size": size, "read": read}
 
 def sf_ledger_row(state, it, plan, res):
@@ -15400,28 +15702,51 @@ def sf_source_rehash(state, plan, dest_root, workers):
         return out
     info(f"Reading {len(jobs)} file{'' if len(jobs) == 1 else 's'} again from the telescope, to prove "
          f"the cop{'y' if len(jobs) == 1 else 'ies'} (this doubles the traffic).")
-    # the first file says whether this computer can read without its cache;
-    # if it can't, reading the rest would double the traffic and prove nothing
-    first = jobs[0]
+    stats = sf_stats_new("Reading again", len(jobs), sum(j["size"] for j in jobs))
+    drops = [0]
+
+    def counted(it, res):
+        sf_stats_done(stats, res["size"])
+        on_ok(it, res)
+
+    def tick(n):
+        drops[0] = n
+        sf_stats_tick(stats, n)
+
+    def close():
+        _SF_STAGE["stats"] = None
+        if stats["doneFiles"] > 1:
+            sf_stats_tick(stats, drops[0], force=True)
+        out["stats"] = dict(sf_stats_close(stats, drops[0]), proven=out["proven"], mismatch=len(out["mismatch"]),
+                            already=out["already"], read=out["read"])
+        return out
+
+    _SF_STAGE["stats"] = stats
     try:
-        res = _sf_rehash_work(first, None)
-    except OSError as ex:
-        if sf_is_link_drop(ex):
-            run = sf_run_jobs(jobs, _sf_rehash_work, workers, on_ok, on_problem, doing="reading again",
-                              watch_stall=False)
-            out["stopped"] = run["stopped"]
-            return out
-        on_problem(first, ex)
-        res = None
-    if res is not None:
-        on_ok(first, res)
-        if out["read"] != "unbuffered":
-            out["unproven"] += len(jobs) - 1
-            return out
-    run = sf_run_jobs(jobs[1:], _sf_rehash_work, workers, on_ok, on_problem, doing="reading again",
-                      watch_stall=False)
-    out["stopped"] = run["stopped"]
-    return out
+        # the first file says whether this computer can read without its cache;
+        # if it can't, reading the rest would double the traffic and prove nothing
+        first = jobs[0]
+        try:
+            res = _sf_rehash_work(first, None)
+        except OSError as ex:
+            if sf_is_link_drop(ex):
+                run = sf_run_jobs(jobs, _sf_rehash_work, workers, counted, on_problem, doing="reading again",
+                                  watch_stall=False, tick=tick)
+                out["stopped"], drops[0] = run["stopped"], run["drops"]
+                return close()
+            on_problem(first, ex)
+            res = None
+        if res is not None:
+            counted(first, res)
+            if out["read"] != "unbuffered":
+                out["unproven"] += len(jobs) - 1
+                return close()
+        run = sf_run_jobs(jobs[1:], _sf_rehash_work, workers, counted, on_problem, doing="reading again",
+                          watch_stall=False, tick=tick)
+        out["stopped"], drops[0] = run["stopped"], run["drops"]
+        return close()
+    finally:
+        _SF_STAGE["stats"] = None
 
 def sf_dark_listing(share, depth=4):
     """Every file under the telescope's darklibrary as [(relpath, size,
@@ -15687,16 +16012,16 @@ def _sf_pull_locked(name, dry_run, rehash_only, now_utc, tz, facts):
                                 f"room first, then pull.")
     nights = sorted({i["night"] for i in todo if i["kind"] == "sub" and i["night"]})
     info(f"{proj} → {plan['projectDir']}")
-    info(f"{len(todo)} file{'' if len(todo) == 1 else 's'} to bring home ({human_size(total_bytes)}, "
+    info(f"{len(todo)} file{'' if len(todo) == 1 else 's'} to bring home ({sf_size(total_bytes)}, "
          f"{len(nights)} night{'' if len(nights) == 1 else 's'}); {n_home} already home and checked.")
     for night in sorted(plan["days"]):
         group = [i for i in todo if i["kind"] == "sub" and (i["night"] or "") == night]
         log(f"{plan['subLabel']} Day {plan['days'][night]}" + (f" (night of {night})" if night else " (night unknown)")
-            + f": {len(group)} sub{'' if len(group) == 1 else 's'}, {human_size(sum(i['size'] for i in group))}")
+            + f": {len(group)} sub{'' if len(group) == 1 else 's'}, {sf_size(sum(i['size'] for i in group))}")
     for kind, word in (("stack", "stack"), ("panel", "mosaic panel")):
         group = [i for i in todo if i["kind"] == kind]
         if group:
-            log(f"{len(group)} {word}{'' if len(group) == 1 else 's'}, {human_size(sum(i['size'] for i in group))}")
+            log(f"{len(group)} {word}{'' if len(group) == 1 else 's'}, {sf_size(sum(i['size'] for i in group))}")
     for rel, what in plan["problems"]:
         warn(f"{rel}: {what}")
     if rehash_only:
@@ -15704,7 +16029,15 @@ def _sf_pull_locked(name, dry_run, rehash_only, now_utc, tz, facts):
     if dry_run:
         dark = sf_pull_darklibrary(dest_root, workers, dry_run=True)
         log(f"dark library: {dark.get('wouldCopy', 0)} of {dark['files']} file{'' if dark['files'] == 1 else 's'} "
-            f"would be copied to {os.path.join(dest_root, 'darklibrary')} ({human_size(dark['bytes'])})")
+            f"would be copied to {os.path.join(dest_root, 'darklibrary')} ({sf_size(dark['bytes'])})")
+        v_copy, v_check = sf_last_speed()
+        if v_copy and total_bytes:
+            log(f"at the last pull's speed ({sf_speed(v_copy)}) the copy would take about "
+                f"{sf_duration(total_bytes / v_copy)}, and the second read of the source about "
+                f"{sf_duration(total_bytes / (v_check or v_copy))} more")
+        elif total_bytes:
+            log("no pull has been timed yet, so there is no estimate of how long this takes; the first pull's "
+                "statistics give one")
         info("Dry run: every guard passed. Nothing was copied and nothing was changed.")
         return {"ok": True, "dryRun": True, "project": proj, "wouldCopy": len(todo), "bytes": total_bytes,
                 "nights": nights, "dest": plan["projectDir"], "alreadyHome": n_home,
@@ -15719,6 +16052,9 @@ def _sf_pull_locked(name, dry_run, rehash_only, now_utc, tz, facts):
     copied, problems = [], list(plan["problems"])
     _SF_ACTIVE.update(now=0, max=0)
     run = {"stopped": None, "maxActive": 0, "drops": 0}
+    t_run, started_local = time.monotonic(), datetime.now()
+    cstats = sf_stats_new("Copying", len(todo), total_bytes)
+    copy_facts, set_aside = None, [0]
     reread = {"proven": 0, "already": 0, "unproven": 0, "mismatch": [], "stopped": None, "read": None, "changed": 0}
     dark = {"files": 0, "copied": 0, "bytes": 0, "kept": 0, "problems": [], "stopped": None}
     try:
@@ -15739,23 +16075,31 @@ def _sf_pull_locked(name, dry_run, rehash_only, now_utc, tz, facts):
                 why_ = ("the local copy did not read back the same a second time" if res["size"] == it["size"]
                         else f"the telescope's file was {res['size']} bytes, not the {it['size']} listed")
                 problems.append((it["rel"], f"{why_}; set aside" + (f" ({aside})" if aside else "")))
+                set_aside[0] += 1
                 warn(f"{it['filename']}: {why_}. It was set aside and not recorded; the file stays on the "
                      f"telescope. Pull again to fetch it afresh.")
                 state.history_event("starfront-pull-problem", file=it["rel"], why=why_, setAside=aside)
                 return
             sf_ledger_row(state, it, plan, res)
             copied.append(it)
+            sf_stats_done(cstats, it["size"])
             if len(copied) % SF_LEDGER_SAVE_EVERY == 0:
                 state.save_ledger()                          # an interrupted pull keeps what it finished
-            if len(copied) % 10 == 0 or len(copied) == len(todo):
-                show_progress(len(copied), len(todo))
 
         def on_problem(it, ex):
             problems.append((it["rel"], str(ex)))
             warn(f"Copy FAILED for {it['filename']}: {ex}")
 
         if todo:
-            run = sf_run_jobs(todo, _sf_copy_work, workers, on_ok, on_problem, doing="copying")
+            _SF_STAGE["stats"] = cstats
+            try:
+                run = sf_run_jobs(todo, _sf_copy_work, workers, on_ok, on_problem, doing="copying",
+                                  tick=lambda n: sf_stats_tick(cstats, n))
+            finally:
+                _SF_STAGE["stats"] = None
+                if cstats["doneFiles"] or cstats["lines"]:
+                    sf_stats_tick(cstats, run.get("drops", 0), force=True)     # the last line: where it ended
+                copy_facts = sf_stats_close(cstats, run.get("drops", 0))
             run["maxActive"] = _SF_ACTIVE["max"]
         state.save_ledger()
         if copied:
@@ -15765,7 +16109,7 @@ def _sf_pull_locked(name, dry_run, rehash_only, now_utc, tz, facts):
         if copied:
             success(f"{len(copied)} file{'' if len(copied) == 1 else 's'} came home and "
                     f"{'was' if len(copied) == 1 else 'were'} checked twice on this computer "
-                    f"({human_size(sum(i['size'] for i in copied))}).")
+                    f"({sf_size(sum(i['size'] for i in copied))}).")
         if run["stopped"]:
             warn(f"The pull stopped: {run['stopped']}.")
         else:
@@ -15776,7 +16120,9 @@ def _sf_pull_locked(name, dry_run, rehash_only, now_utc, tz, facts):
                 problems.append((rel, "read again from the telescope it was not the file that was copied; "
                                       "the copy was set aside"))
             if not reread["stopped"]:
+                t_dark = time.monotonic()
                 dark = sf_pull_darklibrary(dest_root, workers)
+                dark["seconds"] = round(time.monotonic() - t_dark, 1)
     finally:
         # whatever happened, the ledger holds what finished and the project is
         # no longer marked as being pulled
@@ -15812,6 +16158,24 @@ def _sf_pull_locked(name, dry_run, rehash_only, now_utc, tz, facts):
     if shipped is not True:
         state.publish_mirror()
         rebuild_projects_quietly(state)
+    stats = None
+    if copy_facts or reread.get("stats"):
+        # the statistics Brett asked to see for every pull: said last, so they
+        # are what is on the screen when it ends, and kept (the log, the status file)
+        stats = {"project": proj, "at": _utc_iso(), "importer": VERSION, "copy": copy_facts,
+                 "sourceCheck": reread.get("stats"), "alreadyHome": n_home, "setAside": set_aside[0],
+                 "maxActive": run.get("maxActive", 0), "workers": workers, "problems": len(problems),
+                 "stopped": bool(stopped),
+                 "dark": {k: dark.get(k) for k in ("files", "copied", "bytes", "kept", "seconds") if k in dark},
+                 "seconds": round(time.monotonic() - t_run, 1),
+                 "startedLocal": started_local.strftime("%H:%M"), "finishedLocal": datetime.now().strftime("%H:%M")}
+        sf_stats_say(stats)
+        try:
+            status = sf_status_read()
+            status["projects"].setdefault(proj, {})["pullStats"] = stats
+            sf_status_write(status)
+        except OSError as e:
+            debug(f"pull statistics not kept in the status file: {e}")
     if stopped:
         text = (f"{proj}: the pull stopped part way. {home['files']} of {home['of']} files are home and recorded. "
                 f"Run it again to carry on from there.")
@@ -15836,7 +16200,7 @@ def _sf_pull_locked(name, dry_run, rehash_only, now_utc, tz, facts):
     return {"ok": not stopped and not problems, "project": proj, "copied": len(copied),
             "skipped": n_home, "problems": problems, "stopped": stopped, "home": home, "reread": reread,
             "maxActive": run.get("maxActive", 0), "drops": run.get("drops", 0), "dark": dark,
-            "dest": plan["projectDir"], "shipped": shipped}
+            "dest": plan["projectDir"], "shipped": shipped, "stats": stats}
 
 def sf_say_source_check(reread, home):
     """The source check's line, in plain words."""
@@ -15870,6 +16234,7 @@ def _sf_rehash_only(state, plan, proj, dest_root, workers, dry_run, now_utc):
     if not before["files"]:
         return _sf_pull_refused(f"nothing of {proj} is home yet, so there is nothing to check. Pull it first.")
     info(f"{proj}: the source check only; nothing is copied.")
+    t_run, started_local = time.monotonic(), datetime.now()
     reread = sf_source_rehash(state, plan, dest_root, workers)
     state.save_ledger()
     home = sf_project_home(state, plan)
@@ -15885,6 +16250,13 @@ def _sf_rehash_only(state, plan, proj, dest_root, workers, dry_run, now_utc):
     sf_say_source_check(reread, home)
     state.publish_mirror()
     rebuild_projects_quietly(state)
+    stats = None
+    if reread.get("stats"):
+        stats = {"project": proj, "at": _utc_iso(), "importer": VERSION, "rehashOnly": True, "copy": None,
+                 "sourceCheck": reread["stats"], "workers": workers, "problems": len(reread["mismatch"]),
+                 "stopped": bool(reread["stopped"]), "seconds": round(time.monotonic() - t_run, 1),
+                 "startedLocal": started_local.strftime("%H:%M"), "finishedLocal": datetime.now().strftime("%H:%M")}
+        sf_stats_say(stats)
     if home["allProven"] and reread["proven"]:
         text = f"{proj} pulled and verified"
         notify_push("Starfront", text)
@@ -15893,7 +16265,7 @@ def _sf_rehash_only(state, plan, proj, dest_root, workers, dry_run, now_utc):
         error(f"{proj}: the source check stopped part way ({reread['stopped']}). {home['sourceRehashed']} of "
               f"{home['of']} files are proven. Run it again to carry on.")
     return {"ok": not reread["stopped"] and not reread["mismatch"], "project": proj, "rehashOnly": True,
-            "reread": reread, "home": home, "stopped": reread["stopped"]}
+            "reread": reread, "home": home, "stopped": reread["stopped"], "stats": stats}
 
 # ── the record: the `starfront` section and the unit card ────────────────────
 
