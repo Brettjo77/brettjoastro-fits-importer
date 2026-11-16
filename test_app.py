@@ -2612,7 +2612,7 @@ process.stdout.write(JSON.stringify(out));
               and [(l["k"], l["v"], l["warn"]) for l in _s1["status"]][:5] == [
                   ("Tunnel", "up · last OK " + _hn_date("Fri 6 Nov", 2026) + " 14:10 · on-demand", False),
                   ("Roof", "open since " + _hn_date("Fri 6 Nov", 2026) + " 01:30 · read " + _hn_date("Fri 6 Nov", 2026) + " 14:05", False),
-                  ("Scanning", "on, every 2 hours from the PC", False), ("Clock", "filename clock, unconfirmed", True),
+                  ("Scanning", "on, once a day from the PC (after the roof closes, or at dawn)", False), ("Clock", "filename clock, unconfirmed", True),
                   ("Dark library", "120 files · 3.4 GB · newest " + _hn_date("Sun 1 Nov", 2026) + " 09:00", False)]
               and _s1["barsTable"][0] == ["Pleiades (M 45)", "Collecting", "14.1 h", "20 h", "61 %", "about 3 nights, " + _hn_date("Tue 10 Nov", 2026), "·"]
               and _s1["barsTable"][1][6] == "mixed settings" and _s1["cumTable"]["head"] == ["Night", "M 45", "M 42"]

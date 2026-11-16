@@ -234,8 +234,9 @@ def main():
                   warn_only=True)
         for task, needed in (("BrettjoAstro FITS Importer ship", os.path.isdir(eng.ARCHIVE_MOUNT)),
                              ("Astro archive sweep", os.path.isdir(eng.ARCHIVE_MOUNT)),
-                             ("Astro Starfront scan", True),        # 1.10.0: every 2 hours
-                             ("Astro Starfront watch", True)):      # 1.10.0: every 20 minutes
+                             # every 20 minutes; it also runs the scan once a day (the
+                             # two-hourly "Astro Starfront scan" task is gone, and not asked for)
+                             ("Astro Starfront watch", True)):
             if eng.TEST_ROOT:
                 line("SKIP", f"scheduled task '{task}'",
                      "TEST MODE: the real Task Scheduler is never queried")

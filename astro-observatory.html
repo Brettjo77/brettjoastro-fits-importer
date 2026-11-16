@@ -1498,7 +1498,7 @@ function sfStorageModel(sf){ const s=sf.storage; if(!s) return null; const used=
 function sfStatusLines(sf){ const out=[]; const t=sf.tunnel;
   if(t) out.push({k:"Tunnel",v:(t.up?"up":"down")+(t.lastOk?" · last OK "+sfWhen(t.lastOk):"")+(t.mode?" · "+t.mode:"")+(t.hold?" · on hold (starfront-vpn-hold)":""),warn:!t.up||t.hold}); else out.push({k:"Tunnel",v:"not checked",warn:true});
   const r=sf.roof; if(r) out.push({k:"Roof",v:(r.state||"unknown")+(r.since?" since "+sfWhen(r.since):"")+(r.readAt?" · read "+sfWhen(r.readAt):""),warn:r.state==="unknown"}); else out.push({k:"Roof",v:"not read",warn:true});
-  out.push({k:"Scanning",v:sf.paused?"paused (starfront-pause in the state folder)":"on, every 2 hours from the PC",warn:sf.paused});
+  out.push({k:"Scanning",v:sf.paused?"paused (starfront-pause in the state folder)":"on, once a day from the PC (after the roof closes, or at dawn)",warn:sf.paused});
   if(sf.clock) out.push({k:"Clock",v:sf.clock==="filename, unconfirmed"?"filename clock, unconfirmed":sf.clock,warn:/unconfirmed/i.test(sf.clock)});
   const d=sf.darklibrary; if(d) out.push({k:"Dark library",v:plural(d.files,"file")+(d.gb!=null?" · "+sfGb(d.gb):"")+(d.newestMtime?" · newest "+sfWhen(d.newestMtime):""),warn:false});
   out.push({k:"Camera",v:[sf.camera,sf.site,sf.timezone].filter(Boolean).join(" · "),warn:false}); return out; }

@@ -47,15 +47,16 @@ import socket
 import stat
 import subprocess
 import sys
+import queue
 import threading
 import unicodedata
 import uuid
 import time
-from collections import defaultdict
+from collections import defaultdict, deque
 from datetime import date, datetime, timedelta, timezone
 
 # One version for every platform (1.5.0: the Windows 11 edition joins the Mac).
-VERSION = "1.10.2"
+VERSION = "1.10.3"
 IS_WINDOWS = os.name == "nt"
 IS_MAC = sys.platform == "darwin"
 PLATFORM = "windows" if IS_WINDOWS else ("mac" if IS_MAC else "linux")
@@ -222,6 +223,7 @@ def _test_root_guard():
              ("SEESTAR_DEST_S30", SEESTAR_DEST_S30), ("SEESTAR_DEST_S50", SEESTAR_DEST_S50),
              ("SEESTAR_DEST_S30_ORIG", SEESTAR_DEST_S30_ORIG),
              ("SEESTAR_DEST_S50PRO", SEESTAR_DEST_S50PRO),
+             ("SEESTAR_DEST_S50PRO_STARFRONT", SEESTAR_DEST_S50PRO_STARFRONT),
              ("ASIAIR_EQUIPMENT", EQUIPMENT_JSON), ("ASIAIR_RECEIPTS", RECEIPT_BASE),
              ("ASIAIR_LEGACY_NAMES", LEGACY_CUSTOM_NAMES),
              ("ASTRO_SIRIL_EXE", SIRIL_EXE), ("ASTRO_OBSERVATORY_DATASET", OBSERVATORY_DATASET),
@@ -331,6 +333,15 @@ SEESTAR_DEST_S30_ORIG = _env_path("SEESTAR_DEST_S30_ORIG",
 # "S50" and "S50 Pro" are different optical systems and never interleave
 SEESTAR_DEST_S50PRO = _env_path("SEESTAR_DEST_S50PRO",
                                 "~/Documents/Astro/Seestar S50 Pro")
+# The S50 Pro hosted at Starfront (Texas) is another unit of the same model:
+# its pulled frames get a tree of their own, so its Day folders and the home
+# S50 Pro's never share a folder or a numbering (Starfront phase 2). By
+# default it sits beside the home S50 Pro's tree, wherever that is: with the
+# stock settings that is ~/Documents/Astro/Seestar S50 Pro (Starfront), and a
+# workbench moved in config.json takes this tree with it.
+SEESTAR_DEST_S50PRO_STARFRONT = _env_path("SEESTAR_DEST_S50PRO_STARFRONT",
+                                          os.path.join(os.path.dirname(SEESTAR_DEST_S50PRO.rstrip("\\/")) or "~/Documents/Astro",
+                                                       "Seestar S50 Pro (Starfront)"))
 # ═══════════════════════════════════════════════════════════════════════════
 # PLATFORM LAYER — everything that differs between macOS and Windows lives
 # here, so the rest of the engine is one codebase (PARITY.md). 1.5.0.
@@ -945,8 +956,56 @@ def _env_degrees(var, default, lo, hi):
                                f"using the default of {default}")
         return default
 
-STARFRONT_SHARE = _env_path("STARFRONT_SHARE", "\\\\10.15.10.212\\EMMC Images")
+SF_SHARE_NAME = "EMMC Images"               # the one share a Seestar offers
+SF_HOME_CAMERAS = ("ZWO Seestar S30 Pro", "ZWO Seestar S30", "ZWO Seestar S50", "ZWO Seestar S50 Pro",
+                   "ZWO ASI585MC Air")
+
+def sf_unc_host(path):
+    """The host of a UNC path (\\\\host\\share..., or the long form
+    \\\\?\\UNC\\host\\share...), or None for anything else (a folder in a
+    test, a drive letter)."""
+    p = str(path or "")
+    m = re.match(r"^\\\\\?\\UNC\\([^\\]+)\\[^\\]+", p, re.I) or re.match(r"^\\\\([^\\?.][^\\]*)\\[^\\]+", p)
+    return m.group(1) if m else None
+
+def sf_share_setting(share_raw, ip_raw):
+    """The telescope's address in one place (Starfront phase 2): (share,
+    warning). STARFRONT_SHARE, when it is set, is the share and its host is
+    the address for everything. When only STARFRONT_SEESTAR_IP is set, the
+    share is built from it (\\\\IP\\EMMC Images). When both are set and
+    they name different hosts, the share's host wins and the warning says
+    they disagree. (None, None): neither is set, the default applies."""
+    share = str(share_raw).strip() if share_raw is not None else ""
+    ip = str(ip_raw).strip() if ip_raw is not None else ""
+    if ip and not re.fullmatch(r"[A-Za-z0-9][A-Za-z0-9.:_-]*", ip):
+        return (share or None,
+                f"STARFRONT_SEESTAR_IP is set to {ip!r}, which isn't an address or a computer's name; it is ignored")
+    if share:
+        host = sf_unc_host(share)
+        if ip and host and host.lower() != ip.lower():
+            return share, (f"STARFRONT_SHARE points at {host} and STARFRONT_SEESTAR_IP says {ip}: they disagree. "
+                           f"The share's address ({host}) is the one used, for the tunnel check too. Set only one "
+                           f"of the two, or make them the same")
+        return share, None
+    if ip:
+        return f"\\\\{ip}\\{SF_SHARE_NAME}", None
+    return None, None
+
+_sf_share_set, _sf_share_warning = sf_share_setting(
+    os.environ.get("STARFRONT_SHARE") or _CONFIG.get("STARFRONT_SHARE"),
+    os.environ.get("STARFRONT_SEESTAR_IP") or _CONFIG.get("STARFRONT_SEESTAR_IP"))
+if _sf_share_warning:
+    CONFIG_WARNINGS.append(_sf_share_warning)
+STARFRONT_SHARE = os.path.expanduser(_sf_share_set) if _sf_share_set \
+    else _env_path("STARFRONT_SHARE", "\\\\10.15.10.212\\EMMC Images")
 STARFRONT_CAMERA = _env_text("STARFRONT_CAMERA", "ZWO Seestar S50 Pro (Starfront)")
+if STARFRONT_CAMERA.strip().lower() in {c.lower() for c in SF_HOME_CAMERAS}:
+    # the hosted unit must never share a camera name with a camera at home:
+    # the name is what keeps its ledger rows and its archive folder apart
+    CONFIG_WARNINGS.append(f"STARFRONT_CAMERA is set to {STARFRONT_CAMERA!r}, the name of a camera at home; "
+                           f"using the default of 'ZWO Seestar S50 Pro (Starfront)'")
+    STARFRONT_CAMERA = "ZWO Seestar S50 Pro (Starfront)"
+STARFRONT_ARCHIVE_ROOT = "S50P-Starfront"   # its own folder on the archive (contract/scopes.json says the same)
 STARFRONT_SITE = "Starfront"
 STARFRONT_TZ = _env_text("STARFRONT_TZ", "America/Chicago")
 STARFRONT_LAT = _env_degrees("STARFRONT_LAT", 31.54733, -90.0, 90.0)
@@ -955,6 +1014,8 @@ STARFRONT_DEFAULT_HOURS = _env_rule("STARFRONT_DEFAULT_HOURS", 20, 1, 10000)
 STARFRONT_VPN_MODE = _env_choice("STARFRONT_VPN_MODE", "on-demand", ("always", "on-demand", "never"))
 STARFRONT_VPN_TUNNEL = _env_text("STARFRONT_VPN_TUNNEL", "BrettJohnson-B15")
 STARFRONT_SEESTAR_IP = _env_text("STARFRONT_SEESTAR_IP", "10.15.10.212")
+if _sf_share_warning and not _sf_share_warning.startswith("STARFRONT_SHARE points"):
+    STARFRONT_SEESTAR_IP = "10.15.10.212"   # not an address: the default, as the warning says
 STARFRONT_STALL_SECONDS = _env_rule("STARFRONT_STALL_SECONDS", 120, 10, 36000)
 STARFRONT_VPN_ALERT_HOURS = _env_rule("STARFRONT_VPN_ALERT_HOURS", 12, 1, 1000)
 STARFRONT_ROOF_SHARE = _env_path("STARFRONT_ROOF_SHARE", "\\\\172.16.5.21\\sfro-customer")
@@ -965,7 +1026,7 @@ STARFRONT_ROOF_CLOSED_HOURS = _env_rule("STARFRONT_ROOF_CLOSED_HOURS", 2, 0, 48)
 STARFRONT_SILENT_MINUTES = _env_rule("STARFRONT_SILENT_MINUTES", 90, 5, 1440)
 STARFRONT_FULL_WARN_NIGHTS = _env_rule("STARFRONT_FULL_WARN_NIGHTS", 5, 1, 365)
 STARFRONT_AUTO_CLEAR = _env_flag("STARFRONT_AUTO_CLEAR", False)                    # Phase 3 only
-STARFRONT_WORKERS = _env_rule("STARFRONT_WORKERS", 8, 1, 32)                        # Phase 2 only
+STARFRONT_WORKERS = _env_rule("STARFRONT_WORKERS", 8, 1, 32)                        # the pull's copies in parallel
 NOTIFY_PUSH_URL = _env_text("NOTIFY_PUSH_URL", "")                                  # an ntfy topic URL; empty = no push
 # the state files, all in the state folder (confined in test mode like the ledger)
 SF_INVENTORY_FILE = "starfront-inventory.json"
@@ -976,6 +1037,8 @@ SF_ROOF_LOG = "starfront-roof.jsonl"
 SF_LAST_SCAN_FILE = "starfront-last-scan.json"
 SF_PAUSE_FLAG = "starfront-pause"
 SF_VPN_HOLD_FLAG = "starfront-vpn-hold"
+SF_LEDGER_SAVE_EVERY = 25           # the pull saves the ledger after this many files, and at the end
+SF_RETRY_WAITS = (5, 15, 45)        # seconds before a file's second, third and fourth try after a dropped link
 _test_root_guard()
 
 # One-time migration from the pre-unification state locations (spec §1).
@@ -1943,7 +2006,8 @@ LOCK_PATH = os.path.join(STATE_DIR, "import.lock")
 # What Brett reads when the lock is held, by what holds it: the same words
 # from the command line and on the panel's banner (1.5.3)
 LOCK_HOLDER_TEXT = {"panel": "The panel is busy right now",
-                    "ship": "The ship to the archive is running right now"}
+                    "ship": "The ship to the archive is running right now",
+                    "starfront-pull": "A pull from the Starfront telescope is running right now"}
 
 def lock_busy_text(what):
     """'The panel is busy right now', 'Another import is already running', ..."""
@@ -2274,11 +2338,15 @@ def sha256_of(path, bufsize=8*1024*1024):
     return h.hexdigest()
 
 
-def copy_file_verified(src, dst, checksum=True, partial_suffix=".partial"):
+def copy_file_verified(src, dst, checksum=True, partial_suffix=".partial", progress=None):
     """Copy src→dst crash-safely: write .partial, verify, rename.
     Returns (sha256_or_None, size). Raises on failure (partial removed).
     The ship names its partials per machine, so two computers filing the same
-    frame into the archive can never write into one .partial."""
+    frame into the archive can never write into one .partial.
+    `progress` (the Starfront pull, 1.11): called with the bytes of each
+    block as it is written, so a caller can tell a copy that has stopped
+    moving; an exception it raises stops the copy like any other failure
+    (the partial is removed). Nothing else about the copy changes."""
     dst = _win_long(dst)
     partial = dst + partial_suffix
     src_hash = hashlib.sha256() if checksum else None
@@ -2290,6 +2358,8 @@ def copy_file_verified(src, dst, checksum=True, partial_suffix=".partial"):
                 size += len(chunk)
                 if src_hash:
                     src_hash.update(chunk)
+                if progress is not None:
+                    progress(len(chunk))
             fout.flush()
             os.fsync(fout.fileno())
         shutil.copystat(src, partial)
@@ -3907,6 +3977,11 @@ def run_reconcile(state, deep=True):
 SHIP_ROOTS = {"ZWO Seestar S30 Pro": "S30P", "ZWO Seestar S30": "S30",
               "ZWO Seestar S50": "S50", "ZWO Seestar S50 Pro": "S50P",
               "ZWO ASI585MC Air": "ZWO Askar Scopes"}
+# The hosted S50 Pro files into its own root (Starfront phase 2): the camera
+# name on a ledger row decides the root, and that name is never a home
+# camera's (the config loader refuses one), so a Starfront frame can't land
+# in S50P and a home frame can't land here.
+SHIP_ROOTS[STARFRONT_CAMERA] = STARFRONT_ARCHIVE_ROOT
 SHIP_WORKING = "_Working Files (regenerable - safe to delete)"
 _GENERIC_NAMES = {"globular cluster", "open star cluster", "open cluster", "star cluster",
                   "galaxy", "nebula", "planetary nebula"}
@@ -4556,7 +4631,7 @@ def _live_workbench_roots():
     row under it is never taken for gone."""
     out = []
     for r in (DEST_DIR, LIBRARY_DIR, SEESTAR_DEST_S30, SEESTAR_DEST_S50,
-              SEESTAR_DEST_S30_ORIG, SEESTAR_DEST_S50PRO):
+              SEESTAR_DEST_S30_ORIG, SEESTAR_DEST_S50PRO, SEESTAR_DEST_S50PRO_STARFRONT):
         try:
             if r and os.path.isdir(r) and os.listdir(r):
                 out.append(os.path.normcase(os.path.abspath(r)) + os.sep)
@@ -4699,7 +4774,8 @@ def mac_space(state):
     if not state.ledger:
         return out
     benches = [os.path.normpath(r) for r in (DEST_DIR, SEESTAR_DEST_S30, SEESTAR_DEST_S30_ORIG,
-                                             SEESTAR_DEST_S50, SEESTAR_DEST_S50PRO) if r]
+                                             SEESTAR_DEST_S50, SEESTAR_DEST_S50PRO,
+                                             SEESTAR_DEST_S50PRO_STARFRONT) if r]
     on_bench = lambda d: any(d == b or d.startswith(b + os.sep) for b in benches)
     tree_index = {}
     folders = {}          # target folder -> summary
@@ -6338,7 +6414,7 @@ def _hash_progress_path():
 ARCHIVE_WATCH_NAME = "archive-watch.json"
 VERIFY_NOTE_NAME = "READ ME - do not move this folder.txt"
 ALARM_RENOTIFY_HOURS = 24
-ALARM_KINDS = ("history-lost", "nightly-failed")
+ALARM_KINDS = ("history-lost", "nightly-failed", "starfront-device")
 
 def _watch_path():
     return os.path.join(STATE_DIR, ARCHIVE_WATCH_NAME)
@@ -11710,7 +11786,13 @@ def _row_idents(key, row):
         out.add(("sha", sha.lower()))
     size = row.get("size")
     if isinstance(size, int) and not isinstance(size, bool):
-        out.add(("path", str(key).split("|cam=")[0].lower(), size))
+        # the hosted S50 Pro is another unit of a model that is also at home:
+        # the same path and size there is another frame (Starfront phase 2),
+        # so its path identity carries its camera; every other row is as before
+        if row.get("camera") == STARFRONT_CAMERA:
+            out.add(("path", str(key).split("|cam=")[0].lower(), size, STARFRONT_CAMERA))
+        else:
+            out.add(("path", str(key).split("|cam=")[0].lower(), size))
     return out
 
 def _project_rows(state, extra_ledgers, warnings, metas=None, stats=None):
@@ -12890,7 +12972,7 @@ def observatory_from(doc, collect, state=None, now=None, pending=None, starfront
     # scopes with frames, is kept as it was)
     scope_order_ids = [x["id"] for x in out_scopes]
     units, out_scopes = sf_unit_and_scope(starfront if isinstance(starfront, dict) else None,
-                                          contract, units, out_scopes, in_window)
+                                          contract, units, out_scopes, in_window, unit_rows=unit_rows)
     not_counted = {"unknownNames": {"names": int(src.get("unknown_name_count") or 0),
                                     "frames": int(dropped.get("unknown_names") or 0)},
                    "noScope": int(dropped.get("no_scope") or 0), "noNight": int(dropped.get("no_night") or 0),
@@ -13216,6 +13298,16 @@ def rebuild_projects_quietly(state):
 # pull (Phase 2) and the clear (Phase 3) come later, on Brett's word at each
 # rollout stop. Functions are prefixed sf_ or starfront_. PC only by design
 # (DESIGN decision 3); every test runs it in test mode on any OS.
+#
+# Phase 2 (16 Nov 2026, docs/starfront/PHASE2-ENGINE-NOTES.md): the scan
+# remembers which telescope it met and refuses another one (the address once
+# changed hands to a stranger's Seestar); the watch runs the scan once a day;
+# --starfront-pull copies one project home with a verified copy per file, a
+# second read of the local copy, a second read of the source, a receipt and a
+# ship. Phase 2 still writes NOTHING on the telescope and deletes nothing
+# anywhere: every write goes through _sf_local_makedirs, _sf_local_copy or
+# _sf_local_move, each of which asks sf_guard_write first, and a test reads
+# this section's source for anything else.
 
 _SF_SUB_RE = re.compile(r"^Light_(?P<target>.+?)_(?P<exp>\d+(?:\.\d+)?)s(?:_(?P<filter>[A-Za-z0-9]+))?"
                         r"_(?P<stamp>20\d{6}-\d{6})_(?P<n>\d+)\.fits?$", re.I)
@@ -13239,6 +13331,107 @@ _SF_ROOF_LAST = None                          # the last roof file object, for t
 class StarfrontStall(OSError):
     """No bytes, or no listing progress, for STARFRONT_STALL_SECONDS: a
     dropped link by progress, not by ping (Phase 2's copies raise it)."""
+
+class StarfrontRefused(RuntimeError):
+    """A write the Starfront source must never make: anything on the
+    telescope's share or the roof share, or a deletion under a dark library."""
+
+# ── what may be written, and where (Phase 2) ─────────────────────────────────
+
+def sf_in_darklibrary(path):
+    """Is this path inside a dark library folder (the telescope's, or the
+    copy of it on this computer)? By its spelling: any folder named
+    darklibrary on the way."""
+    parts = [x.lower() for x in re.split(r"[\\/]+", os.path.normpath(str(path or ""))) if x]
+    return "darklibrary" in parts[:-1] or (bool(parts) and parts[-1] == "darklibrary")
+
+def sf_dark_root(path):
+    """The dark library folder a path is in (the path up to and including
+    its first folder named darklibrary), or None."""
+    p = os.path.normpath(str(path or ""))
+    m = re.search(r"(^|[\\/])darklibrary(?=$|[\\/])", p, re.I)
+    return p[:m.end()] if m else None
+
+def sf_guard_write(path, deleting=False):
+    """Every Starfront write asks here first. Refused (StarfrontRefused):
+    any path on the telescope's share or the roof share, whatever the write
+    (Phase 2 only ever reads them); and, when `deleting`, any path under a
+    dark library folder, on the telescope or on this computer (the darks are
+    never deleted, by anything). Returns the path when it may be written."""
+    p = str(path or "")
+    if not p:
+        raise StarfrontRefused("refused: no path was given")
+    for root, what in ((STARFRONT_SHARE, "the telescope's share"),
+                       (STARFRONT_ROOF_SHARE, "the observatory's roof share")):
+        if root and sf_inside(p, root):
+            raise StarfrontRefused(f"refused: {p} is on {what}, and nothing is ever written, renamed "
+                                   f"or deleted there")
+    if deleting and sf_in_darklibrary(p):
+        raise StarfrontRefused(f"refused: {p} is in a dark library, and nothing is ever deleted from one")
+    _confine(p, "the Starfront pull")
+    return p
+
+def _sf_local_makedirs(path):
+    """A folder on this computer (never on a share)."""
+    os.makedirs(sf_guard_write(path), exist_ok=True)
+
+def _sf_local_copy(src, dst, progress=None, partial_suffix=".partial"):
+    """The engine's verified copy (a .partial, the hash taken while copying,
+    the copy read back, then the rename) from the telescope to this computer.
+    Returns (sha256, size)."""
+    return copy_file_verified(src, sf_guard_write(dst), checksum=True,
+                              partial_suffix=partial_suffix, progress=progress)
+
+def _sf_local_move(src, dst):
+    """Move a file from one place on this computer to another, never over a
+    file that is already there. A dark may only move within its dark library
+    folder (an earlier version kept beside the new one); anywhere else would
+    be taking it out, which is refused like a deletion."""
+    sf_guard_write(dst)
+    root = sf_dark_root(src)
+    sf_guard_write(src, deleting=not (root is not None and sf_inside(dst, root)))
+    if os.path.lexists(dst):
+        raise FileExistsError(errno.EEXIST, "a file is already there", dst)
+    _sf_local_makedirs(os.path.dirname(dst))
+    os.rename(src, dst)
+    return dst
+
+def sf_set_aside(path, root, why_folder="starfront-mismatch"):
+    """Set a local copy aside, the way the PC's sweep sets an unfinished
+    archive copy aside: moved (never deleted) into <root>\\_Quarantine\\
+    <why_folder>\\ under its own relative path, never over anything already
+    there. Returns where it went. (A dark can only be set aside inside its
+    own dark library folder: pass that folder as `root`.)"""
+    rel = os.path.relpath(path, root).replace(os.sep, "/")
+    return _sf_local_move(path, _quarantine_dest(root, rel, folder=why_folder))
+
+def _sf_scale():
+    """1.0, or in test mode ASTRO_TEST_SF_TIME_SCALE: the stall time and the
+    waits between retries are multiplied by it, so a test of a dropped link
+    takes a moment, not minutes."""
+    if TEST_ROOT:
+        try:
+            v = float(os.environ.get("ASTRO_TEST_SF_TIME_SCALE") or 1.0)
+            return v if 0 < v <= 1 else 1.0
+        except ValueError:
+            return 1.0
+    return 1.0
+
+def _sf_now():
+    """Now, as an aware UTC time. In test mode ASTRO_TEST_SF_NOW (an ISO
+    time) stands in, so a test of the command line does not depend on
+    whether it is day or night in Texas when it runs."""
+    if TEST_ROOT and os.environ.get("ASTRO_TEST_SF_NOW"):
+        d = _parse_utc(os.environ["ASTRO_TEST_SF_NOW"])
+        if d is not None:
+            return d
+    return _utc_now()
+
+def sf_share_host():
+    """The telescope's address, in one place: the host of STARFRONT_SHARE
+    when the share is a UNC path, else STARFRONT_SEESTAR_IP (a test's share
+    is a folder, which has no host)."""
+    return sf_unc_host(STARFRONT_SHARE) or STARFRONT_SEESTAR_IP
 
 def sf_state_path(name):
     return os.path.join(STATE_DIR, name)
@@ -13417,7 +13610,7 @@ def _sf_probe():
     if TEST_ROOT:
         return os.path.isfile(os.path.join(TEST_ROOT, "starfront-tunnel-up"))
     try:
-        with socket.create_connection((STARFRONT_SEESTAR_IP, 445), timeout=3):
+        with socket.create_connection((sf_share_host(), 445), timeout=3):
             return True
     except OSError:
         return False
@@ -13511,7 +13704,7 @@ def ensure_tunnel(timeout=60, poll=5.0):
         if left <= 0:
             break
         time.sleep(min(float(poll), left))
-    return down(f"the Seestar at {STARFRONT_SEESTAR_IP} did not answer on port 445 within {timeout} s"
+    return down(f"the Seestar at {sf_share_host()} did not answer on port 445 within {timeout} s"
                 + (" after the tunnel service was started" if started else
                    (" although the tunnel service is running" if "RUNNING" in text.upper() else "")))
 
@@ -13691,9 +13884,18 @@ def _sf_scandir(path):
     rows. Never os.walk: over a 120 ms tunnel every round trip counts. Any
     OSError is the caller's to treat as 'incomplete'. In test mode
     ASTRO_TEST_SF_FAIL_LIST names a folder whose listing fails."""
+    global _SF_DENIED_ONCE
     if TEST_ROOT and os.environ.get("ASTRO_TEST_SF_FAIL_LIST") \
             and os.path.basename(path.rstrip("\\/")) == os.environ.get("ASTRO_TEST_SF_FAIL_LIST"):
         raise OSError(errno.EIO, "test: the share stopped answering while it was listed", path)
+    if TEST_ROOT and os.environ.get("ASTRO_TEST_SF_DENY_ONCE") and not _SF_DENIED_ONCE \
+            and sf_inside(path, STARFRONT_SHARE):
+        # test: the share's first listing is refused, as Windows refuses a
+        # Seestar share before a guest session is open (error 5)
+        _SF_DENIED_ONCE = True
+        e = PermissionError(errno.EACCES, "test: access is denied (no guest session yet)", path)
+        e.winerror = 5
+        raise e
     out = []
     with os.scandir(path) as it:
         for e in it:
@@ -13705,10 +13907,79 @@ def _sf_scandir(path):
             out.append((e.name, e.is_dir(follow_symlinks=False), int(st.st_size), int(st.st_mtime_ns), False))
     return out
 
+_SF_DENIED_ONCE = False                       # the ASTRO_TEST_SF_DENY_ONCE hook has fired
+_SF_GUEST_TRIED = set()                       # hosts a guest session was opened for, this process
+_SF_DENIED_WINERRORS = {5, 86, 1219, 1326, 2202}
+# 5 access is denied, 86 the network password is not correct, 1219 several
+# connections to one server under different names, 1326 the user name or
+# password is incorrect, 2202 the user name is not valid: what Windows says
+# when it tried this account on the Seestar instead of guest (FACTS section 2)
+
+def sf_is_access_denied(exc):
+    """Did a listing fail because the share would not let this account in?"""
+    return isinstance(exc, PermissionError) or getattr(exc, "winerror", None) in _SF_DENIED_WINERRORS
+
+def sf_guest_session(share):
+    """Open the guest session a Seestar's share needs, by itself: Windows
+    tries the signed-in account first and gets "access is denied" until a
+    guest session to the telescope exists. Two commands, the ones Brett
+    typed by hand (guest, with an empty password: the Seestar has none):
+        net use \\\\HOST\\IPC$ /user:guest ""
+        net use "\\\\HOST\\EMMC Images" /user:guest ""
+    Once per host per run. Windows only; elsewhere it does nothing. In test
+    mode net is never run: the call is recorded (kind "net-use"). True when
+    the commands were run (or recorded), so the caller lists again."""
+    host = sf_unc_host(share)
+    key = (host or str(share)).lower()
+    if key in _SF_GUEST_TRIED:
+        return False
+    _SF_GUEST_TRIED.add(key)
+    m = re.match(r"^\\\\(?:\?\\UNC\\)?[^\\]+\\([^\\]+)", str(share or ""))
+    root = f"\\\\{host}\\{m.group(1)}" if host and m else str(share)
+    cmds = [["net", "use", f"\\\\{host or 'HOST'}\\IPC$", "/user:guest", ""],
+            ["net", "use", root, "/user:guest", ""]]
+    if TEST_ROOT:
+        _test_record("net-use", share=str(share), host=host or "", commands=cmds)
+        return True
+    if not IS_WINDOWS or not host:
+        return False
+    ok = True
+    for cmd in cmds:
+        try:
+            r = subprocess.run(cmd, capture_output=True, text=True, errors="replace", timeout=60,
+                               creationflags=getattr(subprocess, "CREATE_NO_WINDOW", 0))
+            if r.returncode != 0:
+                ok = False
+                debug(f"{' '.join(cmd[:3])} answered {r.returncode}: {((r.stdout or '') + (r.stderr or '')).strip()[:200]}")
+        except (OSError, subprocess.SubprocessError) as e:
+            ok = False
+            debug(f"net use could not be run: {e}")
+    info(f"Signed in to the telescope's share as guest ({host})." if ok else
+         f"Tried to sign in to the telescope's share as guest ({host}); listing it again.")
+    return True
+
+def sf_signed_in(fn, share=None):
+    """Run one listing; when the share refuses this account, open the guest
+    session and run it once more. Any other failure, or a second refusal,
+    is the caller's to handle."""
+    try:
+        return fn()
+    except OSError as e:
+        if sf_is_access_denied(e) and sf_guest_session(share or STARFRONT_SHARE):
+            return fn()
+        raise
+
 def sf_disk_usage(path):
     """shutil.disk_usage on the share root (Windows accepts a UNC root), as
     (total, used, free) bytes, or None. A function of its own so a test can
     stand in a disk of a known size."""
+    if TEST_ROOT and os.environ.get("ASTRO_TEST_SF_DISK"):
+        # a test's disk of a known size: "total,used,free" in bytes
+        try:
+            t, u, f = (int(x) for x in os.environ["ASTRO_TEST_SF_DISK"].split(","))
+            return (t, u, f)
+        except ValueError:
+            return None
     try:
         u = shutil.disk_usage(path)
         return (int(u.total), int(u.total - u.free), int(u.free))
@@ -13826,9 +14097,13 @@ def sf_list_share(share):
     only). Returns {"files": {relpath: (size, mtimeNs, project, part)},
     "darklibrary": {...}, "skipped": [...]} (a link, or a name that climbs
     out of MyWorks, is skipped and named, never followed). Raises OSError on
-    any listing error: the caller then ends 'incomplete'."""
+    any listing error: the caller then ends 'incomplete'. Phase 2 adds
+    "folders" ({project: [the parts it has a folder for]}: a project with no
+    subs folder is stacks only), "darkPairs" (the dark library's top-level
+    (name, size) pairs, for the telescope's fingerprint) and "darkListed"
+    (False when the telescope has no darklibrary folder at all)."""
     myworks = os.path.join(share, "MyWorks")
-    files, skipped = {}, []
+    files, skipped, folders = {}, [], {}
     top = _sf_scandir(myworks)
     for name, is_dir, _size, _m, link in sorted(top):
         if link:
@@ -13843,6 +14118,7 @@ def sf_list_share(share):
         if not sf_inside(folder, myworks):
             skipped.append(f"MyWorks/{name} (outside MyWorks)")
             continue
+        folders.setdefault(project, []).append(part)
         for fname, f_is_dir, size, mtime_ns, f_link in _sf_scandir(folder):
             if f_link or f_is_dir or fname.startswith("."):
                 continue
@@ -13853,17 +14129,158 @@ def sf_list_share(share):
             files[rel] = (size, mtime_ns, project, part)
     dark = {"files": 0, "bytes": 0, "newestMtime": None}
     dark_dir = os.path.join(share, "darklibrary")
-    if os.path.isdir(dark_dir):
-        newest = 0
-        for fname, f_is_dir, size, mtime_ns, f_link in _sf_scandir(dark_dir):
-            if f_link or f_is_dir:
-                continue
-            dark["files"] += 1
-            dark["bytes"] += size
-            newest = max(newest, mtime_ns)
-        dark["newestMtime"] = _utc_iso(datetime.fromtimestamp(newest / 1e9, timezone.utc)) if newest else None
+    pairs, dark_listed = [], True
+    try:
+        rows = _sf_scandir(dark_dir)
+    except (FileNotFoundError, NotADirectoryError) as e:
+        # no darklibrary folder on this device. A dropped link also reads as
+        # "not found" on Windows (errors 53 and 67): that is "cannot tell",
+        # a listing failure like any other, never "this device has no darks"
+        if sf_is_link_drop(e):
+            raise
+        rows, dark_listed = [], False
+    newest = 0
+    for fname, f_is_dir, size, mtime_ns, f_link in rows:
+        if f_link or f_is_dir:
+            continue
+        dark["files"] += 1
+        dark["bytes"] += size
+        newest = max(newest, mtime_ns)
+        pairs.append((fname, size))
+    dark["newestMtime"] = _utc_iso(datetime.fromtimestamp(newest / 1e9, timezone.utc)) if newest else None
     dark["gb"] = round(dark["bytes"] / 1e9, 2)      # the page reads gb (DESIGN.md); bytes stay for exactness
-    return {"files": files, "darklibrary": dark, "skipped": skipped}
+    return {"files": files, "darklibrary": dark, "skipped": skipped,
+            "folders": {k: sorted(set(v)) for k, v in folders.items()},
+            "darkPairs": sorted(pairs), "darkListed": dark_listed}
+
+# ── which telescope is this? (Phase 2) ───────────────────────────────────────
+# On 16 Nov 2026 the Seestar's address changed, and the old address answered
+# as someone else's empty Seestar: the scan listed it and said "No projects".
+# So the importer remembers the telescope it met (starfront-status.json,
+# "device") by what only that unit holds: its dark library's top-level names
+# and sizes, hashed, and the size of its storage. A different device at the
+# address stops the scan, raises an alarm, and can never be pulled from.
+
+def sf_device_fingerprint(dark_pairs, total_bytes):
+    """{darkHash, darkFiles, totalBytes} for the device a listing saw."""
+    pairs = sorted([str(n), int(sz)] for n, sz in (dark_pairs or []))
+    h = hashlib.sha256(json.dumps(pairs, ensure_ascii=False, separators=(",", ":")).encode("utf-8")).hexdigest()
+    return {"darkHash": h, "darkFiles": len(pairs),
+            "totalBytes": int(total_bytes) if isinstance(total_bytes, (int, float)) and total_bytes else None}
+
+def sf_device_words(fp):
+    """'darklibrary of 12 files, 111.5 GB' for a fingerprint."""
+    if not isinstance(fp, dict):
+        return "nothing"
+    n = fp.get("darkFiles")
+    gb = f"{fp['totalBytes'] / 1e9:.1f} GB" if fp.get("totalBytes") else "storage size not read"
+    return f"darklibrary of {n} file{'' if n == 1 else 's'}, {gb}"
+
+def sf_device_remembered(status):
+    """The fingerprint the importer remembers, or None: nothing remembered
+    yet, or --starfront-accept-device said to forget it."""
+    d = status.get("device") if isinstance(status.get("device"), dict) else None
+    if not d or d.get("acceptNext") or not isinstance(d.get("darkHash"), str):
+        return None
+    return d
+
+def sf_device_overlap(files, inv_old):
+    """How many files the last scan listed are still there with the same
+    size and modification time: the same telescope still holds them."""
+    n = 0
+    for rel, row in files.items():
+        old = inv_old.get(rel) if isinstance(inv_old, dict) else None
+        if isinstance(old, dict) and old.get("size") == row[0] and old.get("mtimeNs") == row[1]:
+            n += 1
+    return n
+
+def sf_device_verdict(remembered, seen, files, inv_old):
+    """Is the device a listing saw the telescope the importer knows?
+    'new' (nothing remembered: remember it), 'match', 'changed' (the same
+    telescope with a changed dark library: files the last scan listed are
+    still there) or 'wrong' (a different device). Returns (verdict, overlap).
+    Two cautions beyond the plain comparison: with nothing remembered but a
+    list of files from an earlier scan, a device holding none of them is
+    'wrong' too (the importer knows a telescope by its files even before it
+    has a fingerprint); and an EMPTY dark library tells one Seestar of a
+    model from another no better than nothing, so a match on it also needs
+    one of the earlier files, when there were any."""
+    known = isinstance(inv_old, dict) and len(inv_old) > 0
+    overlap = sf_device_overlap(files, inv_old) if known else 0
+    if remembered is None:
+        return ("wrong" if known and not overlap else "new"), overlap
+    same_dark = remembered.get("darkHash") == seen.get("darkHash")
+    a, b = remembered.get("totalBytes"), seen.get("totalBytes")
+    same_size = (a == b) if (a and b) else None            # None: one of the two was not read
+    if same_dark and same_size is not False:
+        if (remembered.get("darkFiles") or 0) > 0 or not known or overlap:
+            return "match", overlap
+        return "wrong", overlap
+    return ("changed" if overlap else "wrong"), overlap
+
+def sf_device_alarm(wrong, short=None, text=None, said=None):
+    """Raise or clear the 'starfront-device' alarm (the 1.10.1 alarms: the
+    status line, the panel, the Observatory, a notification and a push, once
+    a day while it stands; it clears by itself on the next scan that finds
+    the right telescope)."""
+    d = _watch_load()
+    before = json.dumps(d, sort_keys=True)
+    if wrong:
+        _alarm_set(d, "starfront-device", short, text)
+    else:
+        _alarm_clear(d, "starfront-device", said or "The device at the Starfront telescope's address is the "
+                                                    "telescope the importer knows again.")
+    if json.dumps(d, sort_keys=True) != before:
+        _watch_save(d)
+
+SF_DEVICE_ALARM_SHORT = "Check the Starfront telescope: the device at its address is not the one the importer knows"
+
+def sf_device_refusal(remembered, seen, overlap, inv_old, doing="counted"):
+    """The plain words for a wrong device, said and raised as an alarm.
+    Returns the one-line reason."""
+    known = len(inv_old) if isinstance(inv_old, dict) else 0
+    was = sf_device_words(remembered) if remembered else f"the {known:,} files of the last scan"
+    text = (f"The device answering at {STARFRONT_SHARE} is not the telescope the importer knows "
+            f"(remembered: {was}; found: {sf_device_words(seen)}"
+            + (f", and none of the {known:,} files the last scan listed" if known and not overlap else "")
+            + f"). Nothing was {doing} and nothing was changed. Starfront may have given the telescope a "
+              f"new address: check it, and put the right one in config.json (STARFRONT_SEESTAR_IP or "
+              f"STARFRONT_SHARE). If the telescope itself was replaced or wiped, run --starfront-accept-device "
+              f"and scan again.")
+    error(text)
+    sf_device_alarm(True, SF_DEVICE_ALARM_SHORT, text)
+    return "the device at the telescope's address is not the telescope the importer knows"
+
+def run_starfront_accept_device():
+    """--starfront-accept-device: forget the remembered telescope, so the
+    next scan remembers whatever it finds (for a replaced or wiped unit).
+    Says what it forgot. Nothing is deleted or renamed: one field in
+    starfront-status.json tells the next scan to start afresh, and that scan
+    then writes its own lists over the old ones."""
+    st = sf_status_read()
+    dev = st.get("device") if isinstance(st.get("device"), dict) else {}
+    inv = _read_json_file(sf_state_path(SF_INVENTORY_FILE))
+    n_inv = len(inv.get("entries") or {}) if isinstance(inv.get("entries"), dict) else 0
+    if dev.get("acceptNext"):
+        info("The importer has already been told to forget the telescope: the next scan remembers "
+             "whatever it finds.")
+        return True
+    had = isinstance(dev.get("darkHash"), str)
+    forgot = {k: dev.get(k) for k in ("darkHash", "darkFiles", "totalBytes", "rememberedAt", "share") if k in dev}
+    st["device"] = {"acceptNext": True, "acceptedAt": _utc_iso(), "forgot": forgot or None,
+                    "forgotInventoryFiles": n_inv}
+    sf_status_write(st)
+    if had:
+        info(f"Forgotten: the telescope with a {sf_device_words(dev)}, remembered on "
+             f"{str(dev.get('rememberedAt') or '?')[:10]}.")
+    else:
+        info("No telescope was remembered yet.")
+    info(f"Forgotten too: the list of {n_inv:,} file{'' if n_inv == 1 else 's'} from the last scan, as a way "
+         f"to recognise the telescope. The files in the state folder stay where they are; the next scan "
+         f"writes its own lists over them.")
+    info(f"The next scan remembers whatever telescope it finds at {STARFRONT_SHARE}. Nothing already "
+         f"pulled is touched.")
+    return True
 
 def sf_targets_read():
     d = _read_json_file(sf_state_path(SF_TARGETS_FILE))
@@ -13913,12 +14330,57 @@ def run_starfront_target(name, hours):
 def _sf_num(x):
     return x if isinstance(x, (int, float)) and not isinstance(x, bool) and math.isfinite(x) else None
 
-def sf_build_projects(files, inv, headers, contract, targets, tz, tonight, status_projects):
+def sf_mixed_words(exps, filters, gains):
+    """What is mixed, in words, for the mixed-settings flag: 'exposure 10.0s
+    and 30.0s', 'filter IRCUT and LP', 'gain 80 and 200'; more than one kind
+    joined with '; '. Empty when nothing is mixed."""
+    def join(xs):
+        xs = list(xs)
+        return xs[0] if len(xs) == 1 else ", ".join(xs[:-1]) + " and " + xs[-1]
+    bits = []
+    if len(exps) > 1:
+        bits.append("exposure " + join(f"{e:.1f}s" for e in sorted(exps)))
+    if len(filters) > 1:
+        bits.append("filter " + join("none in the name" if f == "none" else str(f) for f in sorted(filters)))
+    if len(gains) > 1:
+        bits.append("gain " + join(str(int(g)) if g == int(g) else f"{g:g}" for g in sorted(gains)))
+    return "; ".join(bits)
+
+def sf_fit_signature(rows):
+    """One short mark for a project's .fit files as a listing saw them
+    (path, size and modification time of each): the pull writes it down, and
+    while a later scan finds the same mark, nothing on the telescope has
+    changed since that pull."""
+    fits = sorted((rel, int(size), int(mtime_ns)) for rel, size, mtime_ns, _part in rows
+                  if sf_file_kind(rel) == "fit")
+    return hashlib.sha256(json.dumps(fits, ensure_ascii=False, separators=(",", ":")).encode("utf-8")).hexdigest()[:24]
+
+def sf_pull_running(status=None):
+    """Is a pull from the telescope running right now? The import lock held
+    by a live pull, or a project marked 'pulling' by a process that is still
+    alive. A mark left by a pull that died says nothing."""
+    try:
+        with open(LOCK_PATH, encoding="utf-8") as f:
+            lk = json.load(f)
+        if isinstance(lk, dict) and lk.get("what") == "starfront-pull" and pid_alive(lk.get("pid")):
+            return True
+    except (OSError, ValueError):
+        pass
+    st = status if isinstance(status, dict) else sf_status_read()
+    for rec in (st.get("projects") or {}).values():
+        if isinstance(rec, dict) and rec.get("status") == "pulling" and pid_alive(rec.get("pullPid")):
+            return True
+    return False
+
+def sf_build_projects(files, inv, headers, contract, targets, tz, tonight, status_projects, folders=None):
     """The per-project facts from the listing and the caches (DESIGN step 6),
     as the record's `projects[]`. `inv` is the inventory cache's entries
     after this listing was folded in, `headers` the header cache; both keyed
-    by relpath. Returns (projects, header_reads) where header_reads names the
-    files read this time."""
+    by relpath. `folders` ({project: parts}) says which projects have a subs
+    folder: one with stacks and no subs folder is 'stacks-only' (no target,
+    no per cent, no ETA, never ready). The pull's facts for a project
+    (`pulled`, `sourceRehashed`, 'pulling' and 'pulled-awaiting-clear') come
+    from the status file's entry for it."""
     by_project = {}
     for rel, (size, mtime_ns, project, part) in files.items():
         by_project.setdefault(project, []).append((rel, size, mtime_ns, part))
@@ -14005,33 +14467,55 @@ def sf_build_projects(files, inv, headers, contract, targets, tz, tonight, statu
             ra, dec = _sf_num(h.get("ra")), _sf_num(h.get("dec"))
             if ra is not None and dec is not None:
                 positions[night] = (ra, dec)
+        flag_notes = {}
         if len(exps) > 1 or len(filters) > 1 or len(gains) > 1:
             flags.append("mixed-settings")
+            flag_notes["mixed-settings"] = sf_mixed_words(exps, filters, gains)
         if not mosaic and len(positions) > 1:
             pts = [positions[n] for n in sorted(positions)]
             if any(sf_separation_deg(*pts[i], *pts[i + 1]) > 10.0 / 60.0 for i in range(len(pts) - 1)):
                 flags.append("pointing-moved")
-        target_hours = sf_target_hours(targets, display, tid, project)
-        percent = round(100.0 * hours / target_hours, 1) if target_hours else None
-        status = "ready" if hours >= target_hours else "collecting"
-        window = [n for n in nights.values() if n["night"] >= window_from]
-        rate = (sum(n["hours"] for n in window) / len(window)) if window else 0.0
-        eta = None
-        if status == "collecting" and rate > 0:
-            left = max(1, math.ceil((target_hours - hours) / rate))
-            eta = {"nights": left, "date": (today + timedelta(days=left)).isoformat(),
-                   "hoursPerClearNight": round(rate, 2)}
         prev = status_projects.get(project) or {}
-        out.append({"name": project, "tid": tid, "target": display, "codes": codes, "mosaic": mosaic,
-                    "hours": round(hours, 2), "subs": subs, "stacks": stacks, "panels": panels,
-                    "gb": round(gb_bytes / 1e9, 2), "targetHours": target_hours, "percent": percent,
-                    "eta": eta, "status": status, "flags": flags,
-                    "nights": [{"night": n["night"], "hours": round(n["hours"], 3), "subs": n["subs"]}
-                               for n in sorted(nights.values(), key=lambda x: x["night"])],
-                    "byFilter": {k: round(v, 2) for k, v in sorted(by_filter.items())},
-                    "byGain": {k: round(v, 2) for k, v in sorted(by_gain.items())},
-                    "firstNight": min(nights) if nights else None, "lastNight": max(nights) if nights else None,
-                    "notifiedReadyAt": prev.get("notifiedReadyAt"), "clock": clock})
+        prev = prev if isinstance(prev, dict) else {}
+        signature = sf_fit_signature(rows)
+        has_subs_folder = "subs" in (folders.get(project) or ()) if isinstance(folders, dict) else True
+        stacks_only = subs == 0 and (stacks + panels) > 0 and not has_subs_folder
+        if stacks_only:
+            # the Seestar's own stacks with no saved subs (the real 'M 42'):
+            # nothing to count hours from, so no target, per cent or ETA
+            target_hours, percent, eta, status = None, None, None, "stacks-only"
+        else:
+            target_hours = sf_target_hours(targets, display, tid, project)
+            percent = round(100.0 * hours / target_hours, 1) if target_hours else None
+            status = "ready" if hours >= target_hours else "collecting"
+            window = [n for n in nights.values() if n["night"] >= window_from]
+            rate = (sum(n["hours"] for n in window) / len(window)) if window else 0.0
+            eta = None
+            if status == "collecting" and rate > 0:
+                left = max(1, math.ceil((target_hours - hours) / rate))
+                eta = {"nights": left, "date": (today + timedelta(days=left)).isoformat(),
+                       "hoursPerClearNight": round(rate, 2)}
+            # a pull's mark stands while the telescope holds exactly what that
+            # pull saw; a project that has grown since is judged by its hours again
+            if prev.get("status") == "pulled-awaiting-clear" and prev.get("pulledSignature") == signature:
+                status, eta = "pulled-awaiting-clear", None
+            elif prev.get("status") == "pulling" and pid_alive(prev.get("pullPid")):
+                status, eta = "pulling", None
+        rec = {"name": project, "tid": tid, "target": display, "codes": codes, "mosaic": mosaic,
+               "hours": round(hours, 2), "subs": subs, "stacks": stacks, "panels": panels,
+               "gb": round(gb_bytes / 1e9, 2), "targetHours": target_hours, "percent": percent,
+               "eta": eta, "status": status, "flags": flags, "flagNotes": flag_notes,
+               "nights": [{"night": n["night"], "hours": round(n["hours"], 3), "subs": n["subs"]}
+                          for n in sorted(nights.values(), key=lambda x: x["night"])],
+               "byFilter": {k: round(v, 2) for k, v in sorted(by_filter.items())},
+               "byGain": {k: round(v, 2) for k, v in sorted(by_gain.items())},
+               "firstNight": min(nights) if nights else None, "lastNight": max(nights) if nights else None,
+               "notifiedReadyAt": prev.get("notifiedReadyAt"), "clock": clock, "signature": signature}
+        if isinstance(prev.get("pulled"), dict):
+            rec["pulled"] = prev["pulled"]
+            rec["sourceRehashed"] = int(prev.get("sourceRehashed") or 0)
+            rec["pulledAt"] = prev.get("pulledAt")
+        out.append(rec)
     return out
 
 def run_starfront_scan(now=None):
@@ -14051,7 +14535,7 @@ def run_starfront_scan(now=None):
     if not ok:
         error(why)
         return {"ok": False, "reason": why}
-    now_utc = (now or _utc_now())
+    now_utc = (now or _sf_now())
     if now_utc.tzinfo is None:
         now_utc = now_utc.replace(tzinfo=timezone.utc)
     tonight = sf_night_of(now_utc, tz)
@@ -14072,10 +14556,28 @@ def run_starfront_scan(now=None):
         warn(w)
     targets = sf_targets_read()
     status = sf_status_read()
+    accepting = bool((status.get("device") or {}).get("acceptNext")) if isinstance(status.get("device"), dict) else False
+    if accepting:
+        # --starfront-accept-device: whatever is there is the telescope now,
+        # and nothing the old lists said about another unit is reused
+        inv_old, hdr_old = {}, {}
+        status["previousProjects"] = status.get("projects") or {}
+        status["projects"] = {}
+    remembered = sf_device_remembered(status)
     t0 = time.monotonic()
     try:
-        listing = sf_list_share(STARFRONT_SHARE)
+        listing = sf_signed_in(lambda: sf_list_share(STARFRONT_SHARE))
         files = listing["files"]
+        disk = sf_disk_usage(STARFRONT_SHARE)
+        # which telescope is this? Decided before a single file is opened
+        seen = sf_device_fingerprint(listing["darkPairs"], disk[0] if disk else None)
+        verdict, overlap = sf_device_verdict(remembered, seen, files, inv_old)
+        if verdict == "wrong":
+            why = sf_device_refusal(remembered, seen, overlap, inv_old)
+            st2 = sf_status_read()
+            st2["deviceMismatch"] = {"at": _utc_iso(now_utc), "found": seen, "share": STARFRONT_SHARE}
+            sf_status_write(st2)
+            return {"ok": False, "wrongDevice": True, "reason": why}
         # fold the listing into the inventory: an entry unchanged in size and
         # mtime keeps its facts; a new or changed one is parsed from its name
         inv, reused, parsed = {}, 0, 0
@@ -14126,12 +14628,27 @@ def run_starfront_scan(now=None):
                 if d:
                     e["night"] = sf_night_of(d, tz)
                     e["nightFrom"] = "DATE-OBS"
-        disk = sf_disk_usage(STARFRONT_SHARE)
     except OSError as e:
         error(f"The listing stopped ({e}): the scan is incomplete and the caches were left as they were."
-              + (" The link dropped." if sf_is_link_drop(e) else ""))
+              + (" The link dropped." if sf_is_link_drop(e) else "")
+              + (" The share would not let this computer in, even as guest." if sf_is_access_denied(e) else ""))
         return {"ok": False, "incomplete": True, "reason": str(e)}
-    projects = sf_build_projects(files, inv, headers, contract, targets, tz, tonight, status["projects"])
+    # the telescope is the right one (or the first one met): remember it
+    if verdict in ("new", "changed"):
+        status["device"] = {**seen, "rememberedAt": _utc_iso(now_utc), "share": STARFRONT_SHARE}
+        if verdict == "new":
+            info(f"Remembering this telescope: {sf_device_words(seen)}")
+        else:
+            info(f"The telescope's dark library has changed ({sf_device_words(seen)}); it still holds "
+                 f"{overlap:,} of the files from the last scan, so it is the same telescope. Remembered.")
+    else:
+        status["device"] = {**remembered, "seenAt": _utc_iso(now_utc),
+                            "totalBytes": remembered.get("totalBytes") or seen.get("totalBytes")}
+    status.pop("deviceMismatch", None)
+    sf_device_alarm(False, said="The alarm about the Starfront telescope is cleared: this telescope is the one "
+                                "the importer knows now." if verdict == "new" else None)
+    projects = sf_build_projects(files, inv, headers, contract, targets, tz, tonight, status["projects"],
+                                 folders=listing.get("folders"))
     # the ready push: once, when a project first crosses its target; raising
     # the target above the hours clears the mark, so a later crossing tells again
     pushed = []
@@ -14143,14 +14660,21 @@ def run_starfront_scan(now=None):
             notify(text, "Starfront")
             rec["notifiedReadyAt"] = _utc_iso(now_utc)
             pushed.append(p["name"])
-        elif p["status"] != "ready" and rec.get("notifiedReadyAt"):
-            rec["notifiedReadyAt"] = None
+        elif p["status"] == "collecting" and rec.get("notifiedReadyAt"):
+            rec["notifiedReadyAt"] = None        # (a pulled or pulling project keeps its mark)
         rec.update({"status": p["status"], "hours": p["hours"], "targetHours": p["targetHours"],
                     "at": _utc_iso(now_utc)})
+        rec.pop("gone", None)
         p["notifiedReadyAt"] = rec.get("notifiedReadyAt")
     for name in list(status["projects"]):
-        if name not in {p["name"] for p in projects}:
+        if name not in {p["name"] for p in projects} and isinstance(status["projects"][name], dict):
             status["projects"][name]["gone"] = True
+    # the daily scan (the watch runs one a night): a scan that worked after
+    # the night's roof close or after sunrise is that night's scan, whoever ran it
+    owed = sf_daily_owed(now_utc, tz, status)
+    if owed["due"]:
+        status["dailyScanNight"] = owed["night"]
+        status["dailyScanAt"] = _utc_iso(now_utc)
     # storage: GB per night with data in the last 14 nights, and the forecast
     try:
         today = date.fromisoformat(tonight)
@@ -14185,11 +14709,7 @@ def run_starfront_scan(now=None):
     # one line per project, the storage line, and the clock line rollout
     # step 1 judges the stamp by
     for p in projects:
-        eta = (f"ready in about {p['eta']['nights']} night{'s' if p['eta']['nights'] != 1 else ''}" if p["eta"]
-               else ("ready" if p["status"] == "ready" else "no data in the last 14 nights"))
-        info(f"{p['name']}: {p['hours']:.1f} of {p['targetHours']:g} h ({p['percent']:.0f}%), "
-             f"{p['subs']} subs, {len(p['nights'])} night{'s' if len(p['nights']) != 1 else ''}, "
-             f"{p['gb']} GB; {eta} [{p['status']}]" + (f"  flags: {', '.join(p['flags'])}" if p["flags"] else ""))
+        info(sf_project_line(p))
     if not projects:
         info("No projects under MyWorks yet.")
     if disk:
@@ -14209,6 +14729,28 @@ def run_starfront_scan(now=None):
         f"{scan['seconds']} s" + (f"; pushed: {', '.join(pushed)}" if pushed else ""))
     return {"ok": True, "scan": scan, "pushed": pushed}
 
+def sf_project_line(p):
+    """One project's line in the scan's output."""
+    notes = p.get("flagNotes") if isinstance(p.get("flagNotes"), dict) else {}
+    flags = ", ".join(f + (f" ({notes[f]})" if notes.get(f) else "") for f in p.get("flags") or [])
+    tail = f"  flags: {flags}" if flags else ""
+    if p.get("status") == "stacks-only":
+        n = int(p.get("stacks") or 0) + int(p.get("panels") or 0)
+        return f"{p['name']}: stacks only ({n} stack{'' if n == 1 else 's'}, {p['gb']} GB)" + tail
+    if p.get("status") == "pulled-awaiting-clear":
+        eta = "pulled, waiting for the clear"
+    elif p.get("status") == "pulling":
+        eta = "being pulled now"
+    elif p.get("eta"):
+        eta = f"ready in about {p['eta']['nights']} night{'s' if p['eta']['nights'] != 1 else ''}"
+    else:
+        eta = "ready" if p.get("status") == "ready" else "no data in the last 14 nights"
+    home = p.get("pulled") if isinstance(p.get("pulled"), dict) else None
+    return (f"{p['name']}: {p['hours']:.1f} of {p['targetHours']:g} h ({p['percent']:.0f}%), "
+            f"{p['subs']} subs, {len(p['nights'])} night{'s' if len(p['nights']) != 1 else ''}, "
+            f"{p['gb']} GB; {eta} [{p['status']}]"
+            + (f"  home: {home.get('files', 0)} files, {float(home.get('hours') or 0):.1f} h" if home else "") + tail)
+
 def sf_newest_activity(share):
     """When the Seestar last wrote a sub, from the *_sub folders' own
     modification times (one scandir of MyWorks: a folder's mtime moves when
@@ -14221,20 +14763,85 @@ def sf_newest_activity(share):
             newest = max(newest, mtime_ns)
     return datetime.fromtimestamp(newest / 1e9, timezone.utc) if newest else None
 
+def sf_daily_owed(now_utc, tz, status):
+    """The daily scan (Brett, 16 Nov 2026: once a day, not every two hours):
+    which site night's scan is in question now, and is it due? In daytime
+    at the site the night is the one that ended this morning, and its scan
+    is due from sunrise until the sun sets again (then that night is given
+    up). At night it is the night under way, and its scan is due only once
+    the roof has been read closed twice in a row after being read open that
+    night (the watch keeps that count in the status file's `daily`).
+    {"night", "due", "why", "done"}: `due` is never true for a night whose
+    scan is already done."""
+    done = status.get("dailyScanNight") if isinstance(status.get("dailyScanNight"), str) else ""
+    if sf_sun_altitude(STARFRONT_LAT, STARFRONT_LON, now_utc) > 0:
+        night = (now_utc.astimezone(tz).date() - timedelta(days=1)).isoformat()
+        return {"night": night, "due": done < night, "why": "the sun is up at the site", "done": done >= night}
+    night = sf_night_of(now_utc, tz)
+    d = status.get("daily") if isinstance(status.get("daily"), dict) else {}
+    closed = d.get("night") == night and bool(d.get("sawOpen")) and int(d.get("closedRun") or 0) >= 2
+    return {"night": night, "due": closed and done < night,
+            "why": "the roof has been closed on two readings in a row", "done": done >= night}
+
+def sf_daily_scan(owed, now_utc, st):
+    """Run the night's one scan from the watch, or say why it waits: a try
+    less than an hour ago, or a pull that is running. A scan that fails is
+    not marked done, so a later watch run tries again (at most once an
+    hour, until the next evening at the site). Returns {"ran", ...}."""
+    night = owed["night"]
+    words = _day_words(night)
+    last = _parse_utc(st.get("dailyScanLastTry")) if st.get("dailyScanTryNight") == night else None
+    if last is not None and timedelta(0) <= (now_utc - last) < timedelta(hours=1):
+        mins = int((now_utc - last).total_seconds() // 60)
+        info(f"The daily scan for the night of {words} is still owed. The last try was {mins} min ago, "
+             f"so this run waits (one try an hour).")
+        return {"ran": False, "waiting": "hour", "night": night}
+    if sf_pull_running(st):
+        info("A pull from the telescope is running, so the daily scan waits for the next watch run.")
+        return {"ran": False, "waiting": "pull", "night": night}
+    info(f"Daily scan for the night of {words}: {owed['why']}.")
+    st["dailyScanLastTry"] = _utc_iso(now_utc)
+    st["dailyScanTryNight"] = night
+    sf_status_write(st)
+    r = run_starfront_scan(now=now_utc)
+    if r.get("ok"):
+        st2 = sf_status_read()
+        if (st2.get("dailyScanNight") or "") < night:       # (the scan marks it itself; belt and braces)
+            st2["dailyScanNight"], st2["dailyScanAt"] = night, _utc_iso(now_utc)
+            sf_status_write(st2)
+        success(f"Daily scan done for the night of {words}.")
+        return {"ran": True, "ok": True, "night": night}
+    warn(f"The daily scan for the night of {words} did not finish ({r.get('reason') or 'see above'}). "
+         f"The watch tries again in about an hour, until the next evening at the site.")
+    return {"ran": True, "ok": False, "night": night, "reason": r.get("reason")}
+
 def run_starfront_watch(now=None):
-    """--starfront-watch, the 20-minute task: in daytime at the site it
-    exits at once (no tunnel, nothing read). At night it appends the roof
-    reading and, with the roof open, the sky astronomically dark and no new
-    sub for STARFRONT_SILENT_MINUTES, pushes 'B15 open but no new subs since
-    02:10' once per night, so Brett can power-cycle the Seestar."""
+    """--starfront-watch, the 20-minute task, and the one thing that decides
+    when the scan runs. In daytime at the site it exits at once (no tunnel,
+    nothing read), unless the scan for the night just ended is still owed:
+    then it runs that scan, once, and goes back to exiting at once. At night
+    it appends the roof reading and, with the roof open, the sky
+    astronomically dark and no new sub for STARFRONT_SILENT_MINUTES, pushes
+    'B15 open but no new subs since 02:10' once per night, so Brett can
+    power-cycle the Seestar; and once the roof has been read closed twice in
+    a row after being open that night, it runs the night's scan then."""
     tz = sf_require_zone("--starfront-watch")
-    now_utc = now or _utc_now()
+    now_utc = now or _sf_now()
     if now_utc.tzinfo is None:
         now_utc = now_utc.replace(tzinfo=timezone.utc)
     alt = sf_sun_altitude(STARFRONT_LAT, STARFRONT_LON, now_utc)
     if alt > 0:
-        info(f"Daytime at the site (the sun is {alt:.0f} degrees up): nothing to do.")
-        return {"ok": True, "daytime": True}
+        st = sf_status_read()
+        owed = sf_daily_owed(now_utc, tz, st)
+        if not owed["due"]:
+            info(f"Daytime at the site (the sun is {alt:.0f} degrees up): nothing to do.")
+            return {"ok": True, "daytime": True}
+        ok, why = _starfront_share_ok(STARFRONT_SHARE)
+        if not ok:
+            error(why)
+            return {"ok": False, "daytime": True, "reason": why}
+        daily = sf_daily_scan(owed, now_utc, st)
+        return {"ok": not daily.get("ran") or bool(daily.get("ok")), "daytime": True, "dailyScan": daily}
     ok, why = _starfront_share_ok(STARFRONT_SHARE)
     if not ok:
         error(why)
@@ -14247,7 +14854,7 @@ def run_starfront_watch(now=None):
     dark = alt < SF_DARK_DEGREES
     night = sf_night_of(now_utc, tz)
     try:
-        newest = sf_newest_activity(STARFRONT_SHARE)
+        newest = sf_signed_in(lambda: sf_newest_activity(STARFRONT_SHARE))
     except OSError as e:
         error(f"The share could not be listed: {e}")
         return {"ok": False, "reason": str(e), "roof": roof}
@@ -14264,10 +14871,1029 @@ def run_starfront_watch(now=None):
         pushed = True
     st["lastWatch"] = {"at": _utc_iso(now_utc), "roof": roof["state"], "dark": dark,
                        "newestSub": _utc_iso(newest) if newest else None, "silent": silent}
+    # the night's roof, for the daily scan: open seen, then closed twice in a row
+    d = st.get("daily") if isinstance(st.get("daily"), dict) and st["daily"].get("night") == night \
+        else {"night": night, "sawOpen": False, "closedRun": 0}
+    if roof["state"] == "open":
+        d["sawOpen"], d["closedRun"] = True, 0
+    elif roof["state"] == "closed":
+        d["closedRun"] = int(d.get("closedRun") or 0) + 1
+    else:
+        d["closedRun"] = 0
+    st["daily"] = d
     sf_status_write(st)
     info(f"Roof {roof['state']}; {'dark' if dark else 'twilight'} (sun {alt:.0f} degrees); newest sub "
          + (newest.astimezone(tz).strftime("%H:%M") if newest else "none") + (" (silent, pushed)" if pushed else ""))
-    return {"ok": True, "daytime": False, "roof": roof, "dark": dark, "silent": silent, "pushed": pushed}
+    out = {"ok": True, "daytime": False, "roof": roof, "dark": dark, "silent": silent, "pushed": pushed}
+    owed = sf_daily_owed(now_utc, tz, st)
+    if owed["due"]:
+        out["dailyScan"] = sf_daily_scan(owed, now_utc, st)
+        if out["dailyScan"].get("ran") and not out["dailyScan"].get("ok"):
+            out["ok"] = False
+    return out
+
+# ── the pull (Phase 2) ───────────────────────────────────────────────────────
+# --starfront-pull PROJECT brings one project's FITS home: subs, the mosaic's
+# panel stacks and the Seestar's own stacks, never a JPG or a thumbnail. It
+# reads the telescope and writes this computer only. A file counts as home
+# when the engine's verified copy finished, a second read of the local copy
+# gave the same hash, and its ledger row is saved. A second read of the
+# SOURCE (the telescope's file, unbuffered) is the proof the clear will ask
+# for in Phase 3; it doubles the traffic, so it is a step of its own that
+# --rehash-only can run another day.
+
+_SF_HOOK_COUNT = {}                           # test hooks: how often each file was tried
+
+def _sf_test_hook(var, job):
+    """Test mode only. ASTRO_TEST_SF_DROP / ASTRO_TEST_SF_STALL name a part
+    of a file name, optionally with ':N' for 'the first N tries only': is
+    this try of this file one of them? Never true outside a test."""
+    spec = os.environ.get(var) if TEST_ROOT else None
+    if not spec:
+        return False
+    word, _, n = spec.partition(":")
+    if not word or word not in job["filename"]:
+        return False
+    key = (var, job["rel"])
+    _SF_HOOK_COUNT[key] = _SF_HOOK_COUNT.get(key, 0) + 1
+    return (not n.strip().isdigit()) or _SF_HOOK_COUNT[key] <= int(n)
+
+def _sf_test_damage(path):
+    """Test mode only (ASTRO_TEST_SF_CORRUPT_LOCAL names a part of a file
+    name): change one byte of the local copy after the engine's own check,
+    as a disk that wrote it badly would, so the second read has something
+    to catch. Never outside a test, never on a share."""
+    word = os.environ.get("ASTRO_TEST_SF_CORRUPT_LOCAL") if TEST_ROOT else None
+    if not word or word not in os.path.basename(path):
+        return
+    with open(sf_guard_write(path), "r+b") as f:
+        b = f.read(1)
+        f.seek(0)
+        f.write(bytes([(b[0] + 1) % 256]) if b else b"x")
+
+def sf_parse_when(text, tz, now_utc):
+    """A time from a roof file as an aware UTC time, or None: ISO with a zone
+    or a Z, seconds or milliseconds since 1970, or ISO without a zone. That
+    last one could be UTC or the site's clock; the later of the two that is
+    not in the future is taken, which gives the shorter 'closed for'."""
+    s = str(text or "").strip()
+    if not s:
+        return None
+    if re.fullmatch(r"\d{10}(\.\d+)?", s) or re.fullmatch(r"\d{13}", s):
+        try:
+            v = float(s) / (1000.0 if len(s.split(".")[0]) == 13 else 1.0)
+            return datetime.fromtimestamp(v, timezone.utc)
+        except (ValueError, OverflowError, OSError):
+            return None
+    try:
+        d = datetime.fromisoformat(s.replace("Z", "+00:00").replace(" ", "T", 1))
+    except ValueError:
+        return None
+    if d.tzinfo is not None:
+        return d.astimezone(timezone.utc)
+    cands = [d.replace(tzinfo=timezone.utc), d.replace(tzinfo=tz).astimezone(timezone.utc)]
+    cands = [c for c in cands if c <= now_utc + timedelta(minutes=2)]
+    return max(cands) if cands else None
+
+def sf_roof_closed_hours(roof, now_utc, tz, rows=None):
+    """How long the roof is known to have been closed, in hours; None when
+    this reading does not say closed. From the roof log: the first of the
+    unbroken run of 'closed' readings that ends with this one. The roof
+    file's own time is used instead when it stays the same from one closed
+    reading to the next (then it is the time of the change), or when this is
+    the first closed reading (the only evidence there is); a file time that
+    moves while the roof stays closed is only when the file was refreshed,
+    and the readings decide."""
+    if roof.get("state") != "closed":
+        return None
+    rows = sf_roof_log() if rows is None else rows
+    run = []
+    for r in reversed(rows):
+        if r.get("state") != "closed":
+            break
+        run.append(r)
+    run.reverse()
+    start = (_parse_utc(run[0].get("at")) if run else None) or now_utc
+    own = sf_parse_roof(roof.get("raw") or "")[1]
+    t_file = sf_parse_when(own, tz, now_utc) if own else None
+    if t_file is not None:
+        prev_own = sf_parse_roof(run[-2].get("raw") or "")[1] if len(run) >= 2 else None
+        if len(run) < 2 or prev_own == own:
+            start = t_file
+    return max(0.0, (now_utc - min(start, now_utc)).total_seconds() / 3600.0)
+
+SF_LOCAL_FREE_MARGIN = 5 * 1024 ** 3          # a pull leaves this much free on this computer's disk
+
+def sf_local_free(path):
+    """Free bytes on the disk a local folder is (or will be) on, or None
+    when it can't be told: asked of the nearest folder that exists."""
+    p = os.path.abspath(path)
+    for _ in range(64):
+        if os.path.isdir(p):
+            try:
+                return int(shutil.disk_usage(p).free)
+            except OSError:
+                return None
+        parent = os.path.dirname(p)
+        if parent == p:
+            return None
+        p = parent
+    return None
+
+def _sf_pull_refused(why):
+    error(f"Pull refused: {why}")
+    return {"ok": False, "refused": True, "reason": why}
+
+def sf_pull_guards(now_utc, tz):
+    """The pull's guards that need neither the lock nor the listing, each
+    re-checked at the start of every pull and each refusing with one plain
+    sentence: the pause flag, a telescope the importer has met, daytime at
+    the site, the tunnel, the roof closed for STARFRONT_ROOF_CLOSED_HOURS
+    and readable. Returns (None, facts) when all pass, else (why, facts)."""
+    status = sf_status_read()
+    if sf_flag(SF_PAUSE_FLAG):
+        return ("the starfront-pause flag is set (a ticket or night work is open at Starfront). Remove the "
+                "flag file when that is over, then pull."), {}
+    remembered = sf_device_remembered(status)
+    if remembered is None:
+        return ("the importer has not met the telescope yet. Run a scan first (--starfront-scan), "
+                "then pull."), {}
+    alt = sf_sun_altitude(STARFRONT_LAT, STARFRONT_LON, now_utc)
+    if alt <= 0:
+        return (f"it is night at the site (the sun is {abs(alt):.0f} degrees below the horizon). A pull runs "
+                f"only in Texas daytime, so the telescope is left alone while it works."), {}
+    tun = ensure_tunnel()
+    if not tun["up"]:
+        return f"the tunnel to Starfront is down: {tun['reason']}.", {}
+    roof = read_roof(now=now_utc)
+    need = STARFRONT_ROOF_CLOSED_HOURS
+    if roof["state"] == "open":
+        return (f"the B15 roof is open. A pull waits until the roof has been closed for {need} "
+                f"hour{'' if need == 1 else 's'}."), {}
+    if roof["state"] != "closed":
+        return (f"the roof could not be read ({roof.get('why') or 'its file says neither open nor closed'}), "
+                f"and a pull needs to know the roof is closed."), {}
+    hours = sf_roof_closed_hours(roof, now_utc, tz)
+    if hours is None or hours < need:
+        return (f"the B15 roof has been closed for {hours or 0:.1f} h as far as the importer has seen, and a "
+                f"pull waits for {need} hour{'' if need == 1 else 's'}. Try again later."), {}
+    return None, {"status": status, "remembered": remembered, "roofClosedHours": hours, "sunAltitude": alt}
+
+def sf_local_days(project_dir, label, tz):
+    """The Day folders already in a project's folder on this computer:
+    ({night: Day number}, the highest number). One listing of the project
+    folder and one of each Day folder; a night is told from a file's stamp."""
+    nights, top = {}, 0
+    try:
+        entries = _sf_scandir(project_dir)
+    except OSError:
+        return nights, top
+    for name, is_dir, _size, _m, _link in entries:
+        m = re.match(r"^" + re.escape(label) + r" Day (\d+)$", name)
+        if not m or not is_dir:
+            continue
+        n = int(m.group(1))
+        top = max(top, n)
+        try:
+            inside = _sf_scandir(os.path.join(project_dir, name))
+        except OSError:
+            continue
+        for fname, f_is_dir, _s, _mt, _l in inside:
+            if f_is_dir or not _SF_FIT_RE.search(fname):
+                continue
+            stamp = sf_parse_sub_name(fname)["stamp"]
+            night = (sf_night_from_stamp(stamp, tz) if stamp else None) or ""
+            nights.setdefault(night, n)
+    return nights, top
+
+def sf_row_home(e, size, mtime_ns):
+    """Does this ledger row prove a verified copy of the telescope's file as
+    it is now (the Starfront camera, the same size, the same modification
+    time to the nanosecond)? "changed" when the row is this camera's and
+    verified but the telescope's file is not the one it was made from."""
+    if not isinstance(e, dict) or e.get("camera") != STARFRONT_CAMERA or e.get("device") != "seestar":
+        return "no"
+    if not e.get("verifiedAtImport") or not e.get("sha256"):
+        return "no"
+    if e.get("size") == size and e.get("cameraMtimeNs") == mtime_ns:
+        return "yes"
+    return "changed"
+
+def sf_pull_plan(state, project, rows, inv, tz, dest_root, folders):
+    """What a pull of `project` would do, from one listing (`rows`: the
+    project's (relpath, size, mtimeNs, part) entries) and the ledger: every
+    .fit with where it goes, and whether it is already home. Nothing is
+    written. Returns the plan dict; "todo" is the list to copy."""
+    display = seestar_display(state, project, ask=False, dry_run=True)
+    project_dir = os.path.join(dest_root, display)
+    sub_label = project + "_sub"
+    items, problems = [], []
+    for rel, size, mtime_ns, part in sorted(rows):
+        if sf_file_kind(rel) != "fit":
+            continue                              # never a JPG, a thumbnail or anything else
+        name = rel.rsplit("/", 1)[-1]
+        kind = {"subs": "sub", "panels": "panel", "stacks": "stack"}[part]
+        facts = sf_parse_sub_name(name)
+        cached = inv.get(rel) if isinstance(inv.get(rel), dict) and inv[rel].get("size") == size \
+            and inv[rel].get("mtimeNs") == mtime_ns else {}
+        stamp = facts["stamp"] or cached.get("stamp")
+        night = (sf_night_from_stamp(stamp, tz) if stamp else None) or cached.get("night") or None
+        exp = facts["exp"] if facts["exp"] is not None else _sf_num(cached.get("exp"))
+        e = state.file_entry(rel, STARFRONT_CAMERA) if state.ledger else None
+        home = sf_row_home(e, size, mtime_ns)
+        items.append({"rel": rel, "path": os.path.join(STARFRONT_SHARE, *rel.split("/")), "filename": name,
+                      "size": size, "mtimeNs": mtime_ns, "mtime": mtime_ns / 1e9, "part": part, "kind": kind,
+                      "night": night, "exp": exp if kind == "sub" else None,
+                      "filter": facts["filter"] or cached.get("filter"), "home": home, "drops": 0,
+                      "relpath": rel})
+    # a sub or a panel whose file changed on the telescope after it was pulled
+    # is never copied over the copy that is home: it is said, and left
+    todo = []
+    for it in items:
+        if it["home"] == "yes":
+            continue
+        if it["home"] == "changed" and it["kind"] != "stack":
+            problems.append((it["rel"], "changed on the telescope since it was pulled; the copy that is home "
+                                        "was left as it is"))
+            continue
+        todo.append(it)
+    # Day folders by the site's night, continuing what the ledger and the
+    # folders on this computer already number
+    known, top = sf_local_days(project_dir, sub_label, tz)
+    top = max(top, state.max_day_number(project, device="seestar", camera=STARFRONT_CAMERA) if state.ledger else 0)
+    if state.ledger:
+        for e in state.ledger["files"].values():
+            if e.get("camera") == STARFRONT_CAMERA and e.get("target") == project and e.get("sourceType") == "sub" \
+                    and isinstance(e.get("dayNumber"), int):
+                known[e.get("night") or ""] = e["dayNumber"]
+    days = {}
+    for night in sorted({it["night"] or "" for it in todo if it["kind"] == "sub"}):
+        if night in known:
+            days[night] = known[night]
+        else:
+            top += 1
+            days[night] = top
+    for it in todo:
+        if it["kind"] == "sub":
+            it["day"] = days[it["night"] or ""]
+            it["destDir"] = os.path.join(project_dir, f"{sub_label} Day {it['day']}")
+            it["target"] = project
+        elif it["kind"] == "panel":
+            it["day"], it["destDir"] = None, os.path.join(project_dir, "panels")
+            it["target"] = project.split("_mosaic")[0]
+        else:
+            it["day"], it["destDir"], it["target"] = None, project_dir, project
+        it["dst"] = os.path.join(it["destDir"], it["filename"])
+    return {"project": project, "display": display, "projectDir": project_dir, "subLabel": sub_label,
+            "items": items, "todo": todo, "days": days, "problems": problems,
+            "signature": sf_fit_signature(rows),
+            "stacksOnly": not any(i["kind"] == "sub" for i in items) and "subs" not in (folders.get(project) or ())}
+
+def _sf_worker(job, ctx, work, out_q):
+    try:
+        res = ("ok", work(job, ctx))
+    except BaseException as e:               # every failure goes back to the one thread that decides
+        res = ("error", e)
+    out_q.put((ctx, res))
+
+def sf_run_jobs(jobs, work, workers, on_ok, on_problem, doing="copying", watch_stall=True):
+    """Run work(job, ctx) for every job on at most `workers` threads. The
+    calling thread alone hears the answers and calls on_ok(job, result) or
+    on_problem(job, exception): it is the ONE thread that touches the ledger.
+    A dropped link (one of the Windows network errors, or a copy that moves
+    no bytes for STARFRONT_STALL_SECONDS) brings ensure_tunnel() and another
+    try of that file after 5, 15 and 45 seconds; a fourth drop of one file
+    stops the run: no new file is started, the ones in flight finish or
+    fail by themselves, and what finished is kept. Returns {"done",
+    "stopped" (why, or None), "maxActive", "drops"}."""
+    scale = _sf_scale()
+    stall_s = STARFRONT_STALL_SECONDS * scale
+    waits = [w * scale for w in SF_RETRY_WAITS]
+    pending, delayed, active, zombies = deque(jobs), [], {}, []
+    out_q = queue.Queue()
+    st = {"stopped": None, "done": 0, "max": 0, "drops": 0, "ensured": 0.0, "n": 0}
+
+    def drop(job, exc, thread=None):
+        st["drops"] += 1
+        job["drops"] = job.get("drops", 0) + 1
+        if st["stopped"]:
+            return
+        if job["drops"] > len(waits):
+            st["stopped"] = (f"the link to the telescope dropped {job['drops']} times while {doing} "
+                             f"{job['filename']} ({exc})")
+            return
+        wait_s = SF_RETRY_WAITS[job["drops"] - 1]
+        warn(f"The link dropped while {doing} {job['filename']} ({exc.__class__.__name__}: "
+             f"{str(exc)[:100]}). Trying it again in {wait_s} s (try {job['drops'] + 1} of {len(waits) + 1}).")
+        if time.monotonic() - st["ensured"] >= 1.0 * scale or not st["ensured"]:
+            tun = ensure_tunnel(timeout=60 * scale, poll=5 * scale)
+            st["ensured"] = time.monotonic()
+            if not tun["up"]:
+                warn(f"The tunnel is not answering: {tun['reason']}")
+        job["zombie"] = thread
+        delayed.append([time.monotonic() + waits[job["drops"] - 1], job])
+
+    while pending or delayed or active:
+        now = time.monotonic()
+        if st["stopped"] is None:
+            for d in sorted(delayed, key=lambda x: x[0]):
+                if d[0] > now:
+                    break
+                z = d[1].get("zombie")
+                if z is not None and z.is_alive():
+                    # the try that stalled still holds its .partial: wait for it
+                    # to let go; a copy stuck for good ends the run
+                    if now - d[0] > max(3 * stall_s, 1.0):
+                        st["stopped"] = (f"a copy of {d[1]['filename']} stopped moving and never came back")
+                    continue
+                delayed.remove(d)
+                pending.appendleft(d[1])
+        if st["stopped"] is None:
+            while pending and len(active) < workers:
+                job = pending.popleft()
+                st["n"] += 1
+                ctx = {"job": job, "last": time.monotonic(), "cancel": False, "id": st["n"]}
+                t = threading.Thread(target=_sf_worker, args=(job, ctx, work, out_q), daemon=True,
+                                     name=f"starfront-{st['n']}")
+                ctx["thread"] = t
+                active[ctx["id"]] = ctx
+                t.start()
+            st["max"] = max(st["max"], len(active))
+        elif not active:
+            break
+        try:
+            ctx, (kind, val) = out_q.get(timeout=min(0.25, max(0.01, stall_s / 4.0)))
+        except queue.Empty:
+            ctx = None
+        if ctx is not None and ctx["id"] in active:      # (a late answer from a try already given up on is ignored)
+            del active[ctx["id"]]
+            job = ctx["job"]
+            if kind == "ok":
+                st["done"] += 1
+                on_ok(job, val)
+            elif isinstance(val, Exception) and sf_is_link_drop(val):
+                drop(job, val)
+            elif isinstance(val, Exception):
+                on_problem(job, val)
+            else:
+                raise val                                    # Ctrl+C or an exit: not ours to swallow
+        if watch_stall:
+            for cid, c in list(active.items()):
+                if time.monotonic() - c["last"] >= stall_s:
+                    c["cancel"] = True                       # its next block raises, and it clears its own .partial
+                    del active[cid]
+                    zombies.append(c)
+                    drop(c["job"], StarfrontStall(errno.ETIMEDOUT, f"no bytes for {STARFRONT_STALL_SECONDS} s"),
+                         thread=c.get("thread"))
+    # tries that stalled get a moment to notice and clear their own .partial
+    deadline = time.monotonic() + min(30.0, max(1.0, stall_s))
+    for c in zombies:
+        t = c.get("thread")
+        if t is not None and t.is_alive():
+            t.join(max(0.0, deadline - time.monotonic()))
+            if t.is_alive():
+                warn(f"A copy of {c['job']['filename']} is still stuck. If a file ending .partial is left "
+                     f"beside it, it is not a frame; the next pull writes over it.")
+    return {"done": st["done"], "stopped": st["stopped"], "maxActive": st["max"], "drops": st["drops"]}
+
+def _sf_copy_work(job, ctx):
+    """One file, on a worker thread: the engine's verified copy, then the
+    second read of the local copy (unbuffered on Windows, so it comes from
+    the disk and not from memory). Touches no ledger."""
+    stall = _sf_test_hook("ASTRO_TEST_SF_STALL", job)        # (a test: this try moves no bytes)
+
+    def progress(_n):
+        if stall:
+            while not ctx["cancel"]:
+                time.sleep(0.01)
+        else:
+            ctx["last"] = time.monotonic()
+        if ctx["cancel"]:
+            raise StarfrontStall(errno.ETIMEDOUT, "the copy stopped moving and was given up", job["path"])
+    if _sf_test_hook("ASTRO_TEST_SF_DROP", job):
+        e = OSError(errno.ENETRESET, "test: the specified network name is no longer available", job["path"])
+        e.winerror = 64
+        raise e
+    with _SF_ACTIVE_LOCK:
+        _SF_ACTIVE["now"] += 1
+        _SF_ACTIVE["max"] = max(_SF_ACTIVE["max"], _SF_ACTIVE["now"])
+    try:
+        if TEST_ROOT and os.environ.get("ASTRO_TEST_SF_SLOW_MS"):
+            time.sleep(float(os.environ["ASTRO_TEST_SF_SLOW_MS"]) / 1000.0)    # a test: copies overlap
+            ctx["last"] = time.monotonic()
+        sha, size = _sf_local_copy(job["path"], job["dst"], progress=progress)
+        ctx["last"] = time.monotonic()
+        _sf_test_damage(job["dst"])
+        sha2, size2, read = hash_file_unbuffered(job["dst"])
+        ctx["last"] = time.monotonic()
+    finally:
+        with _SF_ACTIVE_LOCK:
+            _SF_ACTIVE["now"] -= 1
+    return {"sha": sha, "size": size, "localSha": sha2, "localSize": size2, "localRead": read}
+
+_SF_ACTIVE = {"now": 0, "max": 0}             # copies in flight right now, and the most at once
+_SF_ACTIVE_LOCK = threading.Lock()
+
+def _sf_rehash_work(job, _ctx):
+    """One source file read again from the telescope, on a worker thread."""
+    if _sf_test_hook("ASTRO_TEST_SF_DROP", job):
+        e = OSError(errno.ENETRESET, "test: the specified network name is no longer available", job["path"])
+        e.winerror = 64
+        raise e
+    sha, size, read = hash_file_unbuffered(job["path"])
+    return {"sha": sha, "size": size, "read": read}
+
+def sf_ledger_row(state, it, plan, res):
+    """Add (or replace) one pulled file's ledger row, the way the home
+    Seestar import writes a row, with the Starfront camera from the
+    configuration, the site's night, and the facts of the second read. An
+    earlier row for the same file is kept inside the new one ('earlier'),
+    with any mark that blocks a clear: rows are added to, never lost."""
+    old = state.file_entry(it["rel"], STARFRONT_CAMERA)
+    old = old if isinstance(old, dict) and old.get("camera") == STARFRONT_CAMERA else None
+    _seestar_ledger_add(state, it, STARFRONT_SHARE, STARFRONT_CAMERA, it["kind"], it["target"], plan["display"],
+                        it["destDir"], res["sha"], day=it["day"], exposure=it["exp"], night=it["night"],
+                        sub_count=_stack_n(it["filename"]) if it["kind"] == "stack" else None)
+    row = state.file_entry(it["rel"], STARFRONT_CAMERA)
+    row.update({"site": STARFRONT_SITE, "cameraMtimeNs": it["mtimeNs"], "localRehash": res["localRead"],
+                "localRehashedAt": _utc_iso(), "sourceRehashed": False})
+    if it.get("filter"):
+        row["filter"] = it["filter"]
+    if old:
+        keep = {k: old[k] for k in ("sha256", "size", "importedAt", "dest", "verifiedAtImport", "cameraMtimeNs",
+                                    "sourceRehashed", "sourceSha256", "sourceRehashedAt", "archiveLocation",
+                                    "archiveShippedAt", "archiveVerifiedAt", "setAside") if k in old}
+        row["earlier"] = list(old.get("earlier") or []) + [keep]
+        for k in ("clearBlocked", "sourceMismatches"):
+            if k in old:
+                row[k] = old[k]
+    state._dirty = True
+    return row
+
+def sf_source_rehash(state, plan, dest_root, workers):
+    """The second read of the SOURCE: every .fit of the project that is home
+    is read again from the telescope and its hash compared with the ledger
+    row's. It is proof only when the read was unbuffered (Windows; a normal
+    read can be answered from this computer's memory and proves nothing
+    about the telescope): then the row gets sourceRehashed, sourceSha256 and
+    sourceRehashedAt. A different hash sets the local copy aside, marks the
+    row so a clear can never take that file (clearBlocked) and is reported.
+    Returns {"proven", "already", "unproven", "mismatch": [...], "stopped",
+    "read": the mode seen}."""
+    forced = (os.environ.get("ASTRO_TEST_UNBUFFERED") or "").strip() if TEST_ROOT else ""
+    forced = {"1": "unbuffered", "0": "buffered"}.get(forced)       # a test says how the read counts
+    out = {"proven": 0, "already": 0, "unproven": 0, "mismatch": [], "stopped": None, "read": None,
+           "changed": 0}
+    jobs = []
+    for it in plan["items"]:
+        e = state.file_entry(it["rel"], STARFRONT_CAMERA)
+        if sf_row_home(e, it["size"], it["mtimeNs"]) != "yes":
+            out["changed" if isinstance(e, dict) and e.get("camera") == STARFRONT_CAMERA
+                and e.get("verifiedAtImport") else "unproven"] += 1
+            continue
+        if e.get("sourceRehashed") and e.get("sourceSha256") == e.get("sha256"):
+            out["already"] += 1
+            continue
+        jobs.append(it)
+
+    def on_ok(it, res):
+        read = forced or res["read"]
+        out["read"] = read
+        e = state.file_entry(it["rel"], STARFRONT_CAMERA)
+        if res["sha"] == e.get("sha256") and res["size"] == e.get("size"):
+            if read == "unbuffered":
+                e.update({"sourceRehashed": True, "sourceSha256": res["sha"], "sourceRehashedAt": _utc_iso(),
+                          "sourceRead": "unbuffered"})
+                out["proven"] += 1
+                state._dirty = True
+                if out["proven"] % SF_LEDGER_SAVE_EVERY == 0:
+                    state.save_ledger()                      # a check that is interrupted keeps what it proved
+            else:
+                out["unproven"] += 1
+            return
+        # the telescope's file does not read as the copy did: neither can be trusted
+        local = os.path.join(e.get("dest") or "", e.get("filename") or "")
+        aside = None
+        try:
+            if os.path.isfile(local):
+                aside = sf_set_aside(local, dest_root)
+        except (OSError, StarfrontRefused) as ex:
+            warn(f"{it['filename']}: the local copy could not be set aside ({ex}).")
+        e["sourceMismatches"] = list(e.get("sourceMismatches") or []) + [{
+            "at": _utc_iso(), "sourceSha256": res["sha"], "sourceSize": res["size"], "read": read,
+            "copySha256": e.get("sha256"), "setAside": aside}]
+        e.update({"verifiedAtImport": False, "sourceRehashed": False, "clearBlocked": "source-mismatch"})
+        if aside:
+            e["setAside"] = aside
+        state._dirty = True
+        out["mismatch"].append(it["rel"])
+        warn(f"{it['filename']}: read again from the telescope it is not the file that was copied. The local "
+             f"copy was set aside" + (f" ({aside})" if aside else "") + ". The file stays on the telescope, and "
+             f"the importer will not clear it. Pull again to fetch it afresh.")
+        state.save_ledger()
+
+    def on_problem(it, ex):
+        out["unproven"] += 1
+        warn(f"{it['filename']}: could not be read again from the telescope ({ex}).")
+
+    if not jobs:
+        return out
+    info(f"Reading {len(jobs)} file{'' if len(jobs) == 1 else 's'} again from the telescope, to prove "
+         f"the cop{'y' if len(jobs) == 1 else 'ies'} (this doubles the traffic).")
+    # the first file says whether this computer can read without its cache;
+    # if it can't, reading the rest would double the traffic and prove nothing
+    first = jobs[0]
+    try:
+        res = _sf_rehash_work(first, None)
+    except OSError as ex:
+        if sf_is_link_drop(ex):
+            run = sf_run_jobs(jobs, _sf_rehash_work, workers, on_ok, on_problem, doing="reading again",
+                              watch_stall=False)
+            out["stopped"] = run["stopped"]
+            return out
+        on_problem(first, ex)
+        res = None
+    if res is not None:
+        on_ok(first, res)
+        if out["read"] != "unbuffered":
+            out["unproven"] += len(jobs) - 1
+            return out
+    run = sf_run_jobs(jobs[1:], _sf_rehash_work, workers, on_ok, on_problem, doing="reading again",
+                      watch_stall=False)
+    out["stopped"] = run["stopped"]
+    return out
+
+def sf_dark_listing(share, depth=4):
+    """Every file under the telescope's darklibrary as [(relpath, size,
+    mtimeNs)], one listing per folder, links never followed, at most
+    `depth` folders deep. Raises OSError as any listing does."""
+    out, stack = [], [("", 0)]
+    root = os.path.join(share, "darklibrary")
+    while stack:
+        rel, d = stack.pop()
+        folder = os.path.join(root, *rel.split("/")) if rel else root
+        for name, is_dir, size, mtime_ns, link in _sf_scandir(folder):
+            if link or name.startswith("."):
+                continue
+            sub = f"{rel}/{name}" if rel else name
+            if not sf_inside(os.path.join(root, *sub.split("/")), root):
+                continue
+            if is_dir:
+                if d + 1 < depth:
+                    stack.append((sub, d + 1))
+            else:
+                out.append((sub, size, mtime_ns))
+    return sorted(out)
+
+def sf_pull_darklibrary(dest_root, workers, dry_run=False):
+    """Copy the telescope's dark library to <workbench>\\darklibrary, so the
+    darks are at hand for Siril: verified copies, only files that are new or
+    changed, nothing deleted here or there. A dark that changed on the
+    telescope keeps its earlier copy under darklibrary\\_earlier\\<time>\\.
+    Returns {"files", "copied", "bytes", "kept", "problems"}."""
+    out = {"files": 0, "copied": 0, "bytes": 0, "kept": 0, "replaced": 0, "problems": [], "stopped": None}
+    try:
+        rows = sf_dark_listing(STARFRONT_SHARE)
+    except (FileNotFoundError, NotADirectoryError) as e:
+        if sf_is_link_drop(e):
+            out["problems"].append(("darklibrary", str(e)))
+        return out                                           # this telescope has no dark library folder
+    except OSError as e:
+        out["problems"].append(("darklibrary", str(e)))
+        return out
+    out["files"] = len(rows)
+    local_root = os.path.join(dest_root, "darklibrary")
+    stamp = now_stamp().replace("T", "-")
+    jobs = []
+    for rel, size, mtime_ns in rows:
+        dst = os.path.join(local_root, *rel.split("/"))
+        try:
+            st_ = os.stat(dst)
+            if st_.st_size == size and abs(st_.st_mtime_ns - mtime_ns) < 2_000_000_000:
+                out["kept"] += 1
+                continue
+            changed = True
+        except OSError:
+            changed = False
+        jobs.append({"rel": "darklibrary/" + rel, "path": os.path.join(STARFRONT_SHARE, "darklibrary", *rel.split("/")),
+                     "filename": rel.rsplit("/", 1)[-1], "size": size, "mtimeNs": mtime_ns, "dst": dst,
+                     "drops": 0, "changed": changed,
+                     "earlier": os.path.join(local_root, "_earlier", stamp, *rel.split("/"))})
+    out["bytes"] = sum(j["size"] for j in jobs)
+    if dry_run or not jobs:
+        out["wouldCopy"] = len(jobs)
+        return out
+
+    def work(job, ctx):
+        if job["changed"] and os.path.isfile(job["dst"]):
+            _sf_local_move(job["dst"], job["earlier"])       # the earlier dark is kept, inside the dark library
+        return _sf_copy_work(job, ctx)
+
+    def on_ok(job, res):
+        if res["localSha"] != res["sha"] or res["localSize"] != res["size"] or res["size"] != job["size"]:
+            aside = None
+            try:
+                aside = sf_set_aside(job["dst"], local_root)
+            except (OSError, StarfrontRefused) as ex:
+                warn(f"{job['filename']}: the copy could not be set aside ({ex}).")
+            out["problems"].append((job["rel"], f"the copy did not read back the same; set aside ({aside})"))
+            return
+        out["copied"] += 1
+        out["replaced"] += 1 if job["changed"] else 0
+
+    def on_problem(job, ex):
+        out["problems"].append((job["rel"], str(ex)))
+
+    _sf_local_makedirs(local_root)
+    for d in sorted({os.path.dirname(j["dst"]) for j in jobs}):
+        _sf_local_makedirs(d)
+    run = sf_run_jobs(jobs, work, workers, on_ok, on_problem, doing="copying the dark")
+    out["stopped"] = run["stopped"]
+    return out
+
+def sf_project_home(state, plan):
+    """Where a project stands after a pull, from the ledger and the listing
+    the pull used: files and hours home, files whose source was read again
+    and matched, and whether that is all of them."""
+    files = subs = proven = 0
+    hours = 0.0
+    for it in plan["items"]:
+        e = state.file_entry(it["rel"], STARFRONT_CAMERA) if state.ledger else None
+        if sf_row_home(e, it["size"], it["mtimeNs"]) != "yes":
+            continue
+        files += 1
+        if it["kind"] == "sub":
+            subs += 1
+            hours += float(e.get("exposureSeconds") or 0) / 3600.0
+        if e.get("sourceRehashed") and e.get("sourceSha256") == e.get("sha256"):
+            proven += 1
+    total = len(plan["items"])
+    return {"files": files, "subs": subs, "hours": round(hours, 2), "of": total, "sourceRehashed": proven,
+            "allHome": total > 0 and files == total, "allProven": total > 0 and proven == total}
+
+def sf_write_receipt(state, plan, copied, home, complete, now_utc):
+    """The AstroLog receipt for a pull, as the Seestar import writes one
+    (same file, same folder rules, one session per Day folder touched), with
+    the three things a hosted telescope adds: site, hours and nights."""
+    scope_name = STARFRONT_CAMERA.replace("ZWO ", "")
+    by_day = {}
+    for it in copied:
+        if it["kind"] != "sub":
+            continue
+        d = by_day.setdefault(it["day"], {"night": it["night"], "frames": 0, "seconds": 0.0, "dir": it["destDir"]})
+        d["frames"] += 1
+        d["seconds"] += float(it["exp"] or 0)
+    stacks = [it for it in copied if it["kind"] == "stack"]
+    panels = [it for it in copied if it["kind"] == "panel"]
+    in_day = {}
+    for e in state.ledger["files"].values():
+        if e.get("camera") == STARFRONT_CAMERA and e.get("target") == plan["project"] and e.get("sourceType") == "sub" \
+                and e.get("verifiedAtImport"):
+            in_day[e.get("dayNumber")] = in_day.get(e.get("dayNumber"), 0) + 1
+    sessions = []
+    for day in sorted(by_day, key=lambda x: (x is None, x)):
+        d = by_day[day]
+        sessions.append({"targetDisplayName": plan["display"], "seestarProjectName": plan["project"],
+                         "isMosaic": "_mosaic" in plan["project"], "dayNumber": day, "night": d["night"],
+                         "framesCopied": d["frames"], "framesInFolder": in_day.get(day, d["frames"]),
+                         "hours": round(d["seconds"] / 3600.0, 2),
+                         "stackedCount": max([_stack_n(s["filename"]) or 0 for s in stacks], default=0),
+                         "stacks": [{"night": s["night"], "subCount": _stack_n(s["filename"]),
+                                     "filename": s["filename"]} for s in stacks],
+                         "fitsFolderPath": d["dir"]})
+    if not sessions and (stacks or panels):
+        sessions.append({"targetDisplayName": plan["display"], "seestarProjectName": plan["project"],
+                         "isMosaic": "_mosaic" in plan["project"], "dayNumber": None, "night": None,
+                         "framesCopied": 0, "framesInFolder": 0, "hours": 0.0,
+                         "stackedCount": max([_stack_n(s["filename"]) or 0 for s in stacks], default=0),
+                         "stacks": [{"night": s["night"], "subCount": _stack_n(s["filename"]),
+                                     "filename": s["filename"]} for s in stacks],
+                         "fitsFolderPath": plan["projectDir"]})
+    if not sessions:
+        return None
+    nights = sorted({s["night"] for s in sessions if s["night"]})
+    receipt = {"version": 1, "source": "seestar-import", "via": "starfront-pull", "telescope": scope_name,
+               "site": STARFRONT_SITE, "timezone": STARFRONT_TZ, "importedAt": now_stamp(),
+               "hours": round(sum(s["hours"] for s in sessions), 2), "nights": nights, "nightCount": len(nights),
+               "panelsCopied": len(panels), "complete": bool(complete),
+               "project": {"name": plan["project"], "filesHome": home["files"], "hoursHome": home["hours"],
+                           "filesOnTelescope": home["of"], "sourceRehashed": home["sourceRehashed"]},
+               "sessions": sessions}
+    rdir = os.path.join(RECEIPT_BASE, scope_name)
+    _sf_local_makedirs(rdir)
+    rpath = _unique_receipt_path(rdir, f"seestar-{receipt['importedAt']}")
+    _atomic_write_json(sf_guard_write(rpath), receipt)
+    success(f"AstroLog receipt saved → {scope_name}/{os.path.basename(rpath)}")
+    return rpath
+
+def run_starfront_pull(project, dry_run=False, rehash_only=False, now=None, have_lock=False):
+    """--starfront-pull PROJECT [--dry-run] [--rehash-only]. Every guard is
+    checked again at the start (the pause flag, a telescope the importer has
+    met, daytime at the site, the tunnel, the roof closed for two hours, the
+    import lock, the telescope is the one remembered, the project is there
+    and has subs); a dry run stops after saying what it would copy. Then the
+    copies (STARFRONT_WORKERS at once; this thread alone writes the ledger),
+    the second read of the source, the dark library, the receipt, the ship
+    and the push. Nothing on the telescope is written, renamed or deleted.
+    Returns {"ok", ...}; ok is False for a refusal, a pull that stopped, or
+    one that left a problem to look at. `have_lock`: the caller already
+    holds the import lock (the panel takes it for every job it runs), so it
+    is neither taken nor released here."""
+    tz = sf_require_zone("--starfront-pull")
+    for w in CONFIG_WARNINGS:
+        warn(w)
+    ok, why = _starfront_share_ok(STARFRONT_SHARE)
+    if not ok:
+        return _sf_pull_refused(why)
+    now_utc = now or _sf_now()
+    if now_utc.tzinfo is None:
+        now_utc = now_utc.replace(tzinfo=timezone.utc)
+    name = str(project or "").strip()
+    if not name:
+        return _sf_pull_refused("no project was named. Say which, for example --starfront-pull \"M 45_mosaic\".")
+    why, facts = sf_pull_guards(now_utc, tz)
+    if why:
+        return _sf_pull_refused(why)
+    if have_lock:
+        return _sf_pull_locked(name, dry_run, rehash_only, now_utc, tz, facts)
+    if not acquire_lock("starfront-pull"):
+        return _sf_pull_refused("another job holds the import lock (it is named above). Wait for it to "
+                                "finish, then pull.")
+    try:
+        return _sf_pull_locked(name, dry_run, rehash_only, now_utc, tz, facts)
+    finally:
+        release_lock()
+
+def _sf_pull_locked(name, dry_run, rehash_only, now_utc, tz, facts):
+    state = State()
+    if getattr(state, "ledger_corrupt", False):
+        return _sf_pull_refused("this computer's ledger can't be read. Restore it first, then pull.")
+    if state.ledger is not None and state.ledger_too_new():
+        return _sf_pull_refused("this computer's ledger was written by a newer importer. Update this copy "
+                                "first, then pull.")
+    if state.ledger is None:
+        if os.path.isfile(os.path.join(MIRROR_DIR, "ledger.json")):
+            return _sf_pull_refused("this computer has no ledger, but its mirror folder holds one. Restore it "
+                                    "first (--restore-ledger), then pull.")
+        if not dry_run:
+            state.new_ledger()
+    dest_root = SEESTAR_DEST_S50PRO_STARFRONT
+    sf_guard_write(dest_root)
+    try:
+        listing = sf_signed_in(lambda: sf_list_share(STARFRONT_SHARE))
+        disk = sf_disk_usage(STARFRONT_SHARE)
+    except OSError as e:
+        return _sf_pull_refused(f"the telescope's share could not be listed ({e})."
+                                + (" The link dropped." if sf_is_link_drop(e) else ""))
+    inv = _read_json_file(sf_state_path(SF_INVENTORY_FILE))
+    inv = inv.get("entries") if inv.get("schema") == SF_INVENTORY_SCHEMA and isinstance(inv.get("entries"), dict) else {}
+    files, folders = listing["files"], listing.get("folders") or {}
+    seen = sf_device_fingerprint(listing["darkPairs"], disk[0] if disk else None)
+    verdict, overlap = sf_device_verdict(facts["remembered"], seen, files, inv)
+    if verdict == "wrong":
+        return {"ok": False, "refused": True, "wrongDevice": True,
+                "reason": sf_device_refusal(facts["remembered"], seen, overlap, inv, doing="copied")}
+    if verdict != "match":
+        return _sf_pull_refused("the telescope's dark library has changed since the last scan. Run a scan first "
+                                "(--starfront-scan), so the importer can check it is the same telescope, then pull.")
+    by_project = {}
+    for rel, (size, mtime_ns, proj, part) in files.items():
+        by_project.setdefault(proj, []).append((rel, size, mtime_ns, part))
+    proj = name if name in by_project else None
+    if proj is None:
+        close = [p for p in by_project if p.lower() == name.lower()]
+        proj = close[0] if len(close) == 1 else None
+    if proj is None:
+        have = ", ".join(sorted(by_project)) or "no projects at all"
+        return _sf_pull_refused(f"there is no project called {name!r} on the telescope. It holds: {have}.")
+    plan = sf_pull_plan(state, proj, by_project[proj], inv, tz, dest_root, folders)
+    if clean_target_name(plan["display"]) != plan["display"] or not sf_inside(plan["projectDir"], dest_root) \
+            or os.path.normpath(plan["projectDir"]) == os.path.normpath(dest_root):
+        return _sf_pull_refused(f"the project's name ({proj}) can't be used as a folder name on this computer.")
+    if plan["stacksOnly"]:
+        return _sf_pull_refused(f"{proj} holds only the Seestar's own stacks, with no saved subs, so there is "
+                                f"no project to pull.")
+    if not plan["items"]:
+        return _sf_pull_refused(f"{proj} has no FITS files on the telescope yet, so there is nothing to pull.")
+    workers = STARFRONT_WORKERS
+    todo = plan["todo"]
+    n_home = sum(1 for i in plan["items"] if i["home"] == "yes")
+    total_bytes = sum(i["size"] for i in todo)
+    free = sf_local_free(dest_root)
+    margin = 0 if TEST_ROOT else SF_LOCAL_FREE_MARGIN         # (a test's disk is a temp folder, as for the ship)
+    if free is not None and not rehash_only and total_bytes and free - total_bytes < margin:
+        return _sf_pull_refused(f"this computer has {human_size(free)} free where the frames go ({dest_root}), and "
+                                f"{proj} needs {human_size(total_bytes)} with {human_size(margin)} to spare. Make "
+                                f"room first, then pull.")
+    nights = sorted({i["night"] for i in todo if i["kind"] == "sub" and i["night"]})
+    info(f"{proj} → {plan['projectDir']}")
+    info(f"{len(todo)} file{'' if len(todo) == 1 else 's'} to bring home ({human_size(total_bytes)}, "
+         f"{len(nights)} night{'' if len(nights) == 1 else 's'}); {n_home} already home and checked.")
+    for night in sorted(plan["days"]):
+        group = [i for i in todo if i["kind"] == "sub" and (i["night"] or "") == night]
+        log(f"{plan['subLabel']} Day {plan['days'][night]}" + (f" (night of {night})" if night else " (night unknown)")
+            + f": {len(group)} sub{'' if len(group) == 1 else 's'}, {human_size(sum(i['size'] for i in group))}")
+    for kind, word in (("stack", "stack"), ("panel", "mosaic panel")):
+        group = [i for i in todo if i["kind"] == kind]
+        if group:
+            log(f"{len(group)} {word}{'' if len(group) == 1 else 's'}, {human_size(sum(i['size'] for i in group))}")
+    for rel, what in plan["problems"]:
+        warn(f"{rel}: {what}")
+    if rehash_only:
+        return _sf_rehash_only(state, plan, proj, dest_root, workers, dry_run, now_utc)
+    if dry_run:
+        dark = sf_pull_darklibrary(dest_root, workers, dry_run=True)
+        log(f"dark library: {dark.get('wouldCopy', 0)} of {dark['files']} file{'' if dark['files'] == 1 else 's'} "
+            f"would be copied to {os.path.join(dest_root, 'darklibrary')} ({human_size(dark['bytes'])})")
+        info("Dry run: every guard passed. Nothing was copied and nothing was changed.")
+        return {"ok": True, "dryRun": True, "project": proj, "wouldCopy": len(todo), "bytes": total_bytes,
+                "nights": nights, "dest": plan["projectDir"], "alreadyHome": n_home,
+                "days": {k: v for k, v in plan["days"].items()}, "darkWouldCopy": dark.get("wouldCopy", 0)}
+    # ── the copies ──
+    status = sf_status_read()
+    rec = status["projects"].setdefault(proj, {})
+    before_status = rec.get("status") if rec.get("status") not in ("pulling",) else rec.get("statusBeforePull")
+    rec.update({"status": "pulling", "pullPid": os.getpid(), "pullStartedAt": _utc_iso(),
+                "statusBeforePull": before_status})
+    sf_status_write(status)
+    copied, problems = [], list(plan["problems"])
+    _SF_ACTIVE.update(now=0, max=0)
+    run = {"stopped": None, "maxActive": 0, "drops": 0}
+    reread = {"proven": 0, "already": 0, "unproven": 0, "mismatch": [], "stopped": None, "read": None, "changed": 0}
+    dark = {"files": 0, "copied": 0, "bytes": 0, "kept": 0, "problems": [], "stopped": None}
+    try:
+        _sf_local_makedirs(dest_root)
+        for d in sorted({i["destDir"] for i in todo}):
+            _sf_local_makedirs(d)
+
+        def on_ok(it, res):
+            if res["localSha"] != res["sha"] or res["localSize"] != res["size"] or res["size"] != it["size"]:
+                # the copy on this computer does not read back as it was written
+                # (or the telescope's file is not the size it was listed at):
+                # it is set aside, never recorded, and the telescope keeps its file
+                aside = None
+                try:
+                    aside = sf_set_aside(it["dst"], dest_root)
+                except (OSError, StarfrontRefused) as ex:
+                    warn(f"{it['filename']}: the copy could not be set aside ({ex}).")
+                why_ = ("the local copy did not read back the same a second time" if res["size"] == it["size"]
+                        else f"the telescope's file was {res['size']} bytes, not the {it['size']} listed")
+                problems.append((it["rel"], f"{why_}; set aside" + (f" ({aside})" if aside else "")))
+                warn(f"{it['filename']}: {why_}. It was set aside and not recorded; the file stays on the "
+                     f"telescope. Pull again to fetch it afresh.")
+                state.history_event("starfront-pull-problem", file=it["rel"], why=why_, setAside=aside)
+                return
+            sf_ledger_row(state, it, plan, res)
+            copied.append(it)
+            if len(copied) % SF_LEDGER_SAVE_EVERY == 0:
+                state.save_ledger()                          # an interrupted pull keeps what it finished
+            if len(copied) % 10 == 0 or len(copied) == len(todo):
+                show_progress(len(copied), len(todo))
+
+        def on_problem(it, ex):
+            problems.append((it["rel"], str(ex)))
+            warn(f"Copy FAILED for {it['filename']}: {ex}")
+
+        if todo:
+            run = sf_run_jobs(todo, _sf_copy_work, workers, on_ok, on_problem, doing="copying")
+            run["maxActive"] = _SF_ACTIVE["max"]
+        state.save_ledger()
+        if copied:
+            state.history_event("import", device="seestar", target=proj, displayName=plan["display"],
+                                scope=STARFRONT_CAMERA.replace("ZWO ", ""), frames=len(copied),
+                                site=STARFRONT_SITE, via="starfront-pull")
+        if copied:
+            success(f"{len(copied)} file{'' if len(copied) == 1 else 's'} came home and "
+                    f"{'was' if len(copied) == 1 else 'were'} checked twice on this computer "
+                    f"({human_size(sum(i['size'] for i in copied))}).")
+        if run["stopped"]:
+            warn(f"The pull stopped: {run['stopped']}.")
+        else:
+            # ── the second read of the source, then the dark library ──
+            reread = sf_source_rehash(state, plan, dest_root, workers)
+            state.save_ledger()
+            for rel in reread["mismatch"]:
+                problems.append((rel, "read again from the telescope it was not the file that was copied; "
+                                      "the copy was set aside"))
+            if not reread["stopped"]:
+                dark = sf_pull_darklibrary(dest_root, workers)
+    finally:
+        # whatever happened, the ledger holds what finished and the project is
+        # no longer marked as being pulled
+        try:
+            state.save_ledger()
+        finally:
+            home = sf_project_home(state, plan)
+            status = sf_status_read()
+            rec = status["projects"].setdefault(proj, {})
+            rec.pop("pullPid", None)
+            rec.update({"pulled": {"files": home["files"], "hours": home["hours"], "subs": home["subs"],
+                                   "of": home["of"]},
+                        "sourceRehashed": home["sourceRehashed"], "pulledAt": _utc_iso(),
+                        "status": "pulled-awaiting-clear" if home["allHome"] else (rec.get("statusBeforePull") or "collecting")})
+            rec.pop("statusBeforePull", None)
+            if home["allHome"]:
+                rec["pulledSignature"] = plan["signature"]
+            if dark.get("files") or dark.get("copied"):
+                status["darklibrary"] = {"files": dark["files"], "copied": dark["copied"], "kept": dark["kept"],
+                                         "at": _utc_iso(), "folder": os.path.join(dest_root, "darklibrary")}
+            sf_status_write(status)
+    stopped = run["stopped"] or reread["stopped"] or dark.get("stopped")
+    for rel, what in dark.get("problems") or []:
+        problems.append((rel, what))
+        warn(f"{rel}: {what}")
+    if dark.get("files"):
+        info(f"Dark library: {dark['copied']} file{'' if dark['copied'] == 1 else 's'} copied, {dark['kept']} "
+             f"already here ({os.path.join(dest_root, 'darklibrary')}).")
+    sf_say_source_check(reread, home)
+    if copied:
+        sf_write_receipt(state, plan, copied, home, complete=home["allHome"], now_utc=now_utc)
+    shipped = ship_after_import(state) if copied else None
+    if shipped is not True:
+        state.publish_mirror()
+        rebuild_projects_quietly(state)
+    if stopped:
+        text = (f"{proj}: the pull stopped part way. {home['files']} of {home['of']} files are home and recorded. "
+                f"Run it again to carry on from there.")
+        error(text)
+        notify_push("Starfront", text)
+        notify(text, "Starfront")
+    elif home["allHome"] and (copied or reread["proven"]):
+        text = f"{proj} pulled and verified" if home["allProven"] else f"{proj} pulled; source check still to do"
+        success(text + f" ({home['files']} files, {home['hours']:.1f} h).")
+        notify_push("Starfront", text)
+        notify(text, "Starfront")
+    elif home["allHome"]:
+        info(f"{proj}: everything on the telescope is already home ({home['files']} files, {home['hours']:.1f} h)."
+             + ("" if home["allProven"] else " The source check is still to do."))
+    if problems:
+        text = (f"{proj}: {len(problems)} file{' needs' if len(problems) == 1 else 's need'} a look after the pull "
+                f"(listed in the importer's output). Nothing on the telescope was changed.")
+        warn(text)
+        if not stopped:
+            notify_push("Starfront", text)
+            notify(text, "Starfront")
+    return {"ok": not stopped and not problems, "project": proj, "copied": len(copied),
+            "skipped": n_home, "problems": problems, "stopped": stopped, "home": home, "reread": reread,
+            "maxActive": run.get("maxActive", 0), "drops": run.get("drops", 0), "dark": dark,
+            "dest": plan["projectDir"], "shipped": shipped}
+
+def sf_say_source_check(reread, home):
+    """The source check's line, in plain words."""
+    if reread["mismatch"]:
+        warn(f"Source check: {len(reread['mismatch'])} file{'' if len(reread['mismatch']) == 1 else 's'} did not "
+             f"read the same from the telescope a second time (set aside, see above).")
+    if home["allProven"] and (reread["proven"] or not reread["already"]):
+        success(f"Source check: all {home['of']} files read again from the telescope and matched.")
+    elif home["allProven"]:
+        info(f"Source check: already done for all {home['of']} files (nothing was read again).")
+    elif reread["read"] is not None and reread["read"] != "unbuffered":
+        info("Source check: this computer read the telescope's file through its own cache, so the second read "
+             "proves nothing here and was not counted"
+             + (" (the share would not allow a read past the cache)." if IS_WINDOWS
+                else ". Only the Windows PC can read past the cache."))
+    elif reread["stopped"]:
+        info(f"Source check: stopped part way ({home['sourceRehashed']} of {home['of']} files proven). "
+             f"Run --starfront-pull with --rehash-only to finish it.")
+    elif home["of"]:
+        info(f"Source check: {home['sourceRehashed']} of {home['of']} files proven. "
+             f"Run --starfront-pull with --rehash-only to finish it.")
+
+def _sf_rehash_only(state, plan, proj, dest_root, workers, dry_run, now_utc):
+    """--rehash-only: the second read of the source by itself, for a
+    project already home (it doubles the traffic, so it may run another day)."""
+    before = sf_project_home(state, plan)
+    if dry_run:
+        info(f"Dry run: {before['files'] - before['sourceRehashed']} of {before['files']} files that are home would "
+             f"be read again from the telescope. Nothing was read and nothing was changed.")
+        return {"ok": True, "dryRun": True, "project": proj, "wouldRead": before["files"] - before["sourceRehashed"]}
+    if not before["files"]:
+        return _sf_pull_refused(f"nothing of {proj} is home yet, so there is nothing to check. Pull it first.")
+    info(f"{proj}: the source check only; nothing is copied.")
+    reread = sf_source_rehash(state, plan, dest_root, workers)
+    state.save_ledger()
+    home = sf_project_home(state, plan)
+    status = sf_status_read()
+    rec = status["projects"].setdefault(proj, {})
+    rec.update({"pulled": {"files": home["files"], "hours": home["hours"], "subs": home["subs"], "of": home["of"]},
+                "sourceRehashed": home["sourceRehashed"]})
+    if home["allHome"]:
+        rec.update({"status": "pulled-awaiting-clear", "pulledSignature": plan["signature"]})
+    elif rec.get("status") == "pulled-awaiting-clear":
+        rec["status"] = "collecting"                         # a copy was set aside: no longer all home
+    sf_status_write(status)
+    sf_say_source_check(reread, home)
+    state.publish_mirror()
+    rebuild_projects_quietly(state)
+    if home["allProven"] and reread["proven"]:
+        text = f"{proj} pulled and verified"
+        notify_push("Starfront", text)
+        notify(text, "Starfront")
+    if reread["stopped"]:
+        error(f"{proj}: the source check stopped part way ({reread['stopped']}). {home['sourceRehashed']} of "
+              f"{home['of']} files are proven. Run it again to carry on.")
+    return {"ok": not reread["stopped"] and not reread["mismatch"], "project": proj, "rehashOnly": True,
+            "reread": reread, "home": home, "stopped": reread["stopped"]}
 
 # ── the record: the `starfront` section and the unit card ────────────────────
 
@@ -14289,7 +15915,32 @@ def starfront_section(now=None):
     if roof_rows:
         last = roof_rows[-1]
         roof = {"state": last.get("state"), "since": last.get("since"), "readAt": last.get("at")}
-    projects = [p for p in scan["projects"] if isinstance(p, dict)]
+    projects = []
+    for p in scan["projects"]:
+        if not isinstance(p, dict):
+            continue
+        # Phase 2: what a pull has brought home, and where the project stands,
+        # from the status file (a pull writes it; the scan file may be older)
+        p = dict(p)
+        sp = st["projects"].get(p.get("name"))
+        sp = sp if isinstance(sp, dict) else {}
+        pulled = sp.get("pulled") if isinstance(sp.get("pulled"), dict) else {}
+        p["pulled"] = {"files": int(pulled.get("files") or 0), "hours": float(pulled.get("hours") or 0)}
+        p["sourceRehashed"] = int(sp.get("sourceRehashed") or 0)
+        p["pulledAt"] = sp.get("pulledAt")
+        p.setdefault("flagNotes", {})
+        if p.get("status") != "stacks-only":
+            if sp.get("status") == "pulling" and pid_alive(sp.get("pullPid")):
+                p["status"], p["eta"] = "pulling", None
+            elif sp.get("status") == "pulled-awaiting-clear" and sp.get("pulledSignature") \
+                    and sp.get("pulledSignature") == p.get("signature"):
+                p["status"], p["eta"] = "pulled-awaiting-clear", None
+            elif p.get("status") in ("pulling", "pulled-awaiting-clear"):
+                # the scan file says so, but the status file no longer does
+                tgt = float(p.get("targetHours") or 0)
+                p["status"] = "ready" if tgt and float(p.get("hours") or 0) >= tgt else "collecting"
+        projects.append(p)
+    dev = st.get("device") if isinstance(st.get("device"), dict) else {}
     nights_log = []
     if tz is not None:
         captured = {}
@@ -14318,7 +15969,16 @@ def starfront_section(now=None):
             "paused": sf_flag(SF_PAUSE_FLAG), "clock": scan.get("clock") or SF_CLOCK_NOTE,
             "storage": scan.get("storage") or {}, "roof": roof, "projects": projects,
             "nightsLog": nights_log, "darklibrary": scan.get("darklibrary") or {},
-            "share": scan.get("share"), "incomplete": bool(scan.get("incomplete"))}
+            "share": scan.get("share"), "incomplete": bool(scan.get("incomplete")),
+            # Phase 2: which telescope the importer remembers, a wrong device seen
+            # at its address, and the night the last daily scan was for
+            "device": {"remembered": isinstance(dev.get("darkHash"), str) and not dev.get("acceptNext"),
+                       "words": sf_device_words(dev) if isinstance(dev.get("darkHash"), str) else None,
+                       "rememberedAt": dev.get("rememberedAt"),
+                       "mismatchAt": (st.get("deviceMismatch") or {}).get("at")
+                       if isinstance(st.get("deviceMismatch"), dict) else None},
+            "dailyScanNight": st.get("dailyScanNight"),
+            "darklibraryHome": st.get("darklibrary") if isinstance(st.get("darklibrary"), dict) else None}
 
 def sf_unit_rows(section, sid, scope_name):
     """The Starfront projects as the (programme, {night: {hours, frames}})
@@ -14327,10 +15987,18 @@ def sf_unit_rows(section, sid, scope_name):
     DESIGN.md's words."""
     rows = []
     for p in section.get("projects") or []:
-        status = "ready_to_process" if p.get("status") == "ready" else "capturing"
+        if p.get("status") == "stacks-only":
+            continue                    # the Seestar's own stacks with no subs: no hours, not a dataset
+        status = "ready_to_process" if p.get("status") in ("ready", "pulled-awaiting-clear") else "capturing"
         hours, target = float(p.get("hours") or 0), float(p.get("targetHours") or 0)
         eta = p.get("eta") if isinstance(p.get("eta"), dict) else None
-        if status == "ready_to_process":
+        if p.get("status") == "pulled-awaiting-clear":
+            nxt = f"Home and checked · {hours:.1f} h · waiting for the clear"
+            reason = f"pulled · {hours:.1f} h home from the Starfront Seestar"
+        elif p.get("status") == "pulling":
+            nxt = f"Being pulled now · {hours:.1f} of {target:g} h"
+            reason = f"pulling · {hours:.1f} of {target:g} h on the Starfront Seestar"
+        elif status == "ready_to_process":
             nxt = f"Ready to pull · {hours:.1f} of {target:g} h"
             reason = f"ready · {hours:.1f} of {target:g} h on the Starfront Seestar"
         else:
@@ -14344,30 +16012,52 @@ def sf_unit_rows(section, sid, scope_name):
                 "hours": round(hours, 2), "lights": int(p.get("subs") or 0), "nights": len(p.get("nights") or []),
                 "firstNight": p.get("firstNight"), "lastNight": p.get("lastNight"),
                 "readySince": ready_since, "reason": reason, "nextAction": nxt, "calMissing": False,
-                "mosaic": bool(p.get("mosaic")), "starfront": True,
+                "mosaic": bool(p.get("mosaic")), "starfront": True, "sfStatus": p.get("status"),
                 "name": p.get("name"), "targetHours": target, "percent": p.get("percent"), "flags": list(p.get("flags") or [])}
         nights = {n["night"]: {"hours": float(n.get("hours") or 0), "frames": int(n.get("subs") or 0)}
                   for n in (p.get("nights") or []) if isinstance(n, dict) and isinstance(n.get("night"), str)}
         rows.append((prog, nights))
     return rows
 
-def sf_unit_and_scope(section, contract, units, out_scopes, in_window):
-    """The Starfront unit card and scope entry for the record, built from the
-    section while no ledger rows resolve to the Starfront scope (once Phase
-    2's pulls write rows, the ordinary unit logic takes over and nothing is
-    added here). The card goes after the home S50 Pro's. Returns
-    (units, scopes) with the additions in place."""
-    if not section or not section.get("projects"):
+def sf_unit_and_scope(section, contract, units, out_scopes, in_window, unit_rows=None):
+    """The Starfront unit card and scope entry for the record. While no
+    ledger rows resolve to the Starfront scope they are built from the scan
+    alone and the card goes after the home S50 Pro's. Once a pull has
+    written rows (Phase 2) the ordinary unit logic has already made a card
+    and a scope from the ledger: then the card is rebuilt from both sources,
+    so nothing still on the telescope drops off it. A project the telescope
+    is still collecting (or that waits to be pulled, or is being pulled) is
+    shown by the scan's facts; a project that is home is shown by its ledger
+    rows, with its ledger hours. `unit_rows` are the record's (scope id,
+    programme, nights) rows. Returns (units, scopes)."""
+    if not section:
         return units, out_scopes
     entry = next((s for s in (contract.get("scopes") or []) if isinstance(s, dict)
                   and (s.get("match") or {}).get("camera") == section.get("camera")), None)
     sid = (entry or {}).get("id") or SF_UNIT_ID
     name = str((entry or {}).get("name") or str(section.get("camera") or "").replace("ZWO ", ""))
     colour = OBS_COLOURS.get(str((entry or {}).get("colour") or "").lower())
-    if any(u.get("id") == sid for u in units) or any(s.get("id") == sid for s in out_scopes):
-        return units, out_scopes
+    have_unit = any(u.get("id") == sid for u in units)
+    have_scope = any(s.get("id") == sid for s in out_scopes)
+    if not section.get("projects") and not (have_unit or have_scope):
+        return units, out_scopes                  # nothing on the telescope and nothing pulled: no card
     rows = sf_unit_rows(section, sid, name)
     me = {"id": sid, "name": name, "colour": colour}
+    if have_unit or have_scope:
+        ledger = [(prog, nights) for s_id, prog, nights in (unit_rows or []) if s_id == sid]
+        live = [(prog, nights) for prog, nights in rows if prog.get("sfStatus") in ("collecting", "ready", "pulling")]
+        live_tids = {prog.get("tid") for prog, _n in live}
+        ledger_tids = {prog.get("tid") for prog, _n in ledger}
+        kept = [(prog, nights) for prog, nights in ledger if prog.get("tid") not in live_tids]
+        rest = [(prog, nights) for prog, nights in rows
+                if prog.get("sfStatus") not in ("collecting", "ready", "pulling") and prog.get("tid") not in ledger_tids]
+        unit = _obs_unit(sid, SF_UNIT_LABEL, name, "seestar", [me], {sid: kept + live + rest}, in_window)
+        unit.update({"site": STARFRONT_SITE, "starfront": True, "short": "SF S50P"})
+        units = [u for u in units if u.get("id") != sid]
+        pos = next((i + 1 for i, u in enumerate(units) if u.get("id") == "S50P"), len(units))
+        units = units[:pos] + [unit] + units[pos:]
+        out_scopes = [dict(s, site=STARFRONT_SITE, starfront=True) if s.get("id") == sid else s for s in out_scopes]
+        return units, out_scopes
     unit = _obs_unit(sid, SF_UNIT_LABEL, name, "seestar", [me], {sid: rows}, in_window)
     unit["site"] = STARFRONT_SITE
     unit["starfront"] = True
@@ -14402,7 +16092,11 @@ def starfront_panel_status():
             "tunnelLastOk": st["tunnel"].get("lastOk"), "tunnelReason": st["tunnel"].get("lastReason"),
             "vpnMode": STARFRONT_VPN_MODE, "hold": sf_flag(SF_VPN_HOLD_FLAG), "paused": sf_flag(SF_PAUSE_FLAG),
             "roof": rows[-1].get("state") if rows else None, "roofReadAt": rows[-1].get("at") if rows else None,
-            "storage": scan.get("storage") if scan.get("schema") == SF_SCAN_SCHEMA else None}
+            "storage": scan.get("storage") if scan.get("schema") == SF_SCAN_SCHEMA else None,
+            # Phase 2: the telescope remembered, the last daily scan, a pull under way
+            "device": sf_device_words(st.get("device")) if sf_device_remembered(st) else None,
+            "deviceMismatchAt": (st.get("deviceMismatch") or {}).get("at") if isinstance(st.get("deviceMismatch"), dict) else None,
+            "dailyScanNight": st.get("dailyScanNight"), "pulling": sf_pull_running(st)}
 
 
 def run_projects(state, extra_ledgers=(), dry_run=False):
@@ -14613,7 +16307,18 @@ def main():
                    help="Starfront: the hours a project is measured against (0 removes the override)")
     p.add_argument("--starfront-watch", action="store_true",
                    help="Starfront (PC), every 20 minutes: at night read the roof and say when "
-                        "the Seestar has gone silent; in daytime exit at once")
+                        "the Seestar has gone silent; run the scan once a day (after the roof "
+                        "closes, or at sunrise); otherwise exit at once in daytime")
+    p.add_argument("--starfront-pull", metavar="PROJECT",
+                   help="Starfront (PC): copy one project's FITS home from the hosted Seestar, "
+                        "verified, in Texas daytime with the roof closed; with --dry-run only "
+                        "says what it would copy; nothing on the telescope is changed")
+    p.add_argument("--rehash-only", action="store_true",
+                   help="with --starfront-pull: only read the project's files again from the "
+                        "telescope and compare (the proof a later clear needs); copies nothing")
+    p.add_argument("--starfront-accept-device", action="store_true",
+                   help="Starfront: forget the telescope the importer remembers, so the next scan "
+                        "remembers the one it finds (after a replaced or wiped unit)")
     args = p.parse_args()
     VERBOSE = args.verbose
 
@@ -14669,6 +16374,17 @@ def main():
     if args.starfront_watch:
         _starfront_role("--starfront-watch")
         sys.exit(0 if run_starfront_watch().get("ok") else 1)
+    if args.starfront_accept_device:
+        _starfront_role("--starfront-accept-device")
+        sys.exit(0 if run_starfront_accept_device() else 1)
+    if args.starfront_pull is not None:
+        # (the pull takes the import lock and loads the ledger under it itself)
+        _starfront_role("--starfront-pull")
+        r = run_starfront_pull(args.starfront_pull, dry_run=args.dry_run, rehash_only=args.rehash_only)
+        sys.exit(0 if r.get("ok") else 1)
+    if args.rehash_only:
+        error("--rehash-only goes with --starfront-pull PROJECT.")
+        sys.exit(2)
 
     refresh_camera_volumes(force=True)
 

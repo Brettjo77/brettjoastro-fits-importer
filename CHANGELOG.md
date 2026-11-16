@@ -1,5 +1,21 @@
 # Changelog
 
+## 1.10.3 (2026-11-16): the Starfront pull, and a telescope-identity check
+
+The first real scan of Brett's hosted Seestar (and a scare: its network address had changed, and the old address now answers as a different owner's empty Seestar) drove this release.
+
+- **It checks the device is your telescope.** The scan remembers a fingerprint of the Seestar (its dark library and its storage size) and refuses to count, copy or clear anything if the device at the address is not the one it knows. It stops, says so, raises an alarm (the status line, a notification, a push) and changes nothing. `--starfront-accept-device` is the way to tell it a telescope was genuinely replaced. This is exactly the situation of 16 Nov, when the old address silently became a stranger's scope.
+- **`--starfront-pull PROJECT`** brings one project's frames home to the PC. It copies the FITS only, each file verified as it copies and read back once on this computer, then every file read again from the telescope to prove the copy, before a receipt, a ship to the archive and a push. A dry run (`--dry-run`) shows what it would do and changes nothing; `--rehash-only` runs the telescope re-read alone. Nothing is ever deleted, renamed or written on the telescope: the clear is a later phase. It refuses unless the device matches, the tunnel is up, the roof has been closed two hours, it is Texas daytime, no pause flag is set and the import lock is free.
+- **The scan runs once a day, not every two hours** (Brett, 16 Nov), at the first check after the roof closes for the night, or at Texas dawn. The twenty-minute watch still runs and still sends the "roof open but the Seestar is quiet" push. The two-hourly task is gone; the installer removes it.
+- **Smaller things:** a stacks-only folder shows as "stacks only", not a project at 0 of 20 hours; "mixed settings" now says what is mixed; the importer signs in to the Seestar's share as guest by itself; the dark library is copied home and can never be deleted by anything; a new workbench folder, "Seestar S50 Pro (Starfront)", and the archive root "S50P-Starfront" keep the hosted scope's frames apart from the home S50 Pro's.
+- Chain SF in the engine suite grew from 49 to 115 checks, including a source-level proof that nothing in the Starfront code can write to or delete from the telescope.
+
+Mac / Windows: the pull and the daily scan are the PC's, as the scan is. On a Mac the Starfront commands say so and exit.
+
+Not in this release: the clear (deleting a verified project from the telescope), the Observatory's Pull button and its phase-2 card, and the morning digest. These wait for Brett's first confirmed pull.
+
+1044 end-to-end checks (811 engine + 233 panel). On Linux here: engine 802 passed, 4 skipped, the five Mac/PC-only lines as before; panel 233 passed.
+
 ## 1.10.2 (2026-11-16): "only on the Mac" is said only of frames that are on the Mac
 
 On Brett's Mac the line at the top read "421 frames only on the Mac" after everything had shipped and been checked. None of the 421 was on the Mac: 376 light frames and 45 stacks that the importer had once copied, verified and cleared from a Seestar, and that were later moved or deleted by hand without ever being recorded on the archive. The ledger never forgets a row, so the line kept counting them as if they sat on the Mac at risk.

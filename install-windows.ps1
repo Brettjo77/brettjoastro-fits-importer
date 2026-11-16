@@ -277,21 +277,32 @@ if ($archiveSet) {
 }
 
 # ── 6b. The Starfront source (1.10.0): read only, as you ────────────────────
-# "Astro Starfront scan" (every 2 hours) lists the hosted Seestar's share over
-# the WireGuard tunnel and counts hours per project; "Astro Starfront watch"
-# (every 20 minutes) reads the roof at night and says when the Seestar has gone
-# silent, and exits at once in daytime. Both run as you with limited rights:
-# the tunnel service must start by itself (one admin command, see the install
-# notes), because a limited task may not start a service. Nothing is pulled or
-# deleted in Phase 1.
-$t = New-ScheduledTaskTrigger -Daily -At 00:00
-$t.Repetition = (New-ScheduledTaskTrigger -Once -At 00:00 -RepetitionInterval (New-TimeSpan -Hours 2) -RepetitionDuration (New-TimeSpan -Days 1)).Repetition
-$set = New-ScheduledTaskSettingsSet -StartWhenAvailable -ExecutionTimeLimit (New-TimeSpan -Hours 1) -MultipleInstances IgnoreNew -AllowStartIfOnBatteries -DontStopIfGoingOnBatteries
-Register-AstroTask 'Astro Starfront scan' '--starfront-scan' @($t) $set "Starfront scan every 2 hours (hours per project on the hosted Seestar, read only)" "The Observatory will not see the Starfront Seestar until it is." | Out-Null
+# One task, "Astro Starfront watch" (every 20 minutes): at night it reads the
+# roof and says when the hosted Seestar has gone silent; once a day (when the
+# roof has closed, or at sunrise at the site) it lists the Seestar's share over
+# the WireGuard tunnel and counts hours per project; otherwise it exits at once
+# in daytime. It runs as you with limited rights: the tunnel service must start
+# by itself (one admin command, see the install notes), because a limited task
+# may not start a service. A pull is only ever started by you.
+# The two-hourly "Astro Starfront scan" task of the first 1.10.0 install is not
+# used any more (the watch runs the scan once a day): it is taken away here
+# when it is there, and nothing is said when it is not.
+$oldScan = 'Astro Starfront scan'
+if (Get-ScheduledTask -TaskName $oldScan -ErrorAction SilentlyContinue) {
+    try {
+        Unregister-ScheduledTask -TaskName $oldScan -Confirm:$false -ErrorAction Stop
+        Ok "The two-hourly Starfront scan task is removed (the watch runs the scan once a day now)"
+    } catch {
+        Warn "Could not remove the old '$oldScan' task ($($_.Exception.Message))."
+        Warn "If it was set up from an administrator window, open PowerShell as administrator, run:"
+        Warn "  Unregister-ScheduledTask -TaskName '$oldScan' -Confirm:`$false"
+        Warn "then close that window. Until then the scan also runs every 2 hours, which does no harm."
+    }
+}
 $t = New-ScheduledTaskTrigger -Daily -At 00:00
 $t.Repetition = (New-ScheduledTaskTrigger -Once -At 00:00 -RepetitionInterval (New-TimeSpan -Minutes 20) -RepetitionDuration (New-TimeSpan -Days 1)).Repetition
 $set = New-ScheduledTaskSettingsSet -StartWhenAvailable -ExecutionTimeLimit (New-TimeSpan -Minutes 10) -MultipleInstances IgnoreNew -AllowStartIfOnBatteries -DontStopIfGoingOnBatteries
-Register-AstroTask 'Astro Starfront watch' '--starfront-watch' @($t) $set "Starfront watch every 20 minutes (the roof and a silent Seestar at night; nothing in daytime)" "No 'Seestar silent' alert will come until it is." | Out-Null
+Register-AstroTask 'Astro Starfront watch' '--starfront-watch' @($t) $set "Starfront watch every 20 minutes (the roof and a silent Seestar at night, the scan once a day; nothing else in daytime)" "No 'Seestar silent' alert and no daily scan will come until it is." | Out-Null
 
 # ── 7. The archive PC's own jobs (1.7.0): Python, as you ────────────────────
 # "Astro archive sweep" (logon and 03:30) checks every shipped frame from this
