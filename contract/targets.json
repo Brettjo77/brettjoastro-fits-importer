@@ -1680,6 +1680,22 @@
    "dec": null,
    "type": "Planet",
    "constellation": null
+  },
+  {
+   "id": "NGC7331",
+   "name": "Deer Lick Galaxy",
+   "codes": [
+    "NGC 7331",
+    "C 30"
+   ],
+   "aliases": [
+    "Deer Lick Galaxy",
+    "Deer Lick Group"
+   ],
+   "ra": 22.618,
+   "dec": 34.42,
+   "type": "Galaxy",
+   "constellation": "Pegasus"
   }
  ]
 }
