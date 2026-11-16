@@ -1,5 +1,22 @@
 # Changelog
 
+## 1.10.1 (2026-11-16): three guards, after the archive's records folder was moved
+
+What happened. On 31 Oct the archive's `_verify` folder was moved into a tidy-up folder by hand. `_verify` is the importer's memory on the archive: each computer's ship log, the PC's proof of which copies it has re-checked, and each computer's record for the other to read. The importer found none and started an empty one without a word. For sixteen days the PC's nightly job failed at its project list and nobody was told; the Observatory on the PC stood at 31 Oct. Separately, the Mac's twice-daily ship had sat installed but not loaded since 11 Oct, behind a green install check, so frames reached the archive only through the panel's ship after an import. No frame was lost by either. Found on 16 Nov by a check of both computers.
+
+- **A note in `_verify`.** The PC leaves `READ ME - do not move this folder.txt` there: what the folder is, that it must stay exactly where it is, and what to do if it has been moved. Made once, by the PC only, never rewritten.
+- **Lost history is an alarm.** Each computer remembers how big its own logs on the archive were (its ship log; on the PC the sweep's `verified.jsonl` too), in `archive-watch.json` in its state folder. Those files only ever grow, so smaller or gone means `_verify` was moved, renamed or replaced. The ship looks (both computers), and the PC's five-minute tick and its nightly. An archive that simply isn't reachable is never an alarm. While it stands: the status line leads with "Check the archive: its records folder (_verify) has lost history" in the panel's header, `--status` and the Observatory's status line (amber, never "safe"); a notification and a push (when `NOTIFY_PUSH_URL` is set), said again once a day; the install check prints it in full. It clears by itself when the folder is back. Nothing is refused: a ship carries on. A dry run says it and keeps nothing.
+- **A failed nightly is an alarm.** `_verify\pc\nightly-status.json` gains `failedRuns` (how many runs in a row) and each failed step's own words (`why`). A failure, other than "another job was running", raises "Check the PC's nightly job: it failed at projects (3 runs in a row)" the same way; a clean night clears it.
+- **Is the Mac's ship really loaded.** The install check asks launchd whether the camera watcher and the twice-daily ship are loaded; a job that is installed but not loaded is a FAIL with the line that loads it (skipped for the ship while the desktop app is in charge). The Mac installer no longer trusts `launchctl load`'s exit code (it prints "Load failed" and still exits 0): after each load it asks launchd whether the job is there, tries `bootstrap` once, and reports launchctl's own words as a problem.
+- **The panel:** a job started in the instant after the last one said "idle" (its lock not yet let go) no longer gets "The importer is busy (idle)"; it starts. Found by the panel suite on 16 Nov.
+- Chain GD in the engine suite (18 checks: 31 Oct replayed on a simulated archive for the Mac's ship and the PC's nightly, the note, the day-later repeat, the agents) and three GD checks in the panel suite.
+
+Mac / Windows: the alarm and the status line are the same on both. The note and the nightly alarm are the PC's (the Mac may not write in `_verify` itself, and the nightly is the PC's job). The loaded check is the Mac's; the Windows install check already asks Task Scheduler for its tasks.
+
+Not in this release: why macOS refused to load the ship agent after 1.7.0 (waiting for what `launchctl bootstrap` says on Brett's Mac), and the tool that joins the two `_verify` folders back into one.
+
+964 end-to-end checks (733 engine + 231 panel). On Linux here: engine 724 passed, 4 skipped, the five Mac/PC-only lines as before; panel 231 passed.
+
 ## 1.10.0 (2026-11-06): the Starfront source, phase 1 (read only)
 
 Brett's hosted Seestar S50 Pro at Starfront Observatories (Texas) joins the importer. Phase 1 looks and counts: nothing is downloaded, nothing on that Seestar is written or deleted, and the ledger is never touched. The pull (phase 2) and the clear (phase 3) are built after the first real scan has been read.

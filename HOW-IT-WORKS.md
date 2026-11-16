@@ -341,6 +341,8 @@ Before the ship existed, frames were moved from the Mac onto the archive by hand
 
 ## When things go wrong
 
+**The `_verify` folder on the archive must stay where it is.** It is the importer's memory there: each computer's ship log, the PC's proof of which copies it has read back, and each computer's record for the other to read. If it is moved, renamed or tidied away, no image is lost, but the importer can no longer tell what was shipped and checked, and the list of what is ready to process stops updating. From 1.10.1 the PC leaves a note inside it saying so, and both computers notice within a ship (the PC within five minutes): the line at the top of the panel and of the Observatory says "Check the archive: its records folder (_verify) has lost history", with a notification, until the folder is back where it was. The same goes for the PC's nightly job: when it fails, the line says which step, instead of failing quietly night after night. And the install check on the Mac now says whether the twice-daily ship is really loaded, not only installed.
+
 Interruptions are expected, not exceptional. A copy that dies mid-file leaves
 only a `.partial` that the next run overwrites — never a half-file counted
 as a backup. A resumed import picks up exactly where the last one stopped,

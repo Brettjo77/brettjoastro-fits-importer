@@ -218,6 +218,19 @@ if [ -z "$APP_OWNS" ] && pkill -f "[Pp]ython[^ ]* .*$HOME/bin/(asiair|astro)-app
     success "Stopped the running panel (the watcher starts the new one in a moment)"
 fi
 
+# 1.10.1: `launchctl load` prints "Load failed" and still exits 0, so its exit
+# code proves nothing: the ship agent sat unloaded from 11 Oct to 16 Nov 2026
+# behind a green "Loaded". Ask launchd whether the job is really there, and
+# when it is not, try the newer `bootstrap` once before saying so.
+agent_loaded() {    # $1 = label, $2 = plist
+    # awk reads the whole list (no early exit, so no broken pipe under pipefail)
+    if launchctl list 2>/dev/null | awk -v l="$1" '$3 == l { f = 1 } END { exit !f }'; then return 0; fi
+    BOOT_SAID=$(launchctl bootstrap "gui/$(id -u)" "$2" 2>&1) || true
+    if launchctl list 2>/dev/null | awk -v l="$1" '$3 == l { f = 1 } END { exit !f }'; then return 0; fi
+    LOAD_SAID="${LOAD_SAID:-$BOOT_SAID}"
+    return 1
+}
+
 info "Retiring old LaunchAgents (replaced by com.brettjohnson.astro-import)..."
 for label in com.brettjohnson.seestar-import com.brettjohnson.asiair-import; do
     plist_path="$LAUNCH_AGENTS_DIR/$label.plist"
@@ -239,10 +252,13 @@ if [ -z "$APP_OWNS" ]; then
         mkdir -p "$HOME/Library/Logs"
         sed "s|__HOME__|$SED_HOME|g" "$SCRIPT_DIR/com.brettjohnson.astro-import.plist" > "$new_plist"
         success "Installed com.brettjohnson.astro-import.plist → $new_plist"
-        if launchctl load "$new_plist" 2>/dev/null; then
+        LOAD_SAID=$(launchctl load "$new_plist" 2>&1) || true
+        if agent_loaded com.brettjohnson.astro-import "$new_plist"; then
             success "Loaded com.brettjohnson.astro-import"
         else
-            warn "Could not load com.brettjohnson.astro-import — may need to log out/in"
+            warn "macOS did not load com.brettjohnson.astro-import: ${LOAD_SAID:-it gave no reason}"
+            warn "  The panel will not start by itself until it is loaded. Try logging out and in, then run the install check."
+            FAILED=$((FAILED + 1))
         fi
     else
         warn "Source not found: com.brettjohnson.astro-import.plist — skipping"
@@ -280,10 +296,14 @@ elif [ -f "$SCRIPT_DIR/com.brettjohnson.astro-ship.plist" ]; then
     info "Installing the twice-daily ship agent (files verified frames to the PC archive)..."
     mkdir -p "$HOME/Library/Logs"
     sed "s|__HOME__|$SED_HOME|g" "$SCRIPT_DIR/com.brettjohnson.astro-ship.plist" > "$ship_plist"
-    if launchctl load "$ship_plist" 2>/dev/null; then
+    LOAD_SAID=$(launchctl load "$ship_plist" 2>&1) || true
+    if agent_loaded com.brettjohnson.astro-ship "$ship_plist"; then
         success "Loaded com.brettjohnson.astro-ship (09:00 and 21:00; mounts the share itself)"
     else
-        warn "Could not load com.brettjohnson.astro-ship — may need to log out/in"
+        warn "macOS did not load com.brettjohnson.astro-ship: ${LOAD_SAID:-it gave no reason}"
+        warn "  Until it is loaded nothing ships by itself (the panel still ships after each import)."
+        warn "  Try logging out and in, then run the install check: it says whether the job is loaded."
+        FAILED=$((FAILED + 1))
     fi
 else
     warn "Source not found: com.brettjohnson.astro-ship.plist — skipping"

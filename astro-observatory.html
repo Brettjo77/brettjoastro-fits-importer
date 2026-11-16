@@ -1354,6 +1354,7 @@ function statusLine(){
   const st=D.status, p=D.pendingImport; const upTo=D.recordsUpTo||(SESS.map(s=>s.night).sort().pop())||null; const upToTxt=upTo?"records up to "+fmtDate(upTo):"no nights on record";
   const facts=[]; let unchecked="";
   if(st){
+    if(st.alarm) facts.push(String(st.alarm));   /* 1.10.1: the archive's records lost history, or the PC's nightly failed */
     if(st.checked===false) unchecked="Couldn't check data safety: "+(st.reason?String(st.reason):"the importer didn't say why");
     else {
       if(+st.onlyHere>0) facts.push(fmtI(st.onlyHere)+" frames only on "+(st.machine?"the "+st.machine:"this computer"));

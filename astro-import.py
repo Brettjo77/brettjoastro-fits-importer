@@ -55,7 +55,7 @@ from collections import defaultdict
 from datetime import date, datetime, timedelta, timezone
 
 # One version for every platform (1.5.0: the Windows 11 edition joins the Mac).
-VERSION = "1.10.0"
+VERSION = "1.10.1"
 IS_WINDOWS = os.name == "nt"
 IS_MAC = sys.platform == "darwin"
 PLATFORM = "windows" if IS_WINDOWS else ("mac" if IS_MAC else "linux")
@@ -1088,7 +1088,11 @@ def emit(event, **fields):
 def log(msg):     print(f"  {msg}")
 def info(msg):    print(f"▸ {msg}")
 def success(msg): print(f"✓ {msg}")
-def warn(msg):    print(f"⚠ {msg}")
+_WARN_TAP = None        # a list while one nightly step runs: its warnings, for nightly-status.json (1.10.1)
+def warn(msg):
+    print(f"⚠ {msg}")
+    if _WARN_TAP is not None:
+        _WARN_TAP.append(str(msg))
 def error(msg):   print(f"✗ {msg}", file=sys.stderr)
 
 def debug(msg):
@@ -1172,6 +1176,29 @@ def notify(message, title="FITS Importer", sound=False):
             debug(f"notification failed: {r.stderr.decode(errors='replace').strip()}")
     except Exception as e:
         debug(f"notification unavailable: {e}")
+
+def launch_agent_loaded(label):
+    """Is this LaunchAgent loaded in the user's launchd session (1.10.1)?
+    True / False, or None when it can't be told (not a Mac, launchctl would
+    not answer). A plist in ~/Library/LaunchAgents proves nothing: the Mac's
+    twice-daily ship sat installed and unloaded from 11 Oct to 16 Nov 2026
+    behind a green install check. A test never asks the real launchd: it
+    reads <root>/launchctl-list.txt (launchctl list's own layout) or says None."""
+    def listed(text):
+        return any(ln.split()[-1:] == [label] for ln in text.splitlines())
+    if TEST_ROOT:
+        try:
+            with open(os.path.join(TEST_ROOT, "launchctl-list.txt"), encoding="utf-8") as f:
+                return listed(f.read())
+        except OSError:
+            return None
+    if not IS_MAC:
+        return None
+    try:
+        r = subprocess.run(["launchctl", "list"], capture_output=True, text=True, timeout=10)
+    except (OSError, subprocess.SubprocessError):
+        return None
+    return listed(r.stdout) if r.returncode == 0 else None
 
 def notify_push(title, text):
     """A push to the phone through ntfy (1.10.0): one HTTP POST of `text` to
@@ -4512,13 +4539,30 @@ def status_summary(state):
         # written by a newer importer: this one can't vouch for its rows
         return status_unknown("the ledger is from a newer version of the importer")
     if not state.ledger:
-        return {"safe": True, "onlyHere": 0, "text": "Nothing imported yet",
-                "machine": machine}
+        return _status_with_alarms({"safe": True, "onlyHere": 0, "text": "Nothing imported yet",
+                                    "machine": machine}, quiet=True)
     n = only_on_this_machine(state)
     text = "Everything is safe" if n == 0 else \
         f"{n:,} frame{'' if n == 1 else 's'} only on {'this PC' if IS_WINDOWS else 'the Mac'}"
-    return {"safe": n == 0, "onlyHere": n, "text": text,
-            "machine": "PC" if IS_WINDOWS else "Mac"}
+    return _status_with_alarms({"safe": n == 0, "onlyHere": n, "text": text,
+                                "machine": "PC" if IS_WINDOWS else "Mac"}, quiet=n == 0)
+
+def _status_with_alarms(s, quiet):
+    """A standing alarm (1.10.1: the archive's records lost history, the PC's
+    nightly failed) leads the status line and it is never "safe" then; the
+    frames-only-here count follows when there is one. `alarm` is the first
+    alarm's short words (the Observatory's status line shows it), `alarms`
+    all of them."""
+    try:
+        alarms = active_alarms()
+    except Exception:
+        alarms = []
+    if alarms:
+        s["alarm"] = alarms[0]["short"]
+        s["alarms"] = alarms
+        s["safe"] = False
+        s["text"] = alarms[0]["short"] + ("" if quiet else f" · {s['text']}")
+    return s
 
 # Names the operating system leaves in folders; never counted as Brett's files.
 _SPACE_JUNK = {".DS_Store", "Icon\r", "Thumbs.db", "desktop.ini"}
@@ -5763,6 +5807,7 @@ def _archive_free_margin():
 
 def _run_ship(state, dry_run=False, mount=None, checksum=True, lock=None):
     mount = mount or ARCHIVE_MOUNT
+    archive_watch(mount, remember=not dry_run)     # 1.10.1: has _verify lost its history since the last look?
     stamped = _ship_apply_verified(state, mount)
     if stamped:
         success(f"{stamped} frame(s) confirmed verified by the PC sweep")
@@ -6188,6 +6233,202 @@ def _mtime(path):
 
 def _hash_progress_path():
     return os.path.join(STATE_DIR, "hash-progress.json")
+
+# ── The archive's records, watched (1.10.1) ──────────────────────────────────
+# On 31 Oct 2026 the archive's _verify folder was moved aside by hand. The
+# importer found none, started an empty one without a word, and for sixteen
+# days the PC's project list stood still and nobody was told. Three guards:
+# the PC leaves a note in _verify saying what it is; each computer remembers
+# how big its OWN append-only logs on the archive were and says so, loudly,
+# when one has shrunk or gone (they only ever grow); and a failed nightly is
+# an alarm too. An alarm is words in --status, the panel and the Observatory's
+# status line, a notification and a push, repeated once a day until it clears
+# by itself. Nothing is refused and nothing on the archive is touched.
+ARCHIVE_WATCH_NAME = "archive-watch.json"
+VERIFY_NOTE_NAME = "READ ME - do not move this folder.txt"
+ALARM_RENOTIFY_HOURS = 24
+ALARM_KINDS = ("history-lost", "nightly-failed")
+
+def _watch_path():
+    return os.path.join(STATE_DIR, ARCHIVE_WATCH_NAME)
+
+def _watch_load():
+    d = _read_json_file(_watch_path())
+    for k in ("files", "alarms"):
+        if not isinstance(d.get(k), dict):
+            d[k] = {}
+    d["schema"] = "archive-watch/1"
+    return d
+
+def _watch_save(d):
+    try:
+        _confine(_watch_path(), "the archive watch")
+        os.makedirs(STATE_DIR, exist_ok=True)
+        _atomic_write_json(_watch_path(), d)
+    except OSError as e:
+        debug(f"archive-watch.json could not be written: {e}")
+
+def active_alarms():
+    """The alarms standing on this computer: [{kind, short, text, since}].
+    Read from the state folder only, never from the archive, so the status
+    line can ask on every look (a sleeping share must not stall the panel)."""
+    alarms = _read_json_file(_watch_path()).get("alarms")
+    out = []
+    for kind in ALARM_KINDS:
+        a = alarms.get(kind) if isinstance(alarms, dict) else None
+        if isinstance(a, dict) and isinstance(a.get("text"), str) and a["text"]:
+            out.append({"kind": kind, "short": a.get("short") if isinstance(a.get("short"), str) and a.get("short")
+                        else a["text"], "text": a["text"],
+                        "since": a.get("since") if isinstance(a.get("since"), str) else None})
+    return out
+
+def _alarm_set(d, kind, short, text):
+    """Raise (or keep) an alarm; say it aloud at most once every
+    ALARM_RENOTIFY_HOURS while it stands. True when it was said this time."""
+    a = d["alarms"].get(kind) if isinstance(d["alarms"].get(kind), dict) else {"since": _utc_iso()}
+    a.update(short=short, text=text)
+    d["alarms"][kind] = a
+    told = _hours_since(a.get("notifiedAt")) if a.get("notifiedAt") else None
+    if told is not None and told < ALARM_RENOTIFY_HOURS:
+        return False
+    a["notifiedAt"] = _utc_iso()
+    notify(short, "FITS Importer: please look")
+    notify_push("FITS Importer: please look", text)
+    return True
+
+def _alarm_clear(d, kind, said):
+    if kind not in d["alarms"]:
+        return False
+    d["alarms"].pop(kind)
+    success(said)
+    return True
+
+def _own_archive_logs(mount):
+    """This computer's own append-only files on the archive: its ship log,
+    and on the PC the sweep's verified.jsonl (of which it is the only writer)."""
+    logs = [ship_log_path(mount)]
+    if ship_sides()[0] == "pc":
+        logs.append(_pc_path(mount, "verified.jsonl"))
+    return logs
+
+def archive_watch(mount=None, remember=True):
+    """Has this computer's own log on the archive shrunk or gone since it last
+    looked? Those files are only ever added to, so smaller means the _verify
+    folder was moved, renamed or replaced. Looks only while the archive is
+    reachable (a share that isn't mounted says nothing about its records),
+    remembers the sizes in archive-watch.json (state folder), raises or clears
+    the 'history-lost' alarm. remember=False (a dry run) only looks and says.
+    Returns the alarms standing."""
+    mount = mount or ARCHIVE_MOUNT
+    try:
+        ok, _why = archive_check(mount, write_test=False)
+    except OSError:
+        ok = False
+    if not ok:
+        return active_alarms()
+    d = _watch_load()
+    before = json.dumps(d, sort_keys=True)
+    lost = []
+    for path in _own_archive_logs(mount):
+        try:
+            size = os.path.getsize(path)
+        except FileNotFoundError:
+            size = -1
+        except OSError:
+            continue                      # couldn't look (the share hiccuped): no verdict either way
+        key = os.path.normcase(os.path.abspath(path))
+        was = d["files"].get(key) if isinstance(d["files"].get(key), dict) else {}
+        old = was.get("size") if isinstance(was.get("size"), int) else 0
+        if old > 0 and size < old:
+            lost.append((path, old, size))
+        elif size >= 0 and size != old:
+            d["files"][key] = {"size": size, "seenAt": _utc_iso()}
+    if lost:
+        path, old, size = lost[0]
+        folder = _verify_path(mount)
+        now = "is not there now" if size < 0 else f"holds {human_size(size)} now"
+        short = "Check the archive: its records folder (_verify) has lost history"
+        text = (f"The importer's records on the archive have lost history: {path} held {human_size(old)} "
+                f"when this computer last looked and {now}. Was the _verify folder moved, renamed or "
+                f"replaced? It belongs at {folder}. No frame is lost by this, but until it is back the "
+                f"importer can't tell what was shipped and checked.")
+        warn(text)
+        if remember:
+            _alarm_set(d, "history-lost", short, text)
+    elif remember:
+        _alarm_clear(d, "history-lost", "The archive's records are as this computer remembers them again.")
+    if remember and json.dumps(d, sort_keys=True) != before:
+        _watch_save(d)
+    return active_alarms() if remember else \
+        ([{"kind": "history-lost", "short": short, "text": text, "since": None}] if lost else [])
+
+def ensure_verify_note(mount=None):
+    """The PC leaves one plain-text note in _verify saying what the folder is
+    and that it must stay where it is. Created only when missing, under its
+    own name, by the PC alone (the Mac may not write in _verify itself); a
+    failure is nothing to stop a job for. Returns the path when it made it."""
+    mount = mount or ARCHIVE_MOUNT
+    if ship_sides()[0] != "pc":
+        return None
+    path = _verify_path(mount, VERIFY_NOTE_NAME)
+    try:
+        _confine(path, "the note in _verify")
+        if os.path.lexists(path) or not os.path.isdir(_verify_path(mount)):
+            return None
+        text = ("DO NOT MOVE, RENAME OR DELETE THIS FOLDER\r\n"
+                "\r\n"
+                "_verify is the BrettjoAstro FITS Importer's memory on the archive:\r\n"
+                "\r\n"
+                "  - each computer's ship log (what it filed here, and when);\r\n"
+                "  - the PC's proof of which archive copies it has read back and checked;\r\n"
+                "  - each computer's record, which the other computer reads.\r\n"
+                "\r\n"
+                f"The importer on the Mac and on the PC expects it exactly here:\r\n  {_verify_path(mount)}\r\n"
+                "\r\n"
+                "If it is moved, the importer loses track of what was shipped and checked,\r\n"
+                "and the list of what is ready to process stops updating. (This happened on\r\n"
+                "31 Oct 2026.) No image is lost by that, and the importer will now tell you,\r\n"
+                "but the cure is simply to put the folder back where it was. If you are not\r\n"
+                "sure, leave it and ask.\r\n"
+                "\r\n"
+                f"Written by the importer on the PC ({machine_identity()['label']}), {_utc_iso()[:10]}. "
+                "Nothing in here needs doing by hand.\r\n")
+        fd = os.open(path, os.O_WRONLY | os.O_CREAT | os.O_EXCL | getattr(os, "O_BINARY", 0), 0o644)
+        with os.fdopen(fd, "wb") as f:
+            f.write(text.encode("utf-8"))
+        return path
+    except OSError as e:
+        debug(f"the note in _verify could not be written: {e}")
+        return None
+
+def nightly_alarm(status):
+    """After --pc-nightly: a step that failed (a 'busy' one aside: another job
+    held the lock, and the next run does it) is an alarm on the PC, with the
+    step's own words when it gave any; a clean night clears it."""
+    steps = status.get("steps") if isinstance(status.get("steps"), dict) else {}
+    failed = [k for k, v in steps.items()
+              if isinstance(v, dict) and not v.get("ok") and v.get("why") != "busy"]
+    d = _watch_load()
+    before = json.dumps(d, sort_keys=True)
+    if failed:
+        runs = status.get("failedRuns") if isinstance(status.get("failedRuns"), int) else 1
+        why = next((str(steps[k].get("why") or steps[k].get("error")) for k in failed
+                    if steps[k].get("why") or steps[k].get("error")), "")
+        short = f"Check the PC's nightly job: it failed at {', '.join(failed)}" + \
+            (f" ({runs} runs in a row)" if runs > 1 else "")
+        made = status.get("projectsGeneratedAt")
+        text = short + "." + (f" It said: {why}" if why else "") + \
+            (f" The project list on the PC is from {str(made)[:10]}." if made and
+             any(k.startswith("projects") for k in failed) else "") + \
+            " The details are in _verify\\pc\\nightly-status.json."
+        warn(text)
+        _alarm_set(d, "nightly-failed", short, text)
+    else:
+        _alarm_clear(d, "nightly-failed", "The PC's nightly job ran clean again.")
+    if json.dumps(d, sort_keys=True) != before:
+        _watch_save(d)
+    return failed
+
 
 def write_heartbeat(mount, job=None, progress=None):
     """_verify\\pc\\pc-heartbeat.json (spec 10.1): what the PC is doing, so the
@@ -7027,6 +7268,8 @@ def run_pc_tick(mount=None):
     if not os.path.isdir(mount):
         return {"ok": False, "why": "archive missing"}
     write_heartbeat(mount)
+    ensure_verify_note(mount)          # 1.10.1: what _verify is, said in the folder itself
+    archive_watch(mount)               # ...and an alarm within five minutes of it losing its history
     want = {}
     try:
         names = sorted(os.listdir(_request_dir(mount)))
@@ -7114,7 +7357,9 @@ def run_pc_nightly(mount=None, max_minutes=None):
     def step(name, fn):
         """One job on its own: a crash in the sweep must not cost the night its
         inventory, its list or its heartbeat; the status file says which failed."""
+        global _WARN_TAP
         t0 = time.time()
+        said = _WARN_TAP = []              # 1.10.1: a failed step's own words go in the status file
         try:
             r = fn()
             out[name] = r
@@ -7122,13 +7367,19 @@ def run_pc_nightly(mount=None, max_minutes=None):
             status["steps"][name] = {"ok": ok, "seconds": round(time.time() - t0)}
             if isinstance(r, dict) and r.get("why"):
                 status["steps"][name]["why"] = r["why"]
+            elif not ok and said:
+                status["steps"][name]["why"] = said[-1][:300]
         except Exception as e:
             warn(f"The nightly's {name} failed: {e}")
             out[name] = {"ok": False, "error": str(e)}
             status["steps"][name] = {"ok": False, "seconds": round(time.time() - t0),
                                      "error": f"{type(e).__name__}: {e}"[:300]}
+        finally:
+            _WARN_TAP = None
         return out[name]
 
+    ensure_verify_note(mount)
+    archive_watch(mount)
     step("sweep", lambda: run_sweep(mount))
     step("inventory", lambda: run_inventory(mount))
     # The project layer (1.7): the list is rebuilt from the fresh inventory
@@ -7150,6 +7401,14 @@ def run_pc_nightly(mount=None, max_minutes=None):
     status["snapshotAgeHours"] = snaps[0].get("age_hours") if snaps else None
     status["finishedAt"] = _utc_iso()
     status["ok"] = all(v.get("ok") for v in status["steps"].values())
+    # 1.10.1: how many runs in a row have failed, and the alarm that says so
+    prev = _read_json_file(_pc_path(mount, "nightly-status.json"))
+    status["failedRuns"] = 0 if status["ok"] else \
+        (prev.get("failedRuns") if isinstance(prev.get("failedRuns"), int) and not prev.get("ok", True) else 0) + 1
+    try:
+        nightly_alarm(status)
+    except Exception as e:                 # an alarm that can't be raised must not cost the night its status file
+        warn(f"The nightly's alarm could not be raised: {e}")
     try:
         _write_json_file(_pc_path(mount, "nightly-status.json"), status)
     except OSError as e:

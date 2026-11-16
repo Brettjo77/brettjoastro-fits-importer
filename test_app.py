@@ -1365,6 +1365,29 @@ try:
         apx["idle2"] = ip_idle()
 except Exception as x:
     apx["error"] = repr(x)
+# 1.10.1: a job that has said "idle" but not yet let go of the lock (its last instant) must not
+# cost the next click a "busy (idle)"; a lock held by a job that is really running still refuses
+gdr = {}
+try:
+    with contextlib.redirect_stdout(said):
+        panel.APP.oplock.acquire()
+        threading.Timer(0.4, panel.APP.oplock.release).start()
+        gdr["tail"] = panel.APP._run("testing", lambda: None, need_camera=False)
+        gdr["idle"] = ip_idle()
+        _gd_hold = threading.Event()
+        gdr["slow"] = panel.APP._run("testing", _gd_hold.wait, need_camera=False)
+        gdr["busy"] = panel.APP._run("testing", lambda: None, need_camera=False)
+        gdr["said"] = panel.APP.last_result
+        _gd_hold.set()
+        gdr["idle2"] = ip_idle()
+except Exception as x:
+    gdr["error"] = repr(x)
+check("GD panel (1.10.1): a job started in the instant after the last one said idle (its lock not yet let go) "
+      "starts all the same; one started while a job is really running is still refused with the reason",
+      gdr.get("tail") is True and gdr.get("idle") is True and gdr.get("slow") is True and gdr.get("busy") is False
+      and gdr.get("said") == "The importer is busy (testing); try again when it has finished."
+      and gdr.get("idle2") is True, json.dumps(gdr))
+
 check("AP a job the engine ends with sys.exit fails on its own: idle again, the banner and "
       "one red line say so, and the next job runs",
       apx.get("started") is True and apx.get("idle") is True
@@ -2168,8 +2191,16 @@ process.stdout.write(JSON.stringify(out));
               and _p2c["pendingFiles"] == 12 and _p2c["pendingCamera"] == "Seestar" and _p2c["servedAgeHours"] is None
               and _p2c["publishedFrom"] is None,
               json.dumps([_p2a, _p2b, _p2c]))
+        _gd_line = {"safe": False, "onlyHere": 652, "machine": "Mac", "alarm": "Check the archive: its records folder (_verify) has lost history",
+                    "text": "Check the archive: its records folder (_verify) has lost history · 652 frames only on the Mac"}
+        _gd_a = _p2_pan.observatory_status({}, None, _gd_line)
+        check("GD panel (1.10.1): a status line carrying an alarm passes it to the page's `status` (alarm), with the count "
+              "and checked as before; a line without one adds no alarm key",
+              lambda: _gd_a.get("alarm") == _gd_line["alarm"] and _gd_a["checked"] is True and _gd_a["onlyHere"] == 652
+              and "alarm" not in _p2c and "alarm" not in _p2a, json.dumps([_gd_a, _p2c]))
     else:
         skip("P2 panel: the status derivation in-process (the U10 panel module isn't loaded)")
+        skip("GD panel (1.10.1): the alarm in the page's status (the U10 panel module isn't loaded)")
     _p2_page = _p2_get("/")[1]
     _p2_lcode, _p2_led = _p2_get("/dashboard?t=p2c")
     check("P2 panel: the Dashboard tab is Ledger (same data-tab and /dashboard route, so the frame and bookmarks keep "
@@ -2383,6 +2414,16 @@ process.stdout.write(JSON.stringify(out));
               and _s_unch["level"] == "amber" and _s_unch["text"] == "Couldn't check data safety: the ledger is locked by an import"
               and _d1["status"]["level"] == "amber" and _d1["status"]["text"] == "Couldn't check data safety: this record doesn't carry the safety facts",
               json.dumps([_s_quiet, _s_risk, _s_stale, _s_unch, _d1.get("status")])[:1200])
+        _gd_alarm = "Check the archive: its records folder (_verify) has lost history"
+        _s_al, _s_al2 = _st(alarm=_gd_alarm, onlyHere=652, machine="Mac"), _st(alarm=_gd_alarm, checked=False, reason="still working it out")
+        check("GD page (1.10.1): a standing alarm in the panel's `status` leads the status line, amber, with the frames-only-here "
+              "count after it; it leads too when the safety facts couldn't be checked; without one the line is as before",
+              lambda: _s_al["level"] == "amber" and _s_al["text"] == _gd_alarm
+              and _s_al["more"].startswith("652 frames only on the Mac · ")
+              and _s_al2["level"] == "amber" and _s_al2["text"] == _gd_alarm
+              and "Couldn't check data safety: still working it out" in _s_al2["more"]
+              and _s_quiet["level"] == "quiet",
+              json.dumps([_s_al, _s_al2])[:900])
         _ex = {x[1]: x for x in _d1.get("explore", [])}
         _holds = " ".join(x[2] for x in _d1.get("explore", []))
         check("P2 page: the Explore menu names every view of the before record (Ready to process = What to do next, Imaging nights = Nights, "

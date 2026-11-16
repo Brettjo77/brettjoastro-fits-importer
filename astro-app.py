@@ -242,11 +242,15 @@ class App:
         if need_camera and not self._camera_ok():
             return False
         if not self.oplock.acquire(blocking=False):
-            # the answer says why (and the banner, next poll), instead of a
-            # silent False that left the button looking pressed (1.7.1 review)
-            self.last_result = (f"The importer is busy ({self.status}); try again when it "
-                                f"has finished.")
-            return False
+            # A job in its last instant has already said "idle" and is about to
+            # let go of the lock: wait for that rather than answer "busy (idle)"
+            # (1.10.1; the panel suite caught it once on 16 Nov 2026).
+            if not (self.status == "idle" and self.oplock.acquire(timeout=2)):
+                # the answer says why (and the banner, next poll), instead of a
+                # silent False that left the button looking pressed (1.7.1 review)
+                self.last_result = (f"The importer is busy ({self.status}); try again when it "
+                                    f"has finished.")
+                return False
         # status flips BEFORE the request returns, so a poll right after
         # "started" can never read the previous op's idle (T6)
         self.status = label
@@ -1090,6 +1094,10 @@ def observatory_status(dataset, pend, status):
            "servedAgeHours": eng._hours_since((dataset or {}).get("generatedAtIso")) if isinstance(dataset, dict) else None,
            # the other side's label when load_observatory(prefer_published=True) served its copy
            "publishedFrom": served.get("machine") if isinstance(served, dict) and isinstance(served.get("machine"), str) else None}
+    # 1.10.1: a standing alarm (the archive's records lost history, the PC's
+    # nightly failed) leads the page's status line, whatever else is so
+    if isinstance(status, dict) and isinstance(status.get("alarm"), str) and status["alarm"]:
+        out["alarm"] = status["alarm"]
     if not known:
         if status is None:
             out["reason"] = "still working it out"

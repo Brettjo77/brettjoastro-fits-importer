@@ -8470,6 +8470,216 @@ if os.name == "nt":
 else:
     skip("RB _win_long prefixes a 300-character Windows path with \\\\?\\ (Windows only)")
 
+print("\n── Chain GD: the guards — the note in _verify, lost history, a failed nightly, agents really loaded (1.10.1) ──")
+# 31 Oct 2026: the archive's _verify folder was moved aside by hand. The
+# importer started an empty one without a word; for sixteen days the PC's
+# project list stood still. And the Mac's twice-daily ship had sat installed
+# but unloaded since 11 Oct behind a green install check.
+GD = teh.Env("GD", asiair=False, seestar=True)
+GD.env.update(D7_MAC)
+GD.env["NOTIFY_PUSH_URL"] = "https://ntfy.example/gd-topic"
+os.makedirs(os.path.join(GD.archive, "S30P"))
+for st in ("20260910-224402", "20260910-225402", "20260910-230402"):
+    GD.add_seestar_sub("M 27", st)
+GD.run("--no-ship")
+r = GD.run("--ship")
+assert "Shipped 3 file(s)" in r.stdout, r.stdout[-400:]
+_gd_watch = os.path.join(GD.state, "archive-watch.json")
+_gd_log = os.path.join(GD.archive, "_verify", "mac", "shipped.jsonl")
+
+def gd_watch():
+    try:
+        with open(_gd_watch, encoding="utf-8") as f:
+            return json.load(f)
+    except (OSError, ValueError):
+        return {}
+
+def gd_said(root, kind):
+    return [c for c in teh.os_calls(root, kind) if "look" in str(c.get("title", "")).lower()]
+
+GD.run("--ship")                       # a second look remembers the log as the first ship left it
+_gd_sizes = [v.get("size") for v in (gd_watch().get("files") or {}).values()]
+_gd_st0 = GD.run("--status").stdout.strip()
+check("GD after a ship this computer remembers how big its own ship log on the archive is "
+      "(archive-watch.json in the state folder); no alarm, the status line as before, nothing said aloud",
+      lambda: _gd_sizes == [os.path.getsize(_gd_log)] and not gd_watch().get("alarms")
+      and "Check the archive" not in _gd_st0 and gd_said(GD.root, "notify") == [],
+      f"{_gd_sizes} {gd_watch().get('alarms')} {_gd_st0!r}")
+
+# the archive not reachable says nothing about its records
+_gd_away = GD.archive + " (away)"
+os.rename(GD.archive, _gd_away)
+_gd_off = probe(GD.env, "print(json.dumps({'alarms': m.archive_watch()}))")
+os.rename(_gd_away, GD.archive)
+check("GD an archive that isn't reachable raises no alarm and forgets nothing",
+      lambda: _gd_off == {"alarms": []} and [v.get("size") for v in gd_watch()["files"].values()] == _gd_sizes,
+      json.dumps(_gd_off))
+
+# the 31 Oct move: _verify goes into a tidy-up folder
+_gd_tidy = os.path.join(GD.archive, "zzArchive Scripts and Stuff")
+os.makedirs(_gd_tidy)
+os.rename(os.path.join(GD.archive, "_verify"), os.path.join(_gd_tidy, "_verify"))
+GD.add_seestar_sub("M 27", "20260911-224402")
+GD.run("--no-ship")
+r = GD.run("--ship", "--dry-run")
+check("GD with _verify moved aside, a dry run says the records have lost history and where the folder belongs, "
+      "and writes nothing: no alarm kept, nothing said aloud",
+      lambda: "lost history" in r.stdout and os.path.join(GD.archive, "_verify") in r.stdout
+      and not gd_watch().get("alarms") and gd_said(GD.root, "notify") == [],
+      r.stdout[-500:])
+r = GD.run("--ship")
+_gd_al = (gd_watch().get("alarms") or {}).get("history-lost") or {}
+_gd_n1, _gd_p1 = gd_said(GD.root, "notify"), gd_said(GD.root, "push")
+check("GD the real ship raises the alarm (kept in archive-watch.json), says it once as a notification and "
+      "once as a push with the file and both sizes, and still ships: nothing is refused",
+      lambda: "lost history" in r.stdout and "Shipped 1 file(s)" in r.stdout
+      and _gd_al.get("since") and "is not there now" in _gd_al.get("text", "")
+      and len(_gd_n1) == 1 and "records folder" in _gd_n1[0]["message"]
+      and len(_gd_p1) == 1 and "shipped.jsonl" in _gd_p1[0]["text"],
+      f"{r.stdout[-400:]!r} {_gd_al} {_gd_n1} {_gd_p1}")
+_gd_sj = json.loads(GD.run("--status", "--json").stdout)
+_gd_st1 = GD.run("--status").stdout.strip()
+check("GD while it stands the status line leads with it and is never 'safe'; --json carries alarm and alarms",
+      lambda: _gd_st1.startswith("Check the archive: its records folder (_verify) has lost history")
+      and _gd_sj["safe"] is False and _gd_sj["alarm"] == _gd_sj["alarms"][0]["short"]
+      and _gd_sj["alarms"][0]["kind"] == "history-lost" and isinstance(_gd_sj["onlyHere"], int),
+      f"{_gd_st1!r} {_gd_sj}")
+GD.run("--ship")
+check("GD a second look the same day keeps the alarm and does not say it again (once every 24 hours)",
+      lambda: (gd_watch().get("alarms") or {}).get("history-lost")
+      and len(gd_said(GD.root, "notify")) == 1 and len(gd_said(GD.root, "push")) == 1,
+      f"{gd_watch().get('alarms')} {len(gd_said(GD.root, 'notify'))}")
+# a day later it is said again
+_w = gd_watch(); _w["alarms"]["history-lost"]["notifiedAt"] = "2026-01-01T00:00:00+00:00"
+with open(_gd_watch, "w", encoding="utf-8") as f:
+    json.dump(_w, f)
+GD.run("--ship")
+check("GD a day later, still standing, it is said once more",
+      lambda: len(gd_said(GD.root, "notify")) == 2, str(len(gd_said(GD.root, "notify"))))
+# put back: the folder the tidy-up took returns, and the alarm clears by itself
+shutil.rmtree(os.path.join(GD.archive, "_verify"))
+os.rename(os.path.join(_gd_tidy, "_verify"), os.path.join(GD.archive, "_verify"))
+_gd_back = probe(GD.env, "print(json.dumps({'alarms': m.archive_watch()}))")
+_gd_st2 = GD.run("--status").stdout.strip()
+check("GD with the folder back where it was the alarm clears by itself and the status line is its old self",
+      lambda: _gd_back == {"alarms": []} and not gd_watch().get("alarms") and "Check the archive" not in _gd_st2,
+      f"{_gd_back} {_gd_st2!r}")
+
+# the note: the PC writes it, once, and only the PC
+_gd_note = os.path.join(GD.archive, "_verify", "READ ME - do not move this folder.txt")
+GD.run("--ship")
+_gd_mac_note = os.path.exists(_gd_note)
+r = GD.run("--pc-tick", extra_env=PCX)
+_gd_note_text = open(_gd_note, encoding="utf-8").read() if os.path.isfile(_gd_note) else ""
+with open(_gd_note, "a", encoding="utf-8") as f:
+    f.write("Brett's own line\n")
+GD.run("--pc-tick", extra_env=PCX)
+check("GD the PC's five-minute tick leaves one note in _verify saying what the folder is, that it must not be "
+      "moved, and where it belongs; it is made once and never rewritten; the Mac never writes it",
+      lambda: not _gd_mac_note and "DO NOT MOVE, RENAME OR DELETE THIS FOLDER" in _gd_note_text
+      and os.path.join(GD.archive, "_verify") in _gd_note_text
+      and open(_gd_note, encoding="utf-8").read().endswith("Brett's own line\n"),
+      f"mac={_gd_mac_note} rc={r.returncode} {_gd_note_text[:120]!r} {(r.stdout + r.stderr)[-200:]!r}")
+
+# the PC watches its verified.jsonl as well as its ship log
+GDp = teh.Env("GDp", asiair=False, seestar=False)
+GDp.env.update(PCX)
+os.makedirs(os.path.join(GDp.archive, "S30P"))
+pc_put_rows(os.path.join(GDp.archive, "_verify", "pc", "verified.jsonl"),
+            [{"relpath": f"S30P\\x\\{i}.fit", "sha256": "ab" * 32, "size": 9} for i in range(20)], "w")
+_gdp0 = probe(GDp.env, "print(json.dumps({'alarms': m.archive_watch()}))")
+pc_put_rows(os.path.join(GDp.archive, "_verify", "pc", "verified.jsonl"),
+            [{"relpath": "S30P\\x\\0.fit", "sha256": "ab" * 32, "size": 9}], "w")
+_gdp1 = probe(GDp.env, "print(json.dumps({'alarms': m.archive_watch()}))")
+check("GD on the PC the sweep's verified.jsonl is watched too: shorter than it was is the same alarm, naming it",
+      lambda: _gdp0 == {"alarms": []} and [a["kind"] for a in _gdp1["alarms"]] == ["history-lost"]
+      and "verified.jsonl" in _gdp1["alarms"][0]["text"], f"{_gdp0} {_gdp1}")
+
+# the nightly: the real case. A PC whose list carried the Mac's record; _verify is moved; the night fails at
+# projects, says why in the status file, counts the runs, raises the alarm; a clean night clears it. (This PC
+# never imported, so the refusal is worded "No ledger rows could be read ..."; Brett's, with a ledger of its
+# own, says "The other computer's record on the archive wasn't read this time". Both end the same way.)
+GDn = pl_pc_env("GDn", {"a": pl_snap_row("M 31", "M 31", "2026-09-01", "aa" * 32)})
+GDn.env.update(PCX)
+os.makedirs(os.path.join(GDn.archive, "S30P"), exist_ok=True)
+r = GDn.run("--pc-nightly", "--max-minutes", "0")
+_gdn0 = pc_json(GDn.archive, "nightly-status.json")
+_gdn_tidy = os.path.join(GDn.archive, "zzArchive Scripts and Stuff")
+os.makedirs(_gdn_tidy)
+os.rename(os.path.join(GDn.archive, "_verify"), os.path.join(_gdn_tidy, "_verify"))
+r1 = GDn.run("--pc-nightly", "--max-minutes", "0")
+_gdn1 = pc_json(GDn.archive, "nightly-status.json")
+r2 = GDn.run("--pc-nightly", "--max-minutes", "0")
+_gdn2 = pc_json(GDn.archive, "nightly-status.json")
+_gdn_st = GDn.run("--status").stdout.strip()
+_gdn_al = (json.load(open(os.path.join(GDn.state, "archive-watch.json"))).get("alarms") or {})
+check("GD a clean nightly counts no failed runs; with _verify moved aside the next one fails at projects, the "
+      "status file carries the step's own words and failedRuns 1 then 2, and the note is back in the new _verify",
+      lambda: _gdn0.get("ok") is True and _gdn0.get("failedRuns") == 0
+      and _gdn1["steps"]["projects"]["ok"] is False and "projects.json was left as it is" in _gdn1["steps"]["projects"].get("why", "")
+      and _gdn1.get("failedRuns") == 1 and _gdn2.get("failedRuns") == 2
+      and os.path.isfile(os.path.join(GDn.archive, "_verify", "READ ME - do not move this folder.txt")),
+      f"{_gdn0.get('ok')} {_gdn0.get('failedRuns')} {_gdn1.get('steps')} {_gdn1.get('failedRuns')} {_gdn2.get('failedRuns')}")
+check("GD the failed nightly is an alarm on the PC: the status line says which step and how many runs, the "
+      "alarm's words carry the reason, and it was said aloud once (not once per run)",
+      lambda: _gdn_st.startswith("Check the PC's nightly job: it failed at projects")
+      and "(2 runs in a row)" in _gdn_al["nightly-failed"]["short"]
+      and "projects.json was left as it is" in _gdn_al["nightly-failed"]["text"]
+      and len([c for c in gd_said(GDn.root, "notify") if "nightly" in c["message"]]) == 1,
+      f"{_gdn_st!r} {_gdn_al} {gd_said(GDn.root, 'notify')}")
+# put back, and the next clean night clears it
+shutil.rmtree(os.path.join(GDn.archive, "_verify"))
+os.rename(os.path.join(_gdn_tidy, "_verify"), os.path.join(GDn.archive, "_verify"))
+r3 = GDn.run("--pc-nightly", "--max-minutes", "0")
+_gdn3 = pc_json(GDn.archive, "nightly-status.json")
+check("GD with _verify back the next nightly is clean, failedRuns is 0 again and the alarm is gone",
+      lambda: _gdn3.get("ok") is True and _gdn3.get("failedRuns") == 0
+      and not (json.load(open(os.path.join(GDn.state, "archive-watch.json"))).get("alarms"))
+      and "Check the PC" not in GDn.run("--status").stdout,
+      f"{_gdn3.get('steps')} {_gdn3.get('failedRuns')} {(r3.stdout + r3.stderr)[-300:]!r}")
+_gd_busy = probe(GDn.env,
+    "st = {'steps': {'hash': {'ok': False, 'why': 'busy'}, 'sweep': {'ok': True}}, 'failedRuns': 1}\n"
+    "print(json.dumps({'failed': m.nightly_alarm(st), 'alarms': m.active_alarms()}))\n")
+check("GD a step that only found another job running ('busy') is not an alarm",
+      lambda: _gd_busy == {"failed": [], "alarms": []}, json.dumps(_gd_busy))
+
+# the agents: a plist on disk is not a job running
+_gd_lc = os.path.join(GD.root, "launchctl-list.txt")
+_gd_ag0 = probe(GD.env, "print(json.dumps([m.launch_agent_loaded('com.brettjohnson.astro-ship')]))")
+with open(_gd_lc, "w", encoding="utf-8") as f:
+    f.write("PID\tStatus\tLabel\n16634\t0\tcom.brettjohnson.astro-import\n-\t0\tcom.apple.something\n"
+            "1505\t0\tapplication.com.brettjohnson.astro-import.app.37800777.37800780\n")
+_gd_ag1 = probe(GD.env, "print(json.dumps([m.launch_agent_loaded('com.brettjohnson.astro-ship'), "
+                        "m.launch_agent_loaded('com.brettjohnson.astro-import')]))")
+with open(_gd_lc, "a", encoding="utf-8") as f:
+    f.write("-\t0\tcom.brettjohnson.astro-ship\n")
+_gd_ag2 = probe(GD.env, "print(json.dumps([m.launch_agent_loaded('com.brettjohnson.astro-ship')]))")
+check("GD launch_agent_loaded reads launchd's own list: the Mac's list of 16 Nov (the watcher and the app wrapper, "
+      "no ship) says the ship is NOT loaded and the watcher is; with its line there it is; with no list, unknown",
+      lambda: _gd_ag0 == [None] and _gd_ag1 == [False, True] and _gd_ag2 == [True],
+      f"{_gd_ag0} {_gd_ag1} {_gd_ag2}")
+_gd_self = open(os.path.join(HERE, "selftest.py"), encoding="utf-8").read()
+_gd_inst = open(os.path.join(HERE, "install-scripts.sh"), encoding="utf-8").read()
+check("GD the install check asks launchd about both agents (a missing ship job is a FAIL with the line that "
+      "loads it, skipped while the app is in charge) and prints a standing alarm in full",
+      lambda: 'agent_loaded(eng, "twice-daily ship LaunchAgent", "com.brettjohnson.astro-ship", ship_plist)' in _gd_self
+      and 'agent_loaded(eng, "camera watcher LaunchAgent", "com.brettjohnson.astro-import", plist)' in _gd_self
+      and 'owner != "app"' in _gd_self and "launchctl bootstrap gui/$(id -u)" in _gd_self
+      and "eng.active_alarms()" in _gd_self, "selftest.py")
+check("GD the Mac installer no longer trusts launchctl load's exit code: after each load it asks launchd whether "
+      "the job is there, tries bootstrap once, and counts a job that did not load as a problem with launchctl's words",
+      lambda: len(re.findall(r"if launchctl load ", _gd_inst)) == 0
+      and 'agent_loaded com.brettjohnson.astro-ship "$ship_plist"' in _gd_inst
+      and 'agent_loaded com.brettjohnson.astro-import "$new_plist"' in _gd_inst
+      and "launchctl bootstrap" in _gd_inst and _gd_inst.count("macOS did not load") == 2,
+      "install-scripts.sh")
+if shutil.which("bash"):
+    _gd_bn = subprocess.run(["bash", "-n", os.path.join(HERE, "install-scripts.sh")], capture_output=True, text=True)
+    check("GD install-scripts.sh still parses (bash -n)", lambda: _gd_bn.returncode == 0, _gd_bn.stderr[-300:])
+else:
+    skip("GD install-scripts.sh still parses (bash -n): no bash here")
+
+
 # ═══════════════ Summary ═════════════════════════════════════════════════════
 summary()
 sys.exit(1 if FAIL else 0)

@@ -71,6 +71,18 @@ def check(name, cond, detail="", warn_only=False):
     return cond
 
 
+def agent_loaded(eng, name, label, plist):
+    """1.10.1: a LaunchAgent's file being there is not the job running. Ask
+    launchd; a job it has not loaded is a FAIL with the line that loads it."""
+    loaded = eng.launch_agent_loaded(label)
+    if loaded is None:
+        line("SKIP", f"{name} loaded", "couldn't ask launchd")
+        return None
+    return check(f"{name} loaded", loaded,
+                 f"it is installed but macOS has not loaded it, so it never runs. In Terminal: "
+                 f"launchctl bootstrap gui/$(id -u) \"{plist}\"  (and paste what it says if it refuses)")
+
+
 def main():
     ap = argparse.ArgumentParser()
     ap.add_argument("--toast", action="store_true", help="also show a test notification")
@@ -263,10 +275,14 @@ def main():
                   "its LaunchAgent is on again — open the app, it offers to take over "
                   "again", warn_only=True)
         else:
-            check("camera watcher LaunchAgent installed", os.path.isfile(plist))
-        ship = os.path.isfile(os.path.join(la, "com.brettjohnson.astro-ship.plist"))
+            if check("camera watcher LaunchAgent installed", os.path.isfile(plist)):
+                agent_loaded(eng, "camera watcher LaunchAgent", "com.brettjohnson.astro-import", plist)
+        ship_plist = os.path.join(la, "com.brettjohnson.astro-ship.plist")
+        ship = os.path.isfile(ship_plist)
         if eng.ARCHIVE_URL or os.path.isdir(eng.ARCHIVE_MOUNT):
             check("twice-daily ship LaunchAgent installed", ship, warn_only=True)
+            if ship and owner != "app":        # while the app is in charge its own ship runs, and this one stays off
+                agent_loaded(eng, "twice-daily ship LaunchAgent", "com.brettjohnson.astro-ship", ship_plist)
         else:
             line("SKIP", "ship LaunchAgent", "no archive configured")
         check("app wrapper installed",
@@ -284,6 +300,15 @@ def main():
             line("PASS", "notification sent", "did one appear top-right?")
     else:
         line("SKIP", "logon / scheduled tasks", f"not Windows or macOS ({eng.PLATFORM})")
+
+    # 1.10.1: an alarm standing on this computer (the archive's records lost
+    # history, the PC's nightly failed) is said here too, in full
+    try:
+        alarms = eng.active_alarms()
+    except Exception:
+        alarms = []
+    for a in alarms:
+        line("WARN", "alarm: " + a["short"], a["text"])
 
     # the panel
     url = f"http://127.0.0.1:{port}"
