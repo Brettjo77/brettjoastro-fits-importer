@@ -9825,6 +9825,191 @@ check("SF3 once a pull has been timed (a copy and a source check of a minute or 
            f"second read of the source about {_sfq_dur(_sfq_m101 / 6_600_000)} more") in _qd10.stdout
       and "no pull has been timed yet" not in _qd10.stdout, _qd10.stdout + _qd10.stderr)
 
+# ── Chain SF, 1.10.5: every project in one go, and a pull that stops when night falls or the roof opens ──
+print("\n── Chain SF, 1.10.5: --starfront-pull all; a pull stops cleanly at nightfall or when the roof opens ──")
+SFU = sfp_env("SFU")
+SFU.env.update({"STARFRONT_WORKERS": "3", "ASTRO_TEST_UNBUFFERED": "1"})
+for i in range(4):
+    sfp_sub(SFU, "M 31", f"20261105-21{i:02d}00")
+for i in range(2):
+    sfp_sub(SFU, "M 33", f"20261105-22{i:02d}00")
+for i in range(6):
+    sfp_sub(SFU, "NGC 7000", f"20261105-23{i:02d}00")
+sf_fits(os.path.join(SFU.mw, "M 42", "Stacked_12_M 42_30.0s_IRCUT_20261106-230000.fit"), dateobs="2026-11-07T05:00:00")
+sfq_roof(SFU, 15, "Roof Status: CLOSED\n", (2026, 11, 7, 12, 0))
+_ua0 = SFU.run("--starfront-pull", "all", "--dry-run", extra_env=SFP_DAY_ENV)
+SFU.run("--starfront-scan", extra_env=SFP_DAY_ENV)
+_usz = {pr: sum(os.path.getsize(os.path.join(SFU.mw, pr + "_sub", f)) for f in os.listdir(os.path.join(SFU.mw, pr + "_sub")))
+        for pr in ("M 31", "M 33", "NGC 7000")}
+_ua1 = SFU.run("--starfront-pull", "ALL", "--dry-run", extra_env=SFP_DAY_ENV)
+_uw = probe(SFU.env, "import shutil\na = m.sf_pull_wants_all('all'), m.sf_pull_wants_all(' All '), m.sf_pull_wants_all('M 31'), m.sf_pull_wants_all('')\n"
+                     "p = m.sf_state_path(m.SF_LAST_SCAN_FILE); keep = open(p, encoding='utf-8').read()\n"
+                     "d = json.loads(keep); d['projects'].append(dict(d['projects'][0], name='All')); open(p, 'w', encoding='utf-8').write(json.dumps(d))\n"
+                     "b = m.sf_pull_wants_all('all')\nopen(p, 'w', encoding='utf-8').write(keep)\nprint(json.dumps([a, b]))\n")
+check("SF4 '--starfront-pull all' needs a scan to take the projects from: with none it is refused ('Run a scan "
+      "first'); the word is taken in any case ('ALL'), and not when the telescope really holds a project called All",
+      lambda: _ua0.returncode == 1 and "Pull refused: there is no scan to take the projects from" in _ua0.stderr
+      and _uw == [[True, True, False, False], False], _ua0.stderr + json.dumps(_uw))
+check("SF4 '--starfront-pull all --dry-run' goes through every project of the last scan that has saved subs, the "
+      "smallest first (M 33, M 31, NGC 7000), leaves the stacks-only folder out and says so, runs each project's "
+      "own dry run with every guard, and ends with one line per project and the total to bring home (12 files); "
+      "nothing is copied and no push goes out",
+      lambda: _ua1.returncode == 0
+      and "▸ All projects, smallest first: M 33, M 31, NGC 7000 (from the scan of 2026-11-07 18:00 UTC). Left out, no saved subs: M 42." in _ua1.stdout
+      and [ln for ln in _ua1.stdout.splitlines() if ln.startswith("▸ Project ")]
+      == ["▸ Project 1 of 3: M 33", "▸ Project 2 of 3: M 31", "▸ Project 3 of 3: NGC 7000"]
+      and _ua1.stdout.count("Dry run: every guard passed") == 3
+      and "▸ All projects, dry run: 3 of 3 passed every guard." in _ua1.stdout
+      and re.search(r"M 33\s+2 files, %s to bring home; 0 already home" % re.escape(_sfq_sz(_usz["M 33"])), _ua1.stdout)
+      and re.search(r"NGC 7000\s+6 files, %s to bring home; 0 already home" % re.escape(_sfq_sz(_usz["NGC 7000"])), _ua1.stdout)
+      and re.search(r"Together\s+12 files, %s to bring home" % re.escape(_sfq_sz(sum(_usz.values()))), _ua1.stdout)
+      and not os.path.exists(SFU.sfdest) and not teh.os_calls(SFU.root, "push"),
+      _ua1.stdout + _ua1.stderr)
+_ua2 = SFU.run("--starfront-pull", "all", extra_env={**SFP_DAY_ENV, **_SFR_FAST, "ASTRO_TEST_SF_DROP": "210100"})
+_ua2rows = [r for r in SFU.ledger()["files"].values() if r.get("camera") == SFP_CAM]
+_ua2push = [c["text"] for c in teh.os_calls(SFU.root, "push")]
+check("SF4 the series stops at the first project that does not come through clean: M 33 is pulled and verified, "
+      "M 31 stops part way (a file's link dropped four times), and NGC 7000 is NOT started (no row, no folder); "
+      "exit 1; the summary says 1 of 3, where it stopped, a line per project ('not started' for the third) and "
+      "what was copied together; one push says so",
+      lambda: _ua2.returncode == 1 and "▸ All projects: 1 of 3 home and clean; stopped at M 31." in _ua2.stdout
+      and re.search(r"M 33\s+2 files, .+ in .+: pulled and verified", _ua2.stdout)
+      and re.search(r"M 31\s+stopped part way: 3 of 4 files home \(the link to the telescope dropped 4 times", _ua2.stdout)
+      and re.search(r"NGC 7000\s+not started", _ua2.stdout) and re.search(r"Together\s+5 files, .+ copied; the whole run took ", _ua2.stdout)
+      and sorted(r["target"] for r in _ua2rows) == ["M 31"] * 3 + ["M 33"] * 2
+      and not any(f.startswith("NGC 7000") for f in sfp_files(SFU.sfdest))
+      and "▸ Project 3 of 3" not in _ua2.stdout
+      and _ua2push[-1] == "Starfront: 1 of 3 projects done; stopped at M 31, 1 not started",
+      _ua2.stdout[-2500:] + _ua2.stderr[-600:] + str(_ua2push))
+_ua3 = SFU.run("--starfront-pull", "all", extra_env=SFP_DAY_ENV)
+_ua3rows = [r for r in SFU.ledger()["files"].values() if r.get("camera") == SFP_CAM]
+check("SF4 run again, it carries on: M 33 is already home and costs nothing, M 31's last file comes, NGC 7000's 6 "
+      "come; all 12 rows are home and proven, exit 0, 'All projects: 3 of 3 home and clean.', and one push says "
+      "'All 3 Starfront projects are home'",
+      lambda: _ua3.returncode == 0 and "▸ All projects: 3 of 3 home and clean." in _ua3.stdout
+      and re.search(r"M 33\s+already home \(2 files\), pulled and verified", _ua3.stdout)
+      and re.search(r"M 31\s+1 file, .+: pulled and verified", _ua3.stdout)
+      and re.search(r"NGC 7000\s+6 files, .+: pulled and verified", _ua3.stdout)
+      and re.search(r"Together\s+7 files, ", _ua3.stdout)
+      and len(_ua3rows) == 12 and all(r["verifiedAtImport"] and r["sourceRehashed"] for r in _ua3rows)
+      and [c["text"] for c in teh.os_calls(SFU.root, "push")][-1] == "All 3 Starfront projects are home",
+      _ua3.stdout[-2500:] + _ua3.stderr[-600:])
+
+# a pull that is running when night falls, or when the roof opens
+SFN = sfp_env("SFN")
+SFN.env.update({"STARFRONT_WORKERS": "1", "ASTRO_TEST_UNBUFFERED": "1", "ASTRO_TEST_SF_SLOW_MS": "40"})
+for proj in ("M 31", "M 33", "M 81", "M 101"):
+    for i in range(5):
+        sfp_sub(SFN, proj, f"20261105-21{i:02d}00")
+sfq_roof(SFN, 15, "Roof Status: CLOSED\n", (2026, 11, 7, 12, 0))
+SFN.run("--starfront-scan", extra_env=SFP_DAY_ENV)
+_SFN_COUNT = ("extra['n'] = 0\n_cfv = m.copy_file_verified\n"
+              "def cfv(*a, **k):\n    extra['n'] += 1; return _cfv(*a, **k)\nm.copy_file_verified = cfv\n")
+_un1 = sfp_pull(SFN, "M 31", before=_SFN_COUNT + "m.SF_PULL_SUN_EVERY = 0\n_alt = m.sf_sun_altitude\n"
+                "m.sf_sun_altitude = lambda *a: -3.0 if extra['n'] >= 2 else _alt(*a)\n")
+_un1st = sfp_status(SFN)["projects"]["M 31"]
+check("SF4 a pull that is still copying when night falls at the site stops by itself, cleanly: the file in "
+      "flight finishes, no new one starts (2 of 5 home, each with a saved ledger row), no stray .partial, the "
+      "project is not left marked as being pulled, the source check is not started, and the reason is said "
+      "('night has fallen at the site…')",
+      lambda: _un1["ok"] is False and str(_un1["stopped"]).startswith("night has fallen at the site")
+      and _un1["copied"] == 2 and _un1["home"]["files"] == 2 and _un1["home"]["of"] == 5
+      and len([r for r in SFN.ledger()["files"].values() if r.get("target") == "M 31"]) == 2
+      and not any(f.endswith(".partial") for f in sfp_files(SFN.sfdest))
+      and _un1st["status"] == "collecting" and "pullPid" not in _un1st
+      and _un1["stats"]["stopped"] is True and _un1["stats"]["stoppedWhy"].startswith("night has fallen")
+      and _un1["stats"]["sourceCheck"] is None and _un1["reread"]["proven"] == 0,
+      json.dumps(_un1)[:1500])
+_un1b = SFN.run("--starfront-pull", "M 31", extra_env=SFP_DAY_ENV)
+check("SF4 ...and the next day's run carries on from there: 3 files to bring home, 2 already home, pulled and "
+      "verified",
+      lambda: _un1b.returncode == 0 and "3 files to bring home" in _un1b.stdout and "2 already home and checked" in _un1b.stdout
+      and "M 31 pulled and verified" in _un1b.stdout, _un1b.stdout[-1500:] + _un1b.stderr)
+_un2 = sfp_pull(SFN, "M 33", before=_SFN_COUNT + "m.SF_PULL_ROOF_EVERY = 0\n_rr = m.read_roof\n"
+                "def rr(*a, **k):\n    r = _rr(*a, **k)\n    return dict(r, state='open') if extra['n'] >= 2 else r\nm.read_roof = rr\n")
+_un3 = sfp_pull(SFN, "M 81", before=_SFN_COUNT + "m.SF_PULL_ROOF_EVERY = 0\n_rr = m.read_roof\n"
+                "def rr(*a, **k):\n    r = _rr(*a, **k)\n    return dict(r, state='unknown', why='test: the roof share is away') if extra['n'] >= 1 else r\nm.read_roof = rr\n")
+check("SF4 the same when the roof opens part way (the roof file is read again while a pull runs): the pull stops "
+      "after the file in flight ('the B15 roof has opened…', 2 of 5 home); a roof that cannot be READ part way "
+      "stops nothing (the pull finishes: all 5 home and proven)",
+      lambda: _un2["ok"] is False and "the B15 roof has opened" in str(_un2["stopped"]) and _un2["copied"] == 2
+      and _un2["home"]["files"] == 2
+      and _un3["ok"] is True and _un3["copied"] == 5 and _un3["stopped"] is None and _un3["home"]["allProven"] is True,
+      json.dumps([_un2, _un3])[:1800])
+_un4 = sfp_pull(SFN, "M 101", before="extra['n'] = 0\n_rw = m._sf_rehash_work\n"
+                "def rw(*a, **k):\n    extra['n'] += 1; return _rw(*a, **k)\nm._sf_rehash_work = rw\n"
+                "m.SF_PULL_SUN_EVERY = 0\n_alt = m.sf_sun_altitude\n"
+                "m.sf_sun_altitude = lambda *a: -3.0 if extra['n'] >= 2 else _alt(*a)\n")
+_un4b = SFN.run("--starfront-pull", "M 101", "--rehash-only", extra_env=SFP_DAY_ENV)
+check("SF4 night falling during the second read of the source stops that too: all 5 files are home, 2 are proven, "
+      "the rest are left for another day, and the pull says it stopped; --rehash-only finishes the proof later "
+      "('all 5 files read again from the telescope and matched')",
+      lambda: _un4["ok"] is False and _un4["copied"] == 5 and _un4["home"]["files"] == 5
+      and str(_un4["stopped"]).startswith("night has fallen") and _un4["home"]["sourceRehashed"] == 2
+      and _un4["stats"]["sourceCheck"]["proven"] == 2
+      and _un4b.returncode == 0 and "all 5 files read again from the telescope and matched" in _un4b.stdout,
+      json.dumps(_un4)[:1500] + _un4b.stdout[-800:])
+_un5 = probe(SFN.env, "c = {'files': 2, 'bytes': 31_600_000, 'of': 5, 'ofBytes': 79_000_000, 'seconds': 12.0, 'bytesPerSecond': 2_633_333, 'drops': 1}\n"
+                      "a = m.sf_stats_block({'project': 'M 31', 'copy': c, 'sourceCheck': None, 'stopped': True, 'problems': 0,\n"
+                      "  'stoppedWhy': 'night has fallen at the site, and a pull runs only in Texas daytime, so the telescope is left alone while it works'})\n"
+                      "b = m.sf_stats_block({'project': 'M 31', 'copy': c, 'sourceCheck': None, 'stopped': True, 'problems': 0,\n"
+                      "  'stoppedWhy': 'the link to the telescope dropped 4 times while copying x.fit (OSError)'})\n"
+                      "print(json.dumps([a, b, m.sf_stop_is_watch('the B15 roof has opened, and so on'), m.sf_stop_is_watch(None)]))\n")
+check("SF4 the statistics of a pull that stopped for the hour say so in a row of their own ('Stopped   night has "
+      "fallen at the site; run it again to carry on') and do not blame the link (an earlier drop reads 'each "
+      "recovered on another try'); a pull that stopped on a dropped link still reads 'the pull stopped on the last'",
+      lambda: any(re.fullmatch(r"\s+Stopped\s+night has fallen at the site; run it again to carry on", ln) for ln in _un5[0])
+      and any(re.fullmatch(r"\s+Link drops\s+1, each recovered on another try", ln) for ln in _un5[0])
+      and any(re.fullmatch(r"\s+Link drops\s+1, the pull stopped on the last", ln) for ln in _un5[1])
+      and not any("Stopped  " in ln for ln in _un5[1]) and _un5[2] is True and _un5[3] is False,
+      json.dumps(_un5))
+
+# the live bar
+SFV = sfp_env("SFV")
+SFV.env.update({"STARFRONT_WORKERS": "2", "ASTRO_TEST_UNBUFFERED": "1", "ASTRO_TEST_SF_SLOW_MS": "30"})
+for i in range(8):
+    sfp_sub(SFV, "M 31", f"20261105-21{i:02d}00")
+    sfp_sub(SFV, "M 33", f"20261105-22{i:02d}00")
+sfq_roof(SFV, 15, "Roof Status: CLOSED\n", (2026, 11, 7, 12, 0))
+SFV.run("--starfront-scan", extra_env=SFP_DAY_ENV)
+_uv = probe(SFV.env,
+    "st = m.sf_stats_new('Copying', 865, 17_240_000_000)\n"
+    "st['t0'] = 1000.0; st['samples'] = m.deque([(1540.0, 1_800_000_000)]); st['moved'] = 2_000_000_000\n"
+    "st['doneFiles'] = 120; st['doneBytes'] = 1_900_000_000\n"
+    "a = m.sf_live_text(st, now=1600.0)\n"
+    "st['moved'] = st['doneBytes'] = 17_240_000_000; st['doneFiles'] = 864\n"
+    "b = m.sf_live_text(st, now=1600.0)\n"
+    "st['doneFiles'] = 865\n"
+    "c = m.sf_live_text(st, now=1600.0)\n"
+    "print(json.dumps([a, b, c, m.sf_live_on()]))\n")
+check("SF4 the live bar's words: a bar of 28 squares that follows the bytes on their way, the per cent, files, "
+      "bytes, the speed over the last minute and the time left ('Copying [███░…] 11% · 120 of 865 files · 1.90 GB "
+      "of 17.24 GB · 3.3 MB/s · about 1 h 17 min left'); it never reads 100% while a file is still to come; and "
+      "it is only for a screen: off when the output is a file or a pipe",
+      lambda: _uv[0] == "Copying [" + "█" * 3 + "░" * 25 + "] 11% · 120 of 865 files · 1.90 GB of 17.24 GB · 3.3 MB/s · about 1 h 17 min left"
+      and _uv[1].startswith("Copying [" + "█" * 27 + "░] 99% · 864 of 865 files")
+      and _uv[2].startswith("Copying [" + "█" * 28 + "] 100% · 865 of 865 files") and _uv[2].endswith("· done")
+      and _uv[3] is False, json.dumps(_uv, ensure_ascii=False))
+_SFV_ENV = {**SFP_DAY_ENV, "STARFRONT_STALL_SECONDS": "3600", "ASTRO_TEST_SF_TIME_SCALE": "0.002", "ASTRO_TEST_SF_STATS_EVERY": "0"}
+_uv1 = SFV.run("--starfront-pull", "M 31", extra_env={**_SFV_ENV, "ASTRO_TEST_SF_LIVE": "1"})
+_uv2 = SFV.run("--starfront-pull", "M 33", extra_env=_SFV_ENV)
+# (the suite reads output as text, so each rewrite of the bar's line arrives as a line of its own)
+_uvseg = _uv1.stdout.split("\n")
+_uvbar = [i for i, ln in enumerate(_uvseg) if ln.startswith("  Copying [") or ln.startswith("  Reading again [")]
+check("SF4 on a screen (ASTRO_TEST_SF_LIVE=1) the pull rewrites a live bar while it copies and while it reads the "
+      "source again; the bar is always wiped before any other line is printed (never a line of text straight "
+      "after a bar), the once-a-minute lines and the statistics block are whole, and the pull ends as it should; "
+      "with the output in a file or a pipe there is no bar at all",
+      lambda: _uv1.returncode == 0 and len(_uvbar) >= 2 and any(_uvseg[i].startswith("  Copying [") for i in _uvbar)
+      and all("█" in _uvseg[i] or "░" in _uvseg[i] for i in _uvbar)
+      and all(i + 1 < len(_uvseg) and (i + 1 in _uvbar or _uvseg[i + 1].strip() == "") for i in _uvbar)
+      and any(ln.startswith("  Copying: 8 of 8 files") for ln in _uvseg)
+      and "▸ Copy statistics for M 31" in _uvseg and any(ln.startswith("✓ M 31 pulled and verified") for ln in _uvseg)
+      and not any("█" in ln or "░" in ln for ln in _uvseg if not (ln.startswith("  Copying [") or ln.startswith("  Reading again [")))
+      and _uv2.returncode == 0 and "█" not in _uv2.stdout and "░" not in _uv2.stdout and "Copying [" not in _uv2.stdout
+      and "▸ Copy statistics for M 33" in _uv2.stdout,
+      repr(_uv1.stdout[-1800:]) + _uv1.stderr + _uv2.stdout[-600:])
+
 print("\n── Chain GD: the guards — the note in _verify, lost history, a failed nightly, agents really loaded (1.10.1) ──")
 # 31 Oct 2026: the archive's _verify folder was moved aside by hand. The
 # importer started an empty one without a word; for sixteen days the PC's

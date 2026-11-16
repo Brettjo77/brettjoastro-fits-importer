@@ -387,3 +387,18 @@ The first dry run was refused: `the roof could not be read (no file under \\172.
 
 - Sizes in the pull's lines are in the scan's units (1 GB = 1,000,000,000 bytes). The examples earlier in this note ("37 KB") were written with the older unit.
 - Still open: the roof file's exact wording (the parser takes open or closed from anywhere in the text; the first real reading is kept raw in `starfront-roof.jsonl`), and whether a pull should stop when night falls or the roof opens part way (both are checked only at the start).
+
+## Addendum, 1.10.5 (16 Nov 2026): all projects, and stopping at nightfall
+
+- `--starfront-pull all [--dry-run] [--rehash-only]`: every project of the last scan with saved subs, the smallest first, each a full pull of its own; the series stops at the first that is not clean. Its closing lines:
+
+    ▸ All projects: 1 of 3 home and clean; stopped at M 45_mosaic.
+        M 42_mosaic       869 files, 14.80 GB in 1 h 15 min, 3.3 MB/s: pulled and verified
+        M 45_mosaic       stopped part way: 420 of 1,041 files home (night has fallen at the site)
+        NGC 1499_mosaic   not started
+        Together          1,289 files, 21.76 GB copied; the whole run took 3 h 02 min
+
+  Pushes: "All 3 Starfront projects are home", or "Starfront: 1 of 3 projects done; stopped at M 45_mosaic, 1 not started".
+- While a pull runs, `sf_pull_watcher` asks once a minute whether the sun is still up at the site and every 20 minutes whether the roof still reads closed. Night or an open roof ends the run after the files in flight: `⚠ The pull stopped: night has fallen at the site, and a pull runs only in Texas daytime, so the telescope is left alone while it works.` The closing sentence adds "It will start again in Texas daytime with the roof closed." The source check stops the same way (`⚠ The source check stopped: ...`).
+- On a screen a live bar is rewritten every second under the last line, for the copy and for the source check: `Copying [███░░░░░░░░░░░░░░░░░░░░░░░░░] 11% · 120 of 865 files · 1.90 GB of 17.24 GB · 3.3 MB/s · about 1 h 17 min left`. Every other line wipes it first. Never in a pipe or a file.
+- Still open from the 1.10.4 addendum: the roof file's exact wording (the dry run of 16 Nov passed the roof guard on the real file, so the state reads; the text itself has not been seen).

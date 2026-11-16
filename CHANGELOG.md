@@ -1,5 +1,19 @@
 # Changelog
 
+## 1.10.5 (2026-11-16): every Starfront project in one go, a live bar, and a pull that stops when night falls
+
+Brett, after the first dry run passed: "I want to pull it all down... not just M42". Three projects come to about 65 GB, some eleven hours with the proof read, and Texas daytime in November is ten and a half. Until now "daytime, roof closed" was checked only when a pull started.
+
+- **`--starfront-pull all`** pulls every project of the last scan that has saved subs, one after the other, the smallest first, so the most projects are safe soonest. Each goes through its own guards, copies, proof read, receipt and ship, exactly as a single pull does. A project already home costs one listing. The series stops at the first project that does not come through clean (refused, stopped part way, or a file to look at), and ends with one line per project, the total, and one push. `--dry-run` and `--rehash-only` work with it. A folder of stacks with no subs is left out and named.
+- **A running pull stops itself when night falls at the site, or when the roof opens.** Once a minute it works out where the sun is in Texas; every twenty minutes it reads the roof file, as the watch does. When either says stop, the file in flight finishes, no new one starts, the ledger is saved and the pull says why. The second read of the source stops the same way. Run it again in Texas daytime and it carries on from where it stopped. A roof file that cannot be read part way stops nothing.
+- **A live bar while it copies** (Brett: "have you remembered to add the visual copying so I know what's what?"). On the screen, one line is rewritten every second: `Copying [███░░░░░░░] 11% · 120 of 865 files · 1.90 GB of 17.24 GB · 3.3 MB/s · about 1 h 17 min left`. The bar follows the bytes on their way, so it moves while a big file is still coming. The once-a-minute lines stay above it as a history, and the bar is wiped before any other line is printed. It shows only on a screen, never in a file or a log. The second read of the source has its own bar.
+- The statistics of a pull that stopped for the hour or the roof say so in a row of their own, and no longer read as if the link had failed.
+- Eleven more checks in chain SF.
+
+Mac / Windows: the pull is the PC's, as before. On a Mac the Starfront commands say so and exit.
+
+1071 end-to-end checks (838 engine + 233 panel). On Linux here: engine 829 passed, 4 skipped, the five Mac/PC-only lines as before; panel 233 passed.
+
 ## 1.10.4 (2026-11-16): the roof file where Starfront keeps it, and statistics for every pull
 
 The first dry run of a pull on the PC was refused: "the roof could not be read". The importer looked for a roof file directly inside the share's `roof` folder, and Starfront keeps one folder per building there, each with its own `RoofStatusFile.txt`. And Brett asked that a pull always shows the statistics of its file copy.
