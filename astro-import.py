@@ -56,7 +56,7 @@ from collections import defaultdict, deque
 from datetime import date, datetime, timedelta, timezone
 
 # One version for every platform (1.5.0: the Windows 11 edition joins the Mac).
-VERSION = "1.10.5"
+VERSION = "1.10.6"
 IS_WINDOWS = os.name == "nt"
 IS_MAC = sys.platform == "darwin"
 PLATFORM = "windows" if IS_WINDOWS else ("mac" if IS_MAC else "linux")
@@ -1023,6 +1023,10 @@ STARFRONT_ROOF_SHARE = _env_path("STARFRONT_ROOF_SHARE", "\\\\172.16.5.21\\sfro-
 STARFRONT_ROOF_FILE = (_env_path("STARFRONT_ROOF_FILE", "")
                        if (os.environ.get("STARFRONT_ROOF_FILE") or _CONFIG.get("STARFRONT_ROOF_FILE")) else "")
 STARFRONT_ROOF_CLOSED_HOURS = _env_rule("STARFRONT_ROOF_CLOSED_HOURS", 2, 0, 48)     # Phase 2's pull guard
+# 1.10.6 (Brett, 17 Nov 2026): a pull may run at any hour while the roof has been closed for
+# STARFRONT_ROOF_CLOSED_HOURS and the telescope has saved no frame for as long. True brings back
+# the first rule: only in the site's daytime, and a running pull stops when night falls.
+STARFRONT_DAYTIME_ONLY = _env_flag("STARFRONT_DAYTIME_ONLY", False)
 STARFRONT_SILENT_MINUTES = _env_rule("STARFRONT_SILENT_MINUTES", 90, 5, 1440)
 STARFRONT_FULL_WARN_NIGHTS = _env_rule("STARFRONT_FULL_WARN_NIGHTS", 5, 1, 365)
 STARFRONT_AUTO_CLEAR = _env_flag("STARFRONT_AUTO_CLEAR", False)                    # Phase 3 only
@@ -15091,6 +15095,28 @@ def _sf_pull_refused(why):
     error(f"Pull refused: {why}")
     return {"ok": False, "refused": True, "reason": why}
 
+def sf_recent_frame(files, now_utc, hours=None):
+    """The roof file is one witness that the telescope is idle; the
+    telescope's own files are a second, and the only one at night (1.10.6:
+    a pull may run at any hour). When the newest file on the share was
+    saved less than STARFRONT_ROOF_CLOSED_HOURS ago, the telescope is
+    working or has only just stopped, whatever the roof file says: the
+    words of the refusal, else None. A file dated more than ten minutes
+    after now is not a fresh frame (a clock that is off, or a test's own
+    files) and decides nothing."""
+    need = STARFRONT_ROOF_CLOSED_HOURS if hours is None else hours
+    t_now = now_utc.timestamp()
+    # (a file dated well ahead of now must not hide a frame that really is fresh)
+    newest = max((row[1] for row in files.values() if row[1] and t_now - row[1] / 1e9 >= -600), default=None)
+    if not newest or need <= 0:
+        return None
+    age = t_now - newest / 1e9
+    if age < need * 3600:
+        mins = max(0, int(age // 60))
+        return (f"the telescope saved a frame {mins} minute{'' if mins == 1 else 's'} ago, so it is working or has "
+                f"only just stopped. A pull waits until it has been quiet for {need} hour{'' if need == 1 else 's'}.")
+    return None
+
 def sf_pull_guards(now_utc, tz):
     """The pull's guards that need neither the lock nor the listing, each
     re-checked at the start of every pull and each refusing with one plain
@@ -15106,7 +15132,7 @@ def sf_pull_guards(now_utc, tz):
         return ("the importer has not met the telescope yet. Run a scan first (--starfront-scan), "
                 "then pull."), {}
     alt = sf_sun_altitude(STARFRONT_LAT, STARFRONT_LON, now_utc)
-    if alt <= 0:
+    if alt <= 0 and STARFRONT_DAYTIME_ONLY:
         return (f"it is night at the site (the sun is {abs(alt):.0f} degrees below the horizon). A pull runs "
                 f"only in Texas daytime, so the telescope is left alone while it works."), {}
     tun = ensure_tunnel()
@@ -15438,11 +15464,11 @@ SF_PULL_ROOF_EVERY = 1200.0                   # ...and is the roof still closed?
 
 def sf_pull_watcher(now_utc):
     """What a running pull asks, a few times a second, and what is really
-    looked at once a minute (the sun, worked out here) and every 20 minutes
-    (the roof file, read as the watch reads it): may the pull go on? The
-    start-of-pull guards promise that the telescope is left alone while it
-    works; a long pull that began in the afternoon would otherwise run on
-    into the night. Returns check() -> None, or the words of why the pull
+    looked at every 20 minutes (the roof file, read as the watch reads it)
+    and, only with STARFRONT_DAYTIME_ONLY, once a minute (the sun, worked
+    out here): may the pull go on? The start-of-pull guards promise that
+    the telescope is left alone while it works; a roof that opens part way
+    means it is about to. Returns check() -> None, or the words of why the pull
     must stop now. A roof that cannot be read part way stops nothing (the
     link's own troubles are the copy's to report); a roof that reads open does."""
     t0 = time.monotonic()
@@ -15452,7 +15478,7 @@ def sf_pull_watcher(now_utc):
     def check():
         t = time.monotonic()
         now = now_utc + timedelta(seconds=t - t0)
-        if t - last["sun"] >= SF_PULL_SUN_EVERY * scale:
+        if STARFRONT_DAYTIME_ONLY and t - last["sun"] >= SF_PULL_SUN_EVERY * scale:
             last["sun"] = t
             if sf_sun_altitude(STARFRONT_LAT, STARFRONT_LON, now) <= 0:
                 return ("night has fallen at the site, and a pull runs only in Texas daytime, so the telescope "
@@ -16108,6 +16134,9 @@ def _sf_pull_locked(name, dry_run, rehash_only, now_utc, tz, facts):
     if verdict != "match":
         return _sf_pull_refused("the telescope's dark library has changed since the last scan. Run a scan first "
                                 "(--starfront-scan), so the importer can check it is the same telescope, then pull.")
+    busy = sf_recent_frame(files, now_utc)
+    if busy:
+        return _sf_pull_refused(busy)
     by_project = {}
     for rel, (size, mtime_ns, proj, part) in files.items():
         by_project.setdefault(proj, []).append((rel, size, mtime_ns, part))
@@ -16309,7 +16338,10 @@ def _sf_pull_locked(name, dry_run, rehash_only, now_utc, tz, facts):
     if stopped:
         text = (f"{proj}: the pull stopped part way. {home['files']} of {home['of']} files are home and recorded. "
                 f"Run it again to carry on from there."
-                + (" It will start again in Texas daytime with the roof closed." if sf_stop_is_watch(stopped) else ""))
+                + (f" It will start again once the roof has been closed for {STARFRONT_ROOF_CLOSED_HOURS} "
+                   f"hour{'' if STARFRONT_ROOF_CLOSED_HOURS == 1 else 's'}"
+                   + (" and it is daytime at the site." if STARFRONT_DAYTIME_ONLY else ".")
+                   if sf_stop_is_watch(stopped) else ""))
         error(text)
         notify_push("Starfront", text)
         notify(text, "Starfront")
@@ -16930,7 +16962,8 @@ def main():
                         "closes, or at sunrise); otherwise exit at once in daytime")
     p.add_argument("--starfront-pull", metavar="PROJECT",
                    help="Starfront (PC): copy one project's FITS home from the hosted Seestar, "
-                        "verified, in Texas daytime with the roof closed; with --dry-run only "
+                        "verified, once the roof has been closed two hours and the telescope "
+                        "has saved no frame for as long; with --dry-run only "
                         "says what it would copy; nothing on the telescope is changed. "
                         "PROJECT may be the word all: every project of the last scan, the "
                         "smallest first, stopping at the first that does not come through clean")

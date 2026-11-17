@@ -7917,7 +7917,7 @@ _sfp_tree0 = sfp_share_tree(SFP)
 open(os.path.join(SFP.state, "starfront-pause"), "w").close()
 _g1 = sfp_pull(SFP, "M 45_mosaic")
 os.remove(os.path.join(SFP.state, "starfront-pause"))
-_g2 = sfp_pull(SFP, "M 45_mosaic", now=SFP_NIGHT)
+_g2 = sfp_pull(SFP, "M 45_mosaic", now=SFP_NIGHT, env={**SFP.env, "STARFRONT_DAYTIME_ONLY": "1"})
 os.remove(SFP.tunnel)
 _g3 = sfp_pull(SFP, "M 45_mosaic")
 open(SFP.tunnel, "w").close()
@@ -7937,7 +7937,7 @@ _g9 = sfp_pull(SFP, "M 42")
 _g10 = SFP.run("--starfront-pull", "M 99", extra_env=SFP_DAY_ENV)
 _g11 = sfp_pull(SFP, "M 45_mosaic", before="m.sf_local_free = lambda p: 1000\n")
 check("SF2 pull guards, one at a time, each a refusal in one plain sentence: the starfront-pause flag; night at "
-      "the site (00:00 in Texas); the tunnel down",
+      "the site (00:00 in Texas; since 1.10.6 only with STARFRONT_DAYTIME_ONLY); the tunnel down",
       lambda: all(g["ok"] is False and g["refused"] is True for g in (_g1, _g2, _g3))
       and "starfront-pause" in _g1["reason"] and "night at the site" in _g2["reason"] and "Texas daytime" in _g2["reason"]
       and "tunnel to Starfront is down" in _g3["reason"],
@@ -9905,10 +9905,11 @@ sfq_roof(SFN, 15, "Roof Status: CLOSED\n", (2026, 11, 7, 12, 0))
 SFN.run("--starfront-scan", extra_env=SFP_DAY_ENV)
 _SFN_COUNT = ("extra['n'] = 0\n_cfv = m.copy_file_verified\n"
               "def cfv(*a, **k):\n    extra['n'] += 1; return _cfv(*a, **k)\nm.copy_file_verified = cfv\n")
-_un1 = sfp_pull(SFN, "M 31", before=_SFN_COUNT + "m.SF_PULL_SUN_EVERY = 0\n_alt = m.sf_sun_altitude\n"
+_SFN_DAY = {**SFN.env, "STARFRONT_DAYTIME_ONLY": "1"}          # (1.10.6: nightfall stops a pull only with this set)
+_un1 = sfp_pull(SFN, "M 31", env=_SFN_DAY, before=_SFN_COUNT + "m.SF_PULL_SUN_EVERY = 0\n_alt = m.sf_sun_altitude\n"
                 "m.sf_sun_altitude = lambda *a: -3.0 if extra['n'] >= 2 else _alt(*a)\n")
 _un1st = sfp_status(SFN)["projects"]["M 31"]
-check("SF4 a pull that is still copying when night falls at the site stops by itself, cleanly: the file in "
+check("SF4 with STARFRONT_DAYTIME_ONLY, a pull that is still copying when night falls at the site stops by itself, cleanly: the file in "
       "flight finishes, no new one starts (2 of 5 home, each with a saved ledger row), no stray .partial, the "
       "project is not left marked as being pulled, the source check is not started, and the reason is said "
       "('night has fallen at the site…')",
@@ -9936,12 +9937,12 @@ check("SF4 the same when the roof opens part way (the roof file is read again wh
       and _un2["home"]["files"] == 2
       and _un3["ok"] is True and _un3["copied"] == 5 and _un3["stopped"] is None and _un3["home"]["allProven"] is True,
       json.dumps([_un2, _un3])[:1800])
-_un4 = sfp_pull(SFN, "M 101", before="extra['n'] = 0\n_rw = m._sf_rehash_work\n"
+_un4 = sfp_pull(SFN, "M 101", env=_SFN_DAY, before="extra['n'] = 0\n_rw = m._sf_rehash_work\n"
                 "def rw(*a, **k):\n    extra['n'] += 1; return _rw(*a, **k)\nm._sf_rehash_work = rw\n"
                 "m.SF_PULL_SUN_EVERY = 0\n_alt = m.sf_sun_altitude\n"
                 "m.sf_sun_altitude = lambda *a: -3.0 if extra['n'] >= 2 else _alt(*a)\n")
 _un4b = SFN.run("--starfront-pull", "M 101", "--rehash-only", extra_env=SFP_DAY_ENV)
-check("SF4 night falling during the second read of the source stops that too: all 5 files are home, 2 are proven, "
+check("SF4 (STARFRONT_DAYTIME_ONLY) night falling during the second read of the source stops that too: all 5 files are home, 2 are proven, "
       "the rest are left for another day, and the pull says it stopped; --rehash-only finishes the proof later "
       "('all 5 files read again from the telescope and matched')",
       lambda: _un4["ok"] is False and _un4["copied"] == 5 and _un4["home"]["files"] == 5
@@ -10009,6 +10010,56 @@ check("SF4 on a screen (ASTRO_TEST_SF_LIVE=1) the pull rewrites a live bar while
       and _uv2.returncode == 0 and "█" not in _uv2.stdout and "░" not in _uv2.stdout and "Copying [" not in _uv2.stdout
       and "▸ Copy statistics for M 33" in _uv2.stdout,
       repr(_uv1.stdout[-1800:]) + _uv1.stderr + _uv2.stdout[-600:])
+
+# ── Chain SF, 1.10.6: a pull at any hour while the roof is closed and the telescope is quiet ──
+print("\n── Chain SF, 1.10.6: a pull may run at night with the roof closed; a frame saved lately refuses it ──")
+SFM = sfp_env("SFM")
+SFM.env.update({"STARFRONT_WORKERS": "2", "ASTRO_TEST_UNBUFFERED": "1"})
+_sfm_subs = [sfp_sub(SFM, "M 31", f"20261105-21{i:02d}00") for i in range(4)]
+for _p in _sfm_subs:                                   # saved on the evening of 5 Nov at the site, as their names say
+    os.utime(_p, (_sfdt(2026, 11, 6, 3, 0, tzinfo=_sftz.utc).timestamp(),) * 2)
+sfq_roof(SFM, 15, "Roof Status: CLOSED\n", (2026, 11, 7, 0, 0))          # closed six hours before 00:00 in Texas
+_SFM_NIGHT = {"ASTRO_TEST_SF_NOW": "2026-11-07T06:00:00+00:00"}          # 00:00 in Texas: deep night
+SFM.run("--starfront-scan", extra_env=_SFM_NIGHT)
+_um1 = SFM.run("--starfront-pull", "M 31", "--dry-run", extra_env=_SFM_NIGHT)
+_um2 = SFM.run("--starfront-pull", "M 31", "--dry-run", extra_env={**_SFM_NIGHT, "STARFRONT_DAYTIME_ONLY": "1"})
+check("SF5 a pull may run at any hour (Brett, 17 Nov 2026): at midnight in Texas, with the roof closed for six "
+      "hours and the telescope quiet, a dry run passes every guard; STARFRONT_DAYTIME_ONLY=1 brings the first "
+      "rule back ('it is night at the site… only in Texas daytime')",
+      lambda: _um1.returncode == 0 and "Dry run: every guard passed" in _um1.stdout
+      and _um2.returncode == 1 and "Pull refused: it is night at the site" in _um2.stderr and "Texas daytime" in _um2.stderr,
+      _um1.stdout + _um1.stderr + _um2.stderr)
+os.utime(_sfm_subs[3], (_sfdt(2026, 11, 7, 5, 30, tzinfo=_sftz.utc).timestamp(),) * 2)       # a frame saved half an hour ago
+_um3 = SFM.run("--starfront-pull", "M 31", "--dry-run", extra_env=_SFM_NIGHT)
+_um3b = SFM.run("--starfront-pull", "M 31", extra_env=_SFM_NIGHT)
+os.utime(_sfm_subs[3], (_sfdt(2026, 11, 7, 3, 0, tzinfo=_sftz.utc).timestamp(),) * 2)        # three hours ago: quiet long enough
+_um4 = SFM.run("--starfront-pull", "M 31", extra_env=_SFM_NIGHT)
+check("SF5 the telescope's own files are the second witness: with a frame saved 30 minutes ago a pull is refused "
+      "whatever the roof file says ('the telescope saved a frame 30 minutes ago… quiet for 2 hours'), as a dry "
+      "run and for real, and nothing is copied; with the newest frame three hours old the pull runs, at night, "
+      "to the end ('pulled and verified'), and nightfall stops nothing",
+      lambda: _um3.returncode == 1 and "Pull refused: the telescope saved a frame 30 minutes ago" in _um3.stderr
+      and "quiet for 2 hours" in _um3.stderr and _um3b.returncode == 1 and "saved a frame 30 minutes ago" in _um3b.stderr
+      and _um4.returncode == 0 and "✓ M 31 pulled and verified" in _um4.stdout and "4 files to bring home" in _um4.stdout
+      and len([r for r in SFM.ledger()["files"].values() if r.get("camera") == SFP_CAM]) == 4,
+      _um3.stderr + _um3b.stderr + _um4.stdout[-900:] + _um4.stderr)
+_um5 = probe(SFM.env,
+    "now = m.datetime(2026, 11, 7, 6, 0, tzinfo=m.timezone.utc)\n"
+    "f = lambda mins: {'a.fit': (10, int((now.timestamp() - 86400) * 1e9), 'P', 'sub'), 'b.fit': (10, int((now.timestamp() - mins * 60) * 1e9), 'P', 'sub')}\n"
+    "r = lambda mins, **k: m.sf_recent_frame(f(mins), now, **k)\n"
+    "g = f(30); g['c.fit'] = (10, int((now.timestamp() + 9 * 86400) * 1e9), 'P', 'sub')\n"
+    "print(json.dumps({'m1': r(1), 'm30': r(30), 'm119': r(119), 'm120': r(120), 'ahead5': r(-5), 'ahead20': r(-20),\n"
+    " 'masked': m.sf_recent_frame(g, now),\n"
+    " 'none': m.sf_recent_frame({}, now), 'off': r(30, hours=0), 'h6': r(300, hours=6)}))\n")
+check("SF5 'saved lately' is under STARFRONT_ROOF_CLOSED_HOURS (2): 1, 30 and 119 minutes refuse, 120 does not; a "
+      "file dated a few minutes ahead (clocks differ a little) still counts as just saved, one dated 20 minutes "
+      "ahead decides nothing, and cannot hide a frame that really is fresh; no files, or the rule set to 0 hours, "
+      "decide nothing; the hours follow the setting",
+      lambda: "saved a frame 1 minute ago" in _um5["m1"] and "30 minutes ago" in _um5["m30"] and "119 minutes ago" in _um5["m119"]
+      and _um5["m120"] is None and "saved a frame 0 minutes ago" in _um5["ahead5"] and _um5["ahead20"] is None
+      and _um5["none"] is None and _um5["off"] is None and "quiet for 6 hours" in _um5["h6"]
+      and "30 minutes ago" in _um5["masked"],
+      json.dumps(_um5))
 
 print("\n── Chain GD: the guards — the note in _verify, lost history, a failed nightly, agents really loaded (1.10.1) ──")
 # 31 Oct 2026: the archive's _verify folder was moved aside by hand. The

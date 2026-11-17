@@ -1,5 +1,18 @@
 # Changelog
 
+## 1.10.6 (2026-11-17): a pull at any hour, while the roof is closed and the telescope is quiet
+
+The first real pull came home on 16 Nov: the California Nebula, 1,951 files, 32.79 GB, 6.3 MB/s, every file proven against the telescope and re-checked on the archive. The next morning a pull was refused because it was night in Texas, although the roof had been closed for three days. Brett: the roof is what matters.
+
+- **A pull may run at any hour.** The rule is now: the roof has been closed for two hours, at any time of day. The "only in Texas daytime" rule is off; `STARFRONT_DAYTIME_ONLY` set to true brings it back, with the stop at nightfall.
+- **A second witness: the telescope's own files.** With the daytime rule gone, the roof file would be the only sign that the telescope is idle. So a pull is also refused when the newest file on the telescope was saved less than two hours ago: "the telescope saved a frame 12 minutes ago, so it is working or has only just stopped". The dry run and the source check follow the same rule.
+- **A running pull still stops when the roof opens** (it reads the roof file every twenty minutes), after the file it is on, and carries on at the next run. Nightfall alone no longer stops it.
+- Three more checks in chain SF.
+
+Mac / Windows: the pull is the PC's, as before. On a Mac the Starfront commands say so and exit.
+
+1074 end-to-end checks (841 engine + 233 panel). On Linux here: engine 832 passed, 4 skipped, the five Mac/PC-only lines as before; panel 233 passed.
+
 ## 1.10.5 (2026-11-16): every Starfront project in one go, a live bar, and a pull that stops when night falls
 
 Brett, after the first dry run passed: "I want to pull it all down... not just M42". Three projects come to about 65 GB, some eleven hours with the proof read, and Texas daytime in November is ten and a half. Until now "daytime, roof closed" was checked only when a pull started.

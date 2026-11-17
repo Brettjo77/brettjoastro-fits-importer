@@ -402,3 +402,10 @@ The first dry run was refused: `the roof could not be read (no file under \\172.
 - While a pull runs, `sf_pull_watcher` asks once a minute whether the sun is still up at the site and every 20 minutes whether the roof still reads closed. Night or an open roof ends the run after the files in flight: `⚠ The pull stopped: night has fallen at the site, and a pull runs only in Texas daytime, so the telescope is left alone while it works.` The closing sentence adds "It will start again in Texas daytime with the roof closed." The source check stops the same way (`⚠ The source check stopped: ...`).
 - On a screen a live bar is rewritten every second under the last line, for the copy and for the source check: `Copying [███░░░░░░░░░░░░░░░░░░░░░░░░░] 11% · 120 of 865 files · 1.90 GB of 17.24 GB · 3.3 MB/s · about 1 h 17 min left`. Every other line wipes it first. Never in a pipe or a file.
 - Still open from the 1.10.4 addendum: the roof file's exact wording (the dry run of 16 Nov passed the roof guard on the real file, so the state reads; the text itself has not been seen).
+
+## Addendum, 1.10.6 (17 Nov 2026): any hour, roof closed, telescope quiet
+
+- The first real pull (16 Nov, NGC 1499_mosaic, on 1.10.4): 1,951 files, 32.79 GB, copy 1 h 27 min at 6.3 MB/s, source check 1 h 29 min at 6.2 MB/s, all matched, no link drops; the unbuffered read works on the Seestar's share from Windows. The archive sweep verified all 1,951 the next night.
+- Guard 3 ("it is night at the site") applies only with `STARFRONT_DAYTIME_ONLY` true. The default is false: a pull may run at any hour.
+- New guard, after the device check: `✗ Pull refused: the telescope saved a frame 12 minutes ago, so it is working or has only just stopped. A pull waits until it has been quiet for 2 hours.` The newest file on the share decides; a file dated more than ten minutes ahead of now is left out.
+- A running pull stops when the roof reads open; nightfall stops it only with `STARFRONT_DAYTIME_ONLY`. A pull stopped for the roof ends with "It will start again once the roof has been closed for 2 hours."
